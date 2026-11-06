@@ -50,6 +50,8 @@ export const text = {
       parse: 'settings.json 을 읽을 수 없어 바꾸지 않았어요. 주석·쉼표 같은 형식을 확인해 주세요.',
       shape: 'settings.json 의 hooks 형식이 예상과 달라 바꾸지 않았어요.',
       busy: 'settings.json 이 계속 바뀌고 있어 바꾸지 않았어요. 잠시 뒤 다시 해 주세요.',
+      encoding:
+        'settings.json 에 UTF-8 이 아닌 글자가 있어 바꾸지 않았어요. UTF-8 로 다시 저장한 뒤 해 주세요.',
       other: (message: string): string => `Claude 연동을 바꾸지 못했어요: ${message}`
     }
   },

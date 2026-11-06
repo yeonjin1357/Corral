@@ -12,6 +12,7 @@ import {
   hookCommand,
   inspectPitwallHooks,
   installClaudeHooks,
+  readClaudeHookState,
   removePitwallHooks,
   uninstallClaudeHooks
 } from './claudeHooks'
@@ -260,6 +261,33 @@ describe('설정 파일 설치·해제(임시 폴더)', () => {
     expect(await readFile(settingsPath(), 'utf8')).toBe('{ "hooks": ')
     expect(await readdir(dir)).toEqual(['settings.json'])
   })
+
+  test('UTF-8 이 아닌 글자(예: CP949 로 저장한 한글 주석)가 있으면 고치지 않고 거절, 백업도 없다', async () => {
+    const bytes = Buffer.concat([
+      Buffer.from('{\n  // '),
+      Buffer.from([0xc7, 0xd1, 0xb1, 0xdb]),
+      Buffer.from('\n  "model": "opus"\n}\n')
+    ])
+    await writeFile(settingsPath(), bytes)
+    await expect(installClaudeHooks({ dir, entry: ENTRY, now: NOW })).rejects.toMatchObject({
+      code: 'encoding'
+    })
+    expect((await readFile(settingsPath())).equals(bytes)).toBe(true)
+    expect(await readdir(dir)).toEqual(['settings.json'])
+    expect((await readClaudeHookState(dir, ENTRY)).state).toBe('error')
+  })
+
+  test.runIf(process.platform !== 'win32')(
+    '백업은 원본과 같은 권한(예: 0600)으로 만든다',
+    async () => {
+      const { chmod, stat } = await import('node:fs/promises')
+      await writeFile(settingsPath(), '{}\n')
+      await chmod(settingsPath(), 0o600)
+      const { backupPath } = await installClaudeHooks({ dir, entry: ENTRY, now: NOW })
+      expect((await stat(backupPath!)).mode & 0o777).toBe(0o600)
+      expect((await stat(settingsPath())).mode & 0o777).toBe(0o600)
+    }
+  )
 
   test('UTF-8 BOM 이 있으면 지킨다', async () => {
     const bom = String.fromCharCode(0xfeff)

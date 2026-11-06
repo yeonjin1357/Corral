@@ -42,10 +42,13 @@ export interface ClaudeHookEntry {
   timeout: number
 }
 
-/** parse: JSON 으로 읽을 수 없음, shape: hooks 형식이 예상과 다름, busy: 쓰는 동안 계속 바뀜. */
+/**
+ * parse: JSON 으로 읽을 수 없음, shape: hooks 형식이 예상과 다름, busy: 쓰는 동안 계속 바뀜,
+ * encoding: UTF-8 이 아닌 글자가 있음(다시 쓰면 그 글자가 깨지므로 고치지 않는다).
+ */
 export class ClaudeSettingsError extends Error {
   constructor(
-    readonly code: 'parse' | 'shape' | 'busy',
+    readonly code: 'parse' | 'shape' | 'busy' | 'encoding',
     message: string
   ) {
     super(message)
@@ -331,12 +334,21 @@ export function inspectPitwallHooks(text: string, entry: ClaudeHookEntry): Pitwa
 
 const BOM = String.fromCharCode(0xfeff)
 
-async function readOrNull(path: string): Promise<string | null> {
+async function readBytes(path: string): Promise<Buffer | null> {
   try {
-    return await readFile(path, 'utf8')
+    return await readFile(path)
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === 'ENOENT') return null
     throw e
+  }
+}
+
+/** UTF-8 로 읽는다. 해석할 수 없는 바이트가 있으면(다른 인코딩으로 저장됨) 거절한다. */
+function decodeUtf8(bytes: Buffer): string {
+  try {
+    return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes)
+  } catch {
+    throw new ClaudeSettingsError('encoding', 'settings.json 에 UTF-8 이 아닌 글자가 있어요')
   }
 }
 
@@ -349,13 +361,22 @@ function stamp(now: number): string {
   )
 }
 
-/** 같은 초에 여러 번 바꿔도 덮이지 않게 번호를 붙인다. */
-async function writeBackup(dir: string, content: string, now: number): Promise<string> {
+/**
+ * 원본 바이트를 그대로, 원본과 같은 권한으로 백업한다(settings.json 의 env 에 키가 있을 수 있어 0600 등을 지킨다).
+ * 같은 초에 여러 번 바꿔도 덮이지 않게 번호를 붙인다.
+ */
+async function writeBackup(
+  dir: string,
+  content: Buffer,
+  mode: number | null,
+  now: number
+): Promise<string> {
   const base = join(dir, `settings.json.pitwall-backup-${stamp(now)}`)
   for (let i = 0; i < 100; i++) {
     const path = i === 0 ? base : `${base}-${i}`
     try {
-      await writeFile(path, content, { flag: 'wx' })
+      await writeFile(path, content, { flag: 'wx', mode: mode ?? 0o600 })
+      if (mode !== null) await chmod(path, mode)
       return path
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e
@@ -395,9 +416,10 @@ async function rewriteSettings(
 ): Promise<HookFileResult> {
   const path = join(dir, 'settings.json')
   for (let attempt = 0; attempt < 3; attempt++) {
-    const original = await readOrNull(path)
-    const hasBom = original?.startsWith(BOM) ?? false
-    const body = hasBom ? original!.slice(1) : (original ?? '')
+    const original = await readBytes(path)
+    const text = original === null ? '' : decodeUtf8(original)
+    const hasBom = text.startsWith(BOM)
+    const body = hasBom ? text.slice(1) : text
     const next = transform(body)
     if (next === body) return { path, backupPath: null, changed: false }
 
@@ -409,9 +431,10 @@ async function rewriteSettings(
       if ((await lstat(path)).isSymbolicLink()) target = await realpath(path)
       mode = (await stat(target)).mode & 0o777
     }
-    const backupPath = original === null ? null : await writeBackup(dir, original, now)
+    const backupPath = original === null ? null : await writeBackup(dir, original, mode, now)
 
-    if ((await readOrNull(path)) !== original) {
+    const again = await readBytes(path)
+    if (again === null ? original !== null : original === null || !again.equals(original)) {
       if (backupPath) await rm(backupPath, { force: true })
       continue
     }
@@ -446,7 +469,8 @@ export async function readClaudeHookState(
   entry: ClaudeHookEntry
 ): Promise<PitwallHookInspection> {
   try {
-    const text = (await readOrNull(join(dir, 'settings.json'))) ?? ''
+    const bytes = await readBytes(join(dir, 'settings.json'))
+    const text = bytes === null ? '' : decodeUtf8(bytes)
     return inspectPitwallHooks(text.startsWith(BOM) ? text.slice(1) : text, entry)
   } catch {
     return { state: 'error', allHooksDisabled: false }
