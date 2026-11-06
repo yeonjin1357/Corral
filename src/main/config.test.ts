@@ -77,3 +77,9 @@ test('훅 설정이 없을 때만 새로 만들어 저장하고, 있으면 그�
   expect(second).toEqual(first)
   expect((await loadConfig(dir)).hook).toEqual(first)
 })
+
+test('훅 포트 범위는 OS 가 임시로 쓰는 동적 포트(49152~)와 겹치지 않는다', () => {
+  // 동적 포트와 겹치면 나가는 연결이 그 번호를 잡아 재부팅 뒤 서버를 못 여는 일이 생긴다.
+  expect(HOOK_PORT_MIN).toBeGreaterThanOrEqual(1024)
+  expect(HOOK_PORT_MAX).toBeLessThan(49152)
+})

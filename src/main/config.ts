@@ -3,9 +3,12 @@ import { readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { join } from 'node:path'
 
-/** 훅 서버 포트를 고르는 범위. 개발 서버가 흔히 쓰는 포트(3000·5173·8080 등)와 겹치지 않는다. */
+/**
+ * 훅 서버 포트를 고르는 범위. 개발 서버가 흔히 쓰는 포트(3000·5173·8080 등)와 겹치지 않고,
+ * OS 가 나가는 연결에 임시로 쓰는 동적 포트(49152~65535)보다 아래다.
+ */
 export const HOOK_PORT_MIN = 40000
-export const HOOK_PORT_MAX = 60000
+export const HOOK_PORT_MAX = 48999
 
 export interface HookConfig {
   port: number
