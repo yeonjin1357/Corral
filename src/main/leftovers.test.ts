@@ -1,4 +1,11 @@
+import { spawnSync } from 'node:child_process'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { findLeftovers, isLeftoverTool, processLabel } from './leftovers'
+import { createKiller } from './kill'
+import { buildSnapshot } from './snapshot'
+import { sampleWindows } from './collect/windows'
 import type { ProcessInfo, RawSample, WorktreeInfo } from '../shared/types'
 
 const MB = 1024 * 1024
@@ -250,4 +257,67 @@ describe('개발 도구 판별과 이름표', () => {
     expect(isLeftoverTool(p)).toBe(false)
     expect(processLabel(p)).toBe('python.exe')
   })
+})
+
+describe.runIf(process.platform === 'win32')('실제 Windows 에서', () => {
+  test('부모가 끝난 개발 도구 프로세스를 남은 프로세스로 찾고, 확인 후 끈다', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'pitwall-leftover-'))
+    const bin = join(dir, 'node_modules', '.bin')
+    await mkdir(bin, { recursive: true })
+    const script = join(bin, 'fake-tool.js')
+    await writeFile(script, 'setInterval(() => {}, 1000)')
+    const marker = `pitwall-leftover-${process.pid}-${Date.now()}`
+    let pid: number | undefined
+    try {
+      // cmd 가 start 로 띄우고 바로 끝나면 node 는 부모 없는 프로세스가 된다(에이전트가 끝난 뒤 남은 도구처럼).
+      spawnSync('cmd.exe', ['/d', '/c', 'start', '""', '/b', process.execPath, script, marker], {
+        stdio: 'ignore',
+        windowsHide: true
+      })
+      let raw = await sampleWindows()
+      for (let i = 0; i < 20 && !raw.processes.some((p) => p.commandLine.includes(marker)); i++) {
+        await new Promise((r) => setTimeout(r, 250))
+        raw = await sampleWindows()
+      }
+      pid = raw.processes.find((p) => p.commandLine.includes(marker))?.pid
+      expect(pid).toBeDefined()
+
+      const snapshot = buildSnapshot({
+        sample: raw,
+        worktrees: new Map(),
+        totalBytes: 1,
+        freeBytes: 1,
+        thresholds: { ramWarnPercent: 80, ramDangerPercent: 90 },
+        now: Date.now(),
+        selfPid: process.pid,
+        platform: 'win32'
+      })
+      const row = snapshot.leftovers.find((r) => r.pid === pid)
+      expect(row).toMatchObject({ label: 'fake-tool.js', processName: 'node.exe' })
+
+      const killer = createKiller({
+        latest: () => snapshot,
+        resample: sampleWindows,
+        confirm: async () => true,
+        signal: (target, sig) => {
+          process.kill(target, sig)
+        },
+        wait: async () => {},
+        platform: 'win32'
+      })
+      expect(await killer.killLeftover(pid!)).toEqual({ status: 'killed' })
+      const after = await sampleWindows()
+      expect(after.processes.some((p) => p.commandLine.includes(marker))).toBe(false)
+      pid = undefined
+    } finally {
+      if (pid) {
+        try {
+          process.kill(pid)
+        } catch {
+          // 이미 끝났으면 됐다.
+        }
+      }
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
+    }
+  }, 60000)
 })
