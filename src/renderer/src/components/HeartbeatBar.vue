@@ -1,6 +1,7 @@
 <!--
   Uptime Kuma (MIT) src/components/HeartbeatBar.vue 의 막대 모양(크기·간격·알약 모양·색)을 가져옴.
-  바꾼 점: 원본은 canvas 로 그리지만 여기서는 div 로 그린다. 상태는 up(연결 있음)·idle(열려만 있음) 두 가지,
+  바꾼 점: 원본은 canvas 로 그리지만 여기서는 div 로 그린다. 상태는 up(초록)·pending(주황)·down(빨강) 은 원본 색 그대로,
+  원본에 없는 idle(회색, 열려만 있음·쉬는 중)을 더했다.
   기록이 없는 칸은 원본처럼 빈 막대로 채운다. 넘치는 왼쪽(오래된) 칸은 잘려 보이지 않는다.
 -->
 <script setup lang="ts">
@@ -64,5 +65,13 @@ const slots = computed<(Beat | 'empty')[]>(() => {
 
 .beat-idle {
   background-color: var(--beat-idle-color);
+}
+
+.beat-pending {
+  background-color: $warning;
+}
+
+.beat-down {
+  background-color: $danger;
 }
 </style>

@@ -1,5 +1,5 @@
 // 렌더러 테스트용 데이터(앱 코드에서는 import 하지 않는다).
-import type { DashboardSnapshot, PortRow } from '../../../shared/types'
+import type { AgentRow, DashboardSnapshot, LeftoverRow, PortRow } from '../../../shared/types'
 
 export const MB = 1024 * 1024
 export const GB = 1024 * MB
@@ -18,6 +18,36 @@ export function portRow(over: Partial<PortRow> = {}): PortRow {
     startedAt: 200,
     judgement: null,
     idleSince: null,
+    agentInWorktree: false,
+    ...over
+  }
+}
+
+export function agentRow(over: Partial<AgentRow> = {}): AgentRow {
+  return {
+    pid: 5000,
+    tool: 'claude',
+    worktree: { root: 'C:\\work\\wt-a', branch: 'feat/a', isLinkedWorktree: true },
+    startedAt: 100,
+    memoryBytes: 600 * MB,
+    descendantCount: 3,
+    state: 'working',
+    stateSource: 'hook',
+    cpuPercent: 12.5,
+    ...over
+  }
+}
+
+export function leftoverRow(over: Partial<LeftoverRow> = {}): LeftoverRow {
+  return {
+    pid: 7000,
+    processName: 'chrome.exe',
+    label: 'Playwright 브라우저',
+    commandLine: 'chrome.exe --remote-debugging-pipe --headless',
+    worktree: null,
+    memoryBytes: 900 * MB,
+    descendantPids: [7001, 7002],
+    startedAt: 300,
     agentInWorktree: false,
     ...over
   }

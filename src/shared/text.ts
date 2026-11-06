@@ -94,6 +94,10 @@ export const text = {
       `RAM ${percent}% (${used} / ${total})`,
     staleSuffix: ' · 업데이트 지연',
     ports: (n: number): string => `개발 서버 포트 ${n}개`,
+    agents: (n: number, waiting: number): string =>
+      waiting > 0 ? `에이전트 ${n}개 (권한 대기 ${waiting})` : `에이전트 ${n}개`,
+    candidates: (n: number): string => `정리 후보 ${n}개`,
+    leftovers: (n: number): string => `남은 프로세스 ${n}개`,
     open: '앱 열기',
     quit: '종료',
     tooltip: (percent: number): string => `pitwall — RAM ${percent}%`,
@@ -112,9 +116,59 @@ export const text = {
       search: '검색…',
       clearSearch: '검색어 지우기',
       empty: '열려 있는 개발 서버 포트가 없어요.',
-      noMatch: '찾는 포트가 없어요.'
+      emptyAgents: '실행 중인 에이전트가 없어요.',
+      emptyLeftovers: '남은 프로세스가 없어요.',
+      noMatch: '찾는 항목이 없어요.',
+      groups: { ports: '개발 서버 포트', agents: '에이전트', leftovers: '남은 프로세스' },
+      collapse: '접기·펼치기'
     },
-    tags: { unresolvable: '판별 불가' },
+    tags: {
+      unresolvable: '판별 불가',
+      candidate: '정리 후보',
+      check: '확인해볼 것',
+      agentRunning: '에이전트 실행 중',
+      noWorktree: '작업 폴더 모름'
+    },
+    agent: {
+      tools: { claude: 'Claude', codex: 'Codex' },
+      toolNames: { claude: 'Claude Code', codex: 'Codex' },
+      states: {
+        working: '작업 중',
+        waiting: '권한 대기',
+        idle: '쉬는 중',
+        error: '오류',
+        unknown: '확인 중'
+      },
+      sources: { hook: 'Claude 훅', cpu: 'CPU 추정' },
+      runtime: '실행 시간',
+      cpu: 'CPU',
+      cpuSub: '(코어 1개 = 100%)',
+      stateSource: '상태 출처',
+      codexNote: 'Codex 는 CPU 사용량으로만 작업 중인지 짐작해요.',
+      noHookNote: 'Claude 연동을 켜면 권한 대기까지 정확히 알 수 있어요.'
+    },
+    leftover: {
+      kill: '끄기',
+      commandLine: '명령줄',
+      startedAt: '시작 시각',
+      runtime: '실행 시간',
+      why: '실행한 프로세스(에이전트·터미널 등)가 끝났는데 남아 있는 개발 도구예요.'
+    },
+    hook: {
+      title: 'Claude 연동',
+      enable: 'Claude 연동 켜기',
+      reenable: 'Claude 연동 다시 켜기',
+      disable: 'Claude 연동 끄기',
+      states: {
+        on: '켜짐 — Claude 훅으로 작업 중·권한 대기를 알아요.',
+        off: '꺼짐 — 지금은 CPU 사용량으로 짐작해요. 켜면 권한 대기까지 알 수 있어요.',
+        partial: '예전 설정이 남아 있어요. 다시 켜 주세요.',
+        server: '훅을 받을 포트를 열지 못했어요. 다시 켜면 새 포트로 바꿔요.',
+        settings: 'Claude 설정 파일(settings.json)을 읽을 수 없어요.'
+      },
+      allHooksDisabled:
+        'Claude 설정에서 모든 훅이 꺼져 있어요(disableAllHooks). 켜도 이벤트가 오지 않아요.'
+    },
     home: {
       title: '한눈에 보기',
       ram: 'RAM',
@@ -122,7 +176,9 @@ export const text = {
       ports: '개발 서버',
       agents: '에이전트',
       leftovers: '남은 프로세스',
-      disk: '디스크',
+      candidates: '정리 후보',
+      waiting: (n: number): string => `권한 대기 ${n}`,
+      checks: (n: number): string => `확인해볼 것 ${n}`,
       current: '(현재)',
       ramTrend: 'RAM 사용 추이',
       groups: '메모리 묶음',

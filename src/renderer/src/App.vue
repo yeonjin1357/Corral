@@ -11,16 +11,18 @@ import {
   faGear,
   faRotateRight
 } from '@fortawesome/free-solid-svg-icons'
-import type { DashboardSnapshot } from '../../shared/types'
+import type { DashboardSnapshot, KillResult } from '../../shared/types'
 import { DEFAULT_INTERVALS } from '../../shared/defaults'
 import { describeKillResult } from '../../shared/format'
 import { text } from '../../shared/text'
 import { watchColorScheme } from './theme'
-import { appendSnapshot, emptyHistory, portKey } from './history'
+import { agentKey, appendSnapshot, emptyHistory, portKey, selectionKey } from './history'
 import StatusBadge from './components/StatusBadge.vue'
 import PortList from './components/PortList.vue'
 import HomeView from './components/HomeView.vue'
 import PortDetail from './components/PortDetail.vue'
+import AgentDetail from './components/AgentDetail.vue'
+import LeftoverDetail from './components/LeftoverDetail.vue'
 
 const snapshot = ref<DashboardSnapshot | null>(null)
 const history = ref(emptyHistory())
@@ -29,6 +31,8 @@ const busyPid = ref<number | null>(null)
 const notice = ref<string | null>(null)
 const refreshing = ref(false)
 const actionError = ref<string | null>(null)
+const hookBusy = ref(false)
+const hookNotice = ref<{ text: string; failed: boolean } | null>(null)
 
 function receive(s: DashboardSnapshot): void {
   snapshot.value = s
@@ -51,13 +55,24 @@ onUnmounted(() => {
   stopTheme()
 })
 
-const selectedRow = computed(
-  () => snapshot.value?.ports.find((row) => portKey(row) === selectedKey.value) ?? null
+const selectedPort = computed(
+  () => snapshot.value?.ports.find((row) => selectionKey.port(row) === selectedKey.value) ?? null
+)
+const selectedAgent = computed(
+  () => snapshot.value?.agents.find((row) => selectionKey.agent(row) === selectedKey.value) ?? null
+)
+const selectedLeftover = computed(
+  () =>
+    snapshot.value?.leftovers.find((row) => selectionKey.leftover(row) === selectedKey.value) ??
+    null
+)
+const hasSelection = computed(
+  () => !!(selectedPort.value || selectedAgent.value || selectedLeftover.value)
 )
 
-// 고른 포트가 사라지면(서버 종료 등) 한눈에 보기로 돌아간다.
-watch(selectedRow, (row) => {
-  if (!row && selectedKey.value) {
+// 고른 항목이 사라지면(서버 종료·세션 끝 등) 한눈에 보기로 돌아간다.
+watch(hasSelection, (has) => {
+  if (!has && selectedKey.value) {
     selectedKey.value = null
     notice.value = null
   }
@@ -90,7 +105,7 @@ async function refresh(): Promise<void> {
 }
 
 async function openSelected(): Promise<void> {
-  const row = selectedRow.value
+  const row = selectedPort.value
   if (!row) return
   try {
     if (!(await window.pitwall.openPort(row.port))) notice.value = text.openFailed
@@ -99,17 +114,39 @@ async function openSelected(): Promise<void> {
   }
 }
 
-async function killSelected(): Promise<void> {
-  const row = selectedRow.value
-  if (!row) return
-  busyPid.value = row.pid
+async function runKill(pid: number, kill: () => Promise<KillResult>): Promise<void> {
+  busyPid.value = pid
   notice.value = null
   try {
-    notice.value = describeKillResult(await window.pitwall.killPort(row.port, row.pid))
+    notice.value = describeKillResult(await kill())
   } catch (e) {
     notice.value = failureText(e)
   } finally {
     busyPid.value = null
+  }
+}
+
+async function killSelectedPort(): Promise<void> {
+  const row = selectedPort.value
+  if (row) await runKill(row.pid, () => window.pitwall.killPort(row.port, row.pid))
+}
+
+async function killSelectedLeftover(): Promise<void> {
+  const row = selectedLeftover.value
+  if (row) await runKill(row.pid, () => window.pitwall.killLeftover(row.pid))
+}
+
+async function hookAction(action: 'enable' | 'disable'): Promise<void> {
+  hookBusy.value = true
+  hookNotice.value = null
+  try {
+    const result = await window.pitwall.claudeHook[action]()
+    if (result.status !== 'cancelled')
+      hookNotice.value = { text: result.message, failed: result.status === 'failed' }
+  } catch (e) {
+    hookNotice.value = { text: failureText(e), failed: true }
+  } finally {
+    hookBusy.value = false
   }
 }
 </script>
@@ -148,6 +185,13 @@ async function killSelected(): Promise<void> {
   <main class="container-fluid">
     <p v-if="snapshot?.error" class="text-danger small">{{ snapshot.error }}</p>
     <p v-if="actionError" class="action-error text-danger small">{{ actionError }}</p>
+    <p
+      v-if="hookNotice"
+      class="hook-notice small"
+      :class="hookNotice.failed ? 'text-danger' : 'text-success'"
+    >
+      {{ hookNotice.text }}
+    </p>
     <p v-if="!snapshot" class="text-secondary">{{ text.ui.loading }}</p>
     <div v-else class="row">
       <div class="col-12 col-md-5 col-xl-4 ps-0">
@@ -163,23 +207,49 @@ async function killSelected(): Promise<void> {
         </div>
         <PortList
           :ports="snapshot.ports"
-          :history="history.ports"
+          :agents="snapshot.agents"
+          :leftovers="snapshot.leftovers"
+          :history="history"
           :selected-key="selectedKey"
+          :hook="snapshot.hook"
+          :hook-busy="hookBusy"
           @select="select"
+          @hook="hookAction"
         />
       </div>
       <div class="col-12 col-md-7 col-xl-8 mb-3 gx-0">
         <PortDetail
-          v-if="selectedRow"
-          :row="selectedRow"
-          :history="history.ports[portKey(selectedRow)]"
-          :busy="busyPid === selectedRow.pid"
+          v-if="selectedPort"
+          :row="selectedPort"
+          :history="history.ports[portKey(selectedPort)]"
+          :busy="busyPid === selectedPort.pid"
           :notice="notice"
           :intervals="DEFAULT_INTERVALS"
           @open="openSelected"
-          @kill="killSelected"
+          @kill="killSelectedPort"
         />
-        <HomeView v-else :snapshot="snapshot" :ram-history="history.ram" />
+        <AgentDetail
+          v-else-if="selectedAgent"
+          :row="selectedAgent"
+          :history="history.agents[agentKey(selectedAgent)]"
+          :now="snapshot.takenAt"
+          :hook="snapshot.hook"
+        />
+        <LeftoverDetail
+          v-else-if="selectedLeftover"
+          :row="selectedLeftover"
+          :busy="busyPid === selectedLeftover.pid"
+          :notice="notice"
+          :now="snapshot.takenAt"
+          @kill="killSelectedLeftover"
+        />
+        <HomeView
+          v-else
+          :snapshot="snapshot"
+          :ram-history="history.ram"
+          :hook-busy="hookBusy"
+          @hook="hookAction"
+        />
       </div>
     </div>
   </main>

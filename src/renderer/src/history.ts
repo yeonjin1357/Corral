@@ -1,7 +1,16 @@
-import type { DashboardSnapshot, PortRow } from '../../shared/types'
+import type {
+  AgentRow,
+  AgentState,
+  DashboardSnapshot,
+  LeftoverRow,
+  PortRow
+} from '../../shared/types'
 
-/** 하트비트 한 칸: 그 시점에 브라우저 등 연결이 있었으면 up, 열려 있기만 했으면 idle. */
-export type Beat = 'up' | 'idle'
+/**
+ * 하트비트 한 칸. 포트: 연결이 있었으면 up, 열려 있기만 했으면 idle.
+ * 에이전트: 작업 중 up, 권한 대기 pending, 오류 down, 쉬는 중·확인 중 idle(Uptime Kuma 의 색과 같은 뜻).
+ */
+export type Beat = 'up' | 'idle' | 'pending' | 'down'
 
 export interface Point {
   t: number
@@ -19,6 +28,8 @@ export interface History {
   /** RAM 사용률(%). */
   ram: Point[]
   ports: Record<string, PortHistory>
+  /** 에이전트별 상태 하트비트와 메모리(자기 + 자손). */
+  agents: Record<string, PortHistory>
 }
 
 export const BEAT_LIMIT = 60
@@ -29,8 +40,29 @@ export function portKey(row: Pick<PortRow, 'port' | 'pid'>): string {
   return `${row.port}:${row.pid}`
 }
 
+/** 같은 pid 가 다른 프로세스에 다시 쓰여도 섞이지 않게 시작 시각을 함께 쓴다. */
+export function agentKey(row: Pick<AgentRow, 'pid' | 'startedAt'>): string {
+  return `${row.pid}:${row.startedAt ?? ''}`
+}
+
+/** 목록에서 고른 항목 키. 종류를 앞에 붙여 포트·에이전트·남은 프로세스가 서로 겹치지 않는다. */
+export const selectionKey = {
+  port: (row: Pick<PortRow, 'port' | 'pid'>): string => `port:${portKey(row)}`,
+  agent: (row: Pick<AgentRow, 'pid' | 'startedAt'>): string => `agent:${agentKey(row)}`,
+  leftover: (row: Pick<LeftoverRow, 'pid' | 'startedAt'>): string =>
+    `leftover:${row.pid}:${row.startedAt ?? ''}`
+}
+
+const AGENT_BEAT: Record<AgentState, Beat> = {
+  working: 'up',
+  waiting: 'pending',
+  error: 'down',
+  idle: 'idle',
+  unknown: 'idle'
+}
+
 export function emptyHistory(): History {
-  return { lastTakenAt: null, ram: [], ports: {} }
+  return { lastTakenAt: null, ram: [], ports: {}, agents: {} }
 }
 
 function keep<T>(list: T[], item: T, limit: number): T[] {
@@ -52,9 +84,19 @@ export function appendSnapshot(history: History, s: DashboardSnapshot): History 
       memory: keep(prev.memory, { t: s.takenAt, value: row.memoryBytes }, POINT_LIMIT)
     }
   }
+  const agents: Record<string, PortHistory> = {}
+  for (const row of s.agents) {
+    const key = agentKey(row)
+    const prev = history.agents[key] ?? { beats: [], memory: [] }
+    agents[key] = {
+      beats: keep(prev.beats, AGENT_BEAT[row.state], BEAT_LIMIT),
+      memory: keep(prev.memory, { t: s.takenAt, value: row.memoryBytes }, POINT_LIMIT)
+    }
+  }
   return {
     lastTakenAt: s.takenAt,
     ram: keep(history.ram, { t: s.takenAt, value: s.memory.usedPercent }, POINT_LIMIT),
-    ports
+    ports,
+    agents
   }
 }

@@ -8,7 +8,7 @@ import {
   createTrayController,
   type TrayLike
 } from './tray'
-import type { DashboardSnapshot } from '../shared/types'
+import type { AgentRow, DashboardSnapshot } from '../shared/types'
 
 const GB = 1024 ** 3
 
@@ -57,6 +57,7 @@ describe('buildTrayMenu', () => {
     expect(labels(items)).toEqual([
       'RAM 82% (26.3 GB / 32.0 GB)',
       '개발 서버 포트 3개',
+      '에이전트 0개',
       '---',
       '앱 열기',
       '---',
@@ -64,6 +65,49 @@ describe('buildTrayMenu', () => {
     ])
     expect(items[0].enabled).toBe(false)
     expect(items[1].enabled).toBe(false)
+    expect(items[2].enabled).toBe(false)
+  })
+
+  test('에이전트(권한 대기)·정리 후보·남은 프로세스 줄, 정리 후보 줄을 누르면 앱을 연다', () => {
+    const agent = (state: AgentRow['state']): AgentRow => ({
+      pid: 1,
+      tool: 'claude',
+      worktree: null,
+      startedAt: 1,
+      memoryBytes: 1,
+      descendantCount: 0,
+      state,
+      stateSource: 'hook',
+      cpuPercent: 0
+    })
+    const base = snap()
+    const s = snap({
+      agents: [agent('waiting'), agent('working')],
+      ports: [{ ...base.ports[0], judgement: 'candidate' }, base.ports[1]],
+      leftovers: [
+        {
+          pid: 9,
+          processName: 'chrome.exe',
+          label: 'Playwright 브라우저',
+          commandLine: 'chrome',
+          worktree: null,
+          memoryBytes: 1,
+          descendantPids: [],
+          startedAt: 1,
+          agentInWorktree: false
+        }
+      ]
+    })
+    const items = buildTrayMenu(s, actions)
+    expect(labels(items).slice(1, 5)).toEqual([
+      '개발 서버 포트 2개',
+      '에이전트 2개 (권한 대기 1)',
+      '정리 후보 1개',
+      '남은 프로세스 1개'
+    ])
+    actions.open.mockClear()
+    items[3].click!({} as never, undefined, {} as never)
+    expect(actions.open).toHaveBeenCalledTimes(1)
   })
 
   test('스냅샷 전에는 확인 중, 포트 줄 없음', () => {

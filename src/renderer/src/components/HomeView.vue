@@ -1,6 +1,7 @@
 <!--
   Uptime Kuma (MIT) src/pages/DashboardHome.vue 의 구성(h1 제목 · 큰 숫자 칸 상자 · 표 상자)을 가져옴.
-  바꾼 점: 감시 상태 개수 대신 RAM·개발 서버·에이전트 수를, 이벤트 표 대신 메모리 묶음 표를, 그 사이에 RAM 추이 그래프를 둔다.
+  바꾼 점: 감시 상태 개수 대신 RAM·개발 서버·에이전트(권한 대기)·남은 프로세스·정리 후보 수를, 이벤트 표 대신 메모리 묶음 표를,
+  그 사이에 RAM 추이 그래프와 Claude 연동 상자를 둔다.
 -->
 <script setup lang="ts">
 import { computed } from 'vue'
@@ -10,7 +11,32 @@ import { text } from '../../../shared/text'
 import type { Point } from '../history'
 import TrendChart from './TrendChart.vue'
 
-const props = defineProps<{ snapshot: DashboardSnapshot; ramHistory: Point[] }>()
+const props = withDefaults(
+  defineProps<{ snapshot: DashboardSnapshot; ramHistory: Point[]; hookBusy?: boolean }>(),
+  { hookBusy: false }
+)
+const emit = defineEmits<{ hook: [action: 'enable' | 'disable'] }>()
+
+const waiting = computed(() => props.snapshot.agents.filter((a) => a.state === 'waiting').length)
+const candidates = computed(
+  () => props.snapshot.ports.filter((p) => p.judgement === 'candidate').length
+)
+const checks = computed(() => props.snapshot.ports.filter((p) => p.judgement === 'check').length)
+
+const hook = computed(() => props.snapshot.hook)
+const hookText = computed(() => {
+  const h = hook.value
+  if (!h) return ''
+  if (h.state === 'error') return text.ui.hook.states[h.problem ?? 'settings']
+  return text.ui.hook.states[h.state]
+})
+const hookButton = computed(() => {
+  const h = hook.value
+  if (!h) return null
+  if (h.state === 'on') return { label: text.ui.hook.disable, action: 'disable' as const }
+  if (h.state === 'off') return { label: text.ui.hook.enable, action: 'enable' as const }
+  return { label: text.ui.hook.reenable, action: 'enable' as const }
+})
 
 const hasMemory = computed(() => props.snapshot.memory.totalBytes > 0)
 // 화면·트레이 공통 규칙: 내림해야 경고 기준과 표시가 어긋나지 않는다.
@@ -62,21 +88,48 @@ const groups = computed(() =>
         </div>
         <div class="col">
           <h3>{{ text.ui.home.agents }}</h3>
-          <span class="num" :class="{ 'text-secondary': snapshot.agentProcessCount === 0 }">
-            {{ snapshot.agentProcessCount }}
+          <span class="num" :class="{ 'text-secondary': snapshot.agents.length === 0 }">
+            {{ snapshot.agents.length }}
+          </span>
+          <p v-if="waiting > 0" class="sub text-warning">{{ text.ui.home.waiting(waiting) }}</p>
+          <p v-else class="sub">{{ text.ui.home.current }}</p>
+        </div>
+        <div class="col">
+          <h3>{{ text.ui.home.leftovers }}</h3>
+          <span class="num" :class="snapshot.leftovers.length ? 'text-warning' : 'text-secondary'">
+            {{ snapshot.leftovers.length }}
           </span>
           <p class="sub">{{ text.ui.home.current }}</p>
         </div>
         <div class="col">
-          <h3>{{ text.ui.home.leftovers }}</h3>
-          <span class="num text-secondary">{{ text.ui.none }}</span>
-          <p class="sub">{{ text.ui.nextStage }}</p>
+          <h3>{{ text.ui.home.candidates }}</h3>
+          <span class="num" :class="candidates ? 'text-danger' : 'text-secondary'">
+            {{ candidates }}
+          </span>
+          <p v-if="checks > 0" class="sub">{{ text.ui.home.checks(checks) }}</p>
+          <p v-else class="sub">{{ text.ui.home.current }}</p>
         </div>
-        <div class="col">
-          <h3>{{ text.ui.home.disk }}</h3>
-          <span class="num text-secondary">{{ text.ui.none }}</span>
-          <p class="sub">{{ text.ui.nextStage }}</p>
+      </div>
+    </div>
+
+    <div v-if="hook" class="shadow-box big-padding mb-3 hook-box">
+      <div class="d-flex align-items-center gap-3 flex-wrap">
+        <div class="flex-fill">
+          <h4 class="mb-1">{{ text.ui.hook.title }}</h4>
+          <p class="mb-0" :class="{ 'text-danger': hook.state === 'error' }">{{ hookText }}</p>
+          <p v-if="hook.allHooksDisabled" class="mb-0 text-warning">
+            {{ text.ui.hook.allHooksDisabled }}
+          </p>
         </div>
+        <button
+          v-if="hookButton"
+          type="button"
+          class="btn btn-normal btn-hook"
+          :disabled="hookBusy"
+          @click="emit('hook', hookButton.action)"
+        >
+          {{ hookButton.label }}
+        </button>
       </div>
     </div>
 

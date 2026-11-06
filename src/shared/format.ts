@@ -38,6 +38,19 @@ export function formatBytes(bytes: number): string {
   return `${(bytes / GiB).toFixed(1)} GB`
 }
 
+/** 실행 시간 같은 길이를 짧게: 30초, 45분, 3시간 12분, 2일 5시간. 알 수 없으면 —. */
+export function formatDuration(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return text.ui.none
+  const sec = Math.floor(ms / 1000)
+  if (sec < 60) return `${sec}초`
+  const min = Math.floor(sec / 60)
+  if (min < 60) return `${min}분`
+  const hour = Math.floor(min / 60)
+  if (hour < 24) return min % 60 ? `${hour}시간 ${min % 60}분` : `${hour}시간`
+  const day = Math.floor(hour / 24)
+  return hour % 24 ? `${day}일 ${hour % 24}시간` : `${day}일`
+}
+
 /** worktree 의 폴더 이름(경로 마지막 부분). 판별되지 않았으면 '판별 불가'. */
 export function worktreeFolder(worktree: WorktreeInfo | null): string {
   if (!worktree) return text.unresolvable

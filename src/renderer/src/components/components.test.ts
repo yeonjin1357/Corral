@@ -6,7 +6,7 @@ import PortListItem from './PortListItem.vue'
 import PortList from './PortList.vue'
 import HomeView from './HomeView.vue'
 import PortDetail from './PortDetail.vue'
-import { appendSnapshot, emptyHistory, portKey } from '../history'
+import { appendSnapshot, emptyHistory, portKey, selectionKey } from '../history'
 import { GB, MB, portRow, snapshot, threePorts } from '../testing/fixtures'
 
 // 그래프(canvas)는 happy-dom 에서 그릴 수 없어 자리만 확인한다.
@@ -81,40 +81,46 @@ describe('PortListItem', () => {
 })
 
 describe('PortList', () => {
-  const history = appendSnapshot(emptyHistory(), snapshot()).ports
+  const history = appendSnapshot(emptyHistory(), snapshot())
+  const base = { ports: threePorts, agents: [], leftovers: [], history, hook: null }
+  const portItems = (
+    w: ReturnType<typeof mount>
+  ): ReturnType<ReturnType<typeof mount>['findAll']> => w.findAll('.item:not(.group-item)')
 
   test('포트마다 항목, 고른 항목 표시, 누르면 키로 select', async () => {
     const w = mount(PortList, {
-      props: { ports: threePorts, history, selectedKey: portKey(threePorts[1]) }
+      props: { ...base, selectedKey: selectionKey.port(threePorts[1]) }
     })
-    const items = w.findAll('.item')
+    const items = portItems(w)
     expect(items).toHaveLength(3)
     expect(items[1].classes()).toContain('active')
     await items[2].trigger('click')
-    expect(w.emitted('select')?.[0]).toEqual([portKey(threePorts[2])])
+    expect(w.emitted('select')?.[0]).toEqual([selectionKey.port(threePorts[2])])
   })
 
   test('검색: worktree·포트·프로세스 이름으로 거르고(대소문자 무시), 없으면 안내', async () => {
-    const w = mount(PortList, { props: { ports: threePorts, history, selectedKey: null } })
+    const w = mount(PortList, { props: { ...base, selectedKey: null } })
     await w.get('input.search-input').setValue('WT-A')
-    expect(w.findAll('.item').map((i) => i.get('.badge').text())).toEqual([':3003'])
+    expect(portItems(w).map((i) => i.get('.badge').text())).toEqual([':3003'])
     await w.get('input.search-input').setValue(':8080')
-    expect(w.findAll('.item').map((i) => i.get('.badge').text())).toEqual([':8080'])
+    expect(portItems(w).map((i) => i.get('.badge').text())).toEqual([':8080'])
     await w.get('input.search-input').setValue('wslrelay')
-    expect(w.findAll('.item')).toHaveLength(1)
+    expect(portItems(w)).toHaveLength(1)
     await w.get('input.search-input').setValue('없는이름')
-    expect(w.findAll('.item')).toHaveLength(0)
-    expect(w.text()).toContain('찾는 포트가 없어요.')
+    expect(portItems(w)).toHaveLength(0)
+    expect(w.text()).toContain('찾는 항목이 없어요.')
   })
 
   test('포트가 없으면 빈 안내', () => {
-    const w = mount(PortList, { props: { ports: [], history: {}, selectedKey: null } })
+    const w = mount(PortList, {
+      props: { ...base, ports: [], history: emptyHistory(), selectedKey: null }
+    })
     expect(w.text()).toContain('열려 있는 개발 서버 포트가 없어요.')
   })
 })
 
 describe('HomeView', () => {
-  test('한눈에 보기: RAM(내림 %, 단계 색)·개발 서버·에이전트, 아직 없는 항목은 다음 단계', () => {
+  test('한눈에 보기: RAM(내림 %, 단계 색)·개발 서버·에이전트·남은 프로세스·정리 후보', () => {
     const w = mount(HomeView, {
       props: { snapshot: snapshot(), ramHistory: [] },
       global: { stubs }
@@ -128,9 +134,9 @@ describe('HomeView', () => {
     expect(cols[1]).toContain('개발 서버')
     expect(cols[1]).toContain('3')
     expect(cols[2]).toContain('에이전트')
-    expect(cols[2]).toContain('2')
+    expect(cols[2]).toContain('0')
     expect(cols[3]).toContain('남은 프로세스')
-    expect(cols[3]).toContain('다음 단계')
+    expect(cols[4]).toContain('정리 후보')
     expect(w.find('.trend-chart-stub').exists()).toBe(true)
   })
 

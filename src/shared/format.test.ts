@@ -3,6 +3,7 @@ import {
   worktreeLabel,
   worktreeFolder,
   describeKillResult,
+  formatDuration,
   describeCollectError
 } from './format'
 
@@ -78,4 +79,13 @@ test('worktree 라벨: 폴더 이름 · 브랜치', () => {
     'x · (detached)'
   )
   expect(worktreeLabel(null)).toBe('판별 불가')
+})
+
+test('실행 시간: 초·분·시간·일, 음수·NaN 은 —', () => {
+  expect(formatDuration(30 * 1000)).toBe('30초')
+  expect(formatDuration(45 * 60 * 1000)).toBe('45분')
+  expect(formatDuration((3 * 60 + 12) * 60 * 1000)).toBe('3시간 12분')
+  expect(formatDuration((2 * 24 + 5) * 60 * 60 * 1000)).toBe('2일 5시간')
+  expect(formatDuration(-1)).toBe('—')
+  expect(formatDuration(Number.NaN)).toBe('—')
 })

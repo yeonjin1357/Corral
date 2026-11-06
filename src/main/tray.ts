@@ -33,7 +33,17 @@ export function buildTrayMenu(
     )
     items.push({ label: s.stale ? ram + text.tray.staleSuffix : ram, enabled: false })
   }
-  if (s) items.push({ label: text.tray.ports(s.ports.length), enabled: false })
+  if (s) {
+    items.push({ label: text.tray.ports(s.ports.length), enabled: false })
+    const waiting = s.agents.filter((a) => a.state === 'waiting').length
+    items.push({ label: text.tray.agents(s.agents.length, waiting), enabled: false })
+    const candidates = s.ports.filter((p) => p.judgement === 'candidate').length
+    // 정리 후보는 바로 확인하러 갈 수 있게 누르면 앱을 연다(끄기는 앱의 확인 창을 거친다).
+    if (candidates > 0)
+      items.push({ label: text.tray.candidates(candidates), click: () => actions.open() })
+    if (s.leftovers.length > 0)
+      items.push({ label: text.tray.leftovers(s.leftovers.length), click: () => actions.open() })
+  }
   items.push(
     { type: 'separator' },
     { label: text.tray.open, click: () => actions.open() },
