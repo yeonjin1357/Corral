@@ -98,6 +98,25 @@ describe('작업 폴더(cwd)', () => {
 import type { CommandResult } from './runCommand'
 
 describe('parsePsOutput', () => {
+  test('lstart(시작 시각, 로컬 시간)를 읽어 startedAt 으로 쓴다(PID 재사용 확인용)', () => {
+    const stats = '  4100  4000 1024000 Thu Nov  6 10:01:02 2026 /usr/local/bin/node\n'
+    const [p] = parsePsOutput(stats, '  4100 node vite\n')
+    expect(p.startedAt).toBe(new Date(2026, 10, 6, 10, 1, 2).getTime())
+    expect(p.name).toBe('node')
+    expect(p.memoryBytes).toBe(1024000 * 1024)
+  })
+
+  test('lstart 뒤의 실행 파일 경로에 공백이 있어도 된다', () => {
+    const exe = '/Applications/Visual Studio Code.app/Contents/MacOS/Electron'
+    const [p] = parsePsOutput(`  700     1   51200 Mon Jan 12 09:05:00 2026 ${exe}\n`, '')
+    expect(p.name).toBe('Electron')
+    expect(p.startedAt).toBe(new Date(2026, 0, 12, 9, 5, 0).getTime())
+  })
+
+  test('ps 가 lstart 를 요청받는다', () => {
+    expect(PS_STATS_ARGV).toEqual(['/bin/ps', '-axww', '-o', 'pid=,ppid=,rss=,lstart=,comm='])
+  })
+
   test('rss(KB)→바이트, 이름은 실행 파일 경로의 basename, 명령줄은 args', () => {
     const stats = '  4100  4000 1024000 /usr/local/bin/node\n'
     const args =
