@@ -22,24 +22,24 @@ describe('작업 폴더(cwd)', () => {
   test('sampleDarwin: LISTEN pid 의 cwd 를 붙이고, 없으면 묻지 않는다', async () => {
     const lsof = ['p4100', 'f23', 'n*:3000', 'TST=LISTEN', 'p5200', 'f9', 'n127.0.0.1:5->127.0.0.1:3000', 'TST=ESTABLISHED'].join('\n')
     const run = vi.fn(async (argv: string[]) => {
-      if (argv === LSOF_ARGV) return { stdout: lsof, exitCode: 0 }
-      if (argv.includes('cwd')) return { stdout: 'p4100\nfcwd\nn/Users/dev/app\n', exitCode: 0 }
-      return { stdout: '  4100 1 10 /usr/local/bin/node\n', exitCode: 0 }
+      if (argv === LSOF_ARGV) return { stdout: lsof, stderr: '', exitCode: 0 }
+      if (argv.includes('cwd')) return { stdout: 'p4100\nfcwd\nn/Users/dev/app\n', stderr: '', exitCode: 0 }
+      return { stdout: '  4100 1 10 /usr/local/bin/node\n', stderr: '', exitCode: 0 }
     })
     const s = await sampleDarwin(run)
     expect(s.cwds).toEqual({ 4100: '/Users/dev/app' })
     expect(run.mock.calls.find((c) => c[0].includes('cwd'))?.[0]).toEqual(lsofCwdArgv([4100]))
 
-    const quiet = vi.fn(async (argv: string[]) => ({ stdout: argv === LSOF_ARGV ? '' : '  1 0 1 /sbin/launchd\n', exitCode: argv === LSOF_ARGV ? 1 : 0 }))
+    const quiet = vi.fn(async (argv: string[]) => ({ stdout: argv === LSOF_ARGV ? '' : '  1 0 1 /sbin/launchd\n', stderr: '', exitCode: argv === LSOF_ARGV ? 1 : 0 }))
     expect((await sampleDarwin(quiet)).cwds).toEqual({})
     expect(quiet.mock.calls.some((c) => c[0].includes('cwd'))).toBe(false)
   })
 
   test('cwd 조회가 실패해도 샘플은 성공(작업 폴더만 비움)', async () => {
     const run = vi.fn(async (argv: string[]) => {
-      if (argv === LSOF_ARGV) return { stdout: 'p1\nf3\nn*:3000\nTST=LISTEN\n', exitCode: 0 }
+      if (argv === LSOF_ARGV) return { stdout: 'p1\nf3\nn*:3000\nTST=LISTEN\n', stderr: '', exitCode: 0 }
       if (argv.includes('cwd')) throw new Error('timeout')
-      return { stdout: '  1 0 1 /x\n', exitCode: 0 }
+      return { stdout: '  1 0 1 /x\n', stderr: '', exitCode: 0 }
     })
     expect((await sampleDarwin(run)).cwds).toEqual({})
   })
@@ -114,7 +114,7 @@ describe('parseLsofOutput', () => {
 })
 
 describe('sampleDarwin', () => {
-  const ok = (stdout: string, exitCode = 0): CommandResult => ({ stdout, exitCode })
+  const ok = (stdout: string, exitCode = 0): CommandResult => ({ stdout, stderr: '', exitCode })
 
   test('명령은 PATH 에 의존하지 않는 전체 경로로 실행한다', () => {
     expect(PS_STATS_ARGV[0]).toBe('/bin/ps')

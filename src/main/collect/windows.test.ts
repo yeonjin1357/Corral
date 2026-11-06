@@ -2,11 +2,14 @@ import { spawn } from 'child_process'
 import { mkdtemp, rm } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { existsSync } from 'fs'
+import { existsSync, writeFileSync } from 'fs'
 import {
   parseWindowsSample,
   WINDOWS_SAMPLE_SCRIPT,
   windowsSampleScript,
+  windowsSafeScript,
+  resetWindowsSamplerMode,
+  parseNetstatLines,
   nativeHelperDllName,
   buildPowerShellArgs,
   powershellPath,
@@ -103,11 +106,134 @@ test('스크립트는 JSON 을 UTF-8 바이트로 표준 출력에 직접 쓰고
   expect(WINDOWS_SAMPLE_SCRIPT).toContain("$ProgressPreference = 'SilentlyContinue'")
 })
 
-test('스크립트는 따옴표 문제 없이 -EncodedCommand(UTF-16LE base64)로 넘긴다', () => {
+test('스크립트는 따옴표 문제 없이 -EncodedCommand(UTF-16LE base64)로 넘기고, 효과 없는 -ExecutionPolicy Bypass 는 쓰지 않는다', () => {
   const args = buildPowerShellArgs('Write-Output "한글 $x"')
-  expect(args.slice(0, 4)).toEqual(['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass'])
-  expect(args[4]).toBe('-EncodedCommand')
-  expect(Buffer.from(args[5], 'base64').toString('utf16le')).toBe('Write-Output "한글 $x"')
+  expect(args.slice(0, 2)).toEqual(['-NoProfile', '-NonInteractive'])
+  expect(args).not.toContain('-ExecutionPolicy')
+  expect(args[2]).toBe('-EncodedCommand')
+  expect(Buffer.from(args[3], 'base64').toString('utf16le')).toBe('Write-Output "한글 $x"')
+})
+
+describe('보안 정책으로 기본 스크립트가 막힌 PC(ConstrainedLanguage 등)', () => {
+  const decode = (argv: string[]): string => Buffer.from(argv[argv.length - 1], 'base64').toString('utf16le')
+
+  test('대체 스크립트는 제한 모드에서 막히는 것(Add-Type·.NET 정적 호출·New-Object)을 쓰지 않고 결과를 UTF-8 파일로 쓴다', () => {
+    const script = windowsSafeScript("C:\\Users\\김'개발\\AppData\\Local\\Temp\\pitwall-1.json")
+    for (const blocked of ['Add-Type', '[Console]', '::new', 'New-Object', '.ToString()']) {
+      expect(script).not.toContain(blocked)
+    }
+    expect(script).toContain("Out-File -LiteralPath 'C:\\Users\\김''개발\\AppData\\Local\\Temp\\pitwall-1.json' -Encoding utf8")
+    expect(script).toContain('CreationDate')
+  })
+
+  test('대체 스크립트는 Get-NetTCPConnection 이 없거나 막히면 netstat -ano 출력을 함께 낸다', () => {
+    const script = windowsSafeScript('C:\\t\\o.json')
+    expect(script).toMatch(/try \{ \$t = @\(Get-NetTCPConnection[\s\S]*\} catch \{\}/)
+    expect(script).toContain('if ($t.Count -eq 0) { $ns = @(netstat -ano) }')
+    expect(script).toContain('netstat = $ns')
+  })
+
+  test('netstat 출력 해석: 한글 제목줄·UDP 무시, IPv6·스코프, 언어가 다른 상태는 상대 포트 0 이면 LISTEN', () => {
+    const lines = [
+      '',
+      '활성 연결',
+      '',
+      '  프로토콜  로컬 주소              외부 주소              상태            PID',
+      '  TCP    0.0.0.0:3000           0.0.0.0:0              LISTENING       4100',
+      '  TCP    [::]:3000              [::]:0                 LISTENING       4100',
+      '  TCP    [::1]:3000             [::1]:51234            ESTABLISHED     4100',
+      '  TCP    [fe80::1%5]:5040       [::]:0                 LISTENING       6848',
+      '  TCP    [::1]:3000             [::1]:51000            TIME_WAIT       0',
+      '  TCP    0.0.0.0:8080           0.0.0.0:0              ABHÖREN         6000',
+      '  UDP    0.0.0.0:5353           *:*                                    1234'
+    ]
+    expect(parseNetstatLines(lines)).toEqual([
+      { pid: 4100, localAddress: '0.0.0.0', localPort: 3000, remoteAddress: '0.0.0.0', remotePort: 0, state: 'Listen' },
+      { pid: 4100, localAddress: '::', localPort: 3000, remoteAddress: '::', remotePort: 0, state: 'Listen' },
+      { pid: 4100, localAddress: '::1', localPort: 3000, remoteAddress: '::1', remotePort: 51234, state: 'Established' },
+      { pid: 6848, localAddress: 'fe80::1%5', localPort: 5040, remoteAddress: '::', remotePort: 0, state: 'Listen' },
+      { pid: 0, localAddress: '::1', localPort: 3000, remoteAddress: '::1', remotePort: 51000, state: 'Other' },
+      { pid: 6000, localAddress: '0.0.0.0', localPort: 8080, remoteAddress: '0.0.0.0', remotePort: 0, state: 'Listen' }
+    ])
+  })
+
+  test('TCP 목록이 비어 있고 netstat 줄이 있으면 그것으로 채운다', () => {
+    const s = parseWindowsSample(
+      JSON.stringify({ processes: [], tcp: [], netstat: ['  TCP    0.0.0.0:3000   0.0.0.0:0   LISTENING   4100'] })
+    )
+    expect(s.tcp.map((t) => [t.localPort, t.state])).toEqual([[3000, 'Listen']])
+  })
+
+  test('CreationDate 의 /Date(ms)/ 문자열·객체 형식을 시작 시각으로 읽는다', () => {
+    const s = parseWindowsSample(
+      JSON.stringify({
+        processes: [
+          { ProcessId: 1, ParentProcessId: 0, Name: 'a', CommandLine: 'a', WorkingSetSize: 1, CreationDate: '/Date(1793945439824)/' },
+          { ProcessId: 2, ParentProcessId: 0, Name: 'b', CommandLine: 'b', WorkingSetSize: 1, CreationDate: { value: '/Date(1793945439000)/', DisplayHint: 2 } },
+          { ProcessId: 3, ParentProcessId: 0, Name: 'c', CommandLine: 'c', WorkingSetSize: 1, CreationDate: null }
+        ],
+        tcp: []
+      })
+    )
+    expect(s.processes.map((p) => p.startedAt)).toEqual([1793945439824, 1793945439000, null])
+  })
+
+  test('기본 스크립트가 실패하면 대체 스크립트로 다시 수집하고, 그 뒤로는 바로 대체 스크립트를 쓴다', async () => {
+    resetWindowsSamplerMode()
+    const calls: string[] = []
+    const run = vi.fn(async (argv: string[]) => {
+      const script = decode(argv)
+      if (script.includes('PitwallTcp')) {
+        calls.push('full')
+        return { stdout: '', stderr: 'Cannot invoke method. Method invocation is supported only on core types in this language mode.', exitCode: 1 }
+      }
+      calls.push('safe')
+      const out = /Out-File -LiteralPath '(.+?)'/.exec(script)![1].replace(/''/g, "'")
+      writeFileSync(out, '\uFEFF' + json, 'utf8')
+      return { stdout: '', stderr: '', exitCode: 0 }
+    })
+    expect((await sampleWindows({ run })).processes).toHaveLength(2)
+    expect((await sampleWindows({ run })).processes).toHaveLength(2)
+    expect(calls).toEqual(['full', 'safe', 'safe'])
+    resetWindowsSamplerMode()
+  })
+
+  test('대체 스크립트로 바뀐 뒤에도 20번에 한 번은 기본 스크립트를 다시 시도한다', async () => {
+    resetWindowsSamplerMode()
+    const calls: string[] = []
+    const run = vi.fn(async (argv: string[]) => {
+      const script = decode(argv)
+      if (script.includes('PitwallTcp')) {
+        calls.push('full')
+        return { stdout: '', stderr: 'blocked', exitCode: 1 }
+      }
+      calls.push('safe')
+      writeFileSync(/Out-File -LiteralPath '(.+?)'/.exec(script)![1], json, 'utf8')
+      return { stdout: '', stderr: '', exitCode: 0 }
+    })
+    for (let i = 0; i < 21; i++) await sampleWindows({ run })
+    expect(calls).toEqual(['full', 'safe', ...Array(19).fill('safe'), 'full', 'safe'])
+    resetWindowsSamplerMode()
+  })
+
+  test('둘 다 실패하면 PowerShell 이 남긴 이유를 담은 한국어 에러', async () => {
+    resetWindowsSamplerMode()
+    const run = vi.fn(async () => ({ stdout: '', stderr: 'Access is denied.', exitCode: 1 }))
+    await expect(sampleWindows({ run })).rejects.toThrow(
+      'Windows 정보를 가져오지 못했어요 (PowerShell 종료 코드 1): Access is denied.'
+    )
+    resetWindowsSamplerMode()
+  })
+
+  test('시간 초과는 모드를 바꾸지 않고 그대로 실패로 알린다(일시적일 수 있으므로)', async () => {
+    resetWindowsSamplerMode()
+    const run = vi.fn(async () => {
+      throw new Error('timeout')
+    })
+    await expect(sampleWindows({ run })).rejects.toThrow('timeout')
+    expect(run).toHaveBeenCalledTimes(1)
+    resetWindowsSamplerMode()
+  })
 })
 
 test('포트를 연 프로세스의 작업 폴더(cwds)를 pid → 경로로 읽고, 없으면 빈 객체', () => {
@@ -165,6 +291,24 @@ describe.runIf(process.platform === 'win32')('실제 Windows 에서', () => {
       child.kill()
     }
   }, 30000)
+
+  test('제한 모드(ConstrainedLanguage)에서도 대체 스크립트로 수집되고 한글 인자가 보존된다', async () => {
+    resetWindowsSamplerMode()
+    const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 20000)', 'C:\\Users\\김개발\\clm'], {
+      windowsHide: true
+    })
+    try {
+      await new Promise((r) => setTimeout(r, 300))
+      const s = await sampleWindows({ languageModeForTest: 'ConstrainedLanguage' })
+      const info = s.processes.find((p) => p.pid === child.pid)
+      expect(info?.commandLine).toContain('C:\\Users\\김개발\\clm')
+      expect(info?.startedAt).toBeGreaterThan(Date.now() - 60000)
+      expect(s.tcp.some((t) => t.state === 'Listen')).toBe(true)
+    } finally {
+      child.kill()
+      resetWindowsSamplerMode()
+    }
+  }, 60000)
 
   test('DLL 캐시: 첫 실행에 만들고 다음 실행부터 재사용, 결과는 같다', async () => {
     const dir = await mkdtemp(join(tmpdir(), '김개발-dll-'))

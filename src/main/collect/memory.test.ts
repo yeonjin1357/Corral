@@ -34,7 +34,7 @@ test('Windows 는 OS 값(사용 가능 물리 메모리)을 그대로 쓴다', a
 })
 
 test('macOS 는 vm_stat 으로 계산하고, 총량을 넘지 않는다', async () => {
-  const run = vi.fn(async () => ({ stdout: vmStat(16384), exitCode: 0 }))
+  const run = vi.fn(async () => ({ stdout: vmStat(16384), stderr: '', exitCode: 0 }))
   const total = 8 * 1024 ** 3
   const r = await readMemory('darwin', { totalmem: () => total, freemem: () => 1, run })
   expect(run).toHaveBeenCalledWith(VM_STAT_ARGV, expect.anything())
@@ -42,7 +42,7 @@ test('macOS 는 vm_stat 으로 계산하고, 총량을 넘지 않는다', async 
 })
 
 test('macOS 에서 vm_stat 이 실패하면 OS 값으로 대신한다', async () => {
-  const run = vi.fn(async () => ({ stdout: '', exitCode: 1 }))
+  const run = vi.fn(async () => ({ stdout: '', stderr: '', exitCode: 1 }))
   await expect(readMemory('darwin', { totalmem: () => 100, freemem: () => 7, run })).resolves.toEqual({
     totalBytes: 100,
     freeBytes: 7

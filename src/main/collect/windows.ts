@@ -1,7 +1,10 @@
-import { createHash } from 'crypto'
+import { createHash, randomBytes } from 'crypto'
+import { readFile, rm } from 'fs/promises'
+import { tmpdir } from 'os'
+import { join } from 'path'
 import type { ProcessInfo, RawSample, TcpEntry, TcpState } from '../../shared/types'
 import { COMMAND_TIMEOUT_MS } from '../../shared/defaults'
-import { runCommand } from './runCommand'
+import { runCommand, type CommandOptions, type CommandResult } from './runCommand'
 
 /**
  * 프로세스 목록과 TCP 연결을 PowerShell 한 번으로 JSON 으로 받는다.
@@ -160,16 +163,70 @@ export function powershellPath(env: Record<string, string | undefined> = process
   return `${root}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`
 }
 
-/** 따옴표·`$`·줄바꿈이 인자 전달 중에 깨지지 않도록 스크립트를 UTF-16LE base64 로 넘긴다. */
+/**
+ * 따옴표·`$`·줄바꿈이 인자 전달 중에 깨지지 않도록 스크립트를 UTF-16LE base64 로 넘긴다.
+ * 실행 정책은 -EncodedCommand 에 적용되지 않아 -ExecutionPolicy Bypass 는 쓰지 않는다(효과는 없고 보안 프로그램 의심만 산다).
+ */
 export function buildPowerShellArgs(script: string): string[] {
+  return ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')]
+}
+
+/**
+ * 보안 정책(ConstrainedLanguage·AppLocker 등)으로 기본 스크립트가 막힌 PC 용.
+ * 제한 모드에서도 허용되는 cmdlet 만 쓰고, 콘솔 인코딩에 기대지 않도록 결과를 UTF-8 파일로 쓴다.
+ * 작업 폴더(cwd)는 읽지 못해 명령줄에 절대 경로가 없는 서버는 판별되지 않는다.
+ */
+export function windowsSafeScript(outFile: string): string {
   return [
-    '-NoProfile',
-    '-NonInteractive',
-    '-ExecutionPolicy',
-    'Bypass',
-    '-EncodedCommand',
-    Buffer.from(script, 'utf16le').toString('base64')
-  ]
+    "$ProgressPreference = 'SilentlyContinue'",
+    '$p = @(Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, Name, CommandLine, WorkingSetSize, CreationDate)',
+    '$t = @()',
+    "try { $t = @(Get-NetTCPConnection -State Listen,Established,TimeWait -ErrorAction SilentlyContinue | Select-Object OwningProcess, LocalAddress, LocalPort, RemoteAddress, RemotePort, @{ Name = 'State'; Expression = { \"$($_.State)\" } }) } catch {}",
+    // 제한 모드에서는 NetTCPIP 모듈을 못 불러올 수 있다. 그때는 netstat 출력을 그대로 넘겨 Node 에서 해석한다.
+    '$ns = @()',
+    'if ($t.Count -eq 0) { $ns = @(netstat -ano) }',
+    `@{ processes = $p; tcp = $t; cwds = @{}; netstat = $ns } | ConvertTo-Json -Compress -Depth 3 | Out-File -LiteralPath '${outFile.replace(/'/g, "''")}' -Encoding utf8`
+  ].join('\n')
+}
+
+function parseNetstatAddress(text: string): { host: string; port: number } | null {
+  const bracketed = /^\[(.+)\]:(\d+)$/.exec(text)
+  if (bracketed) return { host: bracketed[1], port: Number(bracketed[2]) }
+  const plain = /^([^:[\]]+):(\d+)$/.exec(text)
+  if (plain) return { host: plain[1], port: Number(plain[2]) }
+  return null
+}
+
+/**
+ * `netstat -ano` 의 TCP 줄. 제목줄은 OS 언어로 나오므로 'TCP' 로 시작하는 줄만 본다.
+ * 상태 이름이 영어가 아닌 OS 도 있어, 모르는 상태라도 상대 포트가 0 이면 LISTEN 으로 본다.
+ */
+export function parseNetstatLines(lines: string[]): TcpEntry[] {
+  const result: TcpEntry[] = []
+  for (const line of lines) {
+    const parts = line.trim().split(/\s+/)
+    if (parts[0] !== 'TCP' || parts.length < 5) continue
+    const local = parseNetstatAddress(parts[1])
+    const remote = parseNetstatAddress(parts[2])
+    const pid = Number(parts[parts.length - 1])
+    if (!local || !remote || !Number.isInteger(pid)) continue
+    const stateText = parts[3]
+    const state: TcpState =
+      stateText === 'LISTENING' || (stateText !== 'ESTABLISHED' && stateText !== 'TIME_WAIT' && remote.port === 0)
+        ? 'Listen'
+        : stateText === 'ESTABLISHED'
+          ? 'Established'
+          : 'Other'
+    result.push({
+      pid,
+      localAddress: local.host,
+      localPort: local.port,
+      remoteAddress: remote.host,
+      remotePort: remote.port,
+      state
+    })
+  }
+  return result
 }
 
 type Json = Record<string, unknown>
@@ -187,6 +244,16 @@ function toNumber(value: unknown): number {
 
 function toText(value: unknown): string {
   return typeof value === 'string' ? value : ''
+}
+
+/** PowerShell 5.1 ConvertTo-Json 의 날짜: "/Date(ms)/" 문자열, 또는 { value: "/Date(ms)/", DisplayHint } 객체. */
+function parseCimDate(value: unknown): number | null {
+  if (typeof value === 'string') {
+    const m = /\/Date\((-?\d+)\)\//.exec(value)
+    return m ? Number(m[1]) : null
+  }
+  if (value && typeof value === 'object' && 'value' in value) return parseCimDate((value as { value: unknown }).value)
+  return null
 }
 
 function toState(value: unknown): TcpState {
@@ -211,10 +278,11 @@ export function parseWindowsSample(raw: string): RawSample {
     name: toText(p.Name),
     commandLine: toText(p.CommandLine),
     memoryBytes: toNumber(p.WorkingSetSize),
-    startedAt: typeof p.StartedAt === 'number' && Number.isFinite(p.StartedAt) ? p.StartedAt : null
+    startedAt:
+      typeof p.StartedAt === 'number' && Number.isFinite(p.StartedAt) ? p.StartedAt : parseCimDate(p.CreationDate)
   }))
 
-  const tcp: TcpEntry[] = toArray(data?.tcp).map((t) => ({
+  let tcp: TcpEntry[] = toArray(data?.tcp).map((t) => ({
     pid: toNumber(t.OwningProcess),
     localAddress: toText(t.LocalAddress),
     localPort: toNumber(t.LocalPort),
@@ -222,6 +290,9 @@ export function parseWindowsSample(raw: string): RawSample {
     remotePort: toNumber(t.RemotePort),
     state: toState(t.State)
   }))
+  if (tcp.length === 0 && Array.isArray(data?.netstat)) {
+    tcp = parseNetstatLines((data.netstat as unknown[]).filter((l): l is string => typeof l === 'string'))
+  }
 
   const cwds: Record<number, string> = {}
   const rawCwds = data?.cwds
@@ -235,11 +306,72 @@ export function parseWindowsSample(raw: string): RawSample {
   return { processes, tcp, cwds }
 }
 
-export async function sampleWindows(options: { helperDllPath?: string | null } = {}): Promise<RawSample> {
-  const script = windowsSampleScript(options.helperDllPath ?? configuredHelperDllPath)
-  const { stdout, exitCode } = await runCommand([powershellPath(), ...buildPowerShellArgs(script)], {
-    timeoutMs: COMMAND_TIMEOUT_MS
-  })
-  if (exitCode !== 0 && !stdout.trim()) throw new Error(`powershell exited with ${exitCode}`)
-  return parseWindowsSample(stdout)
+type Runner = (argv: string[], opts?: CommandOptions) => Promise<CommandResult>
+
+/** 'full' = 기본 스크립트(보조 C# 포함), 'safe' = 제한 모드용 대체 스크립트. */
+let mode: 'full' | 'safe' = 'full'
+let safeSamplesSinceSwitch = 0
+/** 대체 스크립트로 바뀐 뒤에도 이만큼에 한 번은 기본 스크립트를 다시 시도한다(일시적 실패였을 수 있으므로). */
+export const FULL_RETRY_EVERY = 20
+
+export function resetWindowsSamplerMode(): void {
+  mode = 'full'
+  safeSamplesSinceSwitch = 0
+}
+
+function failureMessage(result: CommandResult): string {
+  const reason = result.stderr.replace(/\s+/g, ' ').trim().slice(0, 200)
+  return `Windows 정보를 가져오지 못했어요 (PowerShell 종료 코드 ${result.exitCode})${reason ? `: ${reason}` : ''}`
+}
+
+async function sampleSafe(run: Runner, prefix: string): Promise<RawSample> {
+  const outFile = join(tmpdir(), `pitwall-sample-${process.pid}-${Date.now()}-${randomBytes(4).toString('hex')}.json`)
+  try {
+    const result = await run([powershellPath(), ...buildPowerShellArgs(prefix + windowsSafeScript(outFile))], {
+      timeoutMs: COMMAND_TIMEOUT_MS
+    })
+    const text = await readFile(outFile, 'utf8').catch(() => '')
+    try {
+      return parseWindowsSample(text)
+    } catch {
+      throw new Error(failureMessage(result))
+    }
+  } finally {
+    await rm(outFile, { force: true }).catch(() => {})
+  }
+}
+
+export async function sampleWindows(
+  options: {
+    helperDllPath?: string | null
+    run?: Runner
+    /** 테스트 전용: 이 언어 모드(예: ConstrainedLanguage)로 바꾼 뒤 스크립트를 실행한다. */
+    languageModeForTest?: string
+  } = {}
+): Promise<RawSample> {
+  const run = options.run ?? runCommand
+  const prefix = options.languageModeForTest
+    ? `$ExecutionContext.SessionState.LanguageMode = '${options.languageModeForTest}'\n`
+    : ''
+
+  const tryFull = mode === 'full' || safeSamplesSinceSwitch >= FULL_RETRY_EVERY
+  if (tryFull) {
+    const script = prefix + windowsSampleScript(options.helperDllPath ?? configuredHelperDllPath)
+    // 시간 초과는 일시적일 수 있어 모드를 바꾸지 않고 그대로 실패로 알린다.
+    const result = await run([powershellPath(), ...buildPowerShellArgs(script)], { timeoutMs: COMMAND_TIMEOUT_MS })
+    if (result.exitCode === 0 || result.stdout.trim()) {
+      try {
+        const sample = parseWindowsSample(result.stdout)
+        resetWindowsSamplerMode()
+        return sample
+      } catch {
+        // 아래 대체 스크립트로 넘어간다.
+      }
+    }
+  }
+
+  const sample = await sampleSafe(run, prefix)
+  safeSamplesSinceSwitch = mode === 'safe' && !tryFull ? safeSamplesSinceSwitch + 1 : 1
+  mode = 'safe'
+  return sample
 }
