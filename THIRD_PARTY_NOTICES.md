@@ -32,3 +32,9 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+## Font Awesome Free
+
+- 출처: https://fontawesome.com (`@fortawesome/fontawesome-svg-core`, `@fortawesome/free-solid-svg-icons`, `@fortawesome/vue-fontawesome`)
+- 쓰는 것: 아이콘(설정 톱니바퀴 등). Uptime Kuma 와 같은 아이콘 세트다.
+- 라이선스: 아이콘 CC BY 4.0, 코드 MIT — https://fontawesome.com/license/free

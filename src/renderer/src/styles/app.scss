@@ -1,0 +1,256 @@
+// Uptime Kuma (MIT) src/assets/app.scss 에서 pitwall 이 쓰는 부분만 가져옴
+// https://github.com/louislam/uptime-kuma/blob/c4f983a457e4ccb18e0836890b0dd80f11c2739a/src/assets/app.scss
+// 바꾼 점: multiselect·폼·모달·페이지네이션·에디터 관련 규칙과 import 를 뺐다. 그 외 규칙은 원본 그대로다.
+// 맨 아래 "pitwall" 구역만 pitwall 이 추가한 것이다(원본 Layout.vue·DashboardHome.vue 의 헤더·숫자 스타일을 옮김).
+
+@import "vars.scss";
+@import "bootstrap/scss/bootstrap";
+
+#app {
+    font-family:
+        "Twemoji Country Flags",
+        BlinkMacSystemFont,
+        segoe ui,
+        Roboto,
+        helvetica neue,
+        Arial,
+        noto sans,
+        sans-serif,
+        apple color emoji,
+        segoe ui emoji,
+        segoe ui symbol,
+        noto color emoji;
+}
+
+h1 {
+    font-size: 32px;
+}
+
+h2 {
+    font-size: 26px;
+}
+
+::-webkit-scrollbar {
+    width: 10px;
+}
+
+.bg-maintenance {
+    color: white !important;
+    background-color: $maintenance !important;
+}
+
+.bg-dark {
+    color: white;
+}
+
+.text-maintenance {
+    color: $maintenance !important;
+}
+
+.list-group {
+    border-radius: 0.75rem;
+
+    .dark & {
+        .list-group-item {
+            background-color: $dark-bg;
+            color: $dark-font-color;
+            border-color: $dark-border-color;
+        }
+    }
+}
+
+// Scrollbar
+::-webkit-scrollbar-thumb {
+    background: #ccc;
+    border-radius: 20px;
+}
+
+.shadow-box {
+    box-shadow: 0 15px 70px rgba(0, 0, 0, 0.1);
+    padding: 10px;
+    border-radius: 10px;
+
+    &.big-padding {
+        padding: 20px;
+    }
+}
+
+.btn {
+    padding-left: 20px;
+    padding-right: 20px;
+}
+
+.btn-sm {
+    border-radius: 25px;
+}
+
+.btn-primary {
+    color: white;
+
+    &:hover,
+    &:active,
+    &:focus,
+    &.active {
+        color: white;
+        background-color: $highlight;
+        border-color: $highlight;
+    }
+
+    .dark & {
+        color: $dark-font-color2;
+    }
+}
+
+.btn-normal {
+    $bg-color: #f5f5f5;
+
+    background-color: $bg-color;
+    border-color: $bg-color;
+
+    &:hover {
+        $hover-color: darken($bg-color, 3%);
+        background-color: $hover-color;
+        border-color: $hover-color;
+    }
+}
+
+.btn-warning {
+    color: white;
+
+    &:hover,
+    &:active,
+    &:focus,
+    &.active {
+        color: white;
+    }
+}
+
+.btn-dark {
+    background-color: #161b22;
+}
+
+// Dark Theme override here
+.dark {
+    background-color: #090c10;
+    color: $dark-font-color;
+
+    &::-webkit-scrollbar-thumb,
+    ::-webkit-scrollbar-thumb {
+        background: $dark-border-color;
+    }
+
+    .shadow-box {
+        &:not(.alert) {
+            background-color: $dark-bg;
+        }
+    }
+
+    a:not(.btn),
+    .table,
+    .nav-link {
+        color: $dark-font-color;
+    }
+
+    .table-hover > tbody > tr:hover > * {
+        --bs-table-accent-bg: #070a10;
+        color: $dark-font-color;
+    }
+
+    .bg-primary {
+        color: $dark-font-color2;
+    }
+
+    .btn-secondary {
+        color: white;
+    }
+
+    .btn-normal {
+        $bg-color: $dark-header-bg;
+
+        color: $dark-font-color;
+        background-color: $bg-color;
+        border-color: $bg-color;
+
+        &:hover {
+            $hover-color: darken($bg-color, 3%);
+            background-color: $hover-color;
+            border-color: $hover-color;
+        }
+    }
+
+    .btn-warning {
+        color: $dark-font-color2;
+
+        &:hover,
+        &:active,
+        &:focus,
+        &.active {
+            color: $dark-font-color2;
+        }
+    }
+
+    .alert {
+        &.bg-info,
+        &.bg-warning,
+        &.bg-danger,
+        &.bg-maintenance,
+        &.bg-light {
+            color: $dark-font-color2;
+        }
+    }
+}
+
+/*
+ * Transitions
+ */
+
+// page-change
+.slide-fade-enter-active {
+    transition: all 0.2s $easing-in;
+}
+
+.slide-fade-leave-active {
+    transition: all 0.2s $easing-in;
+}
+
+.slide-fade-enter-from,
+.slide-fade-leave-to {
+    transform: translateY(50px);
+    opacity: 0;
+}
+
+// --- pitwall ---
+
+// Uptime Kuma Layout.vue 데스크톱 헤더
+header.app-header {
+    .title {
+        font-weight: bold;
+    }
+
+    .dark & {
+        background-color: $dark-header-bg;
+        border-bottom-color: $dark-header-bg !important;
+
+        .title {
+            color: #f0f6fc;
+        }
+    }
+}
+
+// Uptime Kuma DashboardHome.vue 의 큰 숫자
+.num {
+    font-size: 30px;
+    color: $primary;
+    font-weight: bold;
+    display: block;
+}
+
+.dark .table {
+    --bs-table-bg: transparent;
+    --bs-table-color: #{$dark-font-color};
+    border-color: $dark-border-color;
+}
+
+.dark .progress {
+    background-color: $dark-bg2;
+}

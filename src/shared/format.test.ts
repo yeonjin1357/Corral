@@ -1,4 +1,13 @@
-import { formatBytes, worktreeLabel } from './format'
+import { formatBytes, worktreeLabel, describeKillResult } from './format'
+
+test('내리기 결과 문구: 성공·취소는 없음, 실패는 메시지 우선', () => {
+  expect(describeKillResult({ status: 'killed' })).toBeNull()
+  expect(describeKillResult({ status: 'cancelled' })).toBeNull()
+  expect(describeKillResult({ status: 'gone' })).toBe('이미 종료된 프로세스예요.')
+  expect(describeKillResult({ status: 'changed' })).toBe('그 사이 다른 프로세스로 바뀌어서 내리지 않았어요.')
+  expect(describeKillResult({ status: 'failed' })).toBe('내리지 못했어요.')
+  expect(describeKillResult({ status: 'failed', message: '권한이 없어요' })).toBe('권한이 없어요')
+})
 
 const MB = 1024 * 1024
 const GB = 1024 * MB

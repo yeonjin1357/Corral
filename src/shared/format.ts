@@ -1,5 +1,20 @@
-import type { WorktreeInfo } from './types'
+import type { KillResult, WorktreeInfo } from './types'
 import { text } from './text'
+
+/** 화면에 남길 내리기 결과 문구. 성공·취소는 따로 알릴 것이 없어 null. */
+export function describeKillResult(result: KillResult): string | null {
+  switch (result.status) {
+    case 'killed':
+    case 'cancelled':
+      return null
+    case 'gone':
+      return text.killResult.gone
+    case 'changed':
+      return text.killResult.changed
+    case 'failed':
+      return result.message ?? text.killResult.failed
+  }
+}
 
 const MiB = 1024 * 1024
 const GiB = 1024 * MiB

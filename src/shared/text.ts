@@ -23,5 +23,39 @@ export const text = {
     busy: '이미 처리 중이에요.',
     invalid: '잘못된 요청이에요.'
   },
-  unsupportedPlatform: '지원하지 않는 OS 예요. Windows 와 macOS 만 지원해요.'
+  unsupportedPlatform: '지원하지 않는 OS 예요. Windows 와 macOS 만 지원해요.',
+  ui: {
+    loading: '불러오는 중…',
+    stale: '업데이트 지연',
+    settingsLater: '설정은 다음 단계에서 추가돼요',
+    pending: '다음 단계에서 추가돼요',
+    ram: 'RAM',
+    ramUsage: (used: string, total: string, percent: number): string => `${used} / ${total} (${percent}%)`,
+    count: (n: number): string => `${n}개`,
+    none: '—',
+    cards: {
+      ports: '개발 서버 포트',
+      memory: '개발 작업 메모리',
+      agents: '에이전트',
+      leftovers: '남겨진 프로세스',
+      heavy: '무거운 작업',
+      disk: '디스크'
+    },
+    ports: {
+      port: '포트',
+      worktree: '작업(워크트리 · 브랜치)',
+      clients: '연결',
+      memory: '메모리',
+      clientCount: (n: number): string => `연결 ${n}`,
+      noClients: '연결 없음',
+      kill: '내리기',
+      empty: '열려 있는 개발 서버 포트가 없어요.'
+    },
+    groups: {
+      devServer: '개발 서버',
+      agent: '에이전트',
+      other: '그 외',
+      processes: (n: number): string => `프로세스 ${n}개`
+    }
+  }
 } as const
