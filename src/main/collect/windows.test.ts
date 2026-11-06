@@ -491,6 +491,28 @@ test('powershell.exe 는 SystemRoot 기준 전체 경로로 실행(PATH 에 의�
 })
 
 describe.runIf(process.platform === 'win32')('실제 Windows 에서', () => {
+  test('npm 으로 설치한 Claude Code(node …\\@anthropic-ai\\claude-code\\cli.js)의 작업 폴더를 읽는다', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'pitwall-npm-agent-'))
+    const pkg = join(dir, 'npm', 'node_modules', '@anthropic-ai', 'claude-code')
+    const work = join(dir, 'work')
+    const { mkdir } = await import('fs/promises')
+    await mkdir(pkg, { recursive: true })
+    await mkdir(work)
+    writeFileSync(join(pkg, 'cli.js'), 'setTimeout(() => {}, 20000)')
+    const child = spawn(process.execPath, [join(pkg, 'cli.js')], { cwd: work, windowsHide: true })
+    const exited = new Promise<void>((r) => child.once('exit', () => r()))
+    try {
+      await new Promise((r) => setTimeout(r, 300))
+      const s = await sampleWindows()
+      expect(s.processes.find((p) => p.pid === child.pid)?.name).toBe('node.exe')
+      expect(s.cwds?.[child.pid!]?.replace(/\\$/, '').toLowerCase()).toBe(work.toLowerCase())
+    } finally {
+      child.kill()
+      await exited
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
+    }
+  }, 30000)
+
   test('샘플에 자기 자신과 한글 인자를 가진 자식 프로세스가 그대로 보인다', async () => {
     const child = spawn(
       process.execPath,
@@ -587,4 +609,17 @@ describe.runIf(process.platform === 'win32')('실제 Windows 에서', () => {
       await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
     }
   }, 30000)
+})
+
+test('에이전트 후보 정규식이 npm 설치 경로(역슬래시)에도 맞는다', () => {
+  // PowerShell(.NET)과 JS 는 [\/] 를 '/' 하나로, [\/] 를 '\' 또는 '/' 로 똑같이 읽는다.
+  const pattern = /CommandLine -match '([^']+)'/.exec(WINDOWS_SAMPLE_SCRIPT)?.[1]
+  expect(pattern).toBeDefined()
+  const re = new RegExp(pattern!)
+  const claude = String.raw`"C:\Program Files\nodejs\node.exe" C:\Users\김개발\AppData\Roaming\npm\node_modules\@anthropic-ai\claude-code\cli.js`
+  const codex = String.raw`node C:\Users\김개발\AppData\Roaming\npm\node_modules\@openai\codex\bin\codex.js`
+  expect(re.test(claude)).toBe(true)
+  expect(re.test(codex)).toBe(true)
+  expect(re.test('/usr/local/lib/node_modules/@anthropic-ai/claude-code/cli.js')).toBe(true)
+  expect(re.test(String.raw`C:\work\shop-web\node_modules\.bin\vite`)).toBe(false)
 })

@@ -187,7 +187,7 @@ export function windowsSampleScript(helperDllPath: string | null): string {
     "if ('PitwallCwd' -as [type]) {",
     "$listening = @($t | Where-Object { $_.State -eq 'Listen' -and $_.LocalPort -ge 1024 } | ForEach-Object { $_.OwningProcess } | Sort-Object -Unique)",
     // 에이전트(Claude Code·Codex)의 작업 폴더도 읽어 어느 워크트리의 세션인지 안다.
-    "$agentPids = @($p | Where-Object { $_.Name -match '^(claude|codex)' -or ($_.CommandLine -and $_.CommandLine -match '@anthropic-ai[\\/]claude-code|@openai[\\/]codex') } | ForEach-Object { $_.ProcessId })",
+    "$agentPids = @($p | Where-Object { $_.Name -match '^(claude|codex)' -or ($_.CommandLine -and $_.CommandLine -match '@anthropic-ai[\\\\/]claude-code|@openai[\\\\/]codex') } | ForEach-Object { $_.ProcessId })",
     'foreach ($id in @(@($listening) + $agentPids | Sort-Object -Unique)) { try { $d = [PitwallCwd]::Get([int]$id); if ($d) { $cwds["$id"] = $d } } catch {} }',
     '}',
     '$privateWs = @{}',
