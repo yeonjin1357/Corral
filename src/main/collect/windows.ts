@@ -111,6 +111,35 @@ public static class PitwallCwd {
       return System.Text.Encoding.Unicode.GetString(s);
     } catch { return null; } finally { CloseHandle(h); }
   }
+}
+public class PitwallMemRow {
+  public int Pid { get; set; }
+  public long PrivateWs { get; set; }
+}
+public static class PitwallMem {
+  [DllImport("kernel32.dll")] static extern IntPtr OpenProcess(int access, bool inherit, int pid);
+  [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
+  [DllImport("psapi.dll")] static extern bool GetProcessMemoryInfo(IntPtr h, IntPtr counters, int cb);
+  // PROCESS_MEMORY_COUNTERS_EX2(Windows 10 1809+): 96 바이트, PrivateWorkingSetSize 는 80 번째 바이트부터.
+  // 작업 관리자 "메모리" 열과 같은 값이라, 여러 프로세스가 같이 쓰는 메모리가 합계에 겹치지 않는다.
+  public static PitwallMemRow[] Read() {
+    var rows = new List<PitwallMemRow>();
+    IntPtr buf = Marshal.AllocHGlobal(96);
+    try {
+      foreach (var proc in System.Diagnostics.Process.GetProcesses()) {
+        int pid = proc.Id;
+        proc.Dispose();
+        IntPtr h = OpenProcess(0x1000 | 0x0010, false, pid);
+        if (h == IntPtr.Zero) h = OpenProcess(0x1000, false, pid);
+        if (h == IntPtr.Zero) continue;
+        try {
+          Marshal.WriteInt32(buf, 0, 96);
+          if (GetProcessMemoryInfo(h, buf, 96)) rows.Add(new PitwallMemRow { Pid = pid, PrivateWs = Marshal.ReadInt64(buf, 80) });
+        } finally { CloseHandle(h); }
+      }
+    } finally { Marshal.FreeHGlobal(buf); }
+    return rows.ToArray();
+  }
 }`
 
 /** 보조 코드가 바뀌면 이름도 바뀌어 새로 컴파일된다. */
@@ -156,7 +185,9 @@ export function windowsSampleScript(helperDllPath: string | null): string {
     "$listening = @($t | Where-Object { $_.State -eq 'Listen' -and $_.LocalPort -ge 1024 } | ForEach-Object { $_.OwningProcess } | Sort-Object -Unique)",
     'foreach ($id in $listening) { try { $d = [PitwallCwd]::Get([int]$id); if ($d) { $cwds["$id"] = $d } } catch {} }',
     '}',
-    '$json = @{ processes = $p; tcp = $t; cwds = $cwds } | ConvertTo-Json -Compress -Depth 3',
+    '$privateWs = @{}',
+    "if ('PitwallMem' -as [type]) { try { foreach ($m in [PitwallMem]::Read()) { $privateWs[\"$($m.Pid)\"] = $m.PrivateWs } } catch {} }",
+    '$json = @{ processes = $p; tcp = $t; cwds = $cwds; privateWs = $privateWs } | ConvertTo-Json -Compress -Depth 3',
     // PowerShell 호스트 출력(Write-Output)으로 600KB 가 넘는 한 줄을 내면 2초 가까이 걸린다.
     // UTF-8 바이트를 표준 출력 스트림에 직접 써서 그 시간을 없애고, 콘솔 인코딩(한글 경로)에도 의존하지 않는다.
     '$bytes = (New-Object System.Text.UTF8Encoding($false)).GetBytes($json)',
@@ -297,12 +328,22 @@ export function parseWindowsSample(raw: string): RawSample {
     throw new Error(`invalid JSON: ${text.slice(0, 120)}`)
   }
 
+  // 전용 작업 세트(작업 관리자 "메모리" 열)가 있으면 그것을, 없으면(보조 코드 없음·오래된 Windows) 작업 세트를 쓴다.
+  const privateWs =
+    data?.privateWs && typeof data.privateWs === 'object' && !Array.isArray(data.privateWs)
+      ? (data.privateWs as Record<string, unknown>)
+      : {}
+  const memoryOf = (p: Json): number => {
+    const own = privateWs[String(toNumber(p.ProcessId))]
+    return typeof own === 'number' && Number.isFinite(own) && own >= 0 ? own : toNumber(p.WorkingSetSize)
+  }
+
   const processes: ProcessInfo[] = toArray(data?.processes).map((p) => ({
     pid: toNumber(p.ProcessId),
     ppid: toNumber(p.ParentProcessId),
     name: toText(p.Name),
     commandLine: toText(p.CommandLine),
-    memoryBytes: toNumber(p.WorkingSetSize),
+    memoryBytes: memoryOf(p),
     startedAt:
       typeof p.StartedAt === 'number' && Number.isFinite(p.StartedAt)
         ? p.StartedAt

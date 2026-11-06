@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { existsSync, writeFileSync } from 'fs'
+import { runCommand } from './runCommand'
 import {
   parseWindowsSample,
   WINDOWS_SAMPLE_SCRIPT,
@@ -358,6 +359,26 @@ test('포트를 연 프로세스의 작업 폴더(cwds)를 pid → 경로로 읽
   expect(parseWindowsSample(json).cwds).toEqual({})
 })
 
+test('메모리는 작업 관리자와 같은 전용 작업 세트(privateWs)가 있으면 그것을 쓰고, 없으면 작업 세트', () => {
+  const s = parseWindowsSample(
+    JSON.stringify({
+      processes: [
+        { ProcessId: 1, ParentProcessId: 0, Name: 'a', CommandLine: 'a', WorkingSetSize: 900 },
+        { ProcessId: 2, ParentProcessId: 0, Name: 'b', CommandLine: 'b', WorkingSetSize: 800 }
+      ],
+      tcp: [],
+      privateWs: { '1': 300, '9': 5 }
+    })
+  )
+  expect(s.processes.map((p) => p.memoryBytes)).toEqual([300, 800])
+})
+
+test('스크립트는 GetProcessMemoryInfo(PROCESS_MEMORY_COUNTERS_EX2)로 전용 작업 세트를 읽는다', () => {
+  expect(WINDOWS_SAMPLE_SCRIPT).toContain('GetProcessMemoryInfo')
+  expect(WINDOWS_SAMPLE_SCRIPT).toContain('[PitwallMem]::Read()')
+  expect(WINDOWS_SAMPLE_SCRIPT).toContain('privateWs = $privateWs')
+})
+
 test('TCP 목록은 빠른 OS API(GetExtendedTcpTable)로 읽고, 막히면 Get-NetTCPConnection 으로 대신한다', () => {
   expect(WINDOWS_SAMPLE_SCRIPT).toContain('GetExtendedTcpTable')
   expect(WINDOWS_SAMPLE_SCRIPT).toMatch(/if \(\$t -eq \$null\) \{[\s\S]*Get-NetTCPConnection/)
@@ -423,6 +444,19 @@ describe.runIf(process.platform === 'win32')('실제 Windows 에서', () => {
     } finally {
       child.kill()
     }
+  }, 30000)
+
+  test('실제 스크립트가 대부분의 프로세스에 대해 전용 작업 세트를 내고, 그 값은 작업 세트보다 작다', async () => {
+    const r = await runCommand([powershellPath(), ...buildPowerShellArgs(WINDOWS_SAMPLE_SCRIPT)])
+    const data = JSON.parse(r.stdout.replace(/^﻿/, '')) as {
+      processes: { ProcessId: number; WorkingSetSize: number }[]
+      privateWs: Record<string, number>
+    }
+    const entries = Object.entries(data.privateWs)
+    expect(entries.length).toBeGreaterThan(data.processes.length / 3)
+    const self = data.processes.find((p) => p.ProcessId === process.pid)!
+    expect(data.privateWs[String(process.pid)]).toBeGreaterThan(0)
+    expect(data.privateWs[String(process.pid)]).toBeLessThan(self.WorkingSetSize)
   }, 30000)
 
   test('제한 모드(ConstrainedLanguage)에서도 대체 스크립트로 수집되고 한글 인자가 보존된다', async () => {
