@@ -5,8 +5,15 @@ const vite =
   '"C:\\Program Files\\nodejs\\node.exe" C:\\Users\\김개발\\work\\shop-web\\node_modules\\.bin/../vite/bin/vite.js --port 3000'
 const json = JSON.stringify({
   processes: [
-    { ProcessId: 4100, ParentProcessId: 4000, Name: 'node.exe', CommandLine: vite, WorkingSetSize: 1048576000 },
-    { ProcessId: 8, ParentProcessId: 0, Name: 'System', CommandLine: null, WorkingSetSize: 8192 }
+    {
+      ProcessId: 4100,
+      ParentProcessId: 4000,
+      Name: 'node.exe',
+      CommandLine: vite,
+      WorkingSetSize: 1048576000,
+      StartedAt: 1793945439824
+    },
+    { ProcessId: 8, ParentProcessId: 0, Name: 'System', CommandLine: null, WorkingSetSize: 8192, StartedAt: null }
   ],
   tcp: [
     { OwningProcess: 4100, LocalAddress: '0.0.0.0', LocalPort: 3000, RemoteAddress: '0.0.0.0', RemotePort: 0, State: 'Listen' },
@@ -22,8 +29,16 @@ test('픽스처의 경로는 역슬래시가 살아 있는 실제 Windows 경로
 
 test('프로세스·TCP 파싱, 한글 경로 보존, null 명령줄은 빈 문자열', () => {
   const s = parseWindowsSample(json)
-  expect(s.processes[0]).toEqual({ pid: 4100, ppid: 4000, name: 'node.exe', commandLine: vite, memoryBytes: 1048576000 })
+  expect(s.processes[0]).toEqual({
+    pid: 4100,
+    ppid: 4000,
+    name: 'node.exe',
+    commandLine: vite,
+    memoryBytes: 1048576000,
+    startedAt: 1793945439824
+  })
   expect(s.processes[1].commandLine).toBe('')
+  expect(s.processes[1].startedAt).toBeNull()
   expect(s.tcp.map((t) => t.state)).toEqual(['Listen', 'Established', 'Other'])
   expect(s.tcp[1]).toEqual({
     pid: 4100,
@@ -56,7 +71,11 @@ test('이름·메모리가 null 인 프로세스는 빈 문자열·0 으로', ()
       tcp: []
     })
   )
-  expect(s.processes[0]).toEqual({ pid: 9, ppid: 0, name: '', commandLine: '', memoryBytes: 0 })
+  expect(s.processes[0]).toEqual({ pid: 9, ppid: 0, name: '', commandLine: '', memoryBytes: 0, startedAt: null })
+})
+
+test('스크립트는 프로세스 시작 시각을 유닉스 ms 로 낸다(부모 pid 재사용 판별용)', () => {
+  expect(WINDOWS_SAMPLE_SCRIPT).toContain('ToUnixTimeMilliseconds()')
 })
 
 test('빈 출력이나 JSON 이 아닌 출력은 이유가 담긴 에러', () => {
@@ -92,7 +111,10 @@ describe.runIf(process.platform === 'win32')('실제 Windows 에서', () => {
       await new Promise((r) => setTimeout(r, 300))
       const s = await sampleWindows()
       expect(s.processes.find((p) => p.pid === process.pid)?.commandLine).toContain('vitest')
-      expect(s.processes.find((p) => p.pid === child.pid)?.commandLine).toContain('C:\\Users\\김개발\\work')
+      const childInfo = s.processes.find((p) => p.pid === child.pid)
+      expect(childInfo?.commandLine).toContain('C:\\Users\\김개발\\work')
+      expect(childInfo?.startedAt).toBeGreaterThan(Date.now() - 60000)
+      expect(childInfo?.startedAt).toBeLessThanOrEqual(Date.now())
       expect(s.tcp.length).toBeGreaterThan(0)
     } finally {
       child.kill()

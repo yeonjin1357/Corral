@@ -10,7 +10,7 @@ import { runCommand } from './runCommand'
 export const WINDOWS_SAMPLE_SCRIPT = [
   "$ProgressPreference = 'SilentlyContinue'",
   '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8',
-  '$p = @(Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, Name, CommandLine, WorkingSetSize)',
+  "$p = @(Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, Name, CommandLine, WorkingSetSize, @{ Name = 'StartedAt'; Expression = { if ($_.CreationDate) { [DateTimeOffset]::new($_.CreationDate).ToUnixTimeMilliseconds() } else { $null } } })",
   "$t = @(Get-NetTCPConnection -State Listen,Established,TimeWait -ErrorAction SilentlyContinue | Select-Object OwningProcess, LocalAddress, LocalPort, RemoteAddress, RemotePort, @{ Name = 'State'; Expression = { $_.State.ToString() } })",
   '@{ processes = $p; tcp = $t } | ConvertTo-Json -Compress -Depth 3'
 ].join('\n')
@@ -71,7 +71,8 @@ export function parseWindowsSample(raw: string): RawSample {
     ppid: toNumber(p.ParentProcessId),
     name: toText(p.Name),
     commandLine: toText(p.CommandLine),
-    memoryBytes: toNumber(p.WorkingSetSize)
+    memoryBytes: toNumber(p.WorkingSetSize),
+    startedAt: typeof p.StartedAt === 'number' && Number.isFinite(p.StartedAt) ? p.StartedAt : null
   }))
 
   const tcp: TcpEntry[] = toArray(data?.tcp).map((t) => ({

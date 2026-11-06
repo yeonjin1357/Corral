@@ -6,6 +6,11 @@ export interface ProcessInfo {
   name: string
   commandLine: string
   memoryBytes: number
+  /**
+   * 시작 시각(유닉스 ms). Windows 는 부모가 끝나도 자식의 ppid 가 남아 다른 프로세스에 재사용될 수 있어,
+   * "부모보다 먼저 시작한 자식"을 걸러내는 데 쓴다. macOS 는 고아가 launchd 로 옮겨지므로 null.
+   */
+  startedAt: number | null
 }
 
 export type TcpState = 'Listen' | 'Established' | 'Other'

@@ -155,7 +155,14 @@ describe('createWorktreeResolver', () => {
 
   test('resolveProcessWorktrees: 후보를 순서대로 시도해 처음 판별된 것을 쓴다', async () => {
     const repo = await makeRepo(join(tmp, 'shop-web'))
-    const proc = (pid: number, commandLine: string): ProcessInfo => ({ pid, ppid: 1, name: 'node', commandLine, memoryBytes: 1 })
+    const proc = (pid: number, commandLine: string): ProcessInfo => ({
+      pid,
+      ppid: 1,
+      name: 'node',
+      commandLine,
+      memoryBytes: 1,
+      startedAt: null
+    })
     const { resolveProcessWorktrees } = createWorktreeResolver({ homeDir: join(tmp, 'home') })
     const map = await resolveProcessWorktrees([
       proc(1, `"${join(tmp, 'plain', 'node.exe')}" "${join(repo, 'node_modules', '.bin', 'vite')}"`),

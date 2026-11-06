@@ -41,7 +41,8 @@ export function parsePsOutput(statsOut: string, argsOut: string): ProcessInfo[] 
       ppid: Number(m[2]),
       name: basename(comm),
       memoryBytes: Number(m[3]) * 1024,
-      commandLine: argsByPid.get(pid) ?? comm
+      commandLine: argsByPid.get(pid) ?? comm,
+      startedAt: null
     })
   }
   return result

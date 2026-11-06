@@ -11,7 +11,8 @@ describe('parsePsOutput', () => {
         ppid: 4000,
         name: 'node',
         memoryBytes: 1024000 * 1024,
-        commandLine: '/usr/local/bin/node /Users/dev/work/shop-web/node_modules/.bin/vite --port 3000'
+        commandLine: '/usr/local/bin/node /Users/dev/work/shop-web/node_modules/.bin/vite --port 3000',
+        startedAt: null
       }
     ])
   })
