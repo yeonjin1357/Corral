@@ -44,35 +44,53 @@ export const text = {
     loading: '불러오는 중…',
     stale: '업데이트 지연',
     settingsLater: '설정은 다음 단계에서 추가돼요',
-    pending: '다음 단계에서 추가돼요',
-    ram: 'RAM',
-    ramUsage: (used: string, total: string, percent: number): string =>
-      `${used} / ${total} (${percent}%)`,
-    count: (n: number): string => `${n}개`,
+    nextStage: '(다음 단계)',
     none: '—',
-    cards: {
-      ports: '개발 서버 포트',
-      memory: '개발 작업 메모리',
-      agents: '에이전트',
-      leftovers: '남겨진 프로세스',
-      heavy: '무거운 작업',
-      disk: '디스크'
+    nav: { dashboard: '대시보드', settings: '설정' },
+    refresh: '지금 새로고침',
+    list: {
+      search: '검색…',
+      clearSearch: '검색어 지우기',
+      empty: '열려 있는 개발 서버 포트가 없어요.',
+      noMatch: '찾는 포트가 없어요.'
     },
-    ports: {
-      port: '포트',
-      worktree: '작업(워크트리 · 브랜치)',
-      clients: '연결',
-      memory: '메모리',
-      clientCount: (n: number): string => `연결 ${n}`,
-      noClients: '연결 없음',
-      kill: '내리기',
-      empty: '열려 있는 개발 서버 포트가 없어요.'
+    tags: { unresolvable: '판별 불가' },
+    home: {
+      title: '한눈에 보기',
+      ram: 'RAM',
+      ramUsage: (used: string, total: string): string => `${used} / ${total}`,
+      ports: '개발 서버',
+      agents: '에이전트',
+      leftovers: '남은 프로세스',
+      disk: '디스크',
+      current: '(현재)',
+      ramTrend: 'RAM 사용 추이',
+      groups: '메모리 묶음',
+      groupHeaders: { name: '구분', memory: '메모리', processes: '프로세스' }
     },
     groups: {
       devServer: '개발 서버',
       agent: '에이전트',
       other: '그 외',
-      processes: (n: number): string => `프로세스 ${n}개`
+      processes: (n: number): string => `${n}개`
+    },
+    detail: {
+      url: (port: number): string => `http://localhost:${port}`,
+      open: '브라우저로 열기',
+      kill: '내리기',
+      inUse: '사용 중',
+      idle: '연결 없음',
+      every: (openSec: number, closedSec: number): string =>
+        `창이 열려 있으면 ${openSec}초, 닫혀 있으면 ${closedSec}초마다 확인`,
+      memory: '메모리',
+      clients: '연결',
+      pid: 'PID',
+      children: '하위 프로세스',
+      branch: '브랜치',
+      current: '(현재)',
+      mainCheckout: '(메인 체크아웃)',
+      linkedWorktree: '(연결된 worktree)',
+      memoryTrend: '메모리 추이'
     }
   }
 } as const

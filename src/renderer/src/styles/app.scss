@@ -219,7 +219,65 @@ h2 {
     opacity: 0;
 }
 
+.monitor-list {
+    &.scrollbar {
+        overflow-y: auto;
+    }
+
+    @media (max-width: 770px) {
+        &.scrollbar {
+            height: calc(100% - 97px);
+        }
+    }
+
+    .item {
+        display: block;
+        text-decoration: none;
+        padding: 13px 15px 10px 15px;
+        border-radius: 10px;
+        transition: all ease-in-out 0.15s;
+
+        &.disabled {
+            opacity: 0.3;
+        }
+
+        .info {
+            white-space: nowrap;
+            overflow: hidden;
+        }
+
+        &:hover {
+            background-color: $highlight-white;
+        }
+
+        &.active {
+            background-color: #cdf8f4;
+        }
+        .tags {
+            // Removes margin to line up tags list with uptime percentage
+            margin-left: -0.25rem;
+        }
+    }
+}
+
+.dark .monitor-list {
+    .item {
+        &:hover {
+            background-color: $dark-bg2;
+        }
+
+        &.active {
+            background-color: $dark-bg2;
+        }
+    }
+}
+
 // --- pitwall ---
+
+// 목록 항목은 <a> 라서 글자색을 본문색으로 맞춘다(원본은 router-link 에 같은 처리를 한다).
+.monitor-list .item {
+    color: inherit;
+}
 
 // Uptime Kuma Layout.vue 데스크톱 헤더
 header.app-header {
@@ -251,6 +309,26 @@ header.app-header {
     border-color: $dark-border-color;
 }
 
-.dark .progress {
-    background-color: $dark-bg2;
+// Uptime Kuma app.scss 의 .dark 입력창 규칙(처음 옮길 때 빠뜨린 부분)
+.dark {
+    .form-control,
+    .form-control:focus,
+    .form-select,
+    .form-select:focus {
+        color: $dark-font-color;
+        background-color: $dark-bg2;
+    }
+
+    .form-control,
+    .form-select {
+        border-color: $dark-border-color;
+    }
+
+    .form-control::placeholder {
+        color: rgba($dark-font-color, 0.5);
+    }
+
+    // Bootstrap 5.3 은 제목색을 --bs-heading-color 로 따로 정한다(원본이 쓰는 5.1 에는 없음). 본문색을 따르게 한다.
+    --bs-heading-color: #{$dark-font-color};
+    --bs-body-color: #{$dark-font-color};
 }

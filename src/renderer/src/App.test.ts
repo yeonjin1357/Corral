@@ -1,20 +1,23 @@
 // @vitest-environment happy-dom
-import { flushPromises, mount, type DOMWrapper } from '@vue/test-utils'
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import type { Mock } from 'vitest'
 import App from './App.vue'
 import type { DashboardSnapshot, KillResult } from '../../shared/types'
 import type { PitwallApi } from '../../shared/ipc'
-import { snapshot } from './testing/fixtures'
+import { portRow, snapshot, threePorts } from './testing/fixtures'
 
-function installApi(opts: { latest?: DashboardSnapshot | null; kill?: KillResult } = {}): {
+interface FakeApi {
   push(s: DashboardSnapshot): void
   api: PitwallApi & {
     killPort: Mock<PitwallApi['killPort']>
-    onSnapshot: Mock<PitwallApi['onSnapshot']>
+    refreshNow: Mock<PitwallApi['refreshNow']>
+    openPort: Mock<PitwallApi['openPort']>
   }
   resolveLatest(): void
   off: Mock<() => void>
-} {
+}
+
+function installApi(opts: { latest?: DashboardSnapshot | null; kill?: KillResult } = {}): FakeApi {
   let cb: ((s: DashboardSnapshot) => void) | null = null
   let resolveLatest: () => void = () => {}
   const off = vi.fn((): void => {
@@ -29,107 +32,145 @@ function installApi(opts: { latest?: DashboardSnapshot | null; kill?: KillResult
       () =>
         new Promise<DashboardSnapshot | null>((r) => (resolveLatest = () => r(opts.latest ?? null)))
     ),
-    killPort: vi.fn(async (): Promise<KillResult> => opts.kill ?? { status: 'killed' })
+    killPort: vi.fn(async (): Promise<KillResult> => opts.kill ?? { status: 'killed' }),
+    refreshNow: vi.fn(async (): Promise<void> => {}),
+    openPort: vi.fn(async (): Promise<boolean> => true)
   }
   ;(window as unknown as { pitwall: PitwallApi }).pitwall = api
   return { push: (s: DashboardSnapshot) => cb?.(s), api, resolveLatest: () => resolveLatest(), off }
 }
 
-test('스냅샷 전에는 불러오는 중, 오면 카드 요약', async () => {
-  const { push, resolveLatest } = installApi()
-  const w = mount(App)
-  expect(w.text()).toContain('불러오는 중…')
-  push(snapshot())
-  resolveLatest()
+const stubs = {
+  TrendChart: { template: '<div class="trend-chart-stub" />', props: ['points', 'label', 'unit'] }
+}
+
+async function mountWith(fake: FakeApi, s: DashboardSnapshot = snapshot()): Promise<VueWrapper> {
+  const w = mount(App, { global: { stubs } })
+  fake.push(s)
   await flushPromises()
-  expect(w.text()).toContain('개발 서버 포트')
-  expect(w.text()).toContain('3개')
-  expect(w.text()).toContain('26.3 GB / 32.0 GB (82%)')
-  expect(w.findAll('.dash-card')).toHaveLength(6)
-  const memory = w.findAll('.dash-card').find((c) => c.text().includes('개발 작업 메모리'))!
-  expect(memory.get('.num').text()).toBe('2.6 GB')
+  return w
+}
+
+test('스냅샷 전에는 불러오는 중, 오면 왼쪽 포트 목록과 오른쪽 한눈에 보기', async () => {
+  const fake = installApi()
+  const w = mount(App, { global: { stubs } })
+  expect(w.text()).toContain('불러오는 중…')
+  fake.push(snapshot())
+  fake.resolveLatest()
+  await flushPromises()
+  expect(w.findAll('.monitor-list .item')).toHaveLength(3)
+  expect(w.get('h1').text()).toBe('한눈에 보기')
+  expect(w.get('header .title').text()).toBe('pitwall')
+  expect(w.get('header .nav-link.active').text()).toBe('대시보드')
 })
 
 test('getLatest 가 늦게 와도 먼저 받은 더 새 스냅샷을 덮어쓰지 않는다', async () => {
-  const { push, resolveLatest } = installApi({ latest: snapshot({ agentProcessCount: 9 }) })
-  const w = mount(App)
-  push(snapshot({ agentProcessCount: 2 }))
-  resolveLatest()
+  const fake = installApi({ latest: snapshot({ agentProcessCount: 9 }) })
+  const w = mount(App, { global: { stubs } })
+  fake.push(snapshot({ agentProcessCount: 2 }))
+  fake.resolveLatest()
   await flushPromises()
-  const agents = w.findAll('.dash-card').find((c) => c.text().includes('에이전트'))!
-  expect(agents.text()).toContain('2개')
+  const agents = w.findAll('.stats .col').find((c) => c.text().includes('에이전트'))!
+  expect(agents.get('.num').text()).toBe('2')
 })
 
 test('스냅샷이 없을 때 getLatest 결과를 쓴다', async () => {
-  const { resolveLatest } = installApi({ latest: snapshot() })
-  const w = mount(App)
-  resolveLatest()
+  const fake = installApi({ latest: snapshot() })
+  const w = mount(App, { global: { stubs } })
+  fake.resolveLatest()
   await flushPromises()
-  expect(w.text()).toContain('3개')
+  expect(w.findAll('.monitor-list .item')).toHaveLength(3)
 })
 
-test('한 번에 카드 하나만 펼친다', async () => {
-  const { push } = installApi()
-  const w = mount(App)
-  push(snapshot())
-  await flushPromises()
-  const card = (title: string): DOMWrapper<Element> =>
-    w.findAll('.dash-card').find((c) => c.text().includes(title))!
-  await card('개발 서버 포트').get('button.card-head').trigger('click')
-  expect(card('개발 서버 포트').classes()).toContain('expanded')
-  expect(w.find('table').exists()).toBe(true)
-  await card('개발 작업 메모리').get('button.card-head').trigger('click')
-  expect(card('개발 서버 포트').classes()).not.toContain('expanded')
-  expect(card('개발 작업 메모리').classes()).toContain('expanded')
-  await card('개발 작업 메모리').get('button.card-head').trigger('click')
-  expect(w.findAll('.dash-card.expanded')).toHaveLength(0)
+test('목록에서 고르면 오른쪽에 그 포트 상세, 대시보드를 누르면 다시 한눈에 보기', async () => {
+  const fake = installApi()
+  const w = await mountWith(fake)
+  await w.findAll('.monitor-list .item')[0].trigger('click')
+  expect(w.get('h1').text()).toBe('shop-web')
+  expect(w.findAll('.monitor-list .item')[0].classes()).toContain('active')
+  await w.get('header .nav-link.active').trigger('click')
+  expect(w.get('h1').text()).toBe('한눈에 보기')
 })
 
-test('stale 이면 업데이트 지연 배지와 에러 문구', async () => {
-  const { push } = installApi()
-  const w = mount(App)
-  push(snapshot({ stale: true, error: 'timeout' }))
+test('고른 포트가 다음 스냅샷에서 사라지면 한눈에 보기로 돌아간다', async () => {
+  const fake = installApi()
+  const w = await mountWith(fake)
+  await w.findAll('.monitor-list .item')[0].trigger('click')
+  fake.push(snapshot({ takenAt: 2, ports: threePorts.slice(1) }))
   await flushPromises()
+  expect(w.get('h1').text()).toBe('한눈에 보기')
+})
+
+test('지금 새로고침은 refreshNow 를 부르고, 끝날 때까지 버튼을 막는다', async () => {
+  const fake = installApi()
+  let release: () => void = () => {}
+  fake.api.refreshNow.mockImplementationOnce(() => new Promise<void>((r) => (release = r)))
+  const w = await mountWith(fake)
+  await w.get('button.btn-refresh').trigger('click')
+  expect(fake.api.refreshNow).toHaveBeenCalledTimes(1)
+  expect(w.get('button.btn-refresh').attributes('disabled')).toBeDefined()
+  release()
+  await flushPromises()
+  expect(w.get('button.btn-refresh').attributes('disabled')).toBeUndefined()
+})
+
+test('브라우저로 열기는 포트 번호만 넘긴다', async () => {
+  const fake = installApi()
+  const w = await mountWith(fake)
+  await w.findAll('.monitor-list .item')[0].trigger('click')
+  await w.get('button.btn-open').trigger('click')
+  expect(fake.api.openPort).toHaveBeenCalledWith(3000)
+})
+
+test('내리기 결과가 killed 가 아니면 상세에 이유를 보여 준다', async () => {
+  const fake = installApi({ kill: { status: 'changed' } })
+  const w = await mountWith(fake)
+  await w.findAll('.monitor-list .item')[0].trigger('click')
+  await w.get('button.btn-kill').trigger('click')
+  await flushPromises()
+  expect(fake.api.killPort).toHaveBeenCalledWith(3000, 4100)
+  expect(w.get('.kill-notice').text()).toBe('그 사이 다른 프로세스로 바뀌어서 내리지 않았어요.')
+})
+
+test('다른 포트를 고르면 이전 안내 문구는 지운다', async () => {
+  const fake = installApi({ kill: { status: 'gone' } })
+  const w = await mountWith(fake)
+  await w.findAll('.monitor-list .item')[0].trigger('click')
+  await w.get('button.btn-kill').trigger('click')
+  await flushPromises()
+  expect(w.find('.kill-notice').exists()).toBe(true)
+  await w.findAll('.monitor-list .item')[1].trigger('click')
+  expect(w.find('.kill-notice').exists()).toBe(false)
+})
+
+test('stale 이면 헤더에 업데이트 지연 배지와 이유', async () => {
+  const fake = installApi()
+  const w = await mountWith(fake, snapshot({ stale: true, error: 'timeout' }))
   expect(w.get('header .badge').text()).toBe('업데이트 지연')
   expect(w.text()).toContain('timeout')
 })
 
-test('내리기 결과가 killed 가 아니면 카드 안에 이유를 보여준다', async () => {
-  const { push, api } = installApi({ kill: { status: 'changed' } })
-  const w = mount(App)
-  push(snapshot())
-  await flushPromises()
-  const ports = w.findAll('.dash-card').find((c) => c.text().includes('개발 서버 포트'))!
-  await ports.get('button.card-head').trigger('click')
-  await w.findAll('tbody tr')[0].get('button').trigger('click')
-  await flushPromises()
-  expect(api.killPort).toHaveBeenCalledWith(3000, 4100)
-  expect(w.text()).toContain('그 사이 다른 프로세스로 바뀌어서 내리지 않았어요.')
+test('설정은 다음 단계라 비활성', async () => {
+  const fake = installApi()
+  const w = await mountWith(fake)
+  const settings = w.findAll('header .nav-link').find((l) => l.text().includes('설정'))!
+  expect(settings.classes()).toContain('disabled')
 })
 
-test('취소는 조용히 넘어가고, failed 는 메시지를 우선 보여준다', async () => {
-  const cancelled = installApi({ kill: { status: 'cancelled' } })
-  const w = mount(App)
-  cancelled.push(snapshot())
+test('언마운트하면 구독을 끊는다', async () => {
+  const fake = installApi()
+  const w = mount(App, { global: { stubs } })
   await flushPromises()
-  const open = async (): Promise<void> => {
-    const ports = w.findAll('.dash-card').find((c) => c.text().includes('개발 서버 포트'))!
-    if (!ports.classes().includes('expanded')) await ports.get('button.card-head').trigger('click')
-    await w.findAll('tbody tr')[0].get('button').trigger('click')
-    await flushPromises()
-  }
-  await open()
-  expect(w.find('.kill-notice').exists()).toBe(false)
-  cancelled.api.killPort.mockResolvedValueOnce({ status: 'failed', message: '권한이 없어요' })
-  await open()
-  expect(w.get('.kill-notice').text()).toBe('권한이 없어요')
-})
-
-test('언마운트하면 구독을 끊고 다크 모드 감시도 해제한다', async () => {
-  const { off } = installApi()
-  const w = mount(App)
-  await flushPromises()
-  expect(off).not.toHaveBeenCalled()
+  expect(fake.off).not.toHaveBeenCalled()
   w.unmount()
-  expect(off).toHaveBeenCalledTimes(1)
+  expect(fake.off).toHaveBeenCalledTimes(1)
+})
+
+test('포트 행 고유 키는 포트와 pid 를 함께 쓴다(같은 포트를 다른 프로세스가 열면 다른 항목)', async () => {
+  const fake = installApi()
+  const w = await mountWith(
+    fake,
+    snapshot({ ports: [portRow({ pid: 1 }), portRow({ pid: 2, port: 3000 })] })
+  )
+  expect(w.findAll('.monitor-list .item')).toHaveLength(2)
 })

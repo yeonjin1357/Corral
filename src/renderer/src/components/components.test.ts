@@ -1,11 +1,18 @@
 // @vitest-environment happy-dom
 import { mount } from '@vue/test-utils'
 import StatusBadge from './StatusBadge.vue'
-import RamBar from './RamBar.vue'
-import DashCard from './DashCard.vue'
-import PortsCard from './PortsCard.vue'
-import MemoryGroupsCard from './MemoryGroupsCard.vue'
+import HeartbeatBar from './HeartbeatBar.vue'
+import PortListItem from './PortListItem.vue'
+import PortList from './PortList.vue'
+import HomeView from './HomeView.vue'
+import PortDetail from './PortDetail.vue'
+import { appendSnapshot, emptyHistory, portKey } from '../history'
 import { GB, MB, portRow, snapshot, threePorts } from '../testing/fixtures'
+
+// 그래프(canvas)는 happy-dom 에서 그릴 수 없어 자리만 확인한다.
+const stubs = {
+  TrendChart: { template: '<div class="trend-chart-stub" />', props: ['points', 'label', 'unit'] }
+}
 
 describe('StatusBadge', () => {
   test('Uptime Kuma 배지 마크업(rounded-pill + bg-톤)', () => {
@@ -15,116 +22,229 @@ describe('StatusBadge', () => {
   })
 })
 
-describe('RamBar', () => {
-  test('단계에 맞는 막대 색과 사용량 문구', () => {
-    const w = mount(RamBar, { props: { memory: snapshot().memory } })
-    const bar = w.get('.progress-bar')
-    expect(bar.classes()).toContain('bg-warning')
-    expect(bar.attributes('aria-valuenow')).toBe('82')
-    expect(bar.attributes('style')).toContain('width: 82.2%')
-    expect(w.text()).toContain('26.3 GB / 32.0 GB (82%)')
+describe('HeartbeatBar', () => {
+  test('기록 순서대로 막대를 그리고 상태별 클래스를 단다(최신이 오른쪽 끝), 기록 없는 칸은 빈 막대로 채운다', () => {
+    const w = mount(HeartbeatBar, { props: { beats: ['idle', 'up', 'up'], size: 'small' } })
+    expect(w.classes()).toContain('hp-bar-small')
+    const kinds = w.findAll('.beat').map((b) => b.classes().find((c) => c.startsWith('beat-')))
+    expect(kinds).toHaveLength(60)
+    expect(kinds.slice(-3)).toEqual(['beat-idle', 'beat-up', 'beat-up'])
+    expect(new Set(kinds.slice(0, -3))).toEqual(new Set(['beat-empty']))
   })
 
-  test('표시 퍼센트는 내림 — 79.96% 를 80% 로 보여 주면서 정상(초록)으로 칠하지 않는다', () => {
-    const w = mount(RamBar, {
+  test('기본 크기는 big', () => {
+    expect(mount(HeartbeatBar, { props: { beats: [] } }).classes()).toContain('hp-bar-big')
+  })
+})
+
+describe('PortListItem', () => {
+  test('포트 배지(연결 있으면 초록)·폴더 이름·브랜치와 프로세스 태그·작은 하트비트', () => {
+    const w = mount(PortListItem, { props: { row: portRow(), beats: ['up'], active: false } })
+    const pill = w.get('.badge.rounded-pill')
+    expect(pill.text()).toBe(':3000')
+    expect(pill.classes()).toContain('bg-primary')
+    expect(w.get('.name').text()).toBe('shop-web')
+    expect(w.findAll('.tag-wrapper').map((t) => t.text())).toEqual(['develop', 'node.exe'])
+    expect(w.find('.hp-bar-small').exists()).toBe(true)
+  })
+
+  test('연결이 없으면 회색 배지, 판별 불가는 회색 태그', () => {
+    const w = mount(PortListItem, {
       props: {
-        memory: { totalBytes: 100 * GB, usedBytes: 79.96 * GB, usedPercent: 79.96, level: 'normal' }
+        row: portRow({ clientCount: 0, worktree: null, unresolvable: true }),
+        beats: [],
+        active: false
       }
     })
-    expect(w.text()).toContain('(79%)')
-    expect(w.get('.progress-bar').attributes('aria-valuenow')).toBe('79')
+    expect(w.get('.badge.rounded-pill').classes()).toContain('bg-secondary')
+    expect(w.get('.name').text()).toBe('판별 불가')
+    expect(w.findAll('.tag-wrapper').map((t) => t.text())).toEqual(['node.exe'])
   })
 
-  test('normal 은 primary, danger 는 danger', () => {
-    const normal = mount(RamBar, {
-      props: { memory: { totalBytes: GB, usedBytes: 0, usedPercent: 0, level: 'normal' } }
+  test('detached HEAD 는 브랜치 태그에 (detached)', () => {
+    const w = mount(PortListItem, {
+      props: {
+        row: portRow({ worktree: { root: 'C:\\w\\x', branch: null, isLinkedWorktree: false } }),
+        beats: [],
+        active: false
+      }
     })
-    expect(normal.get('.progress-bar').classes()).toContain('bg-primary')
-    const danger = mount(RamBar, {
-      props: { memory: { totalBytes: GB, usedBytes: GB, usedPercent: 100, level: 'danger' } }
-    })
-    expect(danger.get('.progress-bar').classes()).toContain('bg-danger')
+    expect(w.findAll('.tag-wrapper').map((t) => t.text())).toEqual(['(detached)', 'node.exe'])
+  })
+
+  test('누르면 select, 고른 항목은 active', async () => {
+    const w = mount(PortListItem, { props: { row: portRow(), beats: [], active: true } })
+    expect(w.get('.item').classes()).toContain('active')
+    await w.get('.item').trigger('click')
+    expect(w.emitted('select')).toHaveLength(1)
   })
 })
 
-describe('DashCard', () => {
-  test('헤더를 누르면 toggle, 펼쳤을 때만 상세 슬롯', async () => {
-    const w = mount(DashCard, {
-      props: { title: '개발 서버 포트', summary: '3개', expanded: false },
-      slots: { detail: '<p class="d">상세</p>' }
+describe('PortList', () => {
+  const history = appendSnapshot(emptyHistory(), snapshot()).ports
+
+  test('포트마다 항목, 고른 항목 표시, 누르면 키로 select', async () => {
+    const w = mount(PortList, {
+      props: { ports: threePorts, history, selectedKey: portKey(threePorts[1]) }
     })
-    expect(w.find('.d').exists()).toBe(false)
-    await w.get('button.card-head').trigger('click')
-    expect(w.emitted('toggle')).toHaveLength(1)
-    await w.setProps({ expanded: true })
-    expect(w.find('.d').exists()).toBe(true)
-    expect(w.get('button.card-head').attributes('aria-expanded')).toBe('true')
-    expect(w.classes()).toContain('expanded')
+    const items = w.findAll('.item')
+    expect(items).toHaveLength(3)
+    expect(items[1].classes()).toContain('active')
+    await items[2].trigger('click')
+    expect(w.emitted('select')?.[0]).toEqual([portKey(threePorts[2])])
   })
 
-  test('pending 카드는 안내 문구를 보이고 눌러도 펼쳐지지 않는다', async () => {
-    const w = mount(DashCard, {
-      props: { title: '디스크', summary: '—', expanded: false, pending: true }
-    })
-    expect(w.text()).toContain('다음 단계에서 추가돼요')
-    const head = w.get('button.card-head')
-    expect(head.attributes('disabled')).toBeDefined()
-    await head.trigger('click')
-    expect(w.emitted('toggle')).toBeUndefined()
-  })
-})
-
-describe('PortsCard', () => {
-  test('행 3개, 연결 배지, 판별 불가 행에는 내리기 버튼 없음', () => {
-    const w = mount(PortsCard, { props: { ports: threePorts } })
-    const rows = w.findAll('tbody tr')
-    expect(rows).toHaveLength(3)
-    expect(rows[0].text()).toContain(':3000')
-    expect(rows[0].text()).toContain('shop-web · develop')
-    expect(rows[0].get('.badge').classes()).toContain('bg-primary')
-    expect(rows[0].get('.badge').text()).toBe('연결 1')
-    expect(rows[1].get('.badge').classes()).toContain('bg-secondary')
-    expect(rows[1].get('.badge').text()).toBe('연결 없음')
-    expect(rows[1].text()).toContain('wt-a · feat/a')
-    expect(rows[2].text()).toContain('판별 불가')
-    expect(rows[2].find('button').exists()).toBe(false)
-    expect(rows[0].text()).toContain('1.2 GB')
-  })
-
-  test('내리기를 누르면 (포트, pid) 로 kill', async () => {
-    const w = mount(PortsCard, { props: { ports: threePorts } })
-    await w.findAll('tbody tr')[0].get('button').trigger('click')
-    expect(w.emitted('kill')?.[0]).toEqual([3000, 4100])
-  })
-
-  test('처리 중인 pid 의 버튼은 비활성', () => {
-    const w = mount(PortsCard, { props: { ports: threePorts, busyPid: 4100 } })
-    expect(w.findAll('tbody tr')[0].get('button').attributes('disabled')).toBeDefined()
-    expect(w.findAll('tbody tr')[1].get('button').attributes('disabled')).toBeUndefined()
+  test('검색: worktree·포트·프로세스 이름으로 거르고(대소문자 무시), 없으면 안내', async () => {
+    const w = mount(PortList, { props: { ports: threePorts, history, selectedKey: null } })
+    await w.get('input.search-input').setValue('WT-A')
+    expect(w.findAll('.item').map((i) => i.get('.badge').text())).toEqual([':3003'])
+    await w.get('input.search-input').setValue(':8080')
+    expect(w.findAll('.item').map((i) => i.get('.badge').text())).toEqual([':8080'])
+    await w.get('input.search-input').setValue('wslrelay')
+    expect(w.findAll('.item')).toHaveLength(1)
+    await w.get('input.search-input').setValue('없는이름')
+    expect(w.findAll('.item')).toHaveLength(0)
+    expect(w.text()).toContain('찾는 포트가 없어요.')
   })
 
   test('포트가 없으면 빈 안내', () => {
-    const w = mount(PortsCard, { props: { ports: [] } })
+    const w = mount(PortList, { props: { ports: [], history: {}, selectedKey: null } })
     expect(w.text()).toContain('열려 있는 개발 서버 포트가 없어요.')
-    expect(w.find('table').exists()).toBe(false)
-  })
-
-  test('PID·프로세스 이름을 함께 보여준다', () => {
-    const w = mount(PortsCard, { props: { ports: [portRow()] } })
-    expect(w.text()).toContain('node.exe')
-    expect(w.text()).toContain('4100')
   })
 })
 
-describe('MemoryGroupsCard', () => {
-  test('개발 서버 · 에이전트 · 그 외 순서와 크기·프로세스 수', () => {
-    const w = mount(MemoryGroupsCard, { props: { groups: snapshot().groups } })
+describe('HomeView', () => {
+  test('한눈에 보기: RAM(내림 %, 단계 색)·개발 서버·에이전트, 아직 없는 항목은 다음 단계', () => {
+    const w = mount(HomeView, {
+      props: { snapshot: snapshot(), ramHistory: [] },
+      global: { stubs }
+    })
+    expect(w.get('h1').text()).toBe('한눈에 보기')
+    const cols = w.findAll('.stats .col').map((c) => c.text().replace(/\s+/g, ' ').trim())
+    expect(cols[0]).toContain('RAM')
+    expect(cols[0]).toContain('82%')
+    expect(cols[0]).toContain('26.3 GB / 32.0 GB')
+    expect(w.findAll('.stats .num')[0].classes()).toContain('text-warning')
+    expect(cols[1]).toContain('개발 서버')
+    expect(cols[1]).toContain('3')
+    expect(cols[2]).toContain('에이전트')
+    expect(cols[2]).toContain('2')
+    expect(cols[3]).toContain('남은 프로세스')
+    expect(cols[3]).toContain('다음 단계')
+    expect(w.find('.trend-chart-stub').exists()).toBe(true)
+  })
+
+  test('메모리 묶음 표: 개발 서버·에이전트·그 외', () => {
+    const w = mount(HomeView, {
+      props: { snapshot: snapshot(), ramHistory: [] },
+      global: { stubs }
+    })
     const rows = w.findAll('tbody tr').map((r) => r.text())
     expect(rows[0]).toContain('개발 서버')
     expect(rows[0]).toContain('2.1 GB')
-    expect(rows[0]).toContain('프로세스 5개')
-    expect(rows[1]).toContain('에이전트')
     expect(rows[1]).toContain(`${Math.round((500 * MB) / MB)} MB`)
     expect(rows[2]).toContain('그 외')
+  })
+
+  test('RAM 위험 단계는 빨강, 총량 0 은 — 로', () => {
+    const danger = mount(HomeView, {
+      props: {
+        snapshot: snapshot({
+          memory: { totalBytes: GB, usedBytes: GB, usedPercent: 95, level: 'danger' }
+        }),
+        ramHistory: []
+      },
+      global: { stubs }
+    })
+    expect(danger.findAll('.stats .num')[0].classes()).toContain('text-danger')
+    const zero = mount(HomeView, {
+      props: {
+        snapshot: snapshot({
+          memory: { totalBytes: 0, usedBytes: 0, usedPercent: 0, level: 'normal' }
+        }),
+        ramHistory: []
+      },
+      global: { stubs }
+    })
+    expect(zero.findAll('.stats .num')[0].text()).toBe('—')
+  })
+})
+
+describe('PortDetail', () => {
+  const history = appendSnapshot(emptyHistory(), snapshot()).ports[portKey(portRow())]
+  const intervals = { openMs: 5000, closedMs: 30000 }
+
+  test('제목·localhost 링크·상태 배지·숫자 칸', () => {
+    const w = mount(PortDetail, {
+      props: { row: portRow(), history, busy: false, notice: null, intervals },
+      global: { stubs }
+    })
+    expect(w.get('h1').text()).toBe('shop-web')
+    expect(w.get('.url').text()).toBe('http://localhost:3000')
+    expect(w.get('.status-badge').text()).toBe('사용 중')
+    expect(w.get('.status-badge').classes()).toContain('bg-primary')
+    const stats = w.findAll('.stats .col').map((c) => c.text().replace(/\s+/g, ' ').trim())
+    expect(stats[0]).toContain('메모리')
+    expect(stats[0]).toContain('1.2 GB')
+    expect(stats[1]).toContain('연결')
+    expect(stats[2]).toContain('PID')
+    expect(stats[2]).toContain('4100')
+    expect(stats[2]).toContain('node.exe')
+    expect(stats[3]).toContain('하위 프로세스')
+    expect(stats[4]).toContain('develop')
+    expect(stats[4]).toContain('메인 체크아웃')
+    expect(w.text()).toContain('창이 열려 있으면 5초, 닫혀 있으면 30초마다 확인')
+    expect(w.find('.hp-bar-big').exists()).toBe(true)
+    expect(w.find('.trend-chart-stub').exists()).toBe(true)
+  })
+
+  test('연결이 없으면 회색 "연결 없음", 연결된 worktree 표시', () => {
+    const w = mount(PortDetail, {
+      props: {
+        row: portRow({
+          clientCount: 0,
+          worktree: { root: '/Users/dev/wt-a', branch: null, isLinkedWorktree: true }
+        }),
+        history: undefined,
+        busy: false,
+        notice: null,
+        intervals
+      },
+      global: { stubs }
+    })
+    expect(w.get('.status-badge').text()).toBe('연결 없음')
+    expect(w.get('.status-badge').classes()).toContain('bg-secondary')
+    expect(w.text()).toContain('(detached)')
+    expect(w.text()).toContain('연결된 worktree')
+  })
+
+  test('링크·브라우저 열기 버튼은 open, 내리기는 kill, 처리 중엔 내리기 비활성, 안내 문구 표시', async () => {
+    const w = mount(PortDetail, {
+      props: {
+        row: portRow(),
+        history,
+        busy: true,
+        notice: '이미 종료된 프로세스예요.',
+        intervals
+      },
+      global: { stubs }
+    })
+    await w.get('.url a').trigger('click')
+    await w.get('button.btn-open').trigger('click')
+    expect(w.emitted('open')).toHaveLength(2)
+    expect(w.get('button.btn-kill').attributes('disabled')).toBeDefined()
+    expect(w.get('.kill-notice').text()).toBe('이미 종료된 프로세스예요.')
+    await w.setProps({ busy: false })
+    await w.get('button.btn-kill').trigger('click')
+    expect(w.emitted('kill')).toHaveLength(1)
+  })
+
+  test('판별 불가 포트는 제목이 "판별 불가"이고 내리기 버튼이 없다', () => {
+    const w = mount(PortDetail, {
+      props: { row: threePorts[2], history: undefined, busy: false, notice: null, intervals },
+      global: { stubs }
+    })
+    expect(w.get('h1').text()).toBe('판별 불가')
+    expect(w.find('button.btn-kill').exists()).toBe(false)
   })
 })

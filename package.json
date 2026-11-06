@@ -28,7 +28,9 @@
     "@fortawesome/fontawesome-svg-core": "^7.3.1",
     "@fortawesome/free-solid-svg-icons": "^7.3.1",
     "@fortawesome/vue-fontawesome": "^3.3.3",
-    "bootstrap": "^5.3.8"
+    "bootstrap": "^5.3.8",
+    "chart.js": "^4.6.1",
+    "vue-chartjs": "^5.3.4"
   },
   "devDependencies": {
     "@electron-toolkit/eslint-config-prettier": "3.0.1",

@@ -1,33 +1,48 @@
+<!--
+  화면 뼈대는 Uptime Kuma (MIT) src/layouts/Layout.vue(헤더: 로고·제목 + 오른쪽 알약 메뉴)와
+  src/pages/Dashboard.vue(왼쪽 목록 col-md-5/col-xl-4 + 오른쪽 내용 col-md-7/col-xl-8)를 따른다.
+-->
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { FontAwesomeIcon } from '@fortawesome/vue-fontawesome'
-import { faGear } from '@fortawesome/free-solid-svg-icons'
+import {
+  faFlagCheckered,
+  faGaugeHigh,
+  faGear,
+  faRotateRight
+} from '@fortawesome/free-solid-svg-icons'
 import type { DashboardSnapshot } from '../../shared/types'
-import { describeKillResult, formatBytes } from '../../shared/format'
+import { DEFAULT_INTERVALS } from '../../shared/defaults'
+import { describeKillResult } from '../../shared/format'
 import { text } from '../../shared/text'
 import { watchColorScheme } from './theme'
+import { appendSnapshot, emptyHistory, portKey } from './history'
 import StatusBadge from './components/StatusBadge.vue'
-import RamBar from './components/RamBar.vue'
-import DashCard from './components/DashCard.vue'
-import PortsCard from './components/PortsCard.vue'
-import MemoryGroupsCard from './components/MemoryGroupsCard.vue'
-
-type CardId = 'ports' | 'memory' | 'agents' | 'leftovers' | 'heavy' | 'disk'
+import PortList from './components/PortList.vue'
+import HomeView from './components/HomeView.vue'
+import PortDetail from './components/PortDetail.vue'
 
 const snapshot = ref<DashboardSnapshot | null>(null)
-const expanded = ref<CardId | null>(null)
+const history = ref(emptyHistory())
+const selectedKey = ref<string | null>(null)
 const busyPid = ref<number | null>(null)
-const killNotice = ref<string | null>(null)
+const notice = ref<string | null>(null)
+const refreshing = ref(false)
+
+function receive(s: DashboardSnapshot): void {
+  snapshot.value = s
+  history.value = appendSnapshot(history.value, s)
+}
 
 let unsubscribe: () => void = () => {}
 let stopTheme: () => void = () => {}
 
 onMounted(async () => {
   stopTheme = watchColorScheme((q) => window.matchMedia(q), document.body)
-  unsubscribe = window.pitwall.onSnapshot((s) => (snapshot.value = s))
+  unsubscribe = window.pitwall.onSnapshot(receive)
   const latest = await window.pitwall.getLatest()
   // 창이 늦게 열려 놓친 스냅샷만 채운다. 그 사이 받은 더 새 스냅샷은 덮어쓰지 않는다.
-  if (!snapshot.value && latest) snapshot.value = latest
+  if (!snapshot.value && latest) receive(latest)
 })
 
 onUnmounted(() => {
@@ -35,110 +50,162 @@ onUnmounted(() => {
   stopTheme()
 })
 
-function toggle(id: CardId): void {
-  expanded.value = expanded.value === id ? null : id
+const selectedRow = computed(
+  () => snapshot.value?.ports.find((row) => portKey(row) === selectedKey.value) ?? null
+)
+
+// 고른 포트가 사라지면(서버 종료 등) 한눈에 보기로 돌아간다.
+watch(selectedRow, (row) => {
+  if (!row && selectedKey.value) {
+    selectedKey.value = null
+    notice.value = null
+  }
+})
+
+function goHome(): void {
+  selectedKey.value = null
+  notice.value = null
 }
 
-async function kill(port: number, pid: number): Promise<void> {
-  busyPid.value = pid
-  killNotice.value = null
+function select(key: string): void {
+  if (key !== selectedKey.value) notice.value = null
+  selectedKey.value = key
+}
+
+async function refresh(): Promise<void> {
+  refreshing.value = true
   try {
-    killNotice.value = describeKillResult(await window.pitwall.killPort(port, pid))
+    await window.pitwall.refreshNow()
+  } finally {
+    refreshing.value = false
+  }
+}
+
+async function openSelected(): Promise<void> {
+  if (selectedRow.value) await window.pitwall.openPort(selectedRow.value.port)
+}
+
+async function killSelected(): Promise<void> {
+  const row = selectedRow.value
+  if (!row) return
+  busyPid.value = row.pid
+  notice.value = null
+  try {
+    notice.value = describeKillResult(await window.pitwall.killPort(row.port, row.pid))
   } finally {
     busyPid.value = null
   }
 }
-
-const devWorkBytes = computed(() =>
-  (snapshot.value?.groups ?? [])
-    .filter((g) => g.group !== 'other')
-    .reduce((sum, g) => sum + g.memoryBytes, 0)
-)
 </script>
 
 <template>
-  <header class="app-header d-flex align-items-center py-3 mb-3 border-bottom px-4">
-    <span class="fs-4 title">{{ text.appName }}</span>
-    <StatusBadge v-if="snapshot?.stale" class="ms-3" tone="warning" :text="text.ui.stale" />
-    <button type="button" class="btn btn-normal ms-auto" disabled :title="text.ui.settingsLater">
-      <FontAwesomeIcon :icon="faGear" />
-    </button>
+  <header class="app-header d-flex flex-wrap align-items-center py-3 mb-3 border-bottom">
+    <a
+      href="#"
+      class="brand d-flex align-items-center me-auto text-decoration-none"
+      @click.prevent="goHome"
+    >
+      <span class="logo me-2 ms-4"><FontAwesomeIcon :icon="faFlagCheckered" /></span>
+      <span class="fs-4 title">{{ text.appName }}</span>
+    </a>
+    <StatusBadge v-if="snapshot?.stale" class="me-3" tone="warning" :text="text.ui.stale" />
+    <ul class="nav nav-pills me-4">
+      <li class="nav-item me-2">
+        <a href="#" class="nav-link active" @click.prevent="goHome">
+          <FontAwesomeIcon :icon="faGaugeHigh" /> {{ text.ui.nav.dashboard }}
+        </a>
+      </li>
+      <li class="nav-item">
+        <a
+          href="#"
+          class="nav-link disabled"
+          aria-disabled="true"
+          :title="text.ui.settingsLater"
+          @click.prevent
+        >
+          <FontAwesomeIcon :icon="faGear" /> {{ text.ui.nav.settings }}
+        </a>
+      </li>
+    </ul>
   </header>
 
-  <main class="px-4 pb-4">
+  <main class="container-fluid">
+    <p v-if="snapshot?.error" class="text-danger small">{{ snapshot.error }}</p>
     <p v-if="!snapshot" class="text-secondary">{{ text.ui.loading }}</p>
-    <template v-else>
-      <p v-if="snapshot.error" class="text-danger small">{{ snapshot.error }}</p>
-      <RamBar :memory="snapshot.memory" />
-
-      <div class="cards">
-        <DashCard
-          :title="text.ui.cards.ports"
-          :summary="text.ui.count(snapshot.ports.length)"
-          :tone="snapshot.ports.length ? 'primary' : 'secondary'"
-          :expanded="expanded === 'ports'"
-          @toggle="toggle('ports')"
-        >
-          <template #detail>
-            <p v-if="killNotice" class="kill-notice text-warning small">{{ killNotice }}</p>
-            <PortsCard :ports="snapshot.ports" :busy-pid="busyPid" @kill="kill" />
-          </template>
-        </DashCard>
-
-        <DashCard
-          :title="text.ui.cards.memory"
-          :summary="formatBytes(devWorkBytes)"
-          :expanded="expanded === 'memory'"
-          @toggle="toggle('memory')"
-        >
-          <template #detail>
-            <MemoryGroupsCard :groups="snapshot.groups" />
-          </template>
-        </DashCard>
-
-        <DashCard
-          :title="text.ui.cards.agents"
-          :summary="text.ui.count(snapshot.agentProcessCount)"
-          :tone="snapshot.agentProcessCount ? 'primary' : 'secondary'"
-          :expanded="false"
-          pending
-        />
-        <DashCard
-          :title="text.ui.cards.leftovers"
-          :summary="text.ui.none"
-          tone="secondary"
-          :expanded="false"
-          pending
-        />
-        <DashCard
-          :title="text.ui.cards.heavy"
-          :summary="text.ui.none"
-          tone="secondary"
-          :expanded="false"
-          pending
-        />
-        <DashCard
-          :title="text.ui.cards.disk"
-          :summary="text.ui.none"
-          tone="secondary"
-          :expanded="false"
-          pending
+    <div v-else class="row">
+      <div class="col-12 col-md-5 col-xl-4 ps-0">
+        <div>
+          <button
+            type="button"
+            class="btn btn-primary mb-3 btn-refresh"
+            :disabled="refreshing"
+            @click="refresh"
+          >
+            <FontAwesomeIcon :icon="faRotateRight" :spin="refreshing" /> {{ text.ui.refresh }}
+          </button>
+        </div>
+        <PortList
+          :ports="snapshot.ports"
+          :history="history.ports"
+          :selected-key="selectedKey"
+          @select="select"
         />
       </div>
-    </template>
+      <div class="col-12 col-md-7 col-xl-8 mb-3 gx-0">
+        <PortDetail
+          v-if="selectedRow"
+          :row="selectedRow"
+          :history="history.ports[portKey(selectedRow)]"
+          :busy="busyPid === selectedRow.pid"
+          :notice="notice"
+          :intervals="DEFAULT_INTERVALS"
+          @open="openSelected"
+          @kill="killSelected"
+        />
+        <HomeView v-else :snapshot="snapshot" :ram-history="history.ram" />
+      </div>
+    </div>
   </main>
 </template>
 
-<style scoped>
-.cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 1rem;
-  align-items: start;
+<style scoped lang="scss">
+@import './styles/vars.scss';
+
+/* Uptime Kuma Dashboard.vue */
+.container-fluid {
+  width: 98%;
 }
 
-/* 펼친 카드는 그 자리에서 한 줄 전체를 차지하고, 나머지 카드는 아래로 밀린다. */
-.cards > .expanded {
-  grid-column: 1 / -1;
+/* Uptime Kuma Layout.vue 의 nav-link hover */
+.nav-link {
+  &:hover {
+    background-color: $primary;
+    color: #fff;
+
+    .dark & {
+      color: #000;
+    }
+  }
+
+  &.active:hover {
+    background-color: $highlight;
+  }
+}
+
+.brand {
+  color: inherit;
+}
+
+/* 로고 자리: Uptime Kuma 로고 대신 pitwall 아이콘(초록 원 + 체커기) */
+.logo {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background-color: $primary;
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
 }
 </style>

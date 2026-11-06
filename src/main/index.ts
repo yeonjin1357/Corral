@@ -14,6 +14,7 @@ import { resolveProcessWorktrees } from './collect/worktree'
 import { buildSnapshot, pidsForWorktreeLookup } from './snapshot'
 import { createScheduler } from './scheduler'
 import { createPortKiller, type KillConfirm } from './kill'
+import { localUrlFor } from './open'
 import { createDotIcon, createTrayController, encodePng, LEVEL_COLORS } from './tray'
 import type { MemoryLevel } from '../shared/types'
 
@@ -95,9 +96,8 @@ function createTray(): void {
       setImage: (image) => t.setImage(image as Electron.NativeImage),
       popUpContextMenu: () => t.popUpContextMenu(),
       displayBalloon: (options) => t.displayBalloon(options),
-      on: (event, listener) => {
-        if (event === 'click') t.on('click', listener)
-        else t.on('double-click', listener)
+      on: (_event, listener) => {
+        t.on('click', listener)
       }
     },
     makeIcon: trayIcon,
@@ -167,12 +167,24 @@ function registerIpc(): void {
     void scheduler.refreshNow()
     return result
   })
+  ipcMain.handle(IPC.refreshNow, async (event) => {
+    if (fromMainWindow(event.sender)) await scheduler.refreshNow()
+  })
+  ipcMain.handle(IPC.openPort, async (event, port: unknown) => {
+    if (!fromMainWindow(event.sender)) return false
+    const url = localUrlFor(port, scheduler.latest())
+    if (!url) return false
+    await shell.openExternal(url)
+    return true
+  })
 }
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
-    width: 1100,
-    height: 760,
+    width: 1280,
+    height: 820,
+    minWidth: 800,
+    minHeight: 560,
     show: false,
     title: text.appName,
     autoHideMenuBar: true,

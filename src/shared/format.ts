@@ -26,9 +26,14 @@ export function formatBytes(bytes: number): string {
   return `${(bytes / GiB).toFixed(1)} GB`
 }
 
-export function worktreeLabel(worktree: WorktreeInfo | null): string {
+/** worktree 의 폴더 이름(경로 마지막 부분). 판별되지 않았으면 '판별 불가'. */
+export function worktreeFolder(worktree: WorktreeInfo | null): string {
   if (!worktree) return text.unresolvable
   const parts = worktree.root.split(/[\\/]+/).filter(Boolean)
-  const folder = parts[parts.length - 1] ?? worktree.root
-  return `${folder} · ${worktree.branch ?? text.detached}`
+  return parts[parts.length - 1] ?? worktree.root
+}
+
+export function worktreeLabel(worktree: WorktreeInfo | null): string {
+  if (!worktree) return text.unresolvable
+  return `${worktreeFolder(worktree)} · ${worktree.branch ?? text.detached}`
 }
