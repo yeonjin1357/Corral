@@ -35,6 +35,37 @@ describe('훅 이벤트 → 세션 상태', () => {
     expect(stateAfter(ev('UserPromptSubmit'), ev(name, extra))).toBe(expected)
   })
 
+  test('권한 대기 중에 다른 도구(병렬 실행)가 끝나도 권한 대기를 유지하고, 권한을 요청한 도구가 끝나야 작업 중', () => {
+    const sessions: Sessions = new Map()
+    applyHookEvent(sessions, ev('PermissionRequest', { tool_name: 'Bash' }), 1000)
+    applyHookEvent(sessions, ev('PostToolUse', { tool_name: 'Read' }), 1001)
+    expect(sessions.get('s1')?.state).toBe('waiting')
+    applyHookEvent(sessions, ev('Notification', { notification_type: 'permission_prompt' }), 1002)
+    applyHookEvent(sessions, ev('PostToolUse', { tool_name: 'Grep' }), 1003)
+    expect(sessions.get('s1')?.state).toBe('waiting')
+    applyHookEvent(sessions, ev('PostToolUse', { tool_name: 'Bash' }), 1004)
+    expect(sessions.get('s1')?.state).toBe('working')
+  })
+
+  test('어떤 도구가 기다리는지 모르면(알림만 옴) 다음 도구가 끝날 때 작업 중으로 본다', () => {
+    expect(
+      stateAfter(
+        ev('UserPromptSubmit'),
+        ev('Notification', { notification_type: 'permission_prompt' }),
+        ev('PostToolUse', { tool_name: 'Read' })
+      )
+    ).toBe('working')
+  })
+
+  test('권한 대기는 사용자가 입력하거나(UserPromptSubmit) 응답이 끝나면(Stop) 풀린다', () => {
+    const waiting = ev('PermissionRequest', { tool_name: 'Bash' })
+    expect(stateAfter(waiting, ev('UserPromptSubmit'))).toBe('working')
+    expect(stateAfter(waiting, ev('Stop'))).toBe('idle')
+    expect(stateAfter(waiting, ev('Notification', { notification_type: 'idle_prompt' }))).toBe(
+      'idle'
+    )
+  })
+
   test('SessionEnd 는 세션을 지운다', () => {
     expect(stateAfter(ev('UserPromptSubmit'), ev('SessionEnd'))).toBeUndefined()
   })

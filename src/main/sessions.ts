@@ -13,6 +13,8 @@ export interface ClaudeSession {
   firstSeen: number
   /** 짝지은 Claude 프로세스(`pid:시작 시각`). 아직 모르면 null. */
   processKey: string | null
+  /** 권한 대기 중이면 권한을 요청한 도구 이름(모르면 null). 다른 도구가 끝나도 대기를 유지하는 데 쓴다. */
+  waitingTool?: string | null
 }
 
 /** 수집 때 본 최상위 Claude 프로세스. */
@@ -40,14 +42,19 @@ function rank(state: AgentState): number {
 /** 이벤트가 정하는 다음 상태. null 은 "상태는 그대로(세션이 없으면 만들지 않음)". */
 function nextState(
   ev: Record<string, unknown>,
-  current: AgentState | undefined
+  session: ClaudeSession | undefined
 ): AgentState | null {
+  const current = session?.state
   switch (ev.hook_event_name) {
     case 'SessionStart':
       // 자동 압축 뒤에도 SessionStart 가 오지만 작업은 이어진다.
       return ev.source === 'compact' && current ? current : 'idle'
     case 'UserPromptSubmit':
+      return 'working'
     case 'PostToolUse':
+      // 권한을 기다리는 동안 병렬로 돌던 다른 도구가 끝나도 대기는 그대로다. 요청한 그 도구가 끝나야 승인된 것.
+      if (current === 'waiting' && session?.waitingTool && ev.tool_name !== session.waitingTool)
+        return 'waiting'
       return 'working'
     case 'PermissionRequest':
       return 'waiting'
@@ -65,6 +72,16 @@ function nextState(
   }
 }
 
+/** 권한 요청이면 그 도구 이름, 이미 기다리던 중이면 그 도구를 이어 간다. */
+function waitingToolOf(
+  ev: Record<string, unknown>,
+  existing: ClaudeSession | undefined
+): string | null {
+  if (ev.hook_event_name === 'PermissionRequest')
+    return typeof ev.tool_name === 'string' && ev.tool_name ? ev.tool_name : null
+  return existing?.state === 'waiting' ? (existing.waitingTool ?? null) : null
+}
+
 /** 훅 이벤트 하나를 반영한다. 바뀐 것이 있으면 true. 형식이 이상한 입력은 무시한다. */
 export function applyHookEvent(sessions: Sessions, input: unknown, now: number): boolean {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return false
@@ -77,18 +94,20 @@ export function applyHookEvent(sessions: Sessions, input: unknown, now: number):
   if (ev.hook_event_name === 'SessionEnd') return sessions.delete(id)
 
   const cwd = typeof ev.cwd === 'string' && ev.cwd ? ev.cwd : existing?.cwd
-  const state = nextState(ev, existing?.state)
+  const state = nextState(ev, existing)
   if (!cwd || (!existing && !state)) return false
 
+  const next = state ?? existing!.state
   // 최근 소식 순서를 유지해 넘칠 때 가장 오래된 것부터 버린다.
   sessions.delete(id)
   sessions.set(id, {
     id,
     cwd,
-    state: state ?? existing!.state,
+    state: next,
     updatedAt: now,
     firstSeen: existing?.firstSeen ?? now,
-    processKey: existing?.processKey ?? null
+    processKey: existing?.processKey ?? null,
+    ...(next === 'waiting' ? { waitingTool: waitingToolOf(ev, existing) } : {})
   })
   while (sessions.size > MAX_SESSIONS) {
     const oldest = sessions.keys().next().value
