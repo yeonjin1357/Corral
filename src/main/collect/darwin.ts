@@ -188,5 +188,5 @@ export async function sampleDarwin(run: Runner = runCommand): Promise<RawSample>
       cwds = {}
     }
   }
-  return { processes: parsePsOutput(stats.stdout, args.stdout), tcp, cwds }
+  return { processes: parsePsOutput(stats.stdout, args.stdout), tcp, cwds, collectMode: 'darwin' }
 }

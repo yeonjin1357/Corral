@@ -103,6 +103,10 @@ const groups = computed(() =>
         </tbody>
       </table>
     </div>
+
+    <p v-if="snapshot.collectMode" class="collect-mode mt-3">
+      {{ text.ui.home.collectMode(text.ui.home.collectModes[snapshot.collectMode]) }}
+    </p>
   </div>
 </template>
 
@@ -122,6 +126,11 @@ table {
   font-size: 13px;
   color: $secondary-text;
   margin: 4px 0 0;
+}
+
+.collect-mode {
+  font-size: 12px;
+  color: $secondary-text;
 }
 
 /* 원본 제목(Up·Down 등)보다 한글 제목이 길어 다섯 칸에 들어가도록 조금 줄인다. */

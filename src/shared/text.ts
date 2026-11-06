@@ -66,7 +66,15 @@ export const text = {
       current: '(현재)',
       ramTrend: 'RAM 사용 추이',
       groups: '메모리 묶음',
-      groupHeaders: { name: '구분', memory: '메모리', processes: '프로세스' }
+      groupHeaders: { name: '구분', memory: '메모리', processes: '프로세스' },
+      collectMode: (label: string): string => `수집 방식: ${label}`,
+      collectModes: {
+        'helper-dll': '보조 코드(DLL)',
+        'helper-memory': '보조 코드(메모리에서 컴파일)',
+        basic: '기본 명령(보조 코드 막힘 — 작업 폴더·전용 메모리 없음)',
+        safe: '제한 모드 대체 스크립트(보안 정책으로 기본 스크립트 막힘)',
+        darwin: 'macOS ps·lsof'
+      }
     },
     groups: {
       devServer: '개발 서버',

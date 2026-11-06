@@ -134,6 +134,16 @@ describe('HomeView', () => {
     expect(w.find('.trend-chart-stub').exists()).toBe(true)
   })
 
+  test('맨 아래에 수집 방식을 작게 보여 준다(문제 생겼을 때 원인 찾기용)', () => {
+    const w = mount(HomeView, {
+      props: { snapshot: snapshot({ collectMode: 'helper-memory' }), ramHistory: [] },
+      global: { stubs }
+    })
+    expect(w.get('.collect-mode').text()).toBe('수집 방식: 보조 코드(메모리에서 컴파일)')
+    const none = mount(HomeView, { props: { snapshot: snapshot(), ramHistory: [] }, global: { stubs } })
+    expect(none.find('.collect-mode').exists()).toBe(false)
+  })
+
   test('메모리 묶음 표: 개발 서버·에이전트·그 외', () => {
     const w = mount(HomeView, {
       props: { snapshot: snapshot(), ramHistory: [] },

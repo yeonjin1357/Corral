@@ -14,7 +14,8 @@ import {
   nativeHelperDllName,
   buildPowerShellArgs,
   powershellPath,
-  sampleWindows
+  sampleWindows,
+  configureWindowsSampler
 } from './windows'
 
 const vite =
@@ -357,6 +358,42 @@ test('포트를 연 프로세스의 작업 폴더(cwds)를 pid → 경로로 읽
   })
   expect(parseWindowsSample(withCwds).cwds).toEqual({ 4100: 'C:\\Users\\김개발\\work\\shop-web\\' })
   expect(parseWindowsSample(json).cwds).toEqual({})
+})
+
+describe('수집 방식(collectMode)', () => {
+  const sampleJson = (helperMode?: string): string =>
+    JSON.stringify({ processes: [], tcp: [], ...(helperMode ? { helperMode } : {}) })
+
+  test('보조 코드를 어떻게 불러왔는지 수집 방식으로 남긴다', () => {
+    expect(parseWindowsSample(sampleJson('dll')).collectMode).toBe('helper-dll')
+    expect(parseWindowsSample(sampleJson('memory')).collectMode).toBe('helper-memory')
+    expect(parseWindowsSample(sampleJson('none')).collectMode).toBe('basic')
+    expect(parseWindowsSample(sampleJson()).collectMode).toBe('safe')
+  })
+
+  test('스크립트는 helperMode 를 낸다(DLL 성공 dll, 메모리 컴파일 memory, 실패 none)', () => {
+    const withDll = windowsSampleScript('C:\\x\\pitwall-native-1.dll')
+    expect(withDll).toContain("$helperMode = 'none'")
+    expect(withDll).toContain("$helperMode = 'dll'")
+    expect(withDll).toContain("$helperMode = 'memory'")
+    expect(withDll).toContain('helperMode = $helperMode')
+  })
+
+  test('DLL 로 못 불러와 메모리 컴파일로 넘어간 PC 는 그 세션 동안 DLL 을 다시 시도하지 않는다', async () => {
+    resetWindowsSamplerMode()
+    configureWindowsSampler({ helperDllPath: 'C:\\x\\pitwall-native-1.dll' })
+    const scripts: string[] = []
+    const run = vi.fn(async (argv: string[]) => {
+      scripts.push(Buffer.from(argv[argv.length - 1], 'base64').toString('utf16le'))
+      return { stdout: sampleJson('memory'), stderr: '', exitCode: 0 }
+    })
+    await sampleWindows({ run })
+    await sampleWindows({ run })
+    expect(scripts[0]).toContain('$dll =')
+    expect(scripts[1]).not.toContain('$dll =')
+    configureWindowsSampler({ helperDllPath: null })
+    resetWindowsSamplerMode()
+  })
 })
 
 test('메모리는 작업 관리자와 같은 전용 작업 세트(privateWs)가 있으면 그것을 쓰고, 없으면 작업 세트', () => {

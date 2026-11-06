@@ -2,7 +2,7 @@ import { createHash, randomBytes } from 'crypto'
 import { readFile, rm } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import type { ProcessInfo, RawSample, TcpEntry, TcpState } from '../../shared/types'
+import type { CollectMode, ProcessInfo, RawSample, TcpEntry, TcpState } from '../../shared/types'
 import { COMMAND_TIMEOUT_MS } from '../../shared/defaults'
 import { runCommand, type CommandOptions, type CommandResult } from './runCommand'
 
@@ -152,16 +152,18 @@ export function nativeHelperDllName(): string {
  * (매번 컴파일하면 csc.exe 가 뜬다). DLL 이 깨졌거나 쓸 수 없으면 지우고 메모리에서 컴파일한다.
  */
 function helperLoadLines(dllPath: string | null): string[] {
-  const inMemory = 'Add-Type -ErrorAction Stop -TypeDefinition $src'
-  if (!dllPath) return [inMemory]
+  // $helperMode: 불러오기에 성공한 방법을 남긴다(없으면 'none'). Node 는 이것을 보고 DLL 재시도를 그만둔다.
+  const inMemory = ['Add-Type -ErrorAction Stop -TypeDefinition $src', "$helperMode = 'memory'"]
+  if (!dllPath) return inMemory
   return [
     `$dll = '${dllPath.replace(/'/g, "''")}'`,
     'try {',
     '  if (-not (Test-Path -LiteralPath $dll)) { Add-Type -ErrorAction Stop -OutputType Library -OutputAssembly $dll -TypeDefinition $src }',
     '  Add-Type -Path $dll -ErrorAction Stop',
+    "  $helperMode = 'dll'",
     '} catch {',
     '  Remove-Item -LiteralPath $dll -Force -ErrorAction SilentlyContinue',
-    `  ${inMemory}`,
+    ...inMemory.map((line) => `  ${line}`),
     '}'
   ]
 }
@@ -172,6 +174,7 @@ export function windowsSampleScript(helperDllPath: string | null): string {
     "$p = @(Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, Name, CommandLine, WorkingSetSize, @{ Name = 'StartedAt'; Expression = { if ($_.CreationDate) { [DateTimeOffset]::new($_.CreationDate).ToUnixTimeMilliseconds() } else { $null } } })",
     '$t = $null',
     '$cwds = @{}',
+    "$helperMode = 'none'",
     "$src = @'",
     NATIVE_HELPERS,
     "'@",
@@ -187,7 +190,7 @@ export function windowsSampleScript(helperDllPath: string | null): string {
     '}',
     '$privateWs = @{}',
     "if ('PitwallMem' -as [type]) { try { foreach ($m in [PitwallMem]::Read()) { $privateWs[\"$($m.Pid)\"] = $m.PrivateWs } } catch {} }",
-    '$json = @{ processes = $p; tcp = $t; cwds = $cwds; privateWs = $privateWs } | ConvertTo-Json -Compress -Depth 3',
+    '$json = @{ processes = $p; tcp = $t; cwds = $cwds; privateWs = $privateWs; helperMode = $helperMode } | ConvertTo-Json -Compress -Depth 3',
     // PowerShell 호스트 출력(Write-Output)으로 600KB 가 넘는 한 줄을 내면 2초 가까이 걸린다.
     // UTF-8 바이트를 표준 출력 스트림에 직접 써서 그 시간을 없애고, 콘솔 인코딩(한글 경로)에도 의존하지 않는다.
     '$bytes = (New-Object System.Text.UTF8Encoding($false)).GetBytes($json)',
@@ -312,6 +315,14 @@ function parseCimDate(value: unknown): number | null {
   return null
 }
 
+/** 기본 스크립트는 helperMode 를 내고, 제한 모드 대체 스크립트는 내지 않는다. */
+function collectModeOf(helperMode: unknown): CollectMode {
+  if (helperMode === 'dll') return 'helper-dll'
+  if (helperMode === 'memory') return 'helper-memory'
+  if (helperMode === 'none') return 'basic'
+  return 'safe'
+}
+
 function toState(value: unknown): TcpState {
   if (value === 'Listen') return 'Listen'
   if (value === 'Established') return 'Established'
@@ -373,7 +384,7 @@ export function parseWindowsSample(raw: string): RawSample {
     }
   }
 
-  return { processes, tcp, cwds }
+  return { processes, tcp, cwds, collectMode: collectModeOf(data?.helperMode) }
 }
 
 type Runner = (argv: string[], opts?: CommandOptions) => Promise<CommandResult>
@@ -432,7 +443,8 @@ export async function sampleWindows(
 
   const tryFull = mode === 'full' || safeSamplesSinceSwitch >= FULL_RETRY_EVERY
   if (tryFull) {
-    const script = prefix + windowsSampleScript(options.helperDllPath ?? configuredHelperDllPath)
+    const dllPath = options.helperDllPath ?? configuredHelperDllPath
+    const script = prefix + windowsSampleScript(dllPath)
     // 시간 초과는 일시적일 수 있어 모드를 바꾸지 않고 그대로 실패로 알린다.
     const result = await run([powershellPath(), ...buildPowerShellArgs(script)], {
       timeoutMs: COMMAND_TIMEOUT_MS
@@ -441,6 +453,11 @@ export async function sampleWindows(
       try {
         const sample = parseWindowsSample(result.stdout)
         resetWindowsSamplerMode()
+        // DLL 을 주었는데 메모리 컴파일로 넘어갔다면 DLL 이 막힌 PC(보안 정책 등)다.
+        // 매번 DLL 을 만들었다 지우며 두 번 컴파일하지 않도록 이 세션에서는 DLL 을 더 시도하지 않는다.
+        if (dllPath && !options.helperDllPath && sample.collectMode === 'helper-memory') {
+          configuredHelperDllPath = null
+        }
         return sample
       } catch {
         // 아래 대체 스크립트로 넘어간다.

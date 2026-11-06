@@ -252,5 +252,14 @@ export function buildSnapshot(input: {
     }
   ]
 
-  return { takenAt: input.now, memory, ports, groups, agentProcessCount, stale: false, error: null }
+  return {
+    takenAt: input.now,
+    memory,
+    ports,
+    groups,
+    agentProcessCount,
+    stale: false,
+    error: null,
+    collectMode: sample.collectMode ?? null
+  }
 }

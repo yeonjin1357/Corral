@@ -32,7 +32,17 @@ export interface RawSample {
    * worktree 를 판별하는 데 쓴다. 비용 때문에 포트를 연 프로세스만 조회한다.
    */
   cwds?: Record<number, string>
+  collectMode?: CollectMode
 }
+
+/**
+ * 어떤 방식으로 수집했는지(문제 생겼을 때 원인 찾기용).
+ * - helper-dll / helper-memory: Windows 보조 C# 코드를 DLL 에서 / 메모리 컴파일로 불러옴
+ * - basic: 보조 코드가 막혀 기본 명령만 씀(작업 폴더·전용 메모리 없음)
+ * - safe: 보안 정책으로 기본 스크립트가 막혀 제한 모드용 대체 스크립트를 씀
+ * - darwin: macOS ps·lsof
+ */
+export type CollectMode = 'helper-dll' | 'helper-memory' | 'basic' | 'safe' | 'darwin'
 
 export interface WorktreeInfo {
   root: string
@@ -84,4 +94,5 @@ export interface DashboardSnapshot {
   agentProcessCount: number
   stale: boolean
   error: string | null
+  collectMode?: CollectMode | null
 }

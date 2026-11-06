@@ -74,6 +74,7 @@ describe('작업 폴더(cwd)', () => {
     })
     const s = await sampleDarwin(run)
     expect(s.cwds).toEqual({ 4100: '/Users/dev/app' })
+    expect(s.collectMode).toBe('darwin')
     expect(run.mock.calls.find((c) => c[0].includes('cwd'))?.[0]).toEqual(lsofCwdArgv([4100]))
 
     const quiet = vi.fn(async (argv: string[]) => ({
