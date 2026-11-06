@@ -21,6 +21,7 @@ export const text = {
     unresolvable: '어느 작업의 포트인지 알 수 없어 내릴 수 없어요.',
     permission: '권한이 없어 내리지 못했어요. 관리자 권한으로 실행된 프로세스일 수 있어요.',
     busy: '이미 처리 중이에요.',
+    agentInside: '이 프로세스 아래에서 에이전트(Claude·Codex)가 돌고 있어 내리지 않았어요. 에이전트를 먼저 끝내 주세요.',
     invalid: '잘못된 요청이에요.'
   },
   unsupportedPlatform: '지원하지 않는 OS 예요. Windows 와 macOS 만 지원해요.',

@@ -100,6 +100,11 @@ describe('planKill', () => {
     expect(planKill(row, swap({ startedAt: 999 }))).toEqual({ ok: false, reason: 'changed' })
   })
 
+  test('하위에 에이전트(Claude·Codex)가 돌고 있으면 내리지 않는다(세션이 같이 꺼지므로)', () => {
+    const claude = proc(4200, 4100, 'claude.exe', '"C:\\Users\\a\\.local\\bin\\claude.exe"', 500)
+    expect(planKill(row, { processes: [vite, esbuild, claude], tcp: [] })).toEqual({ ok: false, reason: 'agent' })
+  })
+
   test('자손은 오래된 스냅샷이 아니라 최신 샘플에서 다시 계산한다', () => {
     const newChild = proc(4102, 4100, 'node.exe', 'worker', 400)
     const stalePpid = proc(9000, 4100, 'unrelated.exe', 'x', 50)
@@ -180,6 +185,18 @@ describe('killPort', () => {
       resample: async () => (call++ === 0 ? freshSample : { processes: [{ ...vite, commandLine: 'other' }], tcp: [] })
     })
     expect(await createPortKiller(d).killPort(3000, 4100)).toEqual({ status: 'changed' })
+    expect(d.signal).not.toHaveBeenCalled()
+  })
+
+  test('하위에 에이전트가 있으면 확인 창 없이 이유와 함께 거절', async () => {
+    const claude = proc(4200, 4100, 'claude.exe', '"C:\\Users\\a\\.local\\bin\\claude.exe"', 500)
+    const confirm = vi.fn(async () => true)
+    const d = deps({ confirm, resample: async () => ({ processes: [vite, esbuild, claude], tcp: [] }) })
+    expect(await createPortKiller(d).killPort(3000, 4100)).toEqual({
+      status: 'failed',
+      message: '이 프로세스 아래에서 에이전트(Claude·Codex)가 돌고 있어 내리지 않았어요. 에이전트를 먼저 끝내 주세요.'
+    })
+    expect(confirm).not.toHaveBeenCalled()
     expect(d.signal).not.toHaveBeenCalled()
   })
 

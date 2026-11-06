@@ -1,7 +1,7 @@
 import type { DashboardSnapshot, KillResult, Platform, PortRow, ProcessInfo, RawSample } from '../shared/types'
 import { worktreeLabel } from '../shared/format'
 import { text } from '../shared/text'
-import { descendantsOf } from './snapshot'
+import { classifyAgent, descendantsOf } from './snapshot'
 
 export type { KillResult }
 
@@ -14,7 +14,7 @@ export interface KillConfirm {
   cancelId: number
 }
 
-export type KillPlan = { ok: true; pids: number[] } | { ok: false; reason: 'gone' | 'changed' }
+export type KillPlan = { ok: true; pids: number[] } | { ok: false; reason: 'gone' | 'changed' | 'agent' }
 
 /** macOS 는 먼저 정상 종료(SIGTERM)를 요청하고, 이 시간 뒤에도 남아 있으면 강제 종료한다. */
 const DARWIN_GRACE_MS = 3000
@@ -33,7 +33,17 @@ export function planKill(row: PortRow, fresh: RawSample): KillPlan {
   const p = fresh.processes.find((x) => x.pid === row.pid)
   if (!p) return { ok: false, reason: 'gone' }
   if (!isSameProcess(row, p)) return { ok: false, reason: 'changed' }
-  return { ok: true, pids: [row.pid, ...descendantsOf(fresh.processes, row.pid)] }
+  const descendants = descendantsOf(fresh.processes, row.pid)
+  // 예: worktree 에서 띄운 IDE 를 내리면 그 터미널 안의 Claude·Codex 세션까지 같이 꺼진다.
+  const byPid = new Map(fresh.processes.map((x) => [x.pid, x]))
+  if (descendants.some((pid) => { const d = byPid.get(pid); return !!d && classifyAgent(d) })) {
+    return { ok: false, reason: 'agent' }
+  }
+  return { ok: true, pids: [row.pid, ...descendants] }
+}
+
+function planFailure(reason: 'gone' | 'changed' | 'agent'): KillResult {
+  return reason === 'agent' ? { status: 'failed', message: text.killResult.agentInside } : { status: reason }
 }
 
 export function buildKillConfirm(row: PortRow): KillConfirm {
@@ -107,12 +117,12 @@ export function createPortKiller(deps: KillDeps): { killPort(port: number, pid: 
       if (row.unresolvable) return { status: 'failed', message: text.killResult.unresolvable }
 
       const before = await freshPlan(row)
-      if (!before.plan.ok) return { status: before.plan.reason }
+      if (!before.plan.ok) return planFailure(before.plan.reason)
       if (!(await deps.confirm(buildKillConfirm(row)))) return { status: 'cancelled' }
 
       // 확인 창을 띄운 동안 시간이 지났으니 한 번 더 확인한다.
       const after = await freshPlan(row)
-      if (!after.plan.ok) return { status: after.plan.reason }
+      if (!after.plan.ok) return planFailure(after.plan.reason)
       const [root, ...rest] = after.plan.pids
 
       try {
