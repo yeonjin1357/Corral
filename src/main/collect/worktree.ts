@@ -21,7 +21,8 @@ function cutAtNodeModules(path: string, separator: string): string {
   return index < 0 ? path : segments.slice(0, index).join(separator)
 }
 
-function normalizeCandidate(raw: string): string | null {
+/** 판별할 수 있는 로컬 절대 경로로 바꾼다. 네트워크·WSL 경로나 상대 경로는 null. */
+export function normalizeCandidate(raw: string): string | null {
   // 네트워크 공유·WSL(\\wsl.localhost\...) 경로는 접근이 느리거나 막힐 수 있어 판별하지 않는다.
   if (UNC.test(raw)) return null
   if (WIN_ABSOLUTE.test(raw)) {

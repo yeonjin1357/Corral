@@ -227,3 +227,21 @@ test('같은 워크트리에 다른 Claude 가 살아 있어도, 짝지은 프�
   expect([...sessions.keys()]).toEqual(['calm'])
   expect(s.agents.find((a) => a.pid === 5000)).toMatchObject({ state: 'idle', stateSource: 'hook' })
 })
+
+test('네트워크 경로(UNC·WSL)에서 연 세션은 워크트리를 찾아보지 않는다(응답 없는 공유에 수집이 묶이지 않게)', async () => {
+  const resolveWorktree = vi.fn<CollectorDeps['resolveWorktree']>(async () => W1)
+  const { deps, sessions, clock } = setup({ resolveWorktree })
+  for (const cwd of [
+    '\\\\nas\\share\\repo',
+    '\\\\wsl.localhost\\Ubuntu\\home\\dev\\repo',
+    '//nas/share/repo'
+  ])
+    applyHookEvent(
+      sessions,
+      { session_id: cwd, cwd, hook_event_name: 'PermissionRequest' },
+      clock.now
+    )
+  const s = await createCollector(deps).collect()
+  expect(resolveWorktree).not.toHaveBeenCalled()
+  expect(s.agents[0].stateSource).toBe('cpu')
+})

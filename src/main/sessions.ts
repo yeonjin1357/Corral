@@ -31,6 +31,8 @@ export type Sessions = Map<string, ClaudeSession>
 export const SESSION_EXPIRE_MS = 6 * 60 * 60 * 1000
 const MAX_SESSIONS = 500
 const MAX_ID_LENGTH = 200
+/** 이보다 긴 작업 폴더 값은 받지 않는다(세션 500개 × 큰 문자열로 메모리를 쓰지 않게). */
+const MAX_CWD_LENGTH = 4096
 
 /** 같은 워크트리에 세션이 여럿이면 앞쪽 상태를 보인다. 사용자가 봐야 할 것이 먼저. */
 const PRIORITY: AgentState[] = ['waiting', 'working', 'error', 'idle']
@@ -93,7 +95,9 @@ export function applyHookEvent(sessions: Sessions, input: unknown, now: number):
   const existing = sessions.get(id)
   if (ev.hook_event_name === 'SessionEnd') return sessions.delete(id)
 
-  const cwd = typeof ev.cwd === 'string' && ev.cwd ? ev.cwd : existing?.cwd
+  const given =
+    typeof ev.cwd === 'string' && ev.cwd && ev.cwd.length <= MAX_CWD_LENGTH ? ev.cwd : null
+  const cwd = given ?? existing?.cwd
   const state = nextState(ev, existing)
   if (!cwd || (!existing && !state)) return false
 

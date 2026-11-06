@@ -66,6 +66,15 @@ describe('훅 이벤트 → 세션 상태', () => {
     )
   })
 
+  test('지나치게 긴 cwd(4096자 초과)는 받지 않는다(새 세션은 만들지 않고, 있던 세션은 이전 cwd 유지)', () => {
+    const sessions: Sessions = new Map()
+    const long = 'C:\\' + 'a'.repeat(5000)
+    expect(applyHookEvent(sessions, ev('SessionStart', { cwd: long }), 1000)).toBe(false)
+    applyHookEvent(sessions, ev('SessionStart'), 1000)
+    applyHookEvent(sessions, ev('UserPromptSubmit', { cwd: long }), 2000)
+    expect(sessions.get('s1')?.cwd).toBe(CWD)
+  })
+
   test('SessionEnd 는 세션을 지운다', () => {
     expect(stateAfter(ev('UserPromptSubmit'), ev('SessionEnd'))).toBeUndefined()
   })

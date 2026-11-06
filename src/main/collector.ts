@@ -13,6 +13,7 @@ import { judgePorts, type PortMemo } from './judge'
 import { agentToolOf, topLevelAgentPids } from './processTree'
 import { reconcileSessions, stateForWorktree, type LiveClaude, type Sessions } from './sessions'
 import { buildSnapshot, pidsForWorktreeLookup } from './snapshot'
+import { normalizeCandidate } from './collect/worktree'
 
 export interface CollectorDeps {
   platform: Platform
@@ -62,8 +63,11 @@ export function createCollector(deps: CollectorDeps): {
     )
     const resolved = await Promise.all(
       cwds.map(async (cwd): Promise<[string, string | null]> => {
+        // 네트워크 공유·WSL 경로는 응답이 없으면 수집 전체가 멈출 수 있어 판별하지 않는다(포트 판별과 같은 규칙).
+        const local = normalizeCandidate(cwd)
+        if (!local) return [cwd, null]
         try {
-          const w = await deps.resolveWorktree(cwd)
+          const w = await deps.resolveWorktree(local)
           return [cwd, w ? worktreeKey(w.root) : null]
         } catch {
           return [cwd, null]
