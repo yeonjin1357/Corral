@@ -172,4 +172,25 @@ describe('createWorktreeResolver', () => {
     expect([...map.keys()]).toEqual([1])
     expect(map.get(1)?.root).toBe(repo)
   })
+
+  test('명령줄에 경로가 없으면 작업 폴더(cwd)로 판별하고, 명령줄 경로가 있으면 그것을 먼저 쓴다', async () => {
+    const repo = await makeRepo(join(tmp, 'shop-web'))
+    const other = await makeRepo(join(tmp, 'other'))
+    const proc = (pid: number, commandLine: string): ProcessInfo => ({
+      pid,
+      ppid: 1,
+      name: 'node',
+      commandLine,
+      memoryBytes: 1,
+      startedAt: null
+    })
+    const { resolveProcessWorktrees } = createWorktreeResolver({ homeDir: join(tmp, 'home') })
+    const map = await resolveProcessWorktrees(
+      [proc(1, 'node server.js'), proc(2, `node "${join(other, 'server.js')}"`), proc(3, 'python app.py')],
+      { 1: repo + '\\', 2: repo, 3: '\\\\wsl.localhost\\Ubuntu\\home\\dev' }
+    )
+    expect(map.get(1)?.root).toBe(repo)
+    expect(map.get(2)?.root).toBe(other)
+    expect(map.has(3)).toBe(false)
+  })
 })

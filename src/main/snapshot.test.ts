@@ -181,6 +181,15 @@ describe('메모리 요약', () => {
   })
 })
 
+test('에이전트(Claude Code 등)가 연 포트는 worktree 안이어도 목록에 올리지 않는다(세션을 끄지 않도록)', () => {
+  const s = buildSnapshot({
+    ...input,
+    worktrees: new Map([...worktrees, [5000, W2]]),
+    sample: { processes, tcp: [...tcp, listen(5000, 7523)] }
+  })
+  expect(s.ports.map((p) => p.port)).not.toContain(7523)
+})
+
 test('pitwall 자신과 그 자식 프로세스가 연 포트는 목록에 올리지 않는다', () => {
   const s = buildSnapshot({
     ...input,

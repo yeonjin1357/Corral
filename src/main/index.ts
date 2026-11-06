@@ -38,7 +38,7 @@ function trayIcon(level: MemoryLevel): Electron.NativeImage {
 async function collect(): Promise<DashboardSnapshot> {
   if (!platform) throw new Error(text.unsupportedPlatform)
   const [raw, memory] = await Promise.all([sample(platform), readMemory(platform)])
-  const worktrees = await resolveProcessWorktrees(raw.processes)
+  const worktrees = await resolveProcessWorktrees(raw.processes, raw.cwds)
   return buildSnapshot({
     sample: raw,
     worktrees,

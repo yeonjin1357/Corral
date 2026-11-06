@@ -91,7 +91,7 @@ export interface WorktreeResolverOptions {
 
 export interface WorktreeResolver {
   resolveWorktree(path: string): Promise<WorktreeInfo | null>
-  resolveProcessWorktrees(processes: ProcessInfo[]): Promise<Map<number, WorktreeInfo>>
+  resolveProcessWorktrees(processes: ProcessInfo[], cwds?: Record<number, string>): Promise<Map<number, WorktreeInfo>>
 }
 
 export function createWorktreeResolver(options: WorktreeResolverOptions = {}): WorktreeResolver {
@@ -134,11 +134,18 @@ export function createWorktreeResolver(options: WorktreeResolverOptions = {}): W
     return resolveDir(nodePath.resolve(path), 0)
   }
 
-  async function resolveProcessWorktrees(processes: ProcessInfo[]): Promise<Map<number, WorktreeInfo>> {
+  /** 명령줄의 절대 경로를 먼저 보고, 없으면 작업 폴더(cwd)로 판별한다. */
+  async function resolveProcessWorktrees(
+    processes: ProcessInfo[],
+    cwds: Record<number, string> = {}
+  ): Promise<Map<number, WorktreeInfo>> {
     const result = new Map<number, WorktreeInfo>()
     await Promise.all(
       processes.map(async (p) => {
-        for (const candidate of extractPathCandidates(p.commandLine)) {
+        const cwd = cwds[p.pid] ? normalizeCandidate(cwds[p.pid]) : null
+        const candidates = extractPathCandidates(p.commandLine)
+        if (cwd && !candidates.includes(cwd)) candidates.push(cwd)
+        for (const candidate of candidates) {
           const info = await resolveWorktree(candidate)
           if (info) {
             result.set(p.pid, info)

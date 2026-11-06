@@ -27,6 +27,11 @@ export interface TcpEntry {
 export interface RawSample {
   processes: ProcessInfo[]
   tcp: TcpEntry[]
+  /**
+   * 포트를 연 프로세스의 작업 폴더(pid → 경로). `node server.js` 처럼 명령줄에 절대 경로가 없을 때
+   * worktree 를 판별하는 데 쓴다. 비용 때문에 포트를 연 프로세스만 조회한다.
+   */
+  cwds?: Record<number, string>
 }
 
 export interface WorktreeInfo {

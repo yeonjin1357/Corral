@@ -108,6 +108,23 @@ export function parseLsofOutput(out: string): TcpEntry[] {
   return result
 }
 
+/** 포트를 연 프로세스들의 작업 폴더를 한 번에 묻는다. */
+export function lsofCwdArgv(pids: number[]): string[] {
+  return ['/usr/sbin/lsof', '-a', '-d', 'cwd', '-Fpn', '-w', '-p', pids.join(',')]
+}
+
+export function parseLsofCwd(out: string): Record<number, string> {
+  const result: Record<number, string> = {}
+  let pid = 0
+  for (const line of lines(out)) {
+    if (line.startsWith('p')) pid = Number(line.slice(1)) || 0
+    else if (line.startsWith('n') && pid) result[pid] = line.slice(1)
+  }
+  return result
+}
+
+const MIN_DEV_PORT = 1024
+
 type Runner = (argv: string[], opts?: { timeoutMs?: number }) => Promise<CommandResult>
 
 export async function sampleDarwin(run: Runner = runCommand): Promise<RawSample> {
@@ -117,5 +134,17 @@ export async function sampleDarwin(run: Runner = runCommand): Promise<RawSample>
   if (args.exitCode !== 0) throw new Error(`ps exited with ${args.exitCode}`)
   // lsof 는 결과가 없을 때도 1 로 끝난다.
   if (lsof.exitCode !== 0 && lsof.exitCode !== 1) throw new Error(`lsof exited with ${lsof.exitCode}`)
-  return { processes: parsePsOutput(stats.stdout, args.stdout), tcp: parseLsofOutput(lsof.stdout) }
+  const tcp = parseLsofOutput(lsof.stdout)
+
+  // 작업 폴더는 보조 정보라 실패해도 샘플은 성공으로 본다.
+  const listening = [...new Set(tcp.filter((t) => t.state === 'Listen' && t.localPort >= MIN_DEV_PORT).map((t) => t.pid))]
+  let cwds: Record<number, string> = {}
+  if (listening.length) {
+    try {
+      cwds = parseLsofCwd((await run(lsofCwdArgv(listening), opts)).stdout)
+    } catch {
+      cwds = {}
+    }
+  }
+  return { processes: parsePsOutput(stats.stdout, args.stdout), tcp, cwds }
 }

@@ -1,4 +1,7 @@
 import { spawn } from 'child_process'
+import { mkdtemp, rm } from 'fs/promises'
+import { tmpdir } from 'os'
+import { join } from 'path'
 import { parseWindowsSample, WINDOWS_SAMPLE_SCRIPT, buildPowerShellArgs, powershellPath, sampleWindows } from './windows'
 
 const vite =
@@ -97,6 +100,18 @@ test('스크립트는 따옴표 문제 없이 -EncodedCommand(UTF-16LE base64)�
   expect(Buffer.from(args[5], 'base64').toString('utf16le')).toBe('Write-Output "한글 $x"')
 })
 
+test('포트를 연 프로세스의 작업 폴더(cwds)를 pid → 경로로 읽고, 없으면 빈 객체', () => {
+  const withCwds = JSON.stringify({ processes: [], tcp: [], cwds: { '4100': 'C:\\Users\\김개발\\work\\shop-web\\', '7': '' } })
+  expect(parseWindowsSample(withCwds).cwds).toEqual({ 4100: 'C:\\Users\\김개발\\work\\shop-web\\' })
+  expect(parseWindowsSample(json).cwds).toEqual({})
+})
+
+test('스크립트는 포트를 연 프로세스만 골라 작업 폴더를 읽고, 실패해도 나머지는 낸다', () => {
+  expect(WINDOWS_SAMPLE_SCRIPT).toContain('ReadProcessMemory')
+  expect(WINDOWS_SAMPLE_SCRIPT).toContain('[PitwallCwd]::Get(')
+  expect(WINDOWS_SAMPLE_SCRIPT).toMatch(/try\s*\{[\s\S]*Add-Type[\s\S]*\}\s*catch/)
+})
+
 test('powershell.exe 는 SystemRoot 기준 전체 경로로 실행(PATH 에 의존하지 않음)', () => {
   expect(powershellPath({ SystemRoot: 'D:\\Win' })).toBe('D:\\Win\\System32\\WindowsPowerShell\\v1.0\\powershell.exe')
   expect(powershellPath({})).toBe('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe')
@@ -118,6 +133,26 @@ describe.runIf(process.platform === 'win32')('실제 Windows 에서', () => {
       expect(s.tcp.length).toBeGreaterThan(0)
     } finally {
       child.kill()
+    }
+  }, 30000)
+
+  test('상대 경로로 띄운 서버도 작업 폴더(한글 포함)를 읽는다', async () => {
+    const dir = await mkdtemp(join(tmpdir(), '김개발-cwd-'))
+    const child = spawn(
+      process.execPath,
+      ['-e', "require('http').createServer().listen(0, () => console.log('ok'))"],
+      { cwd: dir, windowsHide: true }
+    )
+    const exited = new Promise<void>((r) => child.once('exit', () => r()))
+    try {
+      await new Promise((r) => child.stdout.once('data', r))
+      const s = await sampleWindows()
+      expect(s.cwds?.[child.pid!]?.replace(/\\$/, '').toLowerCase()).toBe(dir.toLowerCase())
+    } finally {
+      // Windows 는 프로세스가 작업 폴더로 쓰는 동안 그 폴더를 지울 수 없다.
+      child.kill()
+      await exited
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
     }
   }, 30000)
 })

@@ -172,7 +172,8 @@ export function buildSnapshot(input: {
     if (seen.has(key)) continue
     seen.add(key)
     const p = tree.byPid.get(t.pid)
-    if (!p) continue
+    // 에이전트가 연 포트(예: Claude Code 의 IDE 연동 포트)는 내리면 세션이 끊기므로 개발 서버로 보지 않는다.
+    if (!p || classifyAgent(p)) continue
     const worktree = worktreeOf(p.pid)
     const relay = RELAY_SET.has(p.name.toLowerCase())
     if (!worktree && !relay) continue

@@ -1,4 +1,49 @@
-import { parsePsOutput, parseLsofOutput, sampleDarwin, PS_STATS_ARGV, PS_ARGS_ARGV, LSOF_ARGV } from './darwin'
+import {
+  parsePsOutput,
+  parseLsofOutput,
+  parseLsofCwd,
+  lsofCwdArgv,
+  sampleDarwin,
+  PS_STATS_ARGV,
+  PS_ARGS_ARGV,
+  LSOF_ARGV
+} from './darwin'
+
+describe('작업 폴더(cwd)', () => {
+  test('lsof -d cwd 출력 파싱', () => {
+    const out = ['p4100', 'fcwd', 'n/Users/dev/My Projects/shop-web', 'p5200', 'fcwd', 'n/'].join('\n')
+    expect(parseLsofCwd(out)).toEqual({ 4100: '/Users/dev/My Projects/shop-web', 5200: '/' })
+  })
+
+  test('포트를 연 pid 만 쉼표로 묶어 한 번에 묻는다', () => {
+    expect(lsofCwdArgv([4100, 5200])).toEqual(['/usr/sbin/lsof', '-a', '-d', 'cwd', '-Fpn', '-w', '-p', '4100,5200'])
+  })
+
+  test('sampleDarwin: LISTEN pid 의 cwd 를 붙이고, 없으면 묻지 않는다', async () => {
+    const lsof = ['p4100', 'f23', 'n*:3000', 'TST=LISTEN', 'p5200', 'f9', 'n127.0.0.1:5->127.0.0.1:3000', 'TST=ESTABLISHED'].join('\n')
+    const run = vi.fn(async (argv: string[]) => {
+      if (argv === LSOF_ARGV) return { stdout: lsof, exitCode: 0 }
+      if (argv.includes('cwd')) return { stdout: 'p4100\nfcwd\nn/Users/dev/app\n', exitCode: 0 }
+      return { stdout: '  4100 1 10 /usr/local/bin/node\n', exitCode: 0 }
+    })
+    const s = await sampleDarwin(run)
+    expect(s.cwds).toEqual({ 4100: '/Users/dev/app' })
+    expect(run.mock.calls.find((c) => c[0].includes('cwd'))?.[0]).toEqual(lsofCwdArgv([4100]))
+
+    const quiet = vi.fn(async (argv: string[]) => ({ stdout: argv === LSOF_ARGV ? '' : '  1 0 1 /sbin/launchd\n', exitCode: argv === LSOF_ARGV ? 1 : 0 }))
+    expect((await sampleDarwin(quiet)).cwds).toEqual({})
+    expect(quiet.mock.calls.some((c) => c[0].includes('cwd'))).toBe(false)
+  })
+
+  test('cwd 조회가 실패해도 샘플은 성공(작업 폴더만 비움)', async () => {
+    const run = vi.fn(async (argv: string[]) => {
+      if (argv === LSOF_ARGV) return { stdout: 'p1\nf3\nn*:3000\nTST=LISTEN\n', exitCode: 0 }
+      if (argv.includes('cwd')) throw new Error('timeout')
+      return { stdout: '  1 0 1 /x\n', exitCode: 0 }
+    })
+    expect((await sampleDarwin(run)).cwds).toEqual({})
+  })
+})
 import type { CommandResult } from './runCommand'
 
 describe('parsePsOutput', () => {
