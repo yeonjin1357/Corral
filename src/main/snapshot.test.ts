@@ -214,6 +214,8 @@ describe('묶음과 에이전트', () => {
       )
     ).toBe(false)
     expect(classifyAgent(p('Claude', '/Applications/Claude.app/Contents/MacOS/Claude'))).toBe(false)
+    // Codex 데스크톱 앱(macOS)도 에이전트(CLI)가 아니다.
+    expect(classifyAgent(p('Codex', '/Applications/Codex.app/Contents/MacOS/Codex'))).toBe(false)
     expect(classifyAgent(p('claude.exe', 'claude.exe --type=renderer'))).toBe(false)
     expect(classifyAgent(p('codex-windows-sandbox-service.exe'))).toBe(false)
     expect(classifyAgent(p('node.exe', 'node server.js'))).toBe(false)

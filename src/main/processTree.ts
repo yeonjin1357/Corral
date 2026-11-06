@@ -7,8 +7,11 @@ const AGENT_NAME =
 const AGENT_PACKAGE = /@anthropic-ai\/claude-code|@openai\/codex/i
 const CLAUDE_NAME = /^claude(\.exe)?$/i
 const CLAUDE_PACKAGE = /@anthropic-ai\/claude-code/i
-/** Claude 데스크톱 앱(이름이 같은 claude.exe / Claude)과 Electron 보조 프로세스는 에이전트가 아니다. */
-const NOT_AGENT = /AnthropicClaude|Claude\.app\/|--type=/i
+/**
+ * 데스크톱 앱(이름이 같은 Claude 앱의 claude.exe / Claude, macOS 의 Codex.app 등 .app 번들 안의 실행 파일)과
+ * Electron 보조 프로세스는 에이전트(CLI)가 아니다. CLI 는 .app 번들 밖(~/.local/bin, npm, Homebrew)에 있다.
+ */
+const NOT_AGENT = /AnthropicClaude|\.app\/Contents\/|--type=/i
 
 /** 에이전트면 도구 이름, 아니면 null. */
 export function agentToolOf(p: ProcessInfo): AgentTool | null {

@@ -94,8 +94,8 @@ test('워크트리 비교는 대소문자·끝 구분자를 무시한다(Windows
   expect(r.rows[0].agentInWorktree).toBe(true)
 })
 
-test('다른 워크트리의 에이전트, 워크트리를 모르는 에이전트는 상관없다', () => {
-  const r = over([0, 30 * MIN], () => [port()], [agent(W2), agent(null)])
+test('다른 워크트리의 에이전트는 상관없다', () => {
+  const r = over([0, 30 * MIN], () => [port()], [agent(W2)])
   expect(r.rows[0]).toMatchObject({ judgement: 'candidate', agentInWorktree: false })
 })
 
@@ -120,4 +120,11 @@ test('입력 행은 바꾸지 않는다', () => {
   const row = port()
   judgePorts([row], [], new Map(), 0, THRESHOLD)
   expect(row.idleSince).toBeNull()
+})
+
+test('워크트리를 모르는 에이전트가 하나라도 있으면 정리 후보를 확인해볼 것으로 낮춘다(그 에이전트의 서버일 수 있음)', () => {
+  const r = over([0, 30 * MIN], () => [port()], [agent(W2), agent(null)])
+  expect(r.rows[0]).toMatchObject({ judgement: 'check', agentInWorktree: false })
+  const noUnknown = over([0, 30 * MIN], () => [port()], [agent(W2)])
+  expect(noUnknown.rows[0].judgement).toBe('candidate')
 })

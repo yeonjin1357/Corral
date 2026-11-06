@@ -13,6 +13,8 @@ function portKey(row: PortRow): string {
  * - 같은 워크트리에 에이전트가 실행 중이면(쉬는 중이어도) 판단하지 않는다. 떠나면 처음부터 센다.
  * - 연결 0 이 기준 시간 이상 → 정리 후보, 탭 연결만 기준 시간 이상 → 확인해볼 것.
  * - 판별 불가 포트는 판단하지 않는다(불확실하면 후보에서 빼는 쪽).
+ * - 워크트리를 모르는 에이전트(작업 폴더를 못 읽는 수집 방식·관리자 권한 등)가 하나라도 있으면 그 에이전트의
+ *   서버일 수 있어 정리 후보를 확인해볼 것으로 낮춘다.
  * 처음 본 포트는 그때부터 센다 — pitwall 이 켜지기 전 상태는 모르므로.
  */
 export function judgePorts(
@@ -25,6 +27,7 @@ export function judgePorts(
   const agentRoots = new Set(
     agents.flatMap((a) => (a.worktree ? [worktreeKey(a.worktree.root)] : []))
   )
+  const unknownAgent = agents.some((a) => !a.worktree)
   const memo: PortMemo = new Map()
   const judged = rows.map((row): PortRow => {
     if (row.unresolvable || !row.worktree)
@@ -40,7 +43,7 @@ export function judgePorts(
     const due = now - since >= thresholdMs
     return {
       ...row,
-      judgement: due ? (state === 'idle' ? 'candidate' : 'check') : null,
+      judgement: due ? (state === 'idle' && !unknownAgent ? 'candidate' : 'check') : null,
       idleSince: since,
       agentInWorktree: false
     }
