@@ -11,6 +11,8 @@ export interface ProcessInfo {
    * "부모보다 먼저 시작한 자식"을 걸러내는 데 쓴다. macOS 는 고아가 launchd 로 옮겨지므로 null.
    */
   startedAt: number | null
+  /** 누적 CPU 시간(ms). 에이전트가 작업 중인지(CPU 변화) 판단하는 데 쓴다. 모르면 null. */
+  cpuMs?: number | null
 }
 
 export type TcpState = 'Listen' | 'Established' | 'Other'
@@ -28,8 +30,8 @@ export interface RawSample {
   processes: ProcessInfo[]
   tcp: TcpEntry[]
   /**
-   * 포트를 연 프로세스의 작업 폴더(pid → 경로). `node server.js` 처럼 명령줄에 절대 경로가 없을 때
-   * worktree 를 판별하는 데 쓴다. 비용 때문에 포트를 연 프로세스만 조회한다.
+   * 작업 폴더(pid → 경로). `node server.js` 처럼 명령줄에 절대 경로가 없을 때 worktree 를 판별하는 데 쓴다.
+   * 비용 때문에 포트를 연 프로세스와 에이전트 프로세스만 조회한다.
    */
   cwds?: Record<number, string>
   collectMode?: CollectMode

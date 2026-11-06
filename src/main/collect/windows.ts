@@ -171,7 +171,7 @@ function helperLoadLines(dllPath: string | null): string[] {
 export function windowsSampleScript(helperDllPath: string | null): string {
   return [
     "$ProgressPreference = 'SilentlyContinue'",
-    "$p = @(Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, Name, CommandLine, WorkingSetSize, @{ Name = 'StartedAt'; Expression = { if ($_.CreationDate) { [DateTimeOffset]::new($_.CreationDate).ToUnixTimeMilliseconds() } else { $null } } })",
+    "$p = @(Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, Name, CommandLine, WorkingSetSize, @{ Name = 'CpuMs'; Expression = { [math]::Round(($_.KernelModeTime + $_.UserModeTime) / 10000) } }, @{ Name = 'StartedAt'; Expression = { if ($_.CreationDate) { [DateTimeOffset]::new($_.CreationDate).ToUnixTimeMilliseconds() } else { $null } } })",
     '$t = $null',
     '$cwds = @{}',
     "$helperMode = 'none'",
@@ -186,7 +186,9 @@ export function windowsSampleScript(helperDllPath: string | null): string {
     "if ($t -eq $null) { $t = @(Get-NetTCPConnection -State Listen,Established,TimeWait -ErrorAction SilentlyContinue | Select-Object OwningProcess, LocalAddress, LocalPort, RemoteAddress, RemotePort, @{ Name = 'State'; Expression = { $_.State.ToString() } }) }",
     "if ('PitwallCwd' -as [type]) {",
     "$listening = @($t | Where-Object { $_.State -eq 'Listen' -and $_.LocalPort -ge 1024 } | ForEach-Object { $_.OwningProcess } | Sort-Object -Unique)",
-    'foreach ($id in $listening) { try { $d = [PitwallCwd]::Get([int]$id); if ($d) { $cwds["$id"] = $d } } catch {} }',
+    // 에이전트(Claude Code·Codex)의 작업 폴더도 읽어 어느 워크트리의 세션인지 안다.
+    "$agentPids = @($p | Where-Object { $_.Name -match '^(claude|codex)' -or ($_.CommandLine -and $_.CommandLine -match '@anthropic-ai[\\/]claude-code|@openai[\\/]codex') } | ForEach-Object { $_.ProcessId })",
+    'foreach ($id in @(@($listening) + $agentPids | Sort-Object -Unique)) { try { $d = [PitwallCwd]::Get([int]$id); if ($d) { $cwds["$id"] = $d } } catch {} }',
     '}',
     '$privateWs = @{}',
     'if (\'PitwallMem\' -as [type]) { try { foreach ($m in [PitwallMem]::Read()) { $privateWs["$($m.Pid)"] = $m.PrivateWs } } catch {} }',
@@ -236,7 +238,7 @@ export function buildPowerShellArgs(script: string): string[] {
 export function windowsSafeScript(outFile: string): string {
   return [
     "$ProgressPreference = 'SilentlyContinue'",
-    '$p = @(Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, Name, CommandLine, WorkingSetSize, CreationDate)',
+    "$p = @(Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, Name, CommandLine, WorkingSetSize, CreationDate, @{ Name = 'CpuMs'; Expression = { [math]::Round(($_.KernelModeTime + $_.UserModeTime) / 10000) } })",
     '$t = @()',
     'try { $t = @(Get-NetTCPConnection -State Listen,Established,TimeWait -ErrorAction SilentlyContinue | Select-Object OwningProcess, LocalAddress, LocalPort, RemoteAddress, RemotePort, @{ Name = \'State\'; Expression = { "$($_.State)" } }) } catch {}',
     // 제한 모드에서는 NetTCPIP 모듈을 못 불러올 수 있다. 그때는 netstat 출력을 그대로 넘겨 Node 에서 해석한다.
@@ -357,6 +359,7 @@ export function parseWindowsSample(raw: string): RawSample {
     name: toText(p.Name),
     commandLine: toText(p.CommandLine),
     memoryBytes: memoryOf(p),
+    cpuMs: typeof p.CpuMs === 'number' && Number.isFinite(p.CpuMs) ? p.CpuMs : null,
     startedAt:
       typeof p.StartedAt === 'number' && Number.isFinite(p.StartedAt)
         ? p.StartedAt

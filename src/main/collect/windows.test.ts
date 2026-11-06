@@ -80,7 +80,8 @@ test('프로세스·TCP 파싱, 한글 경로 보존, null 명령줄은 빈 문�
     name: 'node.exe',
     commandLine: vite,
     memoryBytes: 1048576000,
-    startedAt: 1793945439824
+    startedAt: 1793945439824,
+    cpuMs: null
   })
   expect(s.processes[1].commandLine).toBe('')
   expect(s.processes[1].startedAt).toBeNull()
@@ -124,8 +125,37 @@ test('이름·메모리가 null 인 프로세스는 빈 문자열·0 으로', ()
     name: '',
     commandLine: '',
     memoryBytes: 0,
-    startedAt: null
+    startedAt: null,
+    cpuMs: null
   })
+})
+
+test('누적 CPU 시간(CpuMs)을 읽고, 없으면 null', () => {
+  const s = parseWindowsSample(
+    JSON.stringify({
+      processes: [
+        {
+          ProcessId: 1,
+          ParentProcessId: 0,
+          Name: 'a',
+          CommandLine: 'a',
+          WorkingSetSize: 1,
+          CpuMs: 1530
+        },
+        { ProcessId: 2, ParentProcessId: 0, Name: 'b', CommandLine: 'b', WorkingSetSize: 1 }
+      ],
+      tcp: []
+    })
+  )
+  expect(s.processes.map((p) => p.cpuMs)).toEqual([1530, null])
+})
+
+test('두 스크립트 모두 CPU 시간을 내고, 기본 스크립트는 에이전트 후보의 작업 폴더도 읽는다', () => {
+  for (const script of [WINDOWS_SAMPLE_SCRIPT, windowsSafeScript('C:\\t\\o.json')]) {
+    expect(script).toContain('KernelModeTime + $_.UserModeTime')
+  }
+  expect(WINDOWS_SAMPLE_SCRIPT).toContain('$agentPids')
+  expect(WINDOWS_SAMPLE_SCRIPT).toMatch(/claude\|codex/)
 })
 
 test('스크립트는 프로세스 시작 시각을 유닉스 ms 로 낸다(부모 pid 재사용 판별용)', () => {
@@ -478,6 +508,7 @@ describe.runIf(process.platform === 'win32')('실제 Windows 에서', () => {
       expect(childInfo?.startedAt).toBeGreaterThan(Date.now() - 60000)
       expect(childInfo?.startedAt).toBeLessThanOrEqual(Date.now())
       expect(s.tcp.length).toBeGreaterThan(0)
+      expect(s.processes.find((p) => p.pid === process.pid)?.cpuMs).toBeGreaterThan(0)
     } finally {
       child.kill()
     }

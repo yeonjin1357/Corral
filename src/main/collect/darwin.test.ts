@@ -114,8 +114,34 @@ describe('parsePsOutput', () => {
     expect(p.startedAt).toBe(new Date(2026, 0, 12, 9, 5, 0).getTime())
   })
 
-  test('ps 가 lstart 를 요청받는다', () => {
-    expect(PS_STATS_ARGV).toEqual(['/bin/ps', '-axww', '-o', 'pid=,ppid=,rss=,lstart=,comm='])
+  test('ps 가 CPU 시간(time)과 lstart 를 요청받는다', () => {
+    expect(PS_STATS_ARGV).toEqual(['/bin/ps', '-axww', '-o', 'pid=,ppid=,rss=,time=,lstart=,comm='])
+  })
+
+  test('CPU 시간 형식 4가지를 ms 로 읽는다', () => {
+    const line = (time: string): string => `  1 0 10 ${time} Thu Nov  6 10:01:02 2026 /bin/x\n`
+    expect(parsePsOutput(line('0:01.50'), '')[0].cpuMs).toBe(1500)
+    expect(parsePsOutput(line('12:03.00'), '')[0].cpuMs).toBe(723000)
+    expect(parsePsOutput(line('1:02:03'), '')[0].cpuMs).toBe(3723000)
+    expect(parsePsOutput(line('2-01:00:00'), '')[0].cpuMs).toBe(176400000)
+    expect(parsePsOutput('  1 0 10 /bin/x\n', '')[0].cpuMs).toBeNull()
+  })
+
+  test('작업 폴더는 포트를 연 프로세스와 에이전트 프로세스 둘 다 묻는다', async () => {
+    const run = vi.fn(async (argv: string[]) => {
+      if (argv === LSOF_ARGV)
+        return { stdout: 'p4100\nf3\nn*:3000\nTST=LISTEN\n', stderr: '', exitCode: 0 }
+      if (argv.includes('cwd')) return { stdout: '', stderr: '', exitCode: 0 }
+      if (argv === PS_ARGS_ARGV)
+        return { stdout: '  5000 /Users/a/.local/bin/claude\n', stderr: '', exitCode: 0 }
+      return {
+        stdout: '  5000 1 10 0:01.00 Thu Nov  6 10:01:02 2026 /Users/a/.local/bin/claude\n',
+        stderr: '',
+        exitCode: 0
+      }
+    })
+    await sampleDarwin(run)
+    expect(run.mock.calls.find((c) => c[0].includes('cwd'))?.[0]).toEqual(lsofCwdArgv([4100, 5000]))
   })
 
   test('rss(KB)→바이트, 이름은 실행 파일 경로의 basename, 명령줄은 args', () => {
@@ -130,7 +156,8 @@ describe('parsePsOutput', () => {
         memoryBytes: 1024000 * 1024,
         commandLine:
           '/usr/local/bin/node /Users/dev/work/shop-web/node_modules/.bin/vite --port 3000',
-        startedAt: null
+        startedAt: null,
+        cpuMs: null
       }
     ])
   })
