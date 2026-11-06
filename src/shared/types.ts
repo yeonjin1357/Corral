@@ -75,7 +75,18 @@ export interface PortRow {
   clientCount: number
   /** 포트를 연 프로세스의 시작 시각. 종료 직전 같은 프로세스인지(pid 재사용 아님) 확인하는 데 쓴다. */
   startedAt: number | null
+  /**
+   * 안 쓰는 포트 판단. candidate: 정리 후보(에이전트 없음 + 연결 0 이 기준 시간 이상),
+   * check: 확인해볼 것(에이전트 없음 + 탭 연결만 기준 시간 이상), null: 판단 없음.
+   */
+  judgement: PortJudgement | null
+  /** 지금 상태(연결 0 또는 탭만)가 시작된 시각. 에이전트가 있거나 판별 불가면 null. */
+  idleSince: number | null
+  /** 같은 워크트리에 에이전트(Claude·Codex)가 실행 중. */
+  agentInWorktree: boolean
 }
+
+export type PortJudgement = 'candidate' | 'check'
 
 export interface GroupUsage {
   group: ProcessGroup

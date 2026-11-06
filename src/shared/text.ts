@@ -10,6 +10,8 @@ export const text = {
       descendantCount > 0
         ? `${processName} (PID ${pid}) 와 하위 프로세스 ${descendantCount}개가 종료돼요.`
         : `${processName} (PID ${pid}) 가 종료돼요.`,
+    agentInWorktree:
+      '이 워크트리에서 에이전트가 실행 중이에요. 에이전트가 이 서버를 쓰고 있을 수 있어요.',
     confirm: '내리기',
     cancel: '취소'
   },

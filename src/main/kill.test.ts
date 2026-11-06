@@ -80,7 +80,10 @@ const row: PortRow = {
   memoryBytes: 2 * MB,
   descendantPids: [4101],
   clientCount: 0,
-  startedAt: 200
+  startedAt: 200,
+  judgement: null,
+  idleSince: null,
+  agentInWorktree: false
 }
 const freshSample: RawSample = {
   processes: [proc(4000, 1, 'cmd.exe', 'cmd', 100), vite, esbuild],
@@ -143,6 +146,13 @@ test('확인 창 문구', () => {
   })
   expect(buildKillConfirm({ ...row, descendantPids: [] }).detail).toBe(
     'node.exe (PID 4100) 가 종료돼요.'
+  )
+})
+
+test('같은 워크트리에 에이전트가 있으면 확인 창에 한 줄 더 알린다', () => {
+  expect(buildKillConfirm({ ...row, agentInWorktree: true }).detail).toBe(
+    'node.exe (PID 4100) 와 하위 프로세스 1개가 종료돼요.\n' +
+      '이 워크트리에서 에이전트가 실행 중이에요. 에이전트가 이 서버를 쓰고 있을 수 있어요.'
   )
 })
 

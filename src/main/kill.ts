@@ -65,7 +65,10 @@ export function buildKillConfirm(row: PortRow): KillConfirm {
   return {
     title: text.kill.title,
     message: text.kill.message(row.port, worktreeLabel(row.worktree)),
-    detail: text.kill.detail(row.processName, row.pid, row.descendantPids.length),
+    detail: [
+      text.kill.detail(row.processName, row.pid, row.descendantPids.length),
+      ...(row.agentInWorktree ? [text.kill.agentInWorktree] : [])
+    ].join('\n'),
     buttons: [text.kill.confirm, text.kill.cancel],
     defaultId: 1,
     cancelId: 1

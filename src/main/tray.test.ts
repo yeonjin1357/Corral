@@ -31,7 +31,10 @@ function snap(over: Partial<DashboardSnapshot> = {}): DashboardSnapshot {
       memoryBytes: 1,
       descendantPids: [],
       clientCount: 0,
-      startedAt: null
+      startedAt: null,
+      judgement: null,
+      idleSince: null,
+      agentInWorktree: false
     })),
     groups: [],
     agentProcessCount: 0,

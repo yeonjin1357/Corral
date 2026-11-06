@@ -16,6 +16,9 @@ export function portRow(over: Partial<PortRow> = {}): PortRow {
     descendantPids: [4101],
     clientCount: 1,
     startedAt: 200,
+    judgement: null,
+    idleSince: null,
+    agentInWorktree: false,
     ...over
   }
 }

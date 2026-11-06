@@ -238,7 +238,11 @@ export function buildSnapshot(input: {
       memoryBytes: p.memoryBytes + memoryOf(descendantPids),
       descendantPids,
       clientCount: clients.get(`${p.pid}:${t.localPort}`) ?? 0,
-      startedAt: p.startedAt
+      startedAt: p.startedAt,
+      // 판단은 이전 샘플을 아는 수집기(judgePorts)가 채운다.
+      judgement: null,
+      idleSince: null,
+      agentInWorktree: false
     })
   }
   ports.sort((a, b) => a.port - b.port || a.pid - b.pid)
