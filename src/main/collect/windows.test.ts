@@ -247,6 +247,12 @@ test('TCP 목록은 빠른 OS API(GetExtendedTcpTable)로 읽고, 막히면 Get-
   expect(WINDOWS_SAMPLE_SCRIPT).toMatch(/if \(\$t -eq \$null\) \{[\s\S]*Get-NetTCPConnection/)
 })
 
+test('읽는 사이 목록이 커지면(오류 122) 다시 읽고, IPv4·IPv6 가 모두 실패하면 예외를 던져 대체 경로로 넘긴다', () => {
+  expect(WINDOWS_SAMPLE_SCRIPT).toContain('ERROR_INSUFFICIENT_BUFFER = 122')
+  expect(WINDOWS_SAMPLE_SCRIPT).toMatch(/for \(int attempt = 0; attempt < 5; attempt\+\+\)/)
+  expect(WINDOWS_SAMPLE_SCRIPT).toContain('if (!v4 && !v6) throw new InvalidOperationException')
+})
+
 test('스크립트는 포트를 연 프로세스만 골라 작업 폴더를 읽고, 실패해도 나머지는 낸다', () => {
   expect(WINDOWS_SAMPLE_SCRIPT).toContain('ReadProcessMemory')
   expect(WINDOWS_SAMPLE_SCRIPT).toContain('[PitwallCwd]::Get(')

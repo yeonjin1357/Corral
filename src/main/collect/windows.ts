@@ -36,14 +36,21 @@ public static class PitwallTcp {
   static int Port(int raw) { return ((raw & 0xFF) << 8) | ((raw >> 8) & 0xFF); }
   static string State(int s) { return s == 2 ? "Listen" : s == 5 ? "Established" : s == 11 ? "TimeWait" : "Other"; }
   static byte[] Bytes(IntPtr p, int n) { var b = new byte[n]; Marshal.Copy(p, b, 0, n); return b; }
-  static void Add(int af, List<PitwallTcpRow> rows) {
+  const uint ERROR_INSUFFICIENT_BUFFER = 122;
+  static bool Add(int af, List<PitwallTcpRow> rows) {
+    // 크기를 잰 뒤 읽기 전 사이에 연결이 늘면 122 가 온다. 다시 재서 읽는다(여유 4KB).
+    for (int attempt = 0; attempt < 5; attempt++) {
     int size = 0;
     GetExtendedTcpTable(IntPtr.Zero, ref size, false, af, 5, 0);
-    if (size <= 0) return;
+    if (size <= 0) return false;
+    size += 4096;
     IntPtr buf = Marshal.AllocHGlobal(size);
     try {
-      if (GetExtendedTcpTable(buf, ref size, false, af, 5, 0) != 0) return;
+      uint rc = GetExtendedTcpTable(buf, ref size, false, af, 5, 0);
+      if (rc == ERROR_INSUFFICIENT_BUFFER) continue;
+      if (rc != 0) return false;
       int n = Marshal.ReadInt32(buf);
+      var found = new List<PitwallTcpRow>();
       for (int i = 0; i < n; i++) {
         var row = new PitwallTcpRow();
         if (af == 2) {
@@ -63,11 +70,22 @@ public static class PitwallTcp {
           row.State = State(Marshal.ReadInt32(r, 48));
           row.OwningProcess = Marshal.ReadInt32(r, 52);
         }
-        rows.Add(row);
+        found.Add(row);
       }
+      rows.AddRange(found);
+      return true;
     } finally { Marshal.FreeHGlobal(buf); }
+    }
+    return false;
   }
-  public static PitwallTcpRow[] Read() { var rows = new List<PitwallTcpRow>(); Add(2, rows); Add(23, rows); return rows.ToArray(); }
+  public static PitwallTcpRow[] Read() {
+    var rows = new List<PitwallTcpRow>();
+    bool v4 = Add(2, rows);
+    bool v6 = Add(23, rows);
+    // 둘 다 못 읽었으면 빈 목록을 정상처럼 내지 않고 실패로 알려 Get-NetTCPConnection 경로로 넘긴다.
+    if (!v4 && !v6) throw new InvalidOperationException("GetExtendedTcpTable failed");
+    return rows.ToArray();
+  }
 }
 public static class PitwallCwd {
   [DllImport("ntdll.dll")] static extern int NtQueryInformationProcess(IntPtr h, int cls, ref PBI info, int size, out int ret);
