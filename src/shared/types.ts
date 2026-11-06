@@ -56,6 +56,8 @@ export interface PortRow {
   memoryBytes: number
   descendantPids: number[]
   clientCount: number
+  /** 포트를 연 프로세스의 시작 시각. 종료 직전 같은 프로세스인지(pid 재사용 아님) 확인하는 데 쓴다. */
+  startedAt: number | null
 }
 
 export interface GroupUsage {
@@ -63,6 +65,8 @@ export interface GroupUsage {
   memoryBytes: number
   processCount: number
 }
+
+export type KillResult = { status: 'killed' | 'cancelled' | 'gone' | 'changed' | 'failed'; message?: string }
 
 export interface DashboardSnapshot {
   takenAt: number

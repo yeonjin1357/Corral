@@ -112,6 +112,11 @@ function buildTree(processes: ProcessInfo[]): ProcessTree {
   return { byPid, parentOf, descendants, ancestors }
 }
 
+/** 시작 시각으로 pid 재사용을 걸러낸 자손 pid 목록(종료 직전 최신 샘플로 다시 계산할 때 쓴다). */
+export function descendantsOf(processes: ProcessInfo[], pid: number): number[] {
+  return buildTree(processes).descendants(pid)
+}
+
 function summarizeMemory(
   totalBytes: number,
   freeBytes: number,
@@ -130,9 +135,12 @@ export function buildSnapshot(input: {
   freeBytes: number
   thresholds: { ramWarnPercent: number; ramDangerPercent: number }
   now: number
+  /** pitwall 자신의 pid. 자신과 자식이 연 포트는 목록에 올리지 않는다(스스로를 내리지 않도록). */
+  selfPid?: number
 }): DashboardSnapshot {
   const { sample, worktrees } = input
   const tree = buildTree(sample.processes)
+  const self = new Set<number>(input.selfPid ? [input.selfPid, ...tree.descendants(input.selfPid)] : [])
   const memoryOf = (pids: Iterable<number>): number => {
     let sum = 0
     for (const pid of pids) sum += tree.byPid.get(pid)?.memoryBytes ?? 0
@@ -159,7 +167,7 @@ export function buildSnapshot(input: {
   const ports: PortRow[] = []
   const seen = new Set<string>()
   for (const t of sample.tcp) {
-    if (t.state !== 'Listen' || t.localPort < MIN_DEV_PORT) continue
+    if (t.state !== 'Listen' || t.localPort < MIN_DEV_PORT || self.has(t.pid)) continue
     const key = `${t.localPort}:${t.pid}`
     if (seen.has(key)) continue
     seen.add(key)
@@ -178,7 +186,8 @@ export function buildSnapshot(input: {
       unresolvable: !worktree,
       memoryBytes: p.memoryBytes + memoryOf(descendantPids),
       descendantPids,
-      clientCount: clients.get(`${p.pid}:${t.localPort}`) ?? 0
+      clientCount: clients.get(`${p.pid}:${t.localPort}`) ?? 0,
+      startedAt: p.startedAt
     })
   }
   ports.sort((a, b) => a.port - b.port || a.pid - b.pid)

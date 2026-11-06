@@ -1,26 +1,19 @@
 <script setup lang="ts">
-import Versions from './components/Versions.vue'
+import { onMounted, onUnmounted, ref } from 'vue'
+import type { DashboardSnapshot } from '../../shared/types'
 
-const ipcHandle = (): void => window.electron.ipcRenderer.send('ping')
+// Task 7 에서 대시보드로 바뀌는 임시 화면: 스냅샷이 IPC 로 잘 오는지만 보여준다.
+const snapshot = ref<DashboardSnapshot | null>(null)
+let unsubscribe: () => void = () => {}
+
+onMounted(async () => {
+  unsubscribe = window.pitwall.onSnapshot((s) => (snapshot.value = s))
+  const latest = await window.pitwall.getLatest()
+  if (!snapshot.value) snapshot.value = latest
+})
+onUnmounted(() => unsubscribe())
 </script>
 
 <template>
-  <img alt="logo" class="logo" src="./assets/electron.svg" />
-  <div class="creator">Powered by electron-vite</div>
-  <div class="text">
-    Build an Electron app with
-    <span class="vue">Vue</span>
-    and
-    <span class="ts">TypeScript</span>
-  </div>
-  <p class="tip">Please try pressing <code>F12</code> to open the devTool</p>
-  <div class="actions">
-    <div class="action">
-      <a href="https://electron-vite.org/" target="_blank" rel="noreferrer">Documentation</a>
-    </div>
-    <div class="action">
-      <a target="_blank" rel="noreferrer" @click="ipcHandle">Send IPC</a>
-    </div>
-  </div>
-  <Versions />
+  <pre id="snapshot">{{ snapshot ? JSON.stringify(snapshot, null, 2) : 'loading' }}</pre>
 </template>

@@ -24,7 +24,6 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
     "bootstrap": "^5.3.8"
   },

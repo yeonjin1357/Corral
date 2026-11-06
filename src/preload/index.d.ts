@@ -1,8 +1,7 @@
-import { ElectronAPI } from '@electron-toolkit/preload'
+import type { PitwallApi } from '../shared/ipc'
 
 declare global {
   interface Window {
-    electron: ElectronAPI
-    api: unknown
+    pitwall: PitwallApi
   }
 }

@@ -102,6 +102,7 @@ describe('포트 행', () => {
     expect(row.descendantPids).toEqual([4101])
     expect(row.processName).toBe('node.exe')
     expect(row.worktree).toEqual(W1)
+    expect(row.startedAt).toBe(200)
   })
 
   test('판별 불가 행은 worktree null', () => {
@@ -178,6 +179,17 @@ describe('메모리 요약', () => {
     expect(zero.memory).toEqual({ totalBytes: 0, usedBytes: 0, usedPercent: 0, level: 'normal' })
     expect(buildSnapshot({ ...input, freeBytes: 40 * GB }).memory.usedBytes).toBe(0)
   })
+})
+
+test('pitwall 자신과 그 자식 프로세스가 연 포트는 목록에 올리지 않는다', () => {
+  const s = buildSnapshot({
+    ...input,
+    selfPid: 4100,
+    sample: { processes, tcp: [...tcp, listen(4101, 9333)] }
+  })
+  expect(s.ports.map((p) => p.port)).not.toContain(3000)
+  expect(s.ports.map((p) => p.port)).not.toContain(9333)
+  expect(s.ports.map((p) => p.port)).toContain(3003)
 })
 
 test('릴레이 프로세스 이름 목록은 대소문자 무관하게 비교', () => {

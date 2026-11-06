@@ -1,22 +1,18 @@
-import { contextBridge } from 'electron'
-import { electronAPI } from '@electron-toolkit/preload'
+import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
+import { IPC, type PitwallApi } from '../shared/ipc'
+import type { DashboardSnapshot } from '../shared/types'
 
-// Custom APIs for renderer
-const api = {}
-
-// Use `contextBridge` APIs to expose Electron APIs to
-// renderer only if context isolation is enabled, otherwise
-// just add to the DOM global.
-if (process.contextIsolated) {
-  try {
-    contextBridge.exposeInMainWorld('electron', electronAPI)
-    contextBridge.exposeInMainWorld('api', api)
-  } catch (error) {
-    console.error(error)
-  }
-} else {
-  // @ts-ignore (define in dts)
-  window.electron = electronAPI
-  // @ts-ignore (define in dts)
-  window.api = api
+/** 렌더러에는 pitwall 이 쓰는 세 가지 동작만 노출한다(ipcRenderer 전체를 넘기지 않음). */
+const api: PitwallApi = {
+  onSnapshot(callback) {
+    const handler = (_event: IpcRendererEvent, snapshot: DashboardSnapshot): void => callback(snapshot)
+    ipcRenderer.on(IPC.snapshot, handler)
+    return () => {
+      ipcRenderer.removeListener(IPC.snapshot, handler)
+    }
+  },
+  getLatest: () => ipcRenderer.invoke(IPC.getLatest),
+  killPort: (port, pid) => ipcRenderer.invoke(IPC.killPort, { port, pid })
 }
+
+contextBridge.exposeInMainWorld('pitwall', api)
