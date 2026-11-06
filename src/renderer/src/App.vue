@@ -28,6 +28,7 @@ const selectedKey = ref<string | null>(null)
 const busyPid = ref<number | null>(null)
 const notice = ref<string | null>(null)
 const refreshing = ref(false)
+const actionError = ref<string | null>(null)
 
 function receive(s: DashboardSnapshot): void {
   snapshot.value = s
@@ -72,17 +73,30 @@ function select(key: string): void {
   selectedKey.value = key
 }
 
+function failureText(e: unknown): string {
+  return text.actionError(e instanceof Error ? e.message : String(e))
+}
+
 async function refresh(): Promise<void> {
   refreshing.value = true
+  actionError.value = null
   try {
     await window.pitwall.refreshNow()
+  } catch (e) {
+    actionError.value = failureText(e)
   } finally {
     refreshing.value = false
   }
 }
 
 async function openSelected(): Promise<void> {
-  if (selectedRow.value) await window.pitwall.openPort(selectedRow.value.port)
+  const row = selectedRow.value
+  if (!row) return
+  try {
+    if (!(await window.pitwall.openPort(row.port))) notice.value = text.openFailed
+  } catch (e) {
+    notice.value = failureText(e)
+  }
 }
 
 async function killSelected(): Promise<void> {
@@ -92,6 +106,8 @@ async function killSelected(): Promise<void> {
   notice.value = null
   try {
     notice.value = describeKillResult(await window.pitwall.killPort(row.port, row.pid))
+  } catch (e) {
+    notice.value = failureText(e)
   } finally {
     busyPid.value = null
   }
@@ -131,6 +147,7 @@ async function killSelected(): Promise<void> {
 
   <main class="container-fluid">
     <p v-if="snapshot?.error" class="text-danger small">{{ snapshot.error }}</p>
+    <p v-if="actionError" class="action-error text-danger small">{{ actionError }}</p>
     <p v-if="!snapshot" class="text-secondary">{{ text.ui.loading }}</p>
     <div v-else class="row">
       <div class="col-12 col-md-5 col-xl-4 ps-0">

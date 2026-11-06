@@ -27,6 +27,16 @@ export const text = {
   },
   unsupportedPlatform: '지원하지 않는 OS 예요. Windows 와 macOS 만 지원해요.',
   collectSlow: '수집이 너무 오래 걸리고 있어요.',
+  collectErrors: {
+    timeout: '수집 명령이 시간 안에 끝나지 않았어요.',
+    unreadable: '수집 결과를 읽지 못했어요.',
+    darwinCommand: (command: string, code: number): string =>
+      `macOS 프로세스 정보를 가져오지 못했어요 (${command} 종료 코드 ${code}).`,
+    cannotRun: (detail: string): string => `수집 명령을 실행하지 못했어요: ${detail}`,
+    other: (detail: string): string => `수집 중 문제가 생겼어요: ${detail}`
+  },
+  actionError: (detail: string): string => `요청을 처리하지 못했어요: ${detail}`,
+  openFailed: '브라우저로 열지 못했어요. 포트가 이미 닫혔을 수 있어요.',
   tray: {
     checking: 'RAM 확인 중…',
     failed: 'RAM 정보를 가져오지 못했어요',

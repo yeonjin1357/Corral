@@ -485,7 +485,7 @@ describe.runIf(process.platform === 'win32')('실제 Windows 에서', () => {
 
   test('실제 스크립트가 대부분의 프로세스에 대해 전용 작업 세트를 내고, 그 값은 작업 세트보다 작다', async () => {
     const r = await runCommand([powershellPath(), ...buildPowerShellArgs(WINDOWS_SAMPLE_SCRIPT)])
-    const data = JSON.parse(r.stdout.replace(/^﻿/, '')) as {
+    const data = JSON.parse(r.stdout.replace(/^\uFEFF/, '')) as {
       processes: { ProcessId: number; WorkingSetSize: number }[]
       privateWs: Record<string, number>
     }

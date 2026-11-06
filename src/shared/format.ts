@@ -1,6 +1,18 @@
 import type { KillResult, WorktreeInfo } from './types'
 import { text } from './text'
 
+/** 수집 실패 이유를 화면·트레이에 보일 한국어 문장으로 바꾼다(이미 한국어면 그대로). */
+export function describeCollectError(message: string): string {
+  if (/[가-힣]/.test(message)) return message
+  if (message === 'timeout') return text.collectErrors.timeout
+  if (message === 'empty output' || message.startsWith('invalid JSON'))
+    return text.collectErrors.unreadable
+  const exited = /^(ps|lsof) exited with (-?\d+)/.exec(message)
+  if (exited) return text.collectErrors.darwinCommand(exited[1], Number(exited[2]))
+  if (/ENOENT|EACCES|EPERM/.test(message)) return text.collectErrors.cannotRun(message)
+  return text.collectErrors.other(message)
+}
+
 /** 화면에 남길 내리기 결과 문구. 성공·취소는 따로 알릴 것이 없어 null. */
 export function describeKillResult(result: KillResult): string | null {
   switch (result.status) {

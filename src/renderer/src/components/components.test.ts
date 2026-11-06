@@ -140,7 +140,10 @@ describe('HomeView', () => {
       global: { stubs }
     })
     expect(w.get('.collect-mode').text()).toBe('수집 방식: 보조 코드(메모리에서 컴파일)')
-    const none = mount(HomeView, { props: { snapshot: snapshot(), ramHistory: [] }, global: { stubs } })
+    const none = mount(HomeView, {
+      props: { snapshot: snapshot(), ramHistory: [] },
+      global: { stubs }
+    })
     expect(none.find('.collect-mode').exists()).toBe(false)
   })
 

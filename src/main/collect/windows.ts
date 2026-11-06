@@ -189,7 +189,7 @@ export function windowsSampleScript(helperDllPath: string | null): string {
     'foreach ($id in $listening) { try { $d = [PitwallCwd]::Get([int]$id); if ($d) { $cwds["$id"] = $d } } catch {} }',
     '}',
     '$privateWs = @{}',
-    "if ('PitwallMem' -as [type]) { try { foreach ($m in [PitwallMem]::Read()) { $privateWs[\"$($m.Pid)\"] = $m.PrivateWs } } catch {} }",
+    'if (\'PitwallMem\' -as [type]) { try { foreach ($m in [PitwallMem]::Read()) { $privateWs["$($m.Pid)"] = $m.PrivateWs } } catch {} }',
     '$json = @{ processes = $p; tcp = $t; cwds = $cwds; privateWs = $privateWs; helperMode = $helperMode } | ConvertTo-Json -Compress -Depth 3',
     // PowerShell 호스트 출력(Write-Output)으로 600KB 가 넘는 한 줄을 내면 2초 가까이 걸린다.
     // UTF-8 바이트를 표준 출력 스트림에 직접 써서 그 시간을 없애고, 콘솔 인코딩(한글 경로)에도 의존하지 않는다.
@@ -346,7 +346,9 @@ export function parseWindowsSample(raw: string): RawSample {
       : {}
   const memoryOf = (p: Json): number => {
     const own = privateWs[String(toNumber(p.ProcessId))]
-    return typeof own === 'number' && Number.isFinite(own) && own >= 0 ? own : toNumber(p.WorkingSetSize)
+    return typeof own === 'number' && Number.isFinite(own) && own >= 0
+      ? own
+      : toNumber(p.WorkingSetSize)
   }
 
   const processes: ProcessInfo[] = toArray(data?.processes).map((p) => ({

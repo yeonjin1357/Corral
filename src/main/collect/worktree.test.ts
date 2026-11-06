@@ -29,7 +29,7 @@ describe('extractPathCandidates', () => {
     expect(extractPathCandidates("node C:\\Users\\O'Neil\\work\\app\\server.js")).toEqual([
       "C:\\Users\\O'Neil\\work\\app\\server.js"
     ])
-    expect(extractPathCandidates("\"C:\\Users\\O'Neil\\My App\\node_modules\\.bin\\vite\"")).toEqual(
+    expect(extractPathCandidates('"C:\\Users\\O\'Neil\\My App\\node_modules\\.bin\\vite"')).toEqual(
       ["C:\\Users\\O'Neil\\My App"]
     )
     expect(extractPathCandidates("/usr/local/bin/node /Users/o'neil/app/server.js")).toEqual([

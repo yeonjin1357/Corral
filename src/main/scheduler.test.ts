@@ -85,7 +85,11 @@ test('실패하면 마지막 정상 스냅샷을 stale 로 다시 보내고, 다
   s.start()
   await vi.advanceTimersByTimeAsync(0)
   await vi.advanceTimersByTimeAsync(5000)
-  expect(sent[1]).toEqual({ ...snap(1), stale: true, error: 'timeout' })
+  expect(sent[1]).toEqual({
+    ...snap(1),
+    stale: true,
+    error: '수집 명령이 시간 안에 끝나지 않았어요.'
+  })
   await vi.advanceTimersByTimeAsync(5000)
   expect(sent[2]).toEqual(snap(3))
   s.stop()
@@ -103,7 +107,7 @@ test('첫 수집부터 실패하면 빈 스냅샷을 stale + 에러로 보낸다
     ports: [],
     groups: [],
     stale: true,
-    error: 'boom',
+    error: '수집 중 문제가 생겼어요: boom',
     agentProcessCount: 0
   })
   expect(sent[0].memory).toEqual({ totalBytes: 0, usedBytes: 0, usedPercent: 0, level: 'normal' })

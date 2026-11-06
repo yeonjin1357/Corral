@@ -259,9 +259,9 @@ test('pitwall 자신과 그 자식 프로세스가 연 포트는 목록에 올�
 })
 
 test('수집 방식을 스냅샷에 그대로 옮기고, 없으면 null', () => {
-  expect(buildSnapshot({ ...input, sample: { ...sample, collectMode: 'helper-dll' } }).collectMode).toBe(
-    'helper-dll'
-  )
+  expect(
+    buildSnapshot({ ...input, sample: { ...sample, collectMode: 'helper-dll' } }).collectMode
+  ).toBe('helper-dll')
   expect(buildSnapshot(input).collectMode).toBeNull()
 })
 

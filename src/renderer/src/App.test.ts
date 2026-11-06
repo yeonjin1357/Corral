@@ -143,6 +143,41 @@ test('다른 포트를 고르면 이전 안내 문구는 지운다', async () =>
   expect(w.find('.kill-notice').exists()).toBe(false)
 })
 
+describe('요청이 실패해도 화면이 멈추지 않는다', () => {
+  test('내리기 요청이 오류로 끝나면 이유를 보이고 버튼을 다시 쓸 수 있다', async () => {
+    const fake = installApi()
+    fake.api.killPort.mockRejectedValueOnce(new Error('IPC 끊김'))
+    const w = await mountWith(fake)
+    await w.findAll('.monitor-list .item')[0].trigger('click')
+    await w.get('button.btn-kill').trigger('click')
+    await flushPromises()
+    expect(w.get('.kill-notice').text()).toBe('요청을 처리하지 못했어요: IPC 끊김')
+    expect(w.get('button.btn-kill').attributes('disabled')).toBeUndefined()
+  })
+
+  test('지금 새로고침이 실패하면 버튼을 되살리고 이유를 보인다', async () => {
+    const fake = installApi()
+    fake.api.refreshNow.mockRejectedValueOnce(new Error('IPC 끊김'))
+    const w = await mountWith(fake)
+    await w.get('button.btn-refresh').trigger('click')
+    await flushPromises()
+    expect(w.get('button.btn-refresh').attributes('disabled')).toBeUndefined()
+    expect(w.get('.action-error').text()).toBe('요청을 처리하지 못했어요: IPC 끊김')
+  })
+
+  test('브라우저로 열지 못하면 상세에 알린다', async () => {
+    const fake = installApi()
+    fake.api.openPort.mockResolvedValueOnce(false)
+    const w = await mountWith(fake)
+    await w.findAll('.monitor-list .item')[0].trigger('click')
+    await w.get('button.btn-open').trigger('click')
+    await flushPromises()
+    expect(w.get('.kill-notice').text()).toBe(
+      '브라우저로 열지 못했어요. 포트가 이미 닫혔을 수 있어요.'
+    )
+  })
+})
+
 test('stale 이면 헤더에 업데이트 지연 배지와 이유', async () => {
   const fake = installApi()
   const w = await mountWith(fake, snapshot({ stale: true, error: 'timeout' }))

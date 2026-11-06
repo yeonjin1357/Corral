@@ -1,5 +1,6 @@
 import type { DashboardSnapshot } from '../shared/types'
 import { text } from '../shared/text'
+import { describeCollectError } from '../shared/format'
 
 export const DEFAULT_COLLECT_TIMEOUT_MS = 20000
 
@@ -86,7 +87,7 @@ export function createScheduler(o: {
         o.onSnapshot(snapshot)
       } catch (e) {
         if (!running) return
-        emitStale(errorMessage(e))
+        emitStale(describeCollectError(errorMessage(e)))
       } finally {
         if (deadline) clearTimeout(deadline)
         lastRunAt = now()

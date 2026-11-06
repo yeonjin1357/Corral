@@ -1,4 +1,31 @@
-import { formatBytes, worktreeLabel, worktreeFolder, describeKillResult } from './format'
+import {
+  formatBytes,
+  worktreeLabel,
+  worktreeFolder,
+  describeKillResult,
+  describeCollectError
+} from './format'
+
+test('수집 오류를 한국어로: 시간 초과·결과 해석 실패·macOS 명령 실패·실행 불가, 이미 한국어면 그대로', () => {
+  expect(describeCollectError('timeout')).toBe('수집 명령이 시간 안에 끝나지 않았어요.')
+  expect(describeCollectError('empty output')).toBe('수집 결과를 읽지 못했어요.')
+  expect(describeCollectError('invalid JSON: Get-CimInstance : x')).toBe(
+    '수집 결과를 읽지 못했어요.'
+  )
+  expect(describeCollectError('ps exited with 1')).toBe(
+    'macOS 프로세스 정보를 가져오지 못했어요 (ps 종료 코드 1).'
+  )
+  expect(describeCollectError('lsof exited with 2')).toBe(
+    'macOS 프로세스 정보를 가져오지 못했어요 (lsof 종료 코드 2).'
+  )
+  expect(describeCollectError('spawn /bin/ps ENOENT')).toBe(
+    '수집 명령을 실행하지 못했어요: spawn /bin/ps ENOENT'
+  )
+  expect(describeCollectError('Windows 정보를 가져오지 못했어요 (PowerShell 종료 코드 1)')).toBe(
+    'Windows 정보를 가져오지 못했어요 (PowerShell 종료 코드 1)'
+  )
+  expect(describeCollectError('boom')).toBe('수집 중 문제가 생겼어요: boom')
+})
 
 test('내리기 결과 문구: 성공·취소는 없음, 실패는 메시지 우선', () => {
   expect(describeKillResult({ status: 'killed' })).toBeNull()
