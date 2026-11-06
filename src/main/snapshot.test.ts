@@ -1,4 +1,5 @@
 import {
+  agentToolOf,
   buildSnapshot,
   classifyAgent,
   levelOf,
@@ -187,6 +188,19 @@ describe('묶음과 에이전트', () => {
     expect(buildSnapshot(input).agentProcessCount).toBe(2)
   })
 
+  test('agentToolOf: Claude Code 는 claude, Codex 는 codex, 아니면 null', () => {
+    const tool = (pid: number): string | null => agentToolOf(processes.find((p) => p.pid === pid)!)
+    expect([5000, 5001, 8200, 8201, 8000, 8100, 4100].map(tool)).toEqual([
+      'claude',
+      'claude',
+      'codex',
+      'codex',
+      null,
+      null,
+      null
+    ])
+  })
+
   test('classifyAgent: Claude Code·Codex 는 맞고, Claude 데스크톱 앱·Codex 서비스는 아니다', () => {
     const p = (name: string, commandLine = name): ProcessInfo =>
       proc(1, 0, name, 1, null, commandLine)
@@ -265,9 +279,10 @@ test('수집 방식을 스냅샷에 그대로 옮기고, 없으면 null', () => 
   expect(buildSnapshot(input).collectMode).toBeNull()
 })
 
-test('worktree 판별은 포트를 연 프로세스(1024 이상)와 그 위 3단계 조상만 하면 된다', () => {
+test('worktree 판별은 포트를 연 프로세스(1024 이상)와 그 위 3단계 조상, 최상위 에이전트만 하면 된다', () => {
+  // 8200 은 최상위 Codex, 5001·8201 은 하위 에이전트라 빠진다.
   expect([...pidsForWorktreeLookup(sample)].sort((a, b) => a - b)).toEqual([
-    4000, 4100, 5000, 5100, 6000, 7000, 7050, 7100, 7202, 7203, 7204, 7205, 9100, 9101
+    4000, 4100, 5000, 5100, 6000, 7000, 7050, 7100, 7202, 7203, 7204, 7205, 8200, 9100, 9101
   ])
 })
 

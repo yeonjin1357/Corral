@@ -11,7 +11,7 @@ import { sample, toPlatform } from './collect/sample'
 import { configureWindowsSampler, nativeHelperDllName } from './collect/windows'
 import { readMemory } from './collect/memory'
 import { resolveProcessWorktrees } from './collect/worktree'
-import { buildSnapshot, pidsForWorktreeLookup } from './snapshot'
+import { buildSnapshot, pidsForWorktreeLookup, topLevelAgentPids } from './snapshot'
 import { createScheduler } from './scheduler'
 import { createPortKiller, type KillConfirm } from './kill'
 import { localUrlFor } from './open'
@@ -46,7 +46,8 @@ async function collect(): Promise<DashboardSnapshot> {
   const needed = pidsForWorktreeLookup(raw)
   const worktrees = await resolveProcessWorktrees(
     raw.processes.filter((p) => needed.has(p.pid)),
-    raw.cwds
+    raw.cwds,
+    new Set(topLevelAgentPids(raw.processes))
   )
   return buildSnapshot({
     sample: raw,

@@ -6,7 +6,8 @@ import type {
   PortRow,
   ProcessInfo,
   RawSample,
-  WorktreeInfo
+  WorktreeInfo,
+  AgentTool
 } from '../shared/types'
 import { DEFAULT_THRESHOLDS } from '../shared/defaults'
 
@@ -31,13 +32,21 @@ const MAX_ANCESTOR_DEPTH = 3
 const AGENT_NAME =
   /^(claude(\.exe)?|codex(-(x86_64|aarch64|arm64|x64|universal)[\w.-]*)?(\.exe)?)$/i
 const AGENT_PACKAGE = /@anthropic-ai\/claude-code|@openai\/codex/i
+const CLAUDE_NAME = /^claude(\.exe)?$/i
+const CLAUDE_PACKAGE = /@anthropic-ai\/claude-code/i
 /** Claude 데스크톱 앱(이름이 같은 claude.exe / Claude)과 Electron 보조 프로세스는 에이전트가 아니다. */
 const NOT_AGENT = /AnthropicClaude|Claude\.app\/|--type=/i
 
-export function classifyAgent(p: ProcessInfo): boolean {
+/** 에이전트면 도구 이름, 아니면 null. */
+export function agentToolOf(p: ProcessInfo): AgentTool | null {
   const commandLine = p.commandLine.replace(/\\/g, '/')
-  if (NOT_AGENT.test(commandLine)) return false
-  return AGENT_NAME.test(p.name) || AGENT_PACKAGE.test(commandLine)
+  if (NOT_AGENT.test(commandLine)) return null
+  if (!AGENT_NAME.test(p.name) && !AGENT_PACKAGE.test(commandLine)) return null
+  return CLAUDE_NAME.test(p.name) || CLAUDE_PACKAGE.test(commandLine) ? 'claude' : 'codex'
+}
+
+export function classifyAgent(p: ProcessInfo): boolean {
+  return agentToolOf(p) !== null
 }
 
 export function levelOf(
@@ -59,14 +68,14 @@ function isPlausibleChild(child: ProcessInfo, parent: ProcessInfo): boolean {
   return child.startedAt >= parent.startedAt
 }
 
-interface ProcessTree {
+export interface ProcessTree {
   byPid: Map<number, ProcessInfo>
   parentOf(pid: number): ProcessInfo | undefined
   descendants(pid: number): number[]
   ancestors(pid: number, maxDepth: number): ProcessInfo[]
 }
 
-function buildTree(processes: ProcessInfo[]): ProcessTree {
+export function buildTree(processes: ProcessInfo[]): ProcessTree {
   const byPid = new Map(processes.map((p) => [p.pid, p]))
   const children = new Map<number, number[]>()
   for (const p of processes) {
@@ -113,8 +122,19 @@ function buildTree(processes: ProcessInfo[]): ProcessTree {
   return { byPid, parentOf, descendants, ancestors }
 }
 
+/** 에이전트 조상이 없는(같은 세션의 하위가 아닌) 에이전트 pid. */
+export function topLevelAgentPids(
+  processes: ProcessInfo[],
+  tree: ProcessTree = buildTree(processes)
+): number[] {
+  const agentSet = new Set(processes.filter(classifyAgent).map((p) => p.pid))
+  return [...agentSet].filter(
+    (pid) => !tree.ancestors(pid, Number.MAX_SAFE_INTEGER).some((a) => agentSet.has(a.pid))
+  )
+}
+
 /**
- * buildSnapshot 이 worktree 를 찾아보는 pid: 개발용 포트(1024 이상)를 연 프로세스와 그 위 3단계 조상.
+ * worktree 를 찾아보는 pid: 개발용 포트(1024 이상)를 연 프로세스와 그 위 3단계 조상, 최상위 에이전트.
  * 모든 프로세스의 경로를 확인하면 파일 시스템 조회가 수백 배 늘고, 응답 없는 네트워크 드라이브에 막힐 수 있다.
  */
 export function pidsForWorktreeLookup(sample: RawSample): Set<number> {
@@ -131,6 +151,7 @@ export function pidsForWorktreeLookup(sample: RawSample): Set<number> {
     pids.add(t.pid)
     for (const ancestor of tree.ancestors(t.pid, MAX_ANCESTOR_DEPTH)) pids.add(ancestor.pid)
   }
+  for (const pid of topLevelAgentPids(sample.processes, tree)) pids.add(pid)
   return pids
 }
 
@@ -234,10 +255,7 @@ export function buildSnapshot(input: {
     for (const member of [pid, ...tree.descendants(pid)])
       if (!devServer.has(member)) agent.add(member)
   }
-  const agentSet = new Set(agentPids)
-  const agentProcessCount = agentPids.filter(
-    (pid) => !tree.ancestors(pid, Number.MAX_SAFE_INTEGER).some((a) => agentSet.has(a.pid))
-  ).length
+  const agentProcessCount = topLevelAgentPids(sample.processes, tree).length
 
   const memory = summarizeMemory(input.totalBytes, input.freeBytes, input.thresholds)
   const devBytes = memoryOf(devServer)

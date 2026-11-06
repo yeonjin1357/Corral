@@ -97,7 +97,8 @@ export interface WorktreeResolver {
   resolveWorktree(path: string): Promise<WorktreeInfo | null>
   resolveProcessWorktrees(
     processes: ProcessInfo[],
-    cwds?: Record<number, string>
+    cwds?: Record<number, string>,
+    cwdFirst?: Set<number>
   ): Promise<Map<number, WorktreeInfo>>
 }
 
@@ -141,17 +142,25 @@ export function createWorktreeResolver(options: WorktreeResolverOptions = {}): W
     return resolveDir(nodePath.resolve(path), 0)
   }
 
-  /** 명령줄의 절대 경로를 먼저 보고, 없으면 작업 폴더(cwd)로 판별한다. */
+  /**
+   * 명령줄의 절대 경로를 먼저 보고, 없으면 작업 폴더(cwd)로 판별한다.
+   * cwdFirst 의 프로세스(에이전트)는 작업 폴더를 먼저 본다 — 명령줄에 `--add-dir <다른 저장소>` 나
+   * 프롬프트 속 경로가 있을 수 있어서다.
+   */
   async function resolveProcessWorktrees(
     processes: ProcessInfo[],
-    cwds: Record<number, string> = {}
+    cwds: Record<number, string> = {},
+    cwdFirst: Set<number> = new Set()
   ): Promise<Map<number, WorktreeInfo>> {
     const result = new Map<number, WorktreeInfo>()
     await Promise.all(
       processes.map(async (p) => {
         const cwd = cwds[p.pid] ? normalizeCandidate(cwds[p.pid]) : null
-        const candidates = extractPathCandidates(p.commandLine)
-        if (cwd && !candidates.includes(cwd)) candidates.push(cwd)
+        const candidates = extractPathCandidates(p.commandLine).filter((c) => c !== cwd)
+        if (cwd) {
+          if (cwdFirst.has(p.pid)) candidates.unshift(cwd)
+          else candidates.push(cwd)
+        }
         for (const candidate of candidates) {
           const info = await resolveWorktree(candidate)
           if (info) {

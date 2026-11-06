@@ -233,4 +233,32 @@ describe('createWorktreeResolver', () => {
     expect(map.get(2)?.root).toBe(other)
     expect(map.has(3)).toBe(false)
   })
+
+  test('cwd 우선으로 지정한 프로세스(에이전트)는 명령줄 경로보다 작업 폴더를 먼저 본다', async () => {
+    const repo = await makeRepo(join(tmp, 'shop-web'))
+    const other = await makeRepo(join(tmp, 'other'))
+    const proc = (pid: number, commandLine: string): ProcessInfo => ({
+      pid,
+      ppid: 1,
+      name: 'claude',
+      commandLine,
+      memoryBytes: 1,
+      startedAt: null
+    })
+    const { resolveProcessWorktrees } = createWorktreeResolver({ homeDir: join(tmp, 'home') })
+    // 예: claude --add-dir <다른 저장소> 를 작업 폴더 shop-web 에서 실행
+    const map = await resolveProcessWorktrees(
+      [
+        proc(1, `claude --add-dir "${other}"`),
+        proc(2, `claude --add-dir "${other}"`),
+        proc(3, `claude --add-dir "${other}"`)
+      ],
+      { 1: repo, 2: repo },
+      new Set([1, 3])
+    )
+    expect(map.get(1)?.root).toBe(repo)
+    expect(map.get(2)?.root).toBe(other)
+    // 작업 폴더를 모르면 명령줄 경로로라도 판별한다.
+    expect(map.get(3)?.root).toBe(other)
+  })
 })
