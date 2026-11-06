@@ -1,4 +1,4 @@
-import { buildSnapshot, classifyAgent, levelOf, RELAY_PROCESS_NAMES } from './snapshot'
+import { buildSnapshot, classifyAgent, levelOf, pidsForWorktreeLookup, RELAY_PROCESS_NAMES } from './snapshot'
 import type { ProcessInfo, RawSample, TcpEntry, WorktreeInfo } from '../shared/types'
 
 const MB = 1024 * 1024
@@ -199,6 +199,12 @@ test('pitwall 자신과 그 자식 프로세스가 연 포트는 목록에 올�
   expect(s.ports.map((p) => p.port)).not.toContain(3000)
   expect(s.ports.map((p) => p.port)).not.toContain(9333)
   expect(s.ports.map((p) => p.port)).toContain(3003)
+})
+
+test('worktree 판별은 포트를 연 프로세스(1024 이상)와 그 위 3단계 조상만 하면 된다', () => {
+  expect([...pidsForWorktreeLookup(sample)].sort((a, b) => a - b)).toEqual([
+    4000, 4100, 5000, 5100, 6000, 7000, 7050, 7100, 7202, 7203, 7204, 7205, 9100, 9101
+  ])
 })
 
 test('릴레이 프로세스 이름 목록은 대소문자 무관하게 비교', () => {

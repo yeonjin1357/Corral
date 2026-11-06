@@ -25,6 +25,7 @@ export const text = {
     invalid: '잘못된 요청이에요.'
   },
   unsupportedPlatform: '지원하지 않는 OS 예요. Windows 와 macOS 만 지원해요.',
+  collectSlow: '수집이 너무 오래 걸리고 있어요.',
   tray: {
     checking: 'RAM 확인 중…',
     failed: 'RAM 정보를 가져오지 못했어요',

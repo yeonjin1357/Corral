@@ -112,6 +112,21 @@ function buildTree(processes: ProcessInfo[]): ProcessTree {
   return { byPid, parentOf, descendants, ancestors }
 }
 
+/**
+ * buildSnapshot 이 worktree 를 찾아보는 pid: 개발용 포트(1024 이상)를 연 프로세스와 그 위 3단계 조상.
+ * 모든 프로세스의 경로를 확인하면 파일 시스템 조회가 수백 배 늘고, 응답 없는 네트워크 드라이브에 막힐 수 있다.
+ */
+export function pidsForWorktreeLookup(sample: RawSample): Set<number> {
+  const tree = buildTree(sample.processes)
+  const pids = new Set<number>()
+  for (const t of sample.tcp) {
+    if (t.state !== 'Listen' || t.localPort < MIN_DEV_PORT || pids.has(t.pid) || !tree.byPid.has(t.pid)) continue
+    pids.add(t.pid)
+    for (const ancestor of tree.ancestors(t.pid, MAX_ANCESTOR_DEPTH)) pids.add(ancestor.pid)
+  }
+  return pids
+}
+
 /** 시작 시각으로 pid 재사용을 걸러낸 자손 pid 목록(종료 직전 최신 샘플로 다시 계산할 때 쓴다). */
 export function descendantsOf(processes: ProcessInfo[], pid: number): number[] {
   return buildTree(processes).descendants(pid)

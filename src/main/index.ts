@@ -11,7 +11,7 @@ import { sample, toPlatform } from './collect/sample'
 import { configureWindowsSampler, nativeHelperDllName } from './collect/windows'
 import { readMemory } from './collect/memory'
 import { resolveProcessWorktrees } from './collect/worktree'
-import { buildSnapshot } from './snapshot'
+import { buildSnapshot, pidsForWorktreeLookup } from './snapshot'
 import { createScheduler } from './scheduler'
 import { createPortKiller, type KillConfirm } from './kill'
 import { createDotIcon, createTrayController, encodePng, LEVEL_COLORS } from './tray'
@@ -40,7 +40,11 @@ function trayIcon(level: MemoryLevel): Electron.NativeImage {
 async function collect(): Promise<DashboardSnapshot> {
   if (!platform) throw new Error(text.unsupportedPlatform)
   const [raw, memory] = await Promise.all([sample(platform), readMemory(platform)])
-  const worktrees = await resolveProcessWorktrees(raw.processes, raw.cwds)
+  const needed = pidsForWorktreeLookup(raw)
+  const worktrees = await resolveProcessWorktrees(
+    raw.processes.filter((p) => needed.has(p.pid)),
+    raw.cwds
+  )
   return buildSnapshot({
     sample: raw,
     worktrees,

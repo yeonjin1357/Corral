@@ -1,4 +1,7 @@
 import type { DashboardSnapshot } from '../shared/types'
+import { text } from '../shared/text'
+
+export const DEFAULT_COLLECT_TIMEOUT_MS = 20000
 
 export interface Scheduler {
   start(): void
@@ -34,9 +37,12 @@ export function createScheduler(o: {
   collect: () => Promise<DashboardSnapshot>
   intervals: { openMs: number; closedMs: number }
   onSnapshot: (s: DashboardSnapshot) => void
+  /** 수집이 이 시간을 넘기면 결과를 기다리는 동안 지연 표시(stale)를 먼저 보낸다. */
+  collectTimeoutMs?: number
   now?: () => number
 }): Scheduler {
   const now = o.now ?? Date.now
+  const collectTimeoutMs = o.collectTimeoutMs ?? DEFAULT_COLLECT_TIMEOUT_MS
   let running = false
   let open = false
   let timer: ReturnType<typeof setTimeout> | null = null
@@ -58,9 +64,20 @@ export function createScheduler(o: {
     timer = setTimeout(() => void refreshNow(), delay)
   }
 
+  function emitStale(error: string): void {
+    last = last ? { ...last, stale: true, error } : emptySnapshot(now(), error)
+    o.onSnapshot(last)
+  }
+
   function refreshNow(): Promise<void> {
     if (inFlight) return inFlight
     clearTimer()
+    // 수집이 멈춰도(응답 없는 네트워크 드라이브 등) 화면이 옛 데이터를 최신처럼 보여 주지 않게 지연을 먼저 알린다.
+    // 새 수집은 이 수집이 끝날 때까지 시작하지 않는다(한 번에 하나).
+    let deadline: ReturnType<typeof setTimeout> | null = setTimeout(() => {
+      deadline = null
+      if (running) emitStale(text.collectSlow)
+    }, collectTimeoutMs)
     inFlight = (async () => {
       try {
         const snapshot = await o.collect()
@@ -69,10 +86,9 @@ export function createScheduler(o: {
         o.onSnapshot(snapshot)
       } catch (e) {
         if (!running) return
-        const error = errorMessage(e)
-        last = last ? { ...last, stale: true, error } : emptySnapshot(now(), error)
-        o.onSnapshot(last)
+        emitStale(errorMessage(e))
       } finally {
+        if (deadline) clearTimeout(deadline)
         lastRunAt = now()
         inFlight = null
         schedule()
