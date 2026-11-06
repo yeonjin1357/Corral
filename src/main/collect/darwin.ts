@@ -1,6 +1,6 @@
 import type { ProcessInfo, RawSample, TcpEntry, TcpState } from '../../shared/types'
 import { COMMAND_TIMEOUT_MS } from '../../shared/defaults'
-import { runCommand, type CommandResult } from './runCommand'
+import { runCommand, type CommandOptions, type CommandResult } from './runCommand'
 
 /**
  * macOS 는 실행 파일 경로에 공백이 흔하다(`/Applications/Visual Studio Code.app/...`).
@@ -113,22 +113,44 @@ export function lsofCwdArgv(pids: number[]): string[] {
   return ['/usr/sbin/lsof', '-a', '-d', 'cwd', '-Fpn', '-w', '-p', pids.join(',')]
 }
 
+/**
+ * lsof 는 출력할 수 없다고 보는 바이트를 `\xNN` 으로 바꿔 쓴다(로케일이 없으면 한글 UTF-8 바이트가 모두 그렇게 된다).
+ * 그 바이트들을 모아 UTF-8 로 다시 읽는다. `\x` 가 아닌 역슬래시는 그대로 둔다.
+ */
+export function decodeLsofText(text: string): string {
+  if (!text.includes('\\x')) return text
+  const bytes: number[] = []
+  for (let i = 0; i < text.length; i++) {
+    const escaped = /^\\x([0-9a-fA-F]{2})/.exec(text.slice(i, i + 4))
+    if (escaped) {
+      bytes.push(parseInt(escaped[1], 16))
+      i += 3
+    } else {
+      bytes.push(...Buffer.from(text[i], 'utf8'))
+    }
+  }
+  return Buffer.from(bytes).toString('utf8')
+}
+
 export function parseLsofCwd(out: string): Record<number, string> {
   const result: Record<number, string> = {}
   let pid = 0
   for (const line of lines(out)) {
     if (line.startsWith('p')) pid = Number(line.slice(1)) || 0
-    else if (line.startsWith('n') && pid) result[pid] = line.slice(1)
+    else if (line.startsWith('n') && pid) result[pid] = decodeLsofText(line.slice(1))
   }
   return result
 }
 
 const MIN_DEV_PORT = 1024
 
-type Runner = (argv: string[], opts?: { timeoutMs?: number }) => Promise<CommandResult>
+type Runner = (argv: string[], opts?: CommandOptions) => Promise<CommandResult>
+
+/** Finder 로 켠 앱은 LANG 이 없어 ps·lsof 가 한글을 깨뜨리거나 \xNN 으로 바꾼다. UTF-8 로케일로 실행한다. */
+const UTF8_ENV = { LC_ALL: 'en_US.UTF-8' }
 
 export async function sampleDarwin(run: Runner = runCommand): Promise<RawSample> {
-  const opts = { timeoutMs: COMMAND_TIMEOUT_MS }
+  const opts = { timeoutMs: COMMAND_TIMEOUT_MS, env: UTF8_ENV }
   const [stats, args, lsof] = await Promise.all([run(PS_STATS_ARGV, opts), run(PS_ARGS_ARGV, opts), run(LSOF_ARGV, opts)])
   if (stats.exitCode !== 0) throw new Error(`ps exited with ${stats.exitCode}`)
   if (args.exitCode !== 0) throw new Error(`ps exited with ${args.exitCode}`)

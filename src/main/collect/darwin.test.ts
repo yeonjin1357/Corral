@@ -15,6 +15,21 @@ describe('작업 폴더(cwd)', () => {
     expect(parseLsofCwd(out)).toEqual({ 4100: '/Users/dev/My Projects/shop-web', 5200: '/' })
   })
 
+  test('lsof 가 \\xNN 으로 바꿔 쓴 한글 경로를 되돌린다(그 외 역슬래시는 그대로)', () => {
+    const out = ['p1', 'fcwd', 'n/Users/\\xea\\xb9\\x80\\xea\\xb0\\x9c\\xeb\\xb0\\x9c/app', 'p2', 'fcwd', 'n/tmp/a\\b'].join('\n')
+    expect(parseLsofCwd(out)).toEqual({ 1: '/Users/김개발/app', 2: '/tmp/a\\b' })
+  })
+
+  test('ps·lsof 는 UTF-8 로케일(LC_ALL)로 실행한다(Finder 로 켠 앱은 LANG 이 없어 한글이 깨지므로)', async () => {
+    const run = vi.fn(async (argv: string[], _opts?: { env?: Record<string, string> }) => {
+      if (argv === LSOF_ARGV) return { stdout: 'p1\nf3\nn*:3000\nTST=LISTEN\n', stderr: '', exitCode: 0 }
+      return { stdout: '  1 0 1 /x\n', stderr: '', exitCode: 0 }
+    })
+    await sampleDarwin(run)
+    expect(run).toHaveBeenCalledTimes(4)
+    for (const call of run.mock.calls) expect(call[1]?.env).toEqual({ LC_ALL: 'en_US.UTF-8' })
+  })
+
   test('포트를 연 pid 만 쉼표로 묶어 한 번에 묻는다', () => {
     expect(lsofCwdArgv([4100, 5200])).toEqual(['/usr/sbin/lsof', '-a', '-d', 'cwd', '-Fpn', '-w', '-p', '4100,5200'])
   })
