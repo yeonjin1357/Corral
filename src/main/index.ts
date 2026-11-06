@@ -6,7 +6,9 @@ import type { DashboardSnapshot } from '../shared/types'
 import { DEFAULT_INTERVALS, DEFAULT_THRESHOLDS } from '../shared/defaults'
 import { IPC } from '../shared/ipc'
 import { text } from '../shared/text'
+import { mkdirSync, readdirSync, rmSync } from 'fs'
 import { sample, toPlatform } from './collect/sample'
+import { configureWindowsSampler, nativeHelperDllName } from './collect/windows'
 import { readMemory } from './collect/memory'
 import { resolveProcessWorktrees } from './collect/worktree'
 import { buildSnapshot } from './snapshot'
@@ -121,6 +123,29 @@ const killer = createPortKiller({
   platform: platform ?? 'win32'
 })
 
+/** Windows 수집 보조 코드(C#)를 앱 데이터 폴더에 한 번만 컴파일해 두고, 예전 버전 DLL 은 지운다. */
+function prepareWindowsHelper(): void {
+  if (platform !== 'win32') return
+  const dir = app.getPath('userData')
+  const current = nativeHelperDllName()
+  try {
+    mkdirSync(dir, { recursive: true })
+    for (const name of readdirSync(dir)) {
+      if (/^pitwall-native-.*\.dll$/.test(name) && name !== current) {
+        try {
+          rmSync(join(dir, name), { force: true })
+        } catch {
+          // 다른 수집이 불러 쓰는 중이면 다음 실행 때 지운다.
+        }
+      }
+    }
+    configureWindowsSampler({ helperDllPath: join(dir, current) })
+  } catch {
+    // 폴더를 못 쓰면 매번 메모리에서 컴파일한다(느리지만 동작은 같다).
+    configureWindowsSampler({ helperDllPath: null })
+  }
+}
+
 function registerIpc(): void {
   const fromMainWindow = (sender: Electron.WebContents): boolean =>
     !!mainWindow && !mainWindow.isDestroyed() && sender === mainWindow.webContents
@@ -194,6 +219,7 @@ if (!app.requestSingleInstanceLock()) {
       optimizer.watchWindowShortcuts(window)
     })
 
+    prepareWindowsHelper()
     registerIpc()
     scheduler.start()
     createTray()

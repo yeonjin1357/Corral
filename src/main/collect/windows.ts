@@ -1,19 +1,71 @@
+import { createHash } from 'crypto'
 import type { ProcessInfo, RawSample, TcpEntry, TcpState } from '../../shared/types'
 import { COMMAND_TIMEOUT_MS } from '../../shared/defaults'
 import { runCommand } from './runCommand'
 
 /**
  * 프로세스 목록과 TCP 연결을 PowerShell 한 번으로 JSON 으로 받는다.
- * - netstat 은 OS 언어에 따라 제목줄이 바뀌므로 쓰지 않는다. TCP 상태는 enum 이름(언어 무관)으로 낸다.
- * - 한글 등 비 ASCII 경로가 깨지지 않도록 출력 인코딩을 UTF-8 로 고정한다.
+ * - netstat 은 OS 언어에 따라 제목줄이 바뀌므로 쓰지 않는다. TCP 상태는 이름(언어 무관)으로 낸다.
+ * - 한글 등 비 ASCII 경로가 깨지지 않도록 결과를 UTF-8 바이트로 직접 쓴다.
  */
 /**
- * 다른 프로세스의 작업 폴더를 읽는 C# 코드. Windows 에는 이를 알려주는 기본 명령이 없어
- * 프로세스 메모리의 PEB → ProcessParameters → CurrentDirectory 를 읽는다(같은 사용자 프로세스만, 64비트만).
- * 오프셋: PEB.ProcessParameters = 0x20, RTL_USER_PROCESS_PARAMETERS.CurrentDirectory.DosPath = 0x38.
+ * PowerShell 안에서 컴파일해 쓰는 C# 보조 코드(PowerShell 5.1 = C# 5 문법만).
+ * - PitwallTcp: netstat -ano 와 같은 OS API(GetExtendedTcpTable)로 TCP 목록을 읽는다.
+ *   Get-NetTCPConnection 은 이 PC 에서 약 2초 걸려 수집 시간의 절반을 차지했다. 상태는 숫자라 OS 언어와 무관하다.
+ * - PitwallCwd: 다른 프로세스의 작업 폴더. Windows 에는 이를 알려주는 기본 명령이 없어
+ *   프로세스 메모리의 PEB → ProcessParameters → CurrentDirectory 를 읽는다(같은 사용자 프로세스만, 64비트만).
+ *   오프셋: PEB.ProcessParameters = 0x20, RTL_USER_PROCESS_PARAMETERS.CurrentDirectory.DosPath = 0x38.
  */
-const CWD_READER = `using System;
+const NATIVE_HELPERS = `using System;
+using System.Collections.Generic;
+using System.Net;
 using System.Runtime.InteropServices;
+public class PitwallTcpRow {
+  public int OwningProcess { get; set; }
+  public string LocalAddress { get; set; }
+  public int LocalPort { get; set; }
+  public string RemoteAddress { get; set; }
+  public int RemotePort { get; set; }
+  public string State { get; set; }
+}
+public static class PitwallTcp {
+  [DllImport("iphlpapi.dll")] static extern uint GetExtendedTcpTable(IntPtr table, ref int size, bool order, int af, int tableClass, uint reserved);
+  static int Port(int raw) { return ((raw & 0xFF) << 8) | ((raw >> 8) & 0xFF); }
+  static string State(int s) { return s == 2 ? "Listen" : s == 5 ? "Established" : s == 11 ? "TimeWait" : "Other"; }
+  static byte[] Bytes(IntPtr p, int n) { var b = new byte[n]; Marshal.Copy(p, b, 0, n); return b; }
+  static void Add(int af, List<PitwallTcpRow> rows) {
+    int size = 0;
+    GetExtendedTcpTable(IntPtr.Zero, ref size, false, af, 5, 0);
+    if (size <= 0) return;
+    IntPtr buf = Marshal.AllocHGlobal(size);
+    try {
+      if (GetExtendedTcpTable(buf, ref size, false, af, 5, 0) != 0) return;
+      int n = Marshal.ReadInt32(buf);
+      for (int i = 0; i < n; i++) {
+        var row = new PitwallTcpRow();
+        if (af == 2) {
+          IntPtr r = IntPtr.Add(buf, 4 + i * 24);
+          row.State = State(Marshal.ReadInt32(r, 0));
+          row.LocalAddress = new IPAddress(Bytes(IntPtr.Add(r, 4), 4)).ToString();
+          row.LocalPort = Port(Marshal.ReadInt32(r, 8));
+          row.RemoteAddress = new IPAddress(Bytes(IntPtr.Add(r, 12), 4)).ToString();
+          row.RemotePort = Port(Marshal.ReadInt32(r, 16));
+          row.OwningProcess = Marshal.ReadInt32(r, 20);
+        } else {
+          IntPtr r = IntPtr.Add(buf, 4 + i * 56);
+          row.LocalAddress = new IPAddress(Bytes(r, 16)).ToString();
+          row.LocalPort = Port(Marshal.ReadInt32(r, 20));
+          row.RemoteAddress = new IPAddress(Bytes(IntPtr.Add(r, 24), 16)).ToString();
+          row.RemotePort = Port(Marshal.ReadInt32(r, 44));
+          row.State = State(Marshal.ReadInt32(r, 48));
+          row.OwningProcess = Marshal.ReadInt32(r, 52);
+        }
+        rows.Add(row);
+      }
+    } finally { Marshal.FreeHGlobal(buf); }
+  }
+  public static PitwallTcpRow[] Read() { var rows = new List<PitwallTcpRow>(); Add(2, rows); Add(23, rows); return rows.ToArray(); }
+}
 public static class PitwallCwd {
   [DllImport("ntdll.dll")] static extern int NtQueryInformationProcess(IntPtr h, int cls, ref PBI info, int size, out int ret);
   [DllImport("kernel32.dll")] static extern IntPtr OpenProcess(int access, bool inherit, int pid);
@@ -40,22 +92,67 @@ public static class PitwallCwd {
   }
 }`
 
-export const WINDOWS_SAMPLE_SCRIPT = [
-  "$ProgressPreference = 'SilentlyContinue'",
-  '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8',
-  "$p = @(Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, Name, CommandLine, WorkingSetSize, @{ Name = 'StartedAt'; Expression = { if ($_.CreationDate) { [DateTimeOffset]::new($_.CreationDate).ToUnixTimeMilliseconds() } else { $null } } })",
-  "$t = @(Get-NetTCPConnection -State Listen,Established,TimeWait -ErrorAction SilentlyContinue | Select-Object OwningProcess, LocalAddress, LocalPort, RemoteAddress, RemotePort, @{ Name = 'State'; Expression = { $_.State.ToString() } })",
-  '$cwds = @{}',
-  // 작업 폴더 읽기는 보조 정보다. 회사 정책 등으로 Add-Type 이 막혀도 나머지 샘플은 그대로 낸다.
-  'try {',
-  "Add-Type -ErrorAction Stop -TypeDefinition @'",
-  CWD_READER,
-  "'@",
-  "$listening = @($t | Where-Object { $_.State -eq 'Listen' -and $_.LocalPort -ge 1024 } | ForEach-Object { $_.OwningProcess } | Sort-Object -Unique)",
-  'foreach ($id in $listening) { $d = [PitwallCwd]::Get([int]$id); if ($d) { $cwds["$id"] = $d } }',
-  '} catch {}',
-  '@{ processes = $p; tcp = $t; cwds = $cwds } | ConvertTo-Json -Compress -Depth 3'
-].join('\n')
+/** 보조 코드가 바뀌면 이름도 바뀌어 새로 컴파일된다. */
+export function nativeHelperDllName(): string {
+  return `pitwall-native-${createHash('sha256').update(NATIVE_HELPERS).digest('hex').slice(0, 12)}.dll`
+}
+
+/**
+ * 보조 코드를 불러오는 줄들. DLL 경로가 있으면 처음 한 번만 컴파일해 두고 다음부터는 불러오기만 한다
+ * (매번 컴파일하면 csc.exe 가 뜬다). DLL 이 깨졌거나 쓸 수 없으면 지우고 메모리에서 컴파일한다.
+ */
+function helperLoadLines(dllPath: string | null): string[] {
+  const inMemory = 'Add-Type -ErrorAction Stop -TypeDefinition $src'
+  if (!dllPath) return [inMemory]
+  return [
+    `$dll = '${dllPath.replace(/'/g, "''")}'`,
+    'try {',
+    '  if (-not (Test-Path -LiteralPath $dll)) { Add-Type -ErrorAction Stop -OutputType Library -OutputAssembly $dll -TypeDefinition $src }',
+    '  Add-Type -Path $dll -ErrorAction Stop',
+    '} catch {',
+    '  Remove-Item -LiteralPath $dll -Force -ErrorAction SilentlyContinue',
+    `  ${inMemory}`,
+    '}'
+  ]
+}
+
+export function windowsSampleScript(helperDllPath: string | null): string {
+  return [
+    "$ProgressPreference = 'SilentlyContinue'",
+    "$p = @(Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, Name, CommandLine, WorkingSetSize, @{ Name = 'StartedAt'; Expression = { if ($_.CreationDate) { [DateTimeOffset]::new($_.CreationDate).ToUnixTimeMilliseconds() } else { $null } } })",
+    '$t = $null',
+    '$cwds = @{}',
+    "$src = @'",
+    NATIVE_HELPERS,
+    "'@",
+    // 보조 코드는 회사 정책 등으로 Add-Type 이 막힐 수 있다. 그래도 아래 대체 경로로 샘플은 그대로 낸다.
+    'try {',
+    ...helperLoadLines(helperDllPath),
+    '$t = @([PitwallTcp]::Read())',
+    '} catch {}',
+    "if ($t -eq $null) { $t = @(Get-NetTCPConnection -State Listen,Established,TimeWait -ErrorAction SilentlyContinue | Select-Object OwningProcess, LocalAddress, LocalPort, RemoteAddress, RemotePort, @{ Name = 'State'; Expression = { $_.State.ToString() } }) }",
+    "if ('PitwallCwd' -as [type]) {",
+    "$listening = @($t | Where-Object { $_.State -eq 'Listen' -and $_.LocalPort -ge 1024 } | ForEach-Object { $_.OwningProcess } | Sort-Object -Unique)",
+    'foreach ($id in $listening) { try { $d = [PitwallCwd]::Get([int]$id); if ($d) { $cwds["$id"] = $d } } catch {} }',
+    '}',
+    '$json = @{ processes = $p; tcp = $t; cwds = $cwds } | ConvertTo-Json -Compress -Depth 3',
+    // PowerShell 호스트 출력(Write-Output)으로 600KB 가 넘는 한 줄을 내면 2초 가까이 걸린다.
+    // UTF-8 바이트를 표준 출력 스트림에 직접 써서 그 시간을 없애고, 콘솔 인코딩(한글 경로)에도 의존하지 않는다.
+    '$bytes = (New-Object System.Text.UTF8Encoding($false)).GetBytes($json)',
+    '$out = [Console]::OpenStandardOutput()',
+    '$out.Write($bytes, 0, $bytes.Length)',
+    '$out.Flush()'
+  ].join('\n')
+}
+
+export const WINDOWS_SAMPLE_SCRIPT = windowsSampleScript(null)
+
+let configuredHelperDllPath: string | null = null
+
+/** 앱 시작 시 보조 코드 DLL 을 둘 경로(앱 데이터 폴더)를 정한다. */
+export function configureWindowsSampler(options: { helperDllPath: string | null }): void {
+  configuredHelperDllPath = options.helperDllPath
+}
 
 /** PATH 에 의존하지 않도록 Windows PowerShell 5.1 의 전체 경로를 쓴다(모든 Windows 10/11 에 있음). */
 export function powershellPath(env: Record<string, string | undefined> = process.env): string {
@@ -138,8 +235,9 @@ export function parseWindowsSample(raw: string): RawSample {
   return { processes, tcp, cwds }
 }
 
-export async function sampleWindows(): Promise<RawSample> {
-  const { stdout, exitCode } = await runCommand([powershellPath(), ...buildPowerShellArgs(WINDOWS_SAMPLE_SCRIPT)], {
+export async function sampleWindows(options: { helperDllPath?: string | null } = {}): Promise<RawSample> {
+  const script = windowsSampleScript(options.helperDllPath ?? configuredHelperDllPath)
+  const { stdout, exitCode } = await runCommand([powershellPath(), ...buildPowerShellArgs(script)], {
     timeoutMs: COMMAND_TIMEOUT_MS
   })
   if (exitCode !== 0 && !stdout.trim()) throw new Error(`powershell exited with ${exitCode}`)

@@ -2,7 +2,16 @@ import { spawn } from 'child_process'
 import { mkdtemp, rm } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { parseWindowsSample, WINDOWS_SAMPLE_SCRIPT, buildPowerShellArgs, powershellPath, sampleWindows } from './windows'
+import { existsSync } from 'fs'
+import {
+  parseWindowsSample,
+  WINDOWS_SAMPLE_SCRIPT,
+  windowsSampleScript,
+  nativeHelperDllName,
+  buildPowerShellArgs,
+  powershellPath,
+  sampleWindows
+} from './windows'
 
 const vite =
   '"C:\\Program Files\\nodejs\\node.exe" C:\\Users\\김개발\\work\\shop-web\\node_modules\\.bin/../vite/bin/vite.js --port 3000'
@@ -86,8 +95,9 @@ test('빈 출력이나 JSON 이 아닌 출력은 이유가 담긴 에러', () =>
   expect(() => parseWindowsSample('Get-CimInstance : Access denied')).toThrow('invalid JSON')
 })
 
-test('스크립트는 UTF-8 출력을 강제하고 enum 을 문자열로 낸다', () => {
-  expect(WINDOWS_SAMPLE_SCRIPT).toContain('[Console]::OutputEncoding = [System.Text.Encoding]::UTF8')
+test('스크립트는 JSON 을 UTF-8 바이트로 표준 출력에 직접 쓰고(콘솔 인코딩·호스트 출력 우회) enum 을 문자열로 낸다', () => {
+  expect(WINDOWS_SAMPLE_SCRIPT).toContain('[Console]::OpenStandardOutput()')
+  expect(WINDOWS_SAMPLE_SCRIPT).toContain('New-Object System.Text.UTF8Encoding($false)')
   expect(WINDOWS_SAMPLE_SCRIPT).toContain('Get-NetTCPConnection')
   expect(WINDOWS_SAMPLE_SCRIPT).toContain('.State.ToString()')
   expect(WINDOWS_SAMPLE_SCRIPT).toContain("$ProgressPreference = 'SilentlyContinue'")
@@ -106,10 +116,30 @@ test('포트를 연 프로세스의 작업 폴더(cwds)를 pid → 경로로 읽
   expect(parseWindowsSample(json).cwds).toEqual({})
 })
 
+test('TCP 목록은 빠른 OS API(GetExtendedTcpTable)로 읽고, 막히면 Get-NetTCPConnection 으로 대신한다', () => {
+  expect(WINDOWS_SAMPLE_SCRIPT).toContain('GetExtendedTcpTable')
+  expect(WINDOWS_SAMPLE_SCRIPT).toMatch(/if \(\$t -eq \$null\) \{[\s\S]*Get-NetTCPConnection/)
+})
+
 test('스크립트는 포트를 연 프로세스만 골라 작업 폴더를 읽고, 실패해도 나머지는 낸다', () => {
   expect(WINDOWS_SAMPLE_SCRIPT).toContain('ReadProcessMemory')
   expect(WINDOWS_SAMPLE_SCRIPT).toContain('[PitwallCwd]::Get(')
   expect(WINDOWS_SAMPLE_SCRIPT).toMatch(/try\s*\{[\s\S]*Add-Type[\s\S]*\}\s*catch/)
+})
+
+test('보조 코드 DLL 경로를 주면 한 번만 컴파일해 재사용하고, 경로의 작은따옴표는 이스케이프한다', () => {
+  const script = windowsSampleScript("C:\\Users\\김'개발\\AppData\\Roaming\\pitwall\\pitwall-native-1.dll")
+  expect(script).toContain("$dll = 'C:\\Users\\김''개발\\AppData\\Roaming\\pitwall\\pitwall-native-1.dll'")
+  expect(script).toContain('Add-Type -Path $dll')
+  expect(script).toContain('-OutputAssembly $dll')
+  expect(windowsSampleScript(null)).not.toContain('$dll')
+  expect(nativeHelperDllName()).toMatch(/^pitwall-native-[0-9a-f]{12}\.dll$/)
+})
+
+test('명령줄 길이 제한(32767자) 안에 들어간다', () => {
+  const longPath = 'C:\\Users\\' + '가'.repeat(60) + '\\AppData\\Roaming\\pitwall\\' + nativeHelperDllName()
+  const args = buildPowerShellArgs(windowsSampleScript(longPath))
+  expect([powershellPath(), ...args].join(' ').length).toBeLessThan(30000)
 })
 
 test('powershell.exe 는 SystemRoot 기준 전체 경로로 실행(PATH 에 의존하지 않음)', () => {
@@ -136,6 +166,21 @@ describe.runIf(process.platform === 'win32')('실제 Windows 에서', () => {
     }
   }, 30000)
 
+  test('DLL 캐시: 첫 실행에 만들고 다음 실행부터 재사용, 결과는 같다', async () => {
+    const dir = await mkdtemp(join(tmpdir(), '김개발-dll-'))
+    const dll = join(dir, nativeHelperDllName())
+    try {
+      const first = await sampleWindows({ helperDllPath: dll })
+      expect(existsSync(dll)).toBe(true)
+      const second = await sampleWindows({ helperDllPath: dll })
+      expect(first.tcp.length).toBeGreaterThan(0)
+      expect(second.tcp.some((t) => t.state === 'Listen')).toBe(true)
+      expect(Object.keys(second.cwds ?? {}).length).toBeGreaterThan(0)
+    } finally {
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
+    }
+  }, 60000)
+
   test('상대 경로로 띄운 서버도 작업 폴더(한글 포함)를 읽는다', async () => {
     const dir = await mkdtemp(join(tmpdir(), '김개발-cwd-'))
     const child = spawn(
@@ -148,6 +193,10 @@ describe.runIf(process.platform === 'win32')('실제 Windows 에서', () => {
       await new Promise((r) => child.stdout.once('data', r))
       const s = await sampleWindows()
       expect(s.cwds?.[child.pid!]?.replace(/\\$/, '').toLowerCase()).toBe(dir.toLowerCase())
+      const listen = s.tcp.filter((t) => t.pid === child.pid && t.state === 'Listen')
+      expect(listen.length).toBeGreaterThan(0)
+      expect(listen[0].localPort).toBeGreaterThan(1023)
+      expect(['::', '0.0.0.0']).toContain(listen[0].localAddress)
     } finally {
       // Windows 는 프로세스가 작업 폴더로 쓰는 동안 그 폴더를 지울 수 없다.
       child.kill()
