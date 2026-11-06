@@ -38,3 +38,9 @@ SOFTWARE.
 - 출처: https://fontawesome.com (`@fortawesome/fontawesome-svg-core`, `@fortawesome/free-solid-svg-icons`, `@fortawesome/vue-fontawesome`)
 - 쓰는 것: 아이콘(설정 톱니바퀴 등). Uptime Kuma 와 같은 아이콘 세트다.
 - 라이선스: 아이콘 CC BY 4.0, 코드 MIT — https://fontawesome.com/license/free
+
+## jsonc-parser
+
+- 출처: https://github.com/microsoft/node-jsonc-parser (`jsonc-parser` 3.3.1)
+- 쓰는 것: Claude 설정 파일(settings.json)을 주석·후행 쉼표가 있어도 읽고, 고칠 위치를 찾는 데 쓴다.
+- 라이선스: MIT, Copyright (c) Microsoft
