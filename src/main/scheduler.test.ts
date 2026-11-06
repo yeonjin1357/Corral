@@ -6,6 +6,7 @@ function snap(takenAt: number): DashboardSnapshot {
     takenAt,
     memory: { totalBytes: 100, usedBytes: 50, usedPercent: 50, level: 'normal' },
     ports: [],
+    leftovers: [],
     groups: [],
     agentProcessCount: 0,
     stale: false,

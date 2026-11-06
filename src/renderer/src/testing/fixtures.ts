@@ -51,6 +51,7 @@ export function snapshot(over: Partial<DashboardSnapshot> = {}): DashboardSnapsh
       level: 'warn'
     },
     ports: threePorts,
+    leftovers: [],
     groups: [
       { group: 'devServer', memoryBytes: 2200 * MB, processCount: 5 },
       { group: 'agent', memoryBytes: 500 * MB, processCount: 4 },

@@ -2,11 +2,24 @@ import { spawn } from 'child_process'
 import { mkdtemp, mkdir, writeFile, rm } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { planKill, buildKillConfirm, createPortKiller, type KillDeps } from './kill'
+import {
+  planKill,
+  buildKillConfirm,
+  buildLeftoverConfirm,
+  createKiller,
+  type KillConfirm,
+  type KillDeps
+} from './kill'
 import { buildSnapshot } from './snapshot'
 import { sampleWindows } from './collect/windows'
 import { createWorktreeResolver } from './collect/worktree'
-import type { DashboardSnapshot, PortRow, ProcessInfo, RawSample } from '../shared/types'
+import type {
+  DashboardSnapshot,
+  LeftoverRow,
+  PortRow,
+  ProcessInfo,
+  RawSample
+} from '../shared/types'
 
 describe.runIf(process.platform === 'win32')('실제 Windows 에서', () => {
   test('임시 git 저장소에서 띄운 서버를 찾아 확인 후 실제로 내린다', async () => {
@@ -36,7 +49,7 @@ describe.runIf(process.platform === 'win32')('실제 Windows 에서', () => {
       })
       const row = snapshot.ports.find((p) => p.port === port && p.pid === child.pid)
       expect(row?.worktree?.root.toLowerCase()).toBe(dir.toLowerCase())
-      const killer = createPortKiller({
+      const killer = createKiller({
         latest: () => snapshot,
         resample: sampleWindows,
         confirm: async () => true,
@@ -90,11 +103,12 @@ const freshSample: RawSample = {
   tcp: []
 }
 
-function snapshotWith(ports: PortRow[]): DashboardSnapshot {
+function snapshotWith(ports: PortRow[], leftovers: LeftoverRow[] = []): DashboardSnapshot {
   return {
     takenAt: 1,
     memory: { totalBytes: 1, usedBytes: 0, usedPercent: 0, level: 'normal' },
     ports,
+    leftovers,
     groups: [],
     agentProcessCount: 0,
     stale: false,
@@ -172,7 +186,7 @@ describe('killPort', () => {
 
   test('Windows: 확인 후 루트와 자손을 각각 종료', async () => {
     const d = deps()
-    await expect(createPortKiller(d).killPort(3000, 4100)).resolves.toEqual({ status: 'killed' })
+    await expect(createKiller(d).killPort(3000, 4100)).resolves.toEqual({ status: 'killed' })
     expect(d.signal.mock.calls).toEqual([
       [4100, 'SIGTERM'],
       [4101, 'SIGTERM']
@@ -185,7 +199,7 @@ describe('killPort', () => {
     let call = 0
     const resample = vi.fn(async () => samples[Math.min(call++, 2)])
     const d = deps({ platform: 'darwin', wait, resample })
-    await expect(createPortKiller(d).killPort(3000, 4100)).resolves.toEqual({ status: 'killed' })
+    await expect(createKiller(d).killPort(3000, 4100)).resolves.toEqual({ status: 'killed' })
     expect(wait).toHaveBeenCalledWith(3000)
     expect(d.signal.mock.calls).toEqual([
       [4100, 'SIGTERM'],
@@ -198,15 +212,15 @@ describe('killPort', () => {
     const unresolvable = deps({
       latest: () => snapshotWith([{ ...row, unresolvable: true, worktree: null }])
     })
-    expect((await createPortKiller(unresolvable).killPort(3000, 4100)).status).toBe('failed')
+    expect((await createKiller(unresolvable).killPort(3000, 4100)).status).toBe('failed')
     const cancel = deps({ confirm: async () => false })
-    expect(await createPortKiller(cancel).killPort(3000, 4100)).toEqual({ status: 'cancelled' })
+    expect(await createKiller(cancel).killPort(3000, 4100)).toEqual({ status: 'cancelled' })
     const missing = deps({ latest: () => snapshotWith([]) })
-    expect(await createPortKiller(missing).killPort(3000, 4100)).toEqual({ status: 'gone' })
+    expect(await createKiller(missing).killPort(3000, 4100)).toEqual({ status: 'gone' })
     const nothing = deps({ latest: () => null })
-    expect(await createPortKiller(nothing).killPort(3000, 4100)).toEqual({ status: 'gone' })
+    expect(await createKiller(nothing).killPort(3000, 4100)).toEqual({ status: 'gone' })
     const bad = deps()
-    expect((await createPortKiller(bad).killPort(Number.NaN, -1)).status).toBe('failed')
+    expect((await createKiller(bad).killPort(Number.NaN, -1)).status).toBe('failed')
     for (const d of [unresolvable, cancel, missing, nothing, bad])
       expect(d.signal).not.toHaveBeenCalled()
   })
@@ -217,7 +231,7 @@ describe('killPort', () => {
       resample: async () =>
         call++ === 0 ? freshSample : { processes: [{ ...vite, commandLine: 'other' }], tcp: [] }
     })
-    expect(await createPortKiller(d).killPort(3000, 4100)).toEqual({ status: 'changed' })
+    expect(await createKiller(d).killPort(3000, 4100)).toEqual({ status: 'changed' })
     expect(d.signal).not.toHaveBeenCalled()
   })
 
@@ -228,7 +242,7 @@ describe('killPort', () => {
       confirm,
       resample: async () => ({ processes: [vite, esbuild, claude], tcp: [] })
     })
-    expect(await createPortKiller(d).killPort(3000, 4100)).toEqual({
+    expect(await createKiller(d).killPort(3000, 4100)).toEqual({
       status: 'failed',
       message:
         '이 프로세스 아래에서 에이전트(Claude·Codex)가 돌고 있어 내리지 않았어요. 에이전트를 먼저 끝내 주세요.'
@@ -243,7 +257,7 @@ describe('killPort', () => {
         throw new Error('timeout')
       }
     })
-    expect(await createPortKiller(d).killPort(3000, 4100)).toEqual({
+    expect(await createKiller(d).killPort(3000, 4100)).toEqual({
       status: 'failed',
       message: 'timeout'
     })
@@ -255,13 +269,13 @@ describe('killPort', () => {
         throw Object.assign(new Error('x'), { code: 'ESRCH' })
       })
     })
-    expect(await createPortKiller(esrch).killPort(3000, 4100)).toEqual({ status: 'gone' })
+    expect(await createKiller(esrch).killPort(3000, 4100)).toEqual({ status: 'gone' })
     const eperm = deps({
       signal: vi.fn(() => {
         throw Object.assign(new Error('x'), { code: 'EPERM' })
       })
     })
-    expect(await createPortKiller(eperm).killPort(3000, 4100)).toEqual({
+    expect(await createKiller(eperm).killPort(3000, 4100)).toEqual({
       status: 'failed',
       message: '권한이 없어 내리지 못했어요. 관리자 권한으로 실행된 프로세스일 수 있어요.'
     })
@@ -273,13 +287,13 @@ describe('killPort', () => {
         if (pid === 4101) throw Object.assign(new Error('x'), { code: 'ESRCH' })
       })
     })
-    expect(await createPortKiller(d).killPort(3000, 4100)).toEqual({ status: 'killed' })
+    expect(await createKiller(d).killPort(3000, 4100)).toEqual({ status: 'killed' })
   })
 
   test('같은 pid 를 두 번 동시에 누르면 두 번째는 확인 창 없이 거절', async () => {
     let release: (v: boolean) => void = () => {}
     const confirm = vi.fn(() => new Promise<boolean>((r) => (release = r)))
-    const killer = createPortKiller(deps({ confirm }))
+    const killer = createKiller(deps({ confirm }))
     const first = killer.killPort(3000, 4100)
     const second = await killer.killPort(3000, 4100)
     expect(second).toEqual({ status: 'failed', message: '이미 처리 중이에요.' })
@@ -287,5 +301,105 @@ describe('killPort', () => {
     release(true)
     expect(await first).toEqual({ status: 'killed' })
     expect(confirm).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('남은 프로세스 끄기', () => {
+  const leftover: LeftoverRow = {
+    pid: 4100,
+    processName: 'node.exe',
+    label: 'Vitest',
+    commandLine: 'node vite --port 3000',
+    worktree: null,
+    memoryBytes: 2 * MB,
+    descendantPids: [4101],
+    startedAt: 200,
+    agentInWorktree: false
+  }
+
+  function deps(over: Partial<KillDeps> = {}): KillDeps & { signal: ReturnType<typeof vi.fn> } {
+    const signal = vi.fn()
+    return {
+      latest: () => snapshotWith([], [leftover]),
+      resample: async () => freshSample,
+      confirm: async () => true,
+      signal,
+      wait: async () => {},
+      platform: 'win32',
+      ...over
+    } as KillDeps & { signal: ReturnType<typeof vi.fn> }
+  }
+
+  test('확인 창 문구(작업 폴더를 모르면 그렇게, 같은 워크트리 에이전트는 알림)', () => {
+    expect(buildLeftoverConfirm(leftover)).toEqual({
+      title: '남은 프로세스 끄기',
+      message: 'Vitest (작업 폴더 모름) 을(를) 끌까요?',
+      detail: 'node.exe (PID 4100) 와 하위 프로세스 1개가 종료돼요.',
+      buttons: ['끄기', '취소'],
+      defaultId: 1,
+      cancelId: 1
+    })
+    const inWorktree = buildLeftoverConfirm({
+      ...leftover,
+      worktree: { root: 'C:\\work\\shop-web', branch: 'develop', isLinkedWorktree: false },
+      agentInWorktree: true
+    })
+    expect(inWorktree.message).toBe('Vitest (shop-web · develop) 을(를) 끌까요?')
+    expect(inWorktree.detail).toBe(
+      'node.exe (PID 4100) 와 하위 프로세스 1개가 종료돼요.\n' +
+        '이 워크트리에서 에이전트가 실행 중이에요. 에이전트가 이 프로세스를 쓰고 있을 수 있어요.'
+    )
+  })
+
+  test('확인 후 루트와 최신 샘플의 자손을 종료', async () => {
+    const confirm = vi.fn<(o: KillConfirm) => Promise<boolean>>(async () => true)
+    const d = deps({ confirm })
+    await expect(createKiller(d).killLeftover(4100)).resolves.toEqual({ status: 'killed' })
+    expect(confirm.mock.calls[0]?.[0].title).toBe('남은 프로세스 끄기')
+    expect(d.signal.mock.calls).toEqual([
+      [4100, 'SIGTERM'],
+      [4101, 'SIGTERM']
+    ])
+  })
+
+  test('목록에 없으면 gone, 잘못된 pid 는 failed, 취소하면 아무것도 끄지 않는다', async () => {
+    const d = deps()
+    expect(await createKiller(d).killLeftover(9999)).toEqual({ status: 'gone' })
+    expect((await createKiller(d).killLeftover(-1)).status).toBe('failed')
+    expect(await createKiller(deps({ confirm: async () => false })).killLeftover(4100)).toEqual({
+      status: 'cancelled'
+    })
+    expect(d.signal).not.toHaveBeenCalled()
+  })
+
+  test('그 사이 다른 프로세스로 바뀌었거나 하위에 에이전트가 생기면 끄지 않는다', async () => {
+    const changed = deps({
+      resample: async () => ({ processes: [{ ...vite, commandLine: 'other' }], tcp: [] })
+    })
+    expect(await createKiller(changed).killLeftover(4100)).toEqual({ status: 'changed' })
+    const claude = proc(4200, 4100, 'claude.exe', '"C:\\Users\\a\\.local\\bin\\claude.exe"', 500)
+    const withAgent = deps({
+      resample: async () => ({ processes: [vite, esbuild, claude], tcp: [] })
+    })
+    expect((await createKiller(withAgent).killLeftover(4100)).status).toBe('failed')
+    expect(changed.signal).not.toHaveBeenCalled()
+    expect(withAgent.signal).not.toHaveBeenCalled()
+  })
+
+  test('포트 내리기와 같은 pid 를 동시에 처리하지 않는다', async () => {
+    let release: (v: boolean) => void = () => {}
+    const confirm = vi.fn(() => new Promise<boolean>((r) => (release = r)))
+    const killer = createKiller({
+      ...deps({ confirm }),
+      latest: () => snapshotWith([row], [leftover])
+    })
+    const first = killer.killPort(3000, 4100)
+    expect(await killer.killLeftover(4100)).toEqual({
+      status: 'failed',
+      message: '이미 처리 중이에요.'
+    })
+    await vi.waitFor(() => expect(confirm).toHaveBeenCalled())
+    release(false)
+    expect(await first).toEqual({ status: 'cancelled' })
   })
 })

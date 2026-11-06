@@ -1,7 +1,7 @@
 import type { ProcessInfo, RawSample, TcpEntry, TcpState } from '../../shared/types'
 import { COMMAND_TIMEOUT_MS } from '../../shared/defaults'
 import { runCommand, type CommandOptions, type CommandResult } from './runCommand'
-import { classifyAgent } from '../snapshot'
+import { classifyAgent } from '../processTree'
 
 /**
  * macOS 는 실행 파일 경로에 공백이 흔하다(`/Applications/Visual Studio Code.app/...`).

@@ -1,15 +1,11 @@
 import type { AgentRow, PortRow } from '../shared/types'
+import { worktreeKey } from '../shared/format'
 
 /** 포트별로 지금 상태(연결 0 / 탭만)가 시작된 시각. 키는 `포트:pid:시작 시각`(다시 뜬 서버는 새로 센다). */
 export type PortMemo = Map<string, { state: 'idle' | 'tabs'; since: number }>
 
 function portKey(row: PortRow): string {
   return `${row.port}:${row.pid}:${row.startedAt ?? ''}`
-}
-
-/** Windows·macOS 는 경로 대소문자를 가리지 않고, 판별 경로(명령줄·작업 폴더)에 따라 표기가 다를 수 있다. */
-function rootKey(root: string): string {
-  return root.replace(/[\\/]+$/, '').toLowerCase()
 }
 
 /**
@@ -26,12 +22,14 @@ export function judgePorts(
   now: number,
   thresholdMs: number
 ): { rows: PortRow[]; memo: PortMemo } {
-  const agentRoots = new Set(agents.flatMap((a) => (a.worktree ? [rootKey(a.worktree.root)] : [])))
+  const agentRoots = new Set(
+    agents.flatMap((a) => (a.worktree ? [worktreeKey(a.worktree.root)] : []))
+  )
   const memo: PortMemo = new Map()
   const judged = rows.map((row): PortRow => {
     if (row.unresolvable || !row.worktree)
       return { ...row, judgement: null, idleSince: null, agentInWorktree: false }
-    if (agentRoots.has(rootKey(row.worktree.root)))
+    if (agentRoots.has(worktreeKey(row.worktree.root)))
       return { ...row, judgement: null, idleSince: null, agentInWorktree: true }
 
     const key = portKey(row)

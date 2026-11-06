@@ -1,6 +1,6 @@
 import type { AgentRow, AgentState, ProcessInfo, RawSample, WorktreeInfo } from '../shared/types'
 import { worktreeFolder } from '../shared/format'
-import { agentToolOf, buildTree, topLevelAgentPids } from './snapshot'
+import { agentToolOf, buildTree, topLevelAgentPids } from './processTree'
 
 /** 하위 트리 CPU 사용률이 코어 1개 기준 이 값(%) 이상이면 작업 중으로 본다. */
 export const WORKING_CPU_PERCENT = 2

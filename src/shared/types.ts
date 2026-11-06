@@ -86,6 +86,22 @@ export interface PortRow {
   agentInWorktree: boolean
 }
 
+/** 주인(실행한 프로세스)이 끝났는데 남은 개발 도구 프로세스(자손 포함 한 행). */
+export interface LeftoverRow {
+  pid: number
+  processName: string
+  /** 알아보기 쉬운 이름(Playwright 브라우저, Gradle 데몬 등). */
+  label: string
+  commandLine: string
+  worktree: WorktreeInfo | null
+  /** 자기 + 자손. */
+  memoryBytes: number
+  descendantPids: number[]
+  startedAt: number | null
+  /** 같은 워크트리에 에이전트가 실행 중. */
+  agentInWorktree: boolean
+}
+
 export type PortJudgement = 'candidate' | 'check'
 
 export interface GroupUsage {
@@ -126,6 +142,7 @@ export interface DashboardSnapshot {
   takenAt: number
   memory: MemorySummary
   ports: PortRow[]
+  leftovers: LeftoverRow[]
   groups: GroupUsage[]
   agentProcessCount: number
   stale: boolean

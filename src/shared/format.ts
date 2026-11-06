@@ -45,6 +45,14 @@ export function worktreeFolder(worktree: WorktreeInfo | null): string {
   return parts[parts.length - 1] ?? worktree.root
 }
 
+/**
+ * 워크트리 경로 비교용 키. Windows·macOS 는 경로 대소문자를 가리지 않고,
+ * 판별 경로(명령줄·작업 폴더)에 따라 표기가 다를 수 있다.
+ */
+export function worktreeKey(root: string): string {
+  return root.replace(/[\\/]+$/, '').toLowerCase()
+}
+
 export function worktreeLabel(worktree: WorktreeInfo | null): string {
   if (!worktree) return text.unresolvable
   return `${worktreeFolder(worktree)} · ${worktree.branch ?? text.detached}`

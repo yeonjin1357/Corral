@@ -11,9 +11,10 @@ import { sample, toPlatform } from './collect/sample'
 import { configureWindowsSampler, nativeHelperDllName } from './collect/windows'
 import { readMemory } from './collect/memory'
 import { resolveProcessWorktrees } from './collect/worktree'
-import { buildSnapshot, pidsForWorktreeLookup, topLevelAgentPids } from './snapshot'
+import { buildSnapshot, pidsForWorktreeLookup } from './snapshot'
+import { topLevelAgentPids } from './processTree'
 import { createScheduler } from './scheduler'
-import { createPortKiller, type KillConfirm } from './kill'
+import { createKiller, type KillConfirm } from './kill'
 import { localUrlFor } from './open'
 import { createDotIcon, createTrayController, encodePng, LEVEL_COLORS } from './tray'
 import type { MemoryLevel } from '../shared/types'
@@ -43,7 +44,7 @@ function trayIcon(level: MemoryLevel): Electron.NativeImage {
 async function collect(): Promise<DashboardSnapshot> {
   if (!platform) throw new Error(text.unsupportedPlatform)
   const [raw, memory] = await Promise.all([sample(platform), readMemory(platform)])
-  const needed = pidsForWorktreeLookup(raw)
+  const needed = pidsForWorktreeLookup(raw, platform)
   const worktrees = await resolveProcessWorktrees(
     raw.processes.filter((p) => needed.has(p.pid)),
     raw.cwds,
@@ -56,7 +57,8 @@ async function collect(): Promise<DashboardSnapshot> {
     freeBytes: memory.freeBytes,
     thresholds: DEFAULT_THRESHOLDS,
     now: Date.now(),
-    selfPid: process.pid
+    selfPid: process.pid,
+    platform
   })
 }
 
@@ -119,7 +121,7 @@ async function confirmKill(options: KillConfirm): Promise<boolean> {
   return result.response === 0
 }
 
-const killer = createPortKiller({
+const killer = createKiller({
   latest: () => scheduler.latest(),
   resample: () =>
     platform ? sample(platform) : Promise.reject(new Error(text.unsupportedPlatform)),

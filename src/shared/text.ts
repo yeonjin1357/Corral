@@ -15,6 +15,24 @@ export const text = {
     confirm: '내리기',
     cancel: '취소'
   },
+  leftoverKill: {
+    title: '남은 프로세스 끄기',
+    message: (label: string, where: string): string => `${label} (${where}) 을(를) 끌까요?`,
+    noWorktree: '작업 폴더 모름',
+    agentInWorktree:
+      '이 워크트리에서 에이전트가 실행 중이에요. 에이전트가 이 프로세스를 쓰고 있을 수 있어요.',
+    confirm: '끄기'
+  },
+  leftoverLabels: {
+    kotlinDaemon: 'Kotlin 데몬',
+    gradleDaemon: 'Gradle 데몬',
+    playwrightMcp: 'Playwright MCP',
+    playwrightBrowser: 'Playwright 브라우저',
+    playwright: 'Playwright',
+    headlessBrowser: '헤드리스 브라우저',
+    jestWorker: 'Jest 워커',
+    tsserver: 'TypeScript 서버'
+  },
   killResult: {
     gone: '이미 종료된 프로세스예요.',
     changed: '그 사이 다른 프로세스로 바뀌어서 내리지 않았어요.',

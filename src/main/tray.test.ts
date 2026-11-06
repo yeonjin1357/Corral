@@ -36,6 +36,7 @@ function snap(over: Partial<DashboardSnapshot> = {}): DashboardSnapshot {
       idleSince: null,
       agentInWorktree: false
     })),
+    leftovers: [],
     groups: [],
     agentProcessCount: 0,
     stale: false,

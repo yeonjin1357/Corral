@@ -17,6 +17,7 @@ function emptySnapshot(takenAt: number, error: string): DashboardSnapshot {
     takenAt,
     memory: { totalBytes: 0, usedBytes: 0, usedPercent: 0, level: 'normal' },
     ports: [],
+    leftovers: [],
     groups: [],
     agentProcessCount: 0,
     stale: true,

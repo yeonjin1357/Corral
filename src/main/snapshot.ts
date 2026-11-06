@@ -3,13 +3,15 @@ import type {
   GroupUsage,
   MemoryLevel,
   MemorySummary,
+  Platform,
   PortRow,
-  ProcessInfo,
   RawSample,
-  WorktreeInfo,
-  AgentTool
+  WorktreeInfo
 } from '../shared/types'
 import { DEFAULT_THRESHOLDS } from '../shared/defaults'
+import { worktreeKey } from '../shared/format'
+import { findLeftovers } from './leftovers'
+import { buildTree, classifyAgent, topLevelAgentPids, type ProcessTree } from './processTree'
 
 /** WSL·Docker·Podman 처럼 다른 환경의 포트를 대신 열어 주는 프로세스. 어느 worktree 것인지 알 수 없다. */
 export const RELAY_PROCESS_NAMES: readonly string[] = [
@@ -29,26 +31,6 @@ const RELAY_SET = new Set(RELAY_PROCESS_NAMES.map((n) => n.toLowerCase()))
 const MIN_DEV_PORT = 1024
 const MAX_ANCESTOR_DEPTH = 3
 
-const AGENT_NAME =
-  /^(claude(\.exe)?|codex(-(x86_64|aarch64|arm64|x64|universal)[\w.-]*)?(\.exe)?)$/i
-const AGENT_PACKAGE = /@anthropic-ai\/claude-code|@openai\/codex/i
-const CLAUDE_NAME = /^claude(\.exe)?$/i
-const CLAUDE_PACKAGE = /@anthropic-ai\/claude-code/i
-/** Claude 데스크톱 앱(이름이 같은 claude.exe / Claude)과 Electron 보조 프로세스는 에이전트가 아니다. */
-const NOT_AGENT = /AnthropicClaude|Claude\.app\/|--type=/i
-
-/** 에이전트면 도구 이름, 아니면 null. */
-export function agentToolOf(p: ProcessInfo): AgentTool | null {
-  const commandLine = p.commandLine.replace(/\\/g, '/')
-  if (NOT_AGENT.test(commandLine)) return null
-  if (!AGENT_NAME.test(p.name) && !AGENT_PACKAGE.test(commandLine)) return null
-  return CLAUDE_NAME.test(p.name) || CLAUDE_PACKAGE.test(commandLine) ? 'claude' : 'codex'
-}
-
-export function classifyAgent(p: ProcessInfo): boolean {
-  return agentToolOf(p) !== null
-}
-
 export function levelOf(
   usedPercent: number,
   t: { ramWarnPercent: number; ramDangerPercent: number } = DEFAULT_THRESHOLDS
@@ -58,86 +40,20 @@ export function levelOf(
   return 'normal'
 }
 
-/**
- * Windows 는 부모가 끝나도 자식의 ppid 가 남고, 그 pid 가 나중에 다른 프로세스에 재사용될 수 있다.
- * 부모보다 먼저 시작한 "자식"은 진짜 자식이 아니다.
- */
-function isPlausibleChild(child: ProcessInfo, parent: ProcessInfo): boolean {
-  if (child.pid === parent.pid) return false
-  if (child.startedAt == null || parent.startedAt == null) return true
-  return child.startedAt >= parent.startedAt
-}
-
-export interface ProcessTree {
-  byPid: Map<number, ProcessInfo>
-  parentOf(pid: number): ProcessInfo | undefined
-  descendants(pid: number): number[]
-  ancestors(pid: number, maxDepth: number): ProcessInfo[]
-}
-
-export function buildTree(processes: ProcessInfo[]): ProcessTree {
-  const byPid = new Map(processes.map((p) => [p.pid, p]))
-  const children = new Map<number, number[]>()
-  for (const p of processes) {
-    const parent = byPid.get(p.ppid)
-    if (!parent || !isPlausibleChild(p, parent)) continue
-    const list = children.get(parent.pid)
-    if (list) list.push(p.pid)
-    else children.set(parent.pid, [p.pid])
-  }
-
-  const parentOf = (pid: number): ProcessInfo | undefined => {
-    const p = byPid.get(pid)
-    const parent = p && byPid.get(p.ppid)
-    return p && parent && isPlausibleChild(p, parent) ? parent : undefined
-  }
-
-  // ppid 가 서로를 가리키는 고리가 있을 수 있어 방문 표시로 끊는다.
-  const descendants = (pid: number): number[] => {
-    const result: number[] = []
-    const visited = new Set([pid])
-    const queue = [...(children.get(pid) ?? [])]
-    while (queue.length) {
-      const next = queue.shift()!
-      if (visited.has(next)) continue
-      visited.add(next)
-      result.push(next)
-      queue.push(...(children.get(next) ?? []))
-    }
-    return result
-  }
-
-  const ancestors = (pid: number, maxDepth: number): ProcessInfo[] => {
-    const result: ProcessInfo[] = []
-    const visited = new Set([pid])
-    let current = parentOf(pid)
-    while (current && result.length < maxDepth && !visited.has(current.pid)) {
-      visited.add(current.pid)
-      result.push(current)
-      current = parentOf(current.pid)
-    }
-    return result
-  }
-
-  return { byPid, parentOf, descendants, ancestors }
-}
-
-/** 에이전트 조상이 없는(같은 세션의 하위가 아닌) 에이전트 pid. */
-export function topLevelAgentPids(
-  processes: ProcessInfo[],
-  tree: ProcessTree = buildTree(processes)
-): number[] {
-  const agentSet = new Set(processes.filter(classifyAgent).map((p) => p.pid))
-  return [...agentSet].filter(
-    (pid) => !tree.ancestors(pid, Number.MAX_SAFE_INTEGER).some((a) => agentSet.has(a.pid))
-  )
+/** 에이전트와 그 자손 pid. */
+function agentTreePids(sample: RawSample, tree: ProcessTree): Set<number> {
+  const pids = new Set<number>()
+  for (const p of sample.processes)
+    if (classifyAgent(p)) for (const member of [p.pid, ...tree.descendants(p.pid)]) pids.add(member)
+  return pids
 }
 
 /**
- * worktree 를 찾아보는 pid: 개발용 포트(1024 이상)를 연 프로세스와 그 위 3단계 조상, 최상위 에이전트.
+ * worktree 를 찾아보는 pid: 개발용 포트(1024 이상)를 연 프로세스와 그 위 3단계 조상, 최상위 에이전트,
+ * 남은 프로세스 후보와 그 자손.
  * 모든 프로세스의 경로를 확인하면 파일 시스템 조회가 수백 배 늘고, 응답 없는 네트워크 드라이브에 막힐 수 있다.
  */
-export function pidsForWorktreeLookup(sample: RawSample): Set<number> {
+export function pidsForWorktreeLookup(sample: RawSample, platform?: Platform): Set<number> {
   const tree = buildTree(sample.processes)
   const pids = new Set<number>()
   for (const t of sample.tcp) {
@@ -152,12 +68,11 @@ export function pidsForWorktreeLookup(sample: RawSample): Set<number> {
     for (const ancestor of tree.ancestors(t.pid, MAX_ANCESTOR_DEPTH)) pids.add(ancestor.pid)
   }
   for (const pid of topLevelAgentPids(sample.processes, tree)) pids.add(pid)
+  // 개발 서버 판별 전이라 개발 서버 트리는 아직 못 뺀다(후보가 조금 더 많을 뿐).
+  const exclude = agentTreePids(sample, tree)
+  for (const row of findLeftovers(sample, new Map(), { exclude, platform }))
+    for (const pid of [row.pid, ...row.descendantPids]) pids.add(pid)
   return pids
-}
-
-/** 시작 시각으로 pid 재사용을 걸러낸 자손 pid 목록(종료 직전 최신 샘플로 다시 계산할 때 쓴다). */
-export function descendantsOf(processes: ProcessInfo[], pid: number): number[] {
-  return buildTree(processes).descendants(pid)
 }
 
 function summarizeMemory(
@@ -185,6 +100,8 @@ export function buildSnapshot(input: {
   now: number
   /** pitwall 자신의 pid. 자신과 자식이 연 포트는 목록에 올리지 않는다(스스로를 내리지 않도록). */
   selfPid?: number
+  /** macOS 는 부모가 끝난 프로세스가 launchd(1) 아래로 옮겨진다(남은 프로세스 판단). */
+  platform?: Platform
 }): DashboardSnapshot {
   const { sample, worktrees } = input
   const tree = buildTree(sample.processes)
@@ -259,7 +176,20 @@ export function buildSnapshot(input: {
     for (const member of [pid, ...tree.descendants(pid)])
       if (!devServer.has(member)) agent.add(member)
   }
-  const agentProcessCount = topLevelAgentPids(sample.processes, tree).length
+  const topAgents = topLevelAgentPids(sample.processes, tree)
+  const agentProcessCount = topAgents.length
+
+  const agentRoots = new Set(
+    topAgents.flatMap((pid) => {
+      const w = worktrees.get(pid)
+      return w ? [worktreeKey(w.root)] : []
+    })
+  )
+  const leftovers = findLeftovers(sample, worktrees, {
+    exclude: new Set([...self, ...devServer, ...agent]),
+    agentRoots,
+    platform: input.platform
+  })
 
   const memory = summarizeMemory(input.totalBytes, input.freeBytes, input.thresholds)
   const devBytes = memoryOf(devServer)
@@ -278,6 +208,7 @@ export function buildSnapshot(input: {
     takenAt: input.now,
     memory,
     ports,
+    leftovers,
     groups,
     agentProcessCount,
     stale: false,

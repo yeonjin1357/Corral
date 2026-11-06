@@ -1,11 +1,5 @@
-import {
-  agentToolOf,
-  buildSnapshot,
-  classifyAgent,
-  levelOf,
-  pidsForWorktreeLookup,
-  RELAY_PROCESS_NAMES
-} from './snapshot'
+import { buildSnapshot, levelOf, pidsForWorktreeLookup, RELAY_PROCESS_NAMES } from './snapshot'
+import { agentToolOf, classifyAgent } from './processTree'
 import type { ProcessInfo, RawSample, TcpEntry, WorktreeInfo } from '../shared/types'
 
 const MB = 1024 * 1024
@@ -279,10 +273,12 @@ test('수집 방식을 스냅샷에 그대로 옮기고, 없으면 null', () => 
   expect(buildSnapshot(input).collectMode).toBeNull()
 })
 
-test('worktree 판별은 포트를 연 프로세스(1024 이상)와 그 위 3단계 조상, 최상위 에이전트만 하면 된다', () => {
+test('worktree 판별은 포트를 연 프로세스(1024 이상)와 그 위 3단계 조상, 최상위 에이전트, 남은 프로세스 후보만 하면 된다', () => {
   // 8200 은 최상위 Codex, 5001·8201 은 하위 에이전트라 빠진다.
+  // 4000(npm, 부모 없음) 아래 esbuild(4101)가 있어 남은 프로세스 후보로 4000·4100·4101 이 들어간다
+  // (개발 서버인지는 판별 뒤에 알 수 있어 이 단계에서는 못 뺀다).
   expect([...pidsForWorktreeLookup(sample)].sort((a, b) => a - b)).toEqual([
-    4000, 4100, 5000, 5100, 6000, 7000, 7050, 7100, 7202, 7203, 7204, 7205, 8200, 9100, 9101
+    4000, 4100, 4101, 5000, 5100, 6000, 7000, 7050, 7100, 7202, 7203, 7204, 7205, 8200, 9100, 9101
   ])
 })
 
@@ -294,4 +290,39 @@ test('릴레이 프로세스 이름 목록은 대소문자 무관하게 비교',
     worktrees: new Map()
   })
   expect(s.ports.map((p) => p.unresolvable)).toEqual([true])
+})
+
+describe('남은 프로세스', () => {
+  const PW = 'C:\\x\\ms-playwright\\chromium\\chrome.exe --remote-debugging-pipe'
+  const VT = 'node C:\\work\\wt-a\\node_modules\\vitest\\vitest.mjs'
+  const extra = [
+    proc(9500, 9499, 'chrome.exe', 120, 100, PW),
+    proc(9600, 9599, 'node.exe', 30, 100, VT),
+    proc(9700, 9699, 'chrome.exe', 50, 100, PW)
+  ]
+
+  test('개발 서버·에이전트·pitwall 트리는 빼고, 같은 워크트리 에이전트를 표시한다', () => {
+    const s = buildSnapshot({
+      ...input,
+      sample: { processes: [...processes, ...extra], tcp },
+      worktrees: new Map([...worktrees, [9600, W2], [5000, W2]]),
+      selfPid: 9500
+    })
+    expect(s.leftovers.map((r) => [r.pid, r.label, r.agentInWorktree])).toEqual([
+      [9700, 'Playwright 브라우저', false],
+      [9600, 'Vitest', true]
+    ])
+  })
+
+  test('기존 표본(개발 서버를 거느린 npm·에이전트·셸)에서는 남은 프로세스가 없다', () => {
+    expect(buildSnapshot(input).leftovers).toEqual([])
+  })
+
+  test('워크트리 판별 대상에 남은 프로세스와 그 자손을 더한다', () => {
+    const pids = pidsForWorktreeLookup({
+      processes: [...processes, ...extra, proc(9601, 9600, 'node.exe', 1, 200, 'worker')],
+      tcp
+    })
+    expect([9500, 9600, 9601, 9700].every((pid) => pids.has(pid))).toBe(true)
+  })
 })

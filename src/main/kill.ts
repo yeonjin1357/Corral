@@ -1,6 +1,7 @@
 import type {
   DashboardSnapshot,
   KillResult,
+  LeftoverRow,
   Platform,
   PortRow,
   ProcessInfo,
@@ -8,7 +9,7 @@ import type {
 } from '../shared/types'
 import { worktreeLabel } from '../shared/format'
 import { text } from '../shared/text'
-import { classifyAgent, descendantsOf } from './snapshot'
+import { classifyAgent, descendantsOf } from './processTree'
 
 export type { KillResult }
 
@@ -21,15 +22,19 @@ export interface KillConfirm {
   cancelId: number
 }
 
+/** 끌 대상(포트 행·남은 프로세스 행)에서 "같은 프로세스인지" 확인하는 데 쓰는 값. */
+export type KillTarget = Pick<PortRow, 'pid' | 'processName' | 'commandLine' | 'startedAt'>
+
 export type KillPlan =
   { ok: true; pids: number[] } | { ok: false; reason: 'gone' | 'changed' | 'agent' }
 
 /** macOS 는 먼저 정상 종료(SIGTERM)를 요청하고, 이 시간 뒤에도 남아 있으면 강제 종료한다. */
 const DARWIN_GRACE_MS = 3000
 
-function isSameProcess(row: PortRow, p: ProcessInfo): boolean {
-  if (p.name !== row.processName || p.commandLine !== row.commandLine) return false
-  if (row.startedAt != null && p.startedAt != null && row.startedAt !== p.startedAt) return false
+function isSameProcess(target: KillTarget, p: ProcessInfo): boolean {
+  if (p.name !== target.processName || p.commandLine !== target.commandLine) return false
+  if (target.startedAt != null && p.startedAt != null && target.startedAt !== p.startedAt)
+    return false
   return true
 }
 
@@ -37,11 +42,11 @@ function isSameProcess(row: PortRow, p: ProcessInfo): boolean {
  * 종료 직전 최신 샘플로 "아직 그 프로세스가 맞는지"를 확인하고, 자손도 최신 샘플에서 다시 계산한다.
  * 스냅샷 이후 그 pid 가 다른 프로세스에 재사용됐으면 끄지 않는다.
  */
-export function planKill(row: PortRow, fresh: RawSample): KillPlan {
-  const p = fresh.processes.find((x) => x.pid === row.pid)
+export function planKill(target: KillTarget, fresh: RawSample): KillPlan {
+  const p = fresh.processes.find((x) => x.pid === target.pid)
   if (!p) return { ok: false, reason: 'gone' }
-  if (!isSameProcess(row, p)) return { ok: false, reason: 'changed' }
-  const descendants = descendantsOf(fresh.processes, row.pid)
+  if (!isSameProcess(target, p)) return { ok: false, reason: 'changed' }
+  const descendants = descendantsOf(fresh.processes, target.pid)
   // 예: worktree 에서 띄운 IDE 를 내리면 그 터미널 안의 Claude·Codex 세션까지 같이 꺼진다.
   const byPid = new Map(fresh.processes.map((x) => [x.pid, x]))
   if (
@@ -52,7 +57,7 @@ export function planKill(row: PortRow, fresh: RawSample): KillPlan {
   ) {
     return { ok: false, reason: 'agent' }
   }
-  return { ok: true, pids: [row.pid, ...descendants] }
+  return { ok: true, pids: [target.pid, ...descendants] }
 }
 
 function planFailure(reason: 'gone' | 'changed' | 'agent'): KillResult {
@@ -70,6 +75,21 @@ export function buildKillConfirm(row: PortRow): KillConfirm {
       ...(row.agentInWorktree ? [text.kill.agentInWorktree] : [])
     ].join('\n'),
     buttons: [text.kill.confirm, text.kill.cancel],
+    defaultId: 1,
+    cancelId: 1
+  }
+}
+
+export function buildLeftoverConfirm(row: LeftoverRow): KillConfirm {
+  const where = row.worktree ? worktreeLabel(row.worktree) : text.leftoverKill.noWorktree
+  return {
+    title: text.leftoverKill.title,
+    message: text.leftoverKill.message(row.label, where),
+    detail: [
+      text.kill.detail(row.processName, row.pid, row.descendantPids.length),
+      ...(row.agentInWorktree ? [text.leftoverKill.agentInWorktree] : [])
+    ].join('\n'),
+    buttons: [text.leftoverKill.confirm, text.kill.cancel],
     defaultId: 1,
     cancelId: 1
   }
@@ -95,14 +115,24 @@ function errorMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
 }
 
-export function createPortKiller(deps: KillDeps): {
+function validId(n: number): boolean {
+  return Number.isInteger(n) && n > 0
+}
+
+/**
+ * 포트 내리기와 남은 프로세스 끄기. 둘 다 같은 절차를 거친다:
+ * 최신 샘플로 같은 프로세스인지·하위에 에이전트가 없는지 확인 → 네이티브 확인 창 → 한 번 더 확인 → 루트와 자손 종료.
+ * 같은 pid 를 동시에 처리하지 않는다(포트와 남은 프로세스 사이에서도).
+ */
+export function createKiller(deps: KillDeps): {
   killPort(port: number, pid: number): Promise<KillResult>
+  killLeftover(pid: number): Promise<KillResult>
 } {
   const busy = new Set<number>()
 
-  async function freshPlan(row: PortRow): Promise<{ plan: KillPlan; sample: RawSample }> {
+  async function freshPlan(target: KillTarget): Promise<{ plan: KillPlan; sample: RawSample }> {
     const sample = await deps.resample()
-    return { plan: planKill(row, sample), sample }
+    return { plan: planKill(target, sample), sample }
   }
 
   async function escalateOnDarwin(pids: number[], planned: RawSample): Promise<void> {
@@ -127,23 +157,24 @@ export function createPortKiller(deps: KillDeps): {
     }
   }
 
-  async function killPort(port: number, pid: number): Promise<KillResult> {
-    if (!Number.isInteger(port) || !Number.isInteger(pid) || port <= 0 || pid <= 0) {
-      return { status: 'failed', message: text.killResult.invalid }
-    }
+  /** find 가 최신 스냅샷에서 대상을 찾아 돌려준다(없으면 gone, 문자열이면 그 이유로 실패). */
+  async function run(
+    pid: number,
+    find: () => { target: KillTarget; confirm: KillConfirm } | 'gone' | KillResult
+  ): Promise<KillResult> {
     if (busy.has(pid)) return { status: 'failed', message: text.killResult.busy }
     busy.add(pid)
     try {
-      const row = deps.latest()?.ports.find((r) => r.port === port && r.pid === pid)
-      if (!row) return { status: 'gone' }
-      if (row.unresolvable) return { status: 'failed', message: text.killResult.unresolvable }
+      const found = find()
+      if (found === 'gone') return { status: 'gone' }
+      if ('status' in found) return found
 
-      const before = await freshPlan(row)
+      const before = await freshPlan(found.target)
       if (!before.plan.ok) return planFailure(before.plan.reason)
-      if (!(await deps.confirm(buildKillConfirm(row)))) return { status: 'cancelled' }
+      if (!(await deps.confirm(found.confirm))) return { status: 'cancelled' }
 
       // 확인 창을 띄운 동안 시간이 지났으니 한 번 더 확인한다.
-      const after = await freshPlan(row)
+      const after = await freshPlan(found.target)
       if (!after.plan.ok) return planFailure(after.plan.reason)
       const [root, ...rest] = after.plan.pids
 
@@ -171,5 +202,25 @@ export function createPortKiller(deps: KillDeps): {
     }
   }
 
-  return { killPort }
+  function killPort(port: number, pid: number): Promise<KillResult> {
+    if (!validId(port) || !validId(pid))
+      return Promise.resolve({ status: 'failed', message: text.killResult.invalid })
+    return run(pid, () => {
+      const row = deps.latest()?.ports.find((r) => r.port === port && r.pid === pid)
+      if (!row) return 'gone'
+      if (row.unresolvable) return { status: 'failed', message: text.killResult.unresolvable }
+      return { target: row, confirm: buildKillConfirm(row) }
+    })
+  }
+
+  function killLeftover(pid: number): Promise<KillResult> {
+    if (!validId(pid))
+      return Promise.resolve({ status: 'failed', message: text.killResult.invalid })
+    return run(pid, () => {
+      const row = deps.latest()?.leftovers.find((r) => r.pid === pid)
+      return row ? { target: row, confirm: buildLeftoverConfirm(row) } : 'gone'
+    })
+  }
+
+  return { killPort, killLeftover }
 }
