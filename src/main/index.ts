@@ -1,18 +1,21 @@
 import { app, shell, BrowserWindow, ipcMain, dialog, Tray, Menu, nativeImage } from 'electron'
 import { join } from 'path'
+import { homedir } from 'os'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import type { DashboardSnapshot } from '../shared/types'
-import { DEFAULT_INTERVALS, DEFAULT_THRESHOLDS } from '../shared/defaults'
+import { DEFAULT_IDLE_PORT_MS, DEFAULT_INTERVALS, DEFAULT_THRESHOLDS } from '../shared/defaults'
 import { IPC } from '../shared/ipc'
 import { text } from '../shared/text'
 import { mkdirSync, readdirSync, rmSync } from 'fs'
 import { sample, toPlatform } from './collect/sample'
 import { configureWindowsSampler, nativeHelperDllName } from './collect/windows'
 import { readMemory } from './collect/memory'
-import { resolveProcessWorktrees } from './collect/worktree'
-import { buildSnapshot, pidsForWorktreeLookup } from './snapshot'
-import { topLevelAgentPids } from './processTree'
+import { resolveProcessWorktrees, resolveWorktree } from './collect/worktree'
+import { createCollector } from './collector'
+import { claudeConfigDir } from './claudeHooks'
+import { createClaudeIntegration } from './claudeIntegration'
+import type { Sessions } from './sessions'
 import { createScheduler } from './scheduler'
 import { createKiller, type KillConfirm } from './kill'
 import { localUrlFor } from './open'
@@ -41,25 +44,28 @@ function trayIcon(level: MemoryLevel): Electron.NativeImage {
   return image
 }
 
+/** Claude 훅이 알려 주는 세션들. 훅 서버가 채우고 수집기가 읽는다. */
+const sessions: Sessions = new Map()
+
+const collector = platform
+  ? createCollector({
+      platform,
+      sample: () => sample(platform),
+      readMemory: () => readMemory(platform),
+      resolveProcessWorktrees,
+      resolveWorktree,
+      sessions,
+      hookStatus: () => claude.status(),
+      thresholds: DEFAULT_THRESHOLDS,
+      idlePortMs: DEFAULT_IDLE_PORT_MS,
+      selfPid: process.pid,
+      now: Date.now
+    })
+  : null
+
 async function collect(): Promise<DashboardSnapshot> {
-  if (!platform) throw new Error(text.unsupportedPlatform)
-  const [raw, memory] = await Promise.all([sample(platform), readMemory(platform)])
-  const needed = pidsForWorktreeLookup(raw, platform)
-  const worktrees = await resolveProcessWorktrees(
-    raw.processes.filter((p) => needed.has(p.pid)),
-    raw.cwds,
-    new Set(topLevelAgentPids(raw.processes))
-  )
-  return buildSnapshot({
-    sample: raw,
-    worktrees,
-    totalBytes: memory.totalBytes,
-    freeBytes: memory.freeBytes,
-    thresholds: DEFAULT_THRESHOLDS,
-    now: Date.now(),
-    selfPid: process.pid,
-    platform
-  })
+  if (!collector) throw new Error(text.unsupportedPlatform)
+  return collector.collect()
 }
 
 const scheduler = createScheduler({
@@ -112,7 +118,8 @@ function createTray(): void {
   if (latest) trayController.update(latest)
 }
 
-async function confirmKill(options: KillConfirm): Promise<boolean> {
+/** 끄기·설정 바꾸기 전에 띄우는 네이티브 확인 창. 첫 번째 버튼이면 true. */
+async function confirmDialog(options: KillConfirm): Promise<boolean> {
   const box = { type: 'warning' as const, noLink: true, ...options }
   const result =
     mainWindow && !mainWindow.isDestroyed()
@@ -125,12 +132,38 @@ const killer = createKiller({
   latest: () => scheduler.latest(),
   resample: () =>
     platform ? sample(platform) : Promise.reject(new Error(text.unsupportedPlatform)),
-  confirm: confirmKill,
+  confirm: confirmDialog,
   signal: (pid, sig) => {
     process.kill(pid, sig)
   },
   wait: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   platform: platform ?? 'win32'
+})
+
+/** 훅 이벤트가 몰려도 화면 갱신은 잠깐 모아서 한 번(다시 샘플링하지 않고 상태만 바꾼다). */
+let restateTimer: ReturnType<typeof setTimeout> | null = null
+function scheduleRestate(): void {
+  if (restateTimer || !collector) return
+  restateTimer = setTimeout(() => {
+    restateTimer = null
+    const latest = scheduler.latest()
+    if (!latest) return
+    void collector.restate(latest).then((next) => {
+      // 그 사이 새 수집 결과가 나왔으면 그것이 더 최신이다.
+      if (scheduler.latest() === latest) scheduler.publish(next)
+    })
+  }, 200)
+}
+
+const claude = createClaudeIntegration({
+  userData: app.getPath('userData'),
+  configDir: claudeConfigDir(process.env, homedir()),
+  platform: platform ?? 'win32',
+  systemRoot: process.env.SystemRoot,
+  sessions,
+  now: Date.now,
+  confirm: confirmDialog,
+  onEvent: scheduleRestate
 })
 
 /** Windows 수집 보조 코드(C#)를 앱 데이터 폴더에 한 번만 컴파일해 두고, 예전 버전 DLL 은 지운다. */
@@ -167,6 +200,27 @@ function registerIpc(): void {
     if (!fromMainWindow(event.sender)) return { status: 'failed', message: text.killResult.invalid }
     const { port, pid } = (arg ?? {}) as { port?: unknown; pid?: unknown }
     const result = await killer.killPort(Number(port), Number(pid))
+    void scheduler.refreshNow()
+    return result
+  })
+  ipcMain.handle(IPC.killLeftover, async (event, pid: unknown) => {
+    if (!fromMainWindow(event.sender)) return { status: 'failed', message: text.killResult.invalid }
+    const result = await killer.killLeftover(Number(pid))
+    void scheduler.refreshNow()
+    return result
+  })
+  ipcMain.handle(IPC.claudeHookStatus, async (event) =>
+    fromMainWindow(event.sender) ? claude.status() : null
+  )
+  ipcMain.handle(IPC.claudeHookEnable, async (event) => {
+    if (!fromMainWindow(event.sender)) return { status: 'cancelled' }
+    const result = await claude.enable()
+    void scheduler.refreshNow()
+    return result
+  })
+  ipcMain.handle(IPC.claudeHookDisable, async (event) => {
+    if (!fromMainWindow(event.sender)) return { status: 'cancelled' }
+    const result = await claude.disable()
     void scheduler.refreshNow()
     return result
   })
@@ -245,6 +299,7 @@ if (!app.requestSingleInstanceLock()) {
 
     prepareWindowsHelper()
     registerIpc()
+    void claude.start()
     scheduler.start()
     createTray()
     createWindow()
@@ -259,5 +314,6 @@ if (!app.requestSingleInstanceLock()) {
   app.on('before-quit', () => {
     quitting = true
     scheduler.stop()
+    void claude.stop()
   })
 }

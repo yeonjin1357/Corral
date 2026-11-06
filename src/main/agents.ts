@@ -28,6 +28,12 @@ function cpuDelta(members: ProcessInfo[], previous: CpuMemo, since: number): num
   return delta
 }
 
+/** CPU 사용률로 짐작한 상태. 모르면 unknown. */
+export function cpuState(cpuPercent: number | null): AgentState {
+  if (cpuPercent == null) return 'unknown'
+  return cpuPercent >= WORKING_CPU_PERCENT ? 'working' : 'idle'
+}
+
 export function buildAgents(input: {
   sample: RawSample
   worktrees: Map<number, WorktreeInfo>
@@ -66,8 +72,6 @@ export function buildAgents(input: {
     const worktree = worktrees.get(pid) ?? null
     const hookState =
       tool === 'claude' && worktree && input.hookStates ? input.hookStates(worktree.root) : null
-    const cpuState: AgentState =
-      cpuPercent == null ? 'unknown' : cpuPercent >= WORKING_CPU_PERCENT ? 'working' : 'idle'
 
     agents.push({
       pid,
@@ -76,7 +80,7 @@ export function buildAgents(input: {
       startedAt: self.startedAt,
       memoryBytes: members.reduce((sum, m) => sum + m.memoryBytes, 0),
       descendantCount: descendants.length,
-      state: hookState ?? cpuState,
+      state: hookState ?? cpuState(cpuPercent),
       stateSource: hookState ? 'hook' : 'cpu',
       cpuPercent
     })

@@ -23,6 +23,36 @@ export const text = {
       '이 워크트리에서 에이전트가 실행 중이에요. 에이전트가 이 프로세스를 쓰고 있을 수 있어요.',
     confirm: '끄기'
   },
+  claudeHook: {
+    enableTitle: 'Claude 연동 켜기',
+    enableMessage: 'Claude Code 설정 파일에 pitwall 훅을 더할까요?',
+    enableDetail: (path: string): string =>
+      `${path} 에 세션 시작·프롬프트·권한 요청·알림·도구 사용·응답 끝·오류·세션 끝 이벤트를 ` +
+      'pitwall 로 보내는 훅을 더해요. 다른 설정과 훅은 그대로 두고, 바꾸기 전에 백업을 남겨요. ' +
+      '이미 실행 중인 Claude 세션은 다시 시작해야 반영될 수 있어요.',
+    enableConfirm: '켜기',
+    disableTitle: 'Claude 연동 끄기',
+    disableMessage: 'Claude Code 설정 파일에서 pitwall 훅을 뺄까요?',
+    disableDetail: (path: string): string =>
+      `${path} 에서 pitwall 이 넣은 훅만 빼요. 다른 설정과 훅은 그대로 두고, 바꾸기 전에 백업을 남겨요.`,
+    disableConfirm: '끄기',
+    enabled: (backupPath: string | null): string =>
+      backupPath
+        ? `Claude 연동을 켰어요. 원래 설정은 ${backupPath} 에 백업했어요.`
+        : 'Claude 연동을 켰어요.',
+    alreadyOn: 'Claude 연동이 이미 켜져 있어요.',
+    disabled: (backupPath: string | null): string =>
+      backupPath
+        ? `Claude 연동을 껐어요. 바꾸기 전 설정은 ${backupPath} 에 백업했어요.`
+        : 'Claude 연동을 껐어요.',
+    alreadyOff: 'Claude 연동이 이미 꺼져 있어요.',
+    errors: {
+      parse: 'settings.json 을 읽을 수 없어 바꾸지 않았어요. 주석·쉼표 같은 형식을 확인해 주세요.',
+      shape: 'settings.json 의 hooks 형식이 예상과 달라 바꾸지 않았어요.',
+      busy: 'settings.json 이 계속 바뀌고 있어 바꾸지 않았어요. 잠시 뒤 다시 해 주세요.',
+      other: (message: string): string => `Claude 연동을 바꾸지 못했어요: ${message}`
+    }
+  },
   leftoverLabels: {
     kotlinDaemon: 'Kotlin 데몬',
     gradleDaemon: 'Gradle 데몬',

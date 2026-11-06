@@ -14,8 +14,14 @@ const api: PitwallApi = {
   },
   getLatest: () => ipcRenderer.invoke(IPC.getLatest),
   killPort: (port, pid) => ipcRenderer.invoke(IPC.killPort, { port, pid }),
+  killLeftover: (pid) => ipcRenderer.invoke(IPC.killLeftover, pid),
   refreshNow: () => ipcRenderer.invoke(IPC.refreshNow),
-  openPort: (port) => ipcRenderer.invoke(IPC.openPort, port)
+  openPort: (port) => ipcRenderer.invoke(IPC.openPort, port),
+  claudeHook: {
+    status: () => ipcRenderer.invoke(IPC.claudeHookStatus),
+    enable: () => ipcRenderer.invoke(IPC.claudeHookEnable),
+    disable: () => ipcRenderer.invoke(IPC.claudeHookDisable)
+  }
 }
 
 contextBridge.exposeInMainWorld('pitwall', api)

@@ -9,6 +9,8 @@ export interface Scheduler {
   stop(): void
   setWindowOpen(open: boolean): void
   refreshNow(): Promise<void>
+  /** 수집 없이 고친 스냅샷(예: 훅 이벤트로 바뀐 에이전트 상태)을 내보낸다. */
+  publish(snapshot: DashboardSnapshot): void
   latest(): DashboardSnapshot | null
 }
 
@@ -18,6 +20,8 @@ function emptySnapshot(takenAt: number, error: string): DashboardSnapshot {
     memory: { totalBytes: 0, usedBytes: 0, usedPercent: 0, level: 'normal' },
     ports: [],
     leftovers: [],
+    agents: [],
+    hook: null,
     groups: [],
     agentProcessCount: 0,
     stale: true,
@@ -116,6 +120,11 @@ export function createScheduler(o: {
       else schedule()
     },
     refreshNow,
+    publish(snapshot: DashboardSnapshot) {
+      if (!running) return
+      last = snapshot
+      o.onSnapshot(snapshot)
+    },
     latest: () => last
   }
 }

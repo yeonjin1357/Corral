@@ -209,6 +209,8 @@ export function buildSnapshot(input: {
     memory,
     ports,
     leftovers,
+    agents: [],
+    hook: null,
     groups,
     agentProcessCount,
     stale: false,

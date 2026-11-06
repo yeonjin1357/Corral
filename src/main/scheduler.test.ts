@@ -7,6 +7,8 @@ function snap(takenAt: number): DashboardSnapshot {
     memory: { totalBytes: 100, usedBytes: 50, usedPercent: 50, level: 'normal' },
     ports: [],
     leftovers: [],
+    agents: [],
+    hook: null,
     groups: [],
     agentProcessCount: 0,
     stale: false,
@@ -231,4 +233,20 @@ test('latest() 는 마지막으로 보낸 스냅샷', async () => {
   await vi.advanceTimersByTimeAsync(0)
   expect(s.latest()).toEqual(snap(7))
   s.stop()
+})
+
+test('publish: 수집 없이 받은 스냅샷을 내보내고 latest 로 삼는다(멈춘 뒤에는 무시)', async () => {
+  const onSnapshot = vi.fn()
+  const collect = vi.fn(async () => snap(1))
+  const s = createScheduler({ collect, intervals, onSnapshot })
+  s.start()
+  await vi.advanceTimersByTimeAsync(0)
+  const restated = { ...snap(1), agentProcessCount: 3 }
+  s.publish(restated)
+  expect(onSnapshot).toHaveBeenLastCalledWith(restated)
+  expect(s.latest()).toBe(restated)
+  expect(collect).toHaveBeenCalledTimes(1)
+  s.stop()
+  s.publish(snap(9))
+  expect(s.latest()).toBe(restated)
 })

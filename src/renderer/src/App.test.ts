@@ -3,7 +3,7 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import type { Mock } from 'vitest'
 import App from './App.vue'
 import type { DashboardSnapshot, KillResult } from '../../shared/types'
-import type { PitwallApi } from '../../shared/ipc'
+import type { ClaudeHookActionResult, PitwallApi } from '../../shared/ipc'
 import { portRow, snapshot, threePorts } from './testing/fixtures'
 
 interface FakeApi {
@@ -33,8 +33,14 @@ function installApi(opts: { latest?: DashboardSnapshot | null; kill?: KillResult
         new Promise<DashboardSnapshot | null>((r) => (resolveLatest = () => r(opts.latest ?? null)))
     ),
     killPort: vi.fn(async (): Promise<KillResult> => opts.kill ?? { status: 'killed' }),
+    killLeftover: vi.fn(async (): Promise<KillResult> => opts.kill ?? { status: 'killed' }),
     refreshNow: vi.fn(async (): Promise<void> => {}),
-    openPort: vi.fn(async (): Promise<boolean> => true)
+    openPort: vi.fn(async (): Promise<boolean> => true),
+    claudeHook: {
+      status: vi.fn(async () => null),
+      enable: vi.fn(async (): Promise<ClaudeHookActionResult> => ({ status: 'cancelled' })),
+      disable: vi.fn(async (): Promise<ClaudeHookActionResult> => ({ status: 'cancelled' }))
+    }
   }
   ;(window as unknown as { pitwall: PitwallApi }).pitwall = api
   return { push: (s: DashboardSnapshot) => cb?.(s), api, resolveLatest: () => resolveLatest(), off }

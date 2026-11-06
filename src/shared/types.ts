@@ -133,6 +133,19 @@ export interface AgentRow {
   cpuPercent: number | null
 }
 
+export type ClaudeHookState = 'off' | 'on' | 'partial' | 'error'
+
+/** Claude 훅 연동 상태. */
+export interface ClaudeHookStatus {
+  /** on: 켜짐, partial: 일부만 있거나 예전 포트·토큰(다시 켜야 함), off: 꺼짐, error: 문제 있음. */
+  state: ClaudeHookState
+  /** server: 훅 서버를 열지 못함, settings: settings.json 을 읽을 수 없음. */
+  problem: 'server' | 'settings' | null
+  /** 사용자가 disableAllHooks 로 훅을 모두 끈 상태(켜져 있어도 이벤트가 오지 않음). */
+  allHooksDisabled: boolean
+  settingsPath: string
+}
+
 export type KillResult = {
   status: 'killed' | 'cancelled' | 'gone' | 'changed' | 'failed'
   message?: string
@@ -143,6 +156,9 @@ export interface DashboardSnapshot {
   memory: MemorySummary
   ports: PortRow[]
   leftovers: LeftoverRow[]
+  agents: AgentRow[]
+  /** Claude 훅 연동 상태. 아직 모르면 null. */
+  hook: ClaudeHookStatus | null
   groups: GroupUsage[]
   agentProcessCount: number
   stale: boolean

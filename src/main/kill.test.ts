@@ -109,6 +109,8 @@ function snapshotWith(ports: PortRow[], leftovers: LeftoverRow[] = []): Dashboar
     memory: { totalBytes: 1, usedBytes: 0, usedPercent: 0, level: 'normal' },
     ports,
     leftovers,
+    agents: [],
+    hook: null,
     groups: [],
     agentProcessCount: 0,
     stale: false,
