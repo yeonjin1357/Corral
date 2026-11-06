@@ -38,7 +38,13 @@ export function createHookServer(opts: {
   if (!opts.token) return Promise.reject(new Error('hook token is empty'))
 
   const handle = (req: IncomingMessage, res: ServerResponse): void => {
-    const url = new URL(req.url ?? '/', `http://${HOST}`)
+    // 토큰을 보기 전이라 누구나 보낼 수 있는 값이다. 해석이 안 되면 예외로 메인 프로세스를 흔들지 않고 400.
+    let url: URL
+    try {
+      url = new URL(req.url ?? '/', `http://${HOST}`)
+    } catch {
+      return reply(res, 400)
+    }
     if (req.method !== 'POST' || url.pathname !== HOOK_PATH) return reply(res, 404)
     if (req.headers.origin !== undefined || !sameToken(url.searchParams.get('t'), opts.token))
       return reply(res, 403)

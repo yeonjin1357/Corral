@@ -1,5 +1,5 @@
 import { request } from 'node:http'
-import { createServer } from 'node:net'
+import { createServer, connect } from 'node:net'
 import { createHookServer, HOOK_BODY_LIMIT, type HookServer } from './hookServer'
 
 const TOKEN = 'a'.repeat(64)
@@ -91,6 +91,29 @@ describe('훅 서버', () => {
     expect(status).toBe(413)
     expect(events).toEqual([])
     expect(await send(server.port, { body: '{"session_id":"s1"}' })).toBe(204)
+  })
+
+  test('해석할 수 없는 요청 주소(토큰 없이 누구나 보낼 수 있음)는 400 이고 서버는 죽지 않는다', async () => {
+    const raw = await new Promise<string>((resolve, reject) => {
+      const socket = connect(server.port, '127.0.0.1', () => {
+        socket.write(
+          [
+            'POST http://%zz/ HTTP/1.1',
+            'Host: x',
+            'Content-Length: 0',
+            'Connection: close',
+            '',
+            ''
+          ].join('\r\n')
+        )
+      })
+      let data = ''
+      socket.on('data', (c) => (data += c.toString()))
+      socket.on('end', () => resolve(data))
+      socket.on('error', reject)
+    })
+    expect(raw.startsWith('HTTP/1.1 400')).toBe(true)
+    expect(await send(server.port, { body: '{}' })).toBe(204)
   })
 
   test('onEvent 가 예외를 던져도 204 로 답하고 서버는 계속 동작한다', async () => {
