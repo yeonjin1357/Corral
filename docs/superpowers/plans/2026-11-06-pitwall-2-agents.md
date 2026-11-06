@@ -113,3 +113,16 @@ export function buildAgents(input: { sample; worktrees; devServerPids: Set<numbe
 
 - 실제 Windows 에서: 에이전트 5개가 워크트리별로 보이는지, CPU 판단이 바뀌는지, 임시 `CLAUDE_CONFIG_DIR` 로 켜기·끄기(설정 보존·백업) 후 훅 명령으로 보낸 이벤트가 상태를 바꾸는지, 남은 프로세스(부모를 끝낸 테스트 프로세스)가 잡히고 정리되는지.
 - 최종 검토 에이전트 1개.
+
+---
+
+## 실행하며 바뀐 점 (2026-11-06)
+
+- **Claude 훅 명령은 셸 형식 한 줄이다.** `<curl> -s -m 2 -o NUL|/dev/null --data-binary '@-' '<url>'; exit 0` 을 `command` 하나에 넣는다(`args` 를 쓰는 셸 없는 형식 대신). `args` 를 모르는 예전 Claude Code 는 `command` 만 셸로 실행하는데, 그러면 `cmd.exe`·`/bin/sh` 가 표준입력(프롬프트가 든 이벤트 JSON)을 명령으로 읽을 수 있어서다. 이 한 줄은 Claude 가 고르는 셸(macOS `sh`, Windows Git Bash 또는 PowerShell) 모두에서 같게 동작함을 실제로 시험했다.
+- **settings.json 은 jsonc-parser 로 위치만 찾고 직접 문자열로 넣고 뺀다.** 다른 도구의 항목을 다시 정렬하지 않아, 켰다 끄면 원래 파일과 바이트까지 같다. UTF-8 이 아닌 파일은 고치지 않고, 백업은 원본 바이트·권한 그대로 남긴다.
+- **훅 상태는 `off | on | partial | error`** 와 `problem(server|settings)`, `allHooksDisabled` 로 나눈다. Claude 연동 관리는 `claudeIntegration.ts` 로 수집기와 분리했다.
+- **세션은 같은 워크트리의 Claude 프로세스와 짝짓는다.** 짝지은 프로세스가 사라지면 세션을 버린다(SessionEnd 없이 끝난 세션이 다른 세션 상태를 덮지 않게). 권한 대기 중에는 권한을 요청한 그 도구가 끝나야 대기를 푼다.
+- **포트 판단:** 워크트리를 모르는 에이전트가 하나라도 있으면 정리 후보를 확인해볼 것으로 낮춘다.
+- **남은 프로세스:** Gradle·Kotlin 데몬을 대상에 넣고, 개발 도구를 거느린 채 남은 셸·패키지 실행기도 올린다. 같은 워크트리에 에이전트가 있으면 표시한다.
+- **화면:** 첫 화면의 '디스크(다음 단계)' 칸을 '정리 후보'로 바꿨다(디스크는 3단계). 트레이 메뉴에 에이전트(권한 대기)·정리 후보·남은 프로세스 줄을 더했다.
+- 훅 포트 범위는 OS 동적 포트와 겹치지 않게 40000~48999 다.
