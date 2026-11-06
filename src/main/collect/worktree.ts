@@ -6,8 +6,12 @@ import type { ProcessInfo, WorktreeInfo } from '../../shared/types'
 const WIN_ABSOLUTE = /^[A-Za-z]:[\\/]/
 const UNC = /^[\\/]{2}/
 const POSIX_ABSOLUTE = /^\/(?!\/)/
-/** 따옴표 구간을 포함해 공백으로 나뉜 토큰. `--root="C:\a b\c"` 도 한 토큰이 된다. */
-const TOKEN = /(?:[^\s"']+|"[^"]*"|'[^']*')+/g
+/**
+ * 큰따옴표 구간을 포함해 공백으로 나뉜 토큰. `--root="C:\a b\c"` 도 한 토큰이 된다.
+ * 작은따옴표는 묶음 기호로 보지 않는다: Windows 명령줄은 큰따옴표만 쓰고, macOS ps 는 따옴표 없이 인자를 잇는다.
+ * (`C:\Users\O'Neil\...` 같은 경로가 깨지지 않도록)
+ */
+const TOKEN = /(?:[^\s"]+|"[^"]*")+/g
 const MAX_CLIMB = 64
 
 /** `node_modules` 세그먼트가 있으면 그 앞(= 패키지를 설치한 프로젝트 폴더)까지만 남긴다. */
@@ -38,7 +42,7 @@ function normalizeCandidate(raw: string): string | null {
 export function extractPathCandidates(commandLine: string): string[] {
   const result: string[] = []
   for (const match of commandLine.matchAll(TOKEN)) {
-    let token = match[0].replace(/["']/g, '')
+    let token = match[0].replace(/"/g, '')
     if (token.startsWith('-')) {
       const eq = token.indexOf('=')
       if (eq < 0) continue

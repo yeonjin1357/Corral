@@ -25,10 +25,17 @@ describe('extractPathCandidates', () => {
     expect(extractPathCandidates('vite "--root=/Users/dev/My App"')).toEqual(['/Users/dev/My App'])
   })
 
-  test('작은따옴표로 감싼 공백 경로', () => {
-    expect(
-      extractPathCandidates("node '/Users/dev/My Projects/app/node_modules/.bin/vite'")
-    ).toEqual(['/Users/dev/My Projects/app'])
+  test('작은따옴표는 묶음 기호가 아니라 경로 글자다(Windows 명령줄·macOS ps 출력 모두)', () => {
+    expect(extractPathCandidates("node C:\\Users\\O'Neil\\work\\app\\server.js")).toEqual([
+      "C:\\Users\\O'Neil\\work\\app\\server.js"
+    ])
+    expect(extractPathCandidates("\"C:\\Users\\O'Neil\\My App\\node_modules\\.bin\\vite\"")).toEqual(
+      ["C:\\Users\\O'Neil\\My App"]
+    )
+    expect(extractPathCandidates("/usr/local/bin/node /Users/o'neil/app/server.js")).toEqual([
+      '/usr/local/bin/node',
+      "/Users/o'neil/app/server.js"
+    ])
   })
 
   test('네트워크(UNC)·WSL 경로는 건너뛴다(응답 없는 드라이브에 막히지 않도록)', () => {
