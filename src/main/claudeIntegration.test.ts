@@ -135,7 +135,14 @@ test('끄기: 확인 후 pitwall 훅만 빼고 서버를 닫고 세션을 비운
   const integration = createClaudeIntegration(deps)
   await integration.enable()
   const { hook } = await loadConfig(userData)
-  sessions.set('s1', { id: 's1', cwd: 'C:\\work', state: 'working', updatedAt: 1 })
+  sessions.set('s1', {
+    id: 's1',
+    cwd: 'C:\\work',
+    state: 'working',
+    updatedAt: 1,
+    firstSeen: 1,
+    processKey: null
+  })
 
   const result = await integration.disable()
   expect(result.status).toBe('done')
