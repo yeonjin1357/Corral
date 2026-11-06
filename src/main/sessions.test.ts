@@ -1,8 +1,9 @@
 import {
   applyHookEvent,
-  pruneSessions,
+  reconcileSessions,
   SESSION_EXPIRE_MS,
   stateForWorktree,
+  type LiveClaude,
   type Sessions
 } from './sessions'
 import type { AgentState } from '../shared/types'
@@ -57,7 +58,14 @@ describe('훅 이벤트 → 세션 상태', () => {
     const sessions: Sessions = new Map()
     applyHookEvent(sessions, ev('SessionStart'), 1000)
     applyHookEvent(sessions, { session_id: 's1', hook_event_name: 'UserPromptSubmit' }, 2000)
-    expect(sessions.get('s1')).toEqual({ id: 's1', cwd: CWD, state: 'working', updatedAt: 2000 })
+    expect(sessions.get('s1')).toEqual({
+      id: 's1',
+      cwd: CWD,
+      state: 'working',
+      updatedAt: 2000,
+      firstSeen: 1000,
+      processKey: null
+    })
   })
 
   test.each<[string, unknown]>([
@@ -84,33 +92,128 @@ describe('훅 이벤트 → 세션 상태', () => {
   })
 })
 
-describe('세션 정리', () => {
+describe('세션 정리(살아 있는 Claude 프로세스와 짝짓기)', () => {
+  const ROOT = CWD.toLowerCase()
+  const rootOfCwd = (cwd: string): string | null =>
+    cwd.toLowerCase().startsWith(ROOT)
+      ? ROOT
+      : cwd.startsWith('C:\\work\\api')
+        ? 'c:\\work\\api'
+        : null
+  const claude = (key: string, startedAt: number | null = 0): LiveClaude => ({
+    key,
+    rootKey: ROOT,
+    startedAt
+  })
+  const start = (sessions: Sessions, id: string, at: number, name = 'SessionStart'): void => {
+    applyHookEvent(sessions, { ...ev(name), session_id: id }, at)
+  }
+
   test('6시간 동안 소식이 없으면 버린다', () => {
     const sessions: Sessions = new Map()
-    applyHookEvent(sessions, ev('SessionStart'), 1000)
-    pruneSessions(sessions, { now: 1000 + SESSION_EXPIRE_MS - 1 })
+    start(sessions, 's1', 1000)
+    const opts = { sampledAt: 500, live: [claude('p1')], rootOfCwd }
+    reconcileSessions(sessions, { ...opts, now: 1000 + SESSION_EXPIRE_MS - 1 })
     expect(sessions.size).toBe(1)
-    pruneSessions(sessions, { now: 1000 + SESSION_EXPIRE_MS })
+    reconcileSessions(sessions, { ...opts, now: 1000 + SESSION_EXPIRE_MS })
     expect(sessions.size).toBe(0)
   })
 
-  test('샘플 전에 온 세션인데 그 워크트리에 Claude 가 없으면(꺼진 세션) 버린다', () => {
+  test('샘플 전에 온 세션은 같은 워크트리의 짝 없는 Claude 와 짝짓는다', () => {
     const sessions: Sessions = new Map()
-    applyHookEvent(sessions, { ...ev('UserPromptSubmit'), session_id: 'dead' }, 1000)
-    applyHookEvent(sessions, { ...ev('UserPromptSubmit'), session_id: 'new' }, 3000)
+    start(sessions, 's1', 1000)
+    reconcileSessions(sessions, { now: 3000, sampledAt: 2000, live: [claude('p1')], rootOfCwd })
+    expect(sessions.get('s1')).toMatchObject({ processKey: 'p1', firstSeen: 1000 })
+  })
+
+  test('짝지은 프로세스가 사라지면, 같은 워크트리에 다른 Claude 가 살아 있어도 그 세션은 버린다', () => {
+    const sessions: Sessions = new Map()
+    start(sessions, 'a', 1000, 'PermissionRequest')
+    start(sessions, 'b', 1100)
+    reconcileSessions(sessions, {
+      now: 3000,
+      sampledAt: 2000,
+      live: [claude('pa', 900), claude('pb', 1050)],
+      rootOfCwd
+    })
+    expect(sessions.get('a')?.processKey).toBe('pa')
+    expect(sessions.get('b')?.processKey).toBe('pb')
+    // a 의 터미널 창을 닫음(SessionEnd 없음). b 는 계속 쉬는 중.
+    reconcileSessions(sessions, {
+      now: 9000,
+      sampledAt: 8000,
+      live: [claude('pb', 1050)],
+      rootOfCwd
+    })
+    expect([...sessions.keys()]).toEqual(['b'])
+  })
+
+  test('한 수집 주기 안에 Claude 를 껐다 다시 켜도 옛 세션은 버리고 새 세션을 새 프로세스와 짝짓는다', () => {
+    const sessions: Sessions = new Map()
+    start(sessions, 'old', 1000, 'PermissionRequest')
+    reconcileSessions(sessions, {
+      now: 3000,
+      sampledAt: 2000,
+      live: [claude('p1', 900)],
+      rootOfCwd
+    })
+    start(sessions, 'new', 5000)
+    reconcileSessions(sessions, {
+      now: 9000,
+      sampledAt: 8000,
+      live: [claude('p2', 4900)],
+      rootOfCwd
+    })
+    expect([...sessions.keys()]).toEqual(['new'])
+    expect(sessions.get('new')?.processKey).toBe('p2')
+  })
+
+  test('한 프로세스에서 새 세션이 시작되면(SessionEnd 없이) 그 프로세스의 예전 세션은 버린다', () => {
+    const sessions: Sessions = new Map()
+    start(sessions, 'old', 1000, 'PermissionRequest')
+    reconcileSessions(sessions, {
+      now: 3000,
+      sampledAt: 2000,
+      live: [claude('p1', 900)],
+      rootOfCwd
+    })
+    start(sessions, 'cleared', 4000)
+    reconcileSessions(sessions, {
+      now: 9000,
+      sampledAt: 8000,
+      live: [claude('p1', 900)],
+      rootOfCwd
+    })
+    expect([...sessions.keys()]).toEqual(['cleared'])
+    expect(sessions.get('cleared')?.processKey).toBe('p1')
+  })
+
+  test('두 Claude 와 두 세션은 시작 시각이 가까운 쪽끼리 짝짓는다', () => {
+    const sessions: Sessions = new Map()
+    start(sessions, 'late', 5000)
+    start(sessions, 'early', 1000)
+    reconcileSessions(sessions, {
+      now: 9000,
+      sampledAt: 8000,
+      live: [claude('p-late', 4900), claude('p-early', 900)],
+      rootOfCwd
+    })
+    expect(sessions.get('early')?.processKey).toBe('p-early')
+    expect(sessions.get('late')?.processKey).toBe('p-late')
+  })
+
+  test('샘플 뒤에 온 세션은 다음 샘플까지 기다리고, 워크트리를 모르는 세션은 만료까지 둔다', () => {
+    const sessions: Sessions = new Map()
+    start(sessions, 'dead', 1000)
+    start(sessions, 'new', 3000)
     applyHookEvent(
       sessions,
-      { ...ev('UserPromptSubmit'), session_id: 'elsewhere', cwd: 'C:\\tmp' },
+      { ...ev('SessionStart'), session_id: 'elsewhere', cwd: 'C:\\tmp' },
       1000
     )
-    pruneSessions(sessions, {
-      now: 4000,
-      sampledAt: 2000,
-      liveRoots: new Set(['C:\\work\\api']),
-      rootOfCwd: (cwd) => (cwd === CWD ? CWD : null)
-    })
-    // 샘플 뒤에 온 세션(new)은 다음 샘플까지 기다린다. 워크트리를 모르는 세션은 연결될 일이 없어 남겨 둔다.
+    reconcileSessions(sessions, { now: 4000, sampledAt: 2000, live: [], rootOfCwd })
     expect([...sessions.keys()].sort()).toEqual(['elsewhere', 'new'])
+    expect(sessions.get('new')?.processKey).toBeNull()
   })
 })
 
@@ -119,7 +222,12 @@ describe('워크트리 상태', () => {
     cwd.startsWith(CWD) ? CWD : cwd.startsWith('C:\\work\\api') ? 'C:\\work\\api' : null
 
   function sessionsWith(...entries: [string, string, AgentState][]): Sessions {
-    return new Map(entries.map(([id, cwd, state]) => [id, { id, cwd, state, updatedAt: 1 }]))
+    return new Map(
+      entries.map(([id, cwd, state]) => [
+        id,
+        { id, cwd, state, updatedAt: 1, firstSeen: 1, processKey: null }
+      ])
+    )
   }
 
   test('같은 워크트리 세션 중 권한 대기 > 작업 중 > 오류 > 쉬는 중', () => {

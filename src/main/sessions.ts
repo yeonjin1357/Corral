@@ -1,11 +1,26 @@
 import type { AgentState } from '../shared/types'
 
-/** Claude Code 세션 하나. 훅 이벤트로만 알 수 있다(프로세스와 직접 연결되지 않고 작업 폴더로 이어 붙인다). */
+/**
+ * Claude Code 세션 하나. 훅 이벤트로만 알 수 있다. 이벤트에는 프로세스 정보가 없어서, 작업 폴더의 워크트리로
+ * 행에 이어 붙이고, 수집 때 같은 워크트리의 Claude 프로세스와 짝지어(processKey) 끝났는지 판단한다.
+ */
 export interface ClaudeSession {
   id: string
   cwd: string
   state: AgentState
   updatedAt: number
+  /** 처음 소식이 온 시각. 어느 프로세스의 세션인지 짝지을 때 쓴다. */
+  firstSeen: number
+  /** 짝지은 Claude 프로세스(`pid:시작 시각`). 아직 모르면 null. */
+  processKey: string | null
+}
+
+/** 수집 때 본 최상위 Claude 프로세스. */
+export interface LiveClaude {
+  key: string
+  /** 워크트리 키(worktreeKey). */
+  rootKey: string
+  startedAt: number | null
 }
 
 export type Sessions = Map<string, ClaudeSession>
@@ -67,7 +82,14 @@ export function applyHookEvent(sessions: Sessions, input: unknown, now: number):
 
   // 최근 소식 순서를 유지해 넘칠 때 가장 오래된 것부터 버린다.
   sessions.delete(id)
-  sessions.set(id, { id, cwd, state: state ?? existing!.state, updatedAt: now })
+  sessions.set(id, {
+    id,
+    cwd,
+    state: state ?? existing!.state,
+    updatedAt: now,
+    firstSeen: existing?.firstSeen ?? now,
+    processKey: existing?.processKey ?? null
+  })
   while (sessions.size > MAX_SESSIONS) {
     const oldest = sessions.keys().next().value
     if (oldest === undefined) break
@@ -77,31 +99,66 @@ export function applyHookEvent(sessions: Sessions, input: unknown, now: number):
 }
 
 /**
- * 끝난 세션을 버린다.
- * - 6시간 동안 소식이 없는 세션
- * - 샘플을 뜨기 전에 소식이 온 세션인데, 그 워크트리에 Claude 프로세스가 없는 세션(SessionEnd 없이 꺼짐).
- *   샘플 뒤에 온 세션은 프로세스가 샘플 뒤에 시작했을 수 있어 다음 샘플까지 둔다.
- *   워크트리를 모르는 세션은 어느 행에도 연결되지 않으니 만료까지 둔다.
+ * 세션을 살아 있는 Claude 프로세스와 짝짓고, 끝난 세션을 버린다(SessionEnd 를 못 받은 경우 대비).
+ * - 6시간 동안 소식이 없는 세션은 버린다.
+ * - 짝지은 프로세스가 이번 샘플에 없으면(꺼짐) 버린다. 같은 워크트리에 다른 Claude 가 살아 있어도 마찬가지.
+ * - 아직 짝이 없고 샘플 전에 소식이 온 세션(그 프로세스는 이번 샘플에 있어야 함)은 같은 워크트리의 짝 없는
+ *   Claude 중 시작 시각이 세션보다 앞서고 가장 가까운 것과 짝짓는다.
+ *   - 그 워크트리에 Claude 가 하나도 없으면 버린다.
+ *   - 모두 짝이 있으면, 이 세션보다 먼저 소식이 끊긴 세션 중 가장 오래된 것의 프로세스가 새 세션으로
+ *     넘어온 것으로 보고(/clear 등) 그 예전 세션을 버린다.
+ * - 샘플 뒤에 온 세션은 다음 샘플까지 두고, 워크트리를 모르는 세션은 어느 행에도 연결되지 않으니 만료까지 둔다.
  */
-export function pruneSessions(
+export function reconcileSessions(
   sessions: Sessions,
   opts: {
     now: number
-    sampledAt?: number
-    liveRoots?: Set<string>
-    rootOfCwd?: (cwd: string) => string | null
+    sampledAt: number
+    live: LiveClaude[]
+    rootOfCwd: (cwd: string) => string | null
   }
 ): void {
+  const liveKeys = new Set(opts.live.map((l) => l.key))
   for (const [id, s] of sessions) {
-    if (opts.now - s.updatedAt >= SESSION_EXPIRE_MS) {
-      sessions.delete(id)
+    if (opts.now - s.updatedAt >= SESSION_EXPIRE_MS) sessions.delete(id)
+    else if (s.processKey && !liveKeys.has(s.processKey)) sessions.delete(id)
+  }
+
+  const unlinked = [...sessions.values()]
+    .filter((s) => !s.processKey && s.firstSeen < opts.sampledAt)
+    .sort((a, b) => a.firstSeen - b.firstSeen)
+  for (const session of unlinked) {
+    const root = opts.rootOfCwd(session.cwd)
+    if (!root) continue
+    const candidates = opts.live.filter((l) => l.rootKey === root)
+    if (candidates.length === 0) {
+      sessions.delete(session.id)
       continue
     }
-    if (opts.sampledAt == null || !opts.liveRoots || !opts.rootOfCwd) continue
-    if (s.updatedAt >= opts.sampledAt) continue
-    const root = opts.rootOfCwd(s.cwd)
-    if (root && !opts.liveRoots.has(root)) sessions.delete(id)
+    const owner = new Map<string, ClaudeSession>()
+    for (const s of sessions.values()) if (s.processKey) owner.set(s.processKey, s)
+
+    const free = candidates.filter((c) => !owner.has(c.key))
+    if (free.length) {
+      session.processKey = closestBefore(free, session.firstSeen).key
+      continue
+    }
+    const replaced = candidates
+      .map((c) => owner.get(c.key)!)
+      .filter((s) => s.updatedAt <= session.firstSeen)
+      .sort((a, b) => a.updatedAt - b.updatedAt)[0]
+    if (!replaced) continue
+    sessions.delete(replaced.id)
+    session.processKey = replaced.processKey
   }
+}
+
+/** 세션보다 먼저 시작한 것 중 가장 늦게 시작한 프로세스. 없으면 가장 늦게 시작한 것. */
+function closestBefore(candidates: LiveClaude[], firstSeen: number): LiveClaude {
+  const started = (c: LiveClaude): number => c.startedAt ?? Number.NEGATIVE_INFINITY
+  const before = candidates.filter((c) => started(c) <= firstSeen)
+  const pool = before.length ? before : candidates
+  return pool.reduce((best, c) => (started(c) > started(best) ? c : best))
 }
 
 /** 워크트리의 Claude 상태. 그 워크트리 세션이 없으면 null. */

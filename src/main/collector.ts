@@ -10,8 +10,8 @@ import type {
 import { worktreeKey } from '../shared/format'
 import { buildAgents, cpuState, type CpuMemo } from './agents'
 import { judgePorts, type PortMemo } from './judge'
-import { topLevelAgentPids } from './processTree'
-import { pruneSessions, stateForWorktree, type Sessions } from './sessions'
+import { agentToolOf, topLevelAgentPids } from './processTree'
+import { reconcileSessions, stateForWorktree, type LiveClaude, type Sessions } from './sessions'
 import { buildSnapshot, pidsForWorktreeLookup } from './snapshot'
 
 export interface CollectorDeps {
@@ -105,6 +105,24 @@ export function createCollector(deps: CollectorDeps): {
     const devServerPids = new Set(snapshot.ports.flatMap((p) => [p.pid, ...p.descendantPids]))
     const [roots, hook] = await Promise.all([resolveSessionRoots(), readHookStatus()])
     rootOfCwd = roots
+
+    // 세션을 이번 샘플의 Claude 프로세스와 짝짓고 끝난 세션을 버린 뒤 상태를 정한다(끝난 세션이 한 번도 섞이지 않게).
+    const byPid = new Map(raw.processes.map((p) => [p.pid, p]))
+    const live: LiveClaude[] = topLevelAgentPids(raw.processes).flatMap((pid) => {
+      const p = byPid.get(pid)
+      const w = worktrees.get(pid)
+      if (!p || !w || agentToolOf(p) !== 'claude') return []
+      return [
+        { key: `${pid}:${p.startedAt ?? ''}`, rootKey: worktreeKey(w.root), startedAt: p.startedAt }
+      ]
+    })
+    reconcileSessions(deps.sessions, {
+      now,
+      sampledAt,
+      live,
+      rootOfCwd: (cwd) => roots.get(cwd) ?? null
+    })
+
     const { agents, cpu } = buildAgents({
       sample: raw,
       worktrees,
@@ -117,19 +135,6 @@ export function createCollector(deps: CollectorDeps): {
 
     const judged = judgePorts(snapshot.ports, agents, portMemo, now, deps.idlePortMs)
     portMemo = judged.memo
-
-    // 샘플 전에 소식이 온 세션인데 그 워크트리에 Claude 가 없으면 SessionEnd 없이 끝난 세션이다.
-    const liveRoots = new Set(
-      agents.flatMap((a) =>
-        a.tool === 'claude' && a.worktree ? [worktreeKey(a.worktree.root)] : []
-      )
-    )
-    pruneSessions(deps.sessions, {
-      now,
-      sampledAt,
-      liveRoots,
-      rootOfCwd: (cwd) => roots.get(cwd) ?? null
-    })
 
     return { ...snapshot, ports: judged.rows, agents, hook }
   }

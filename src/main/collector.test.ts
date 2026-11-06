@@ -184,3 +184,46 @@ test('훅 상태를 읽다 실패해도 수집은 성공하고 훅은 error', as
   const s = await createCollector(deps).collect()
   expect(s.hook).toMatchObject({ state: 'error', problem: 'settings' })
 })
+
+test('같은 워크트리에 다른 Claude 가 살아 있어도, 짝지은 프로세스가 꺼진 세션은 그 수집부터 상태에 쓰지 않는다', async () => {
+  const { deps, sessions, clock } = setup()
+  const withTwo: RawSample = {
+    ...sampleAt(0),
+    processes: [...sampleAt(0).processes, { ...proc(5001, 1, 'claude.exe', 0), startedAt: 200 }],
+    cwds: { 5000: W1.root, 5001: W1.root, 6000: W2.root }
+  }
+  const twoWorktrees: CollectorDeps['resolveProcessWorktrees'] = async (processes) => {
+    const map = new Map<number, WorktreeInfo>()
+    for (const p of processes) {
+      if (p.pid === 4100 || p.pid === 5000 || p.pid === 5001) map.set(p.pid, W1)
+      if (p.pid === 6000) map.set(p.pid, W2)
+    }
+    return map
+  }
+  const samples = [withTwo, withTwo, sampleAt(0)]
+  const collector = createCollector({
+    ...deps,
+    sample: async () => samples.shift()!,
+    resolveProcessWorktrees: twoWorktrees
+  })
+  applyHookEvent(
+    sessions,
+    { session_id: 'stuck', cwd: W1.root, hook_event_name: 'PermissionRequest' },
+    clock.now - 2
+  )
+  applyHookEvent(
+    sessions,
+    { session_id: 'calm', cwd: W1.root, hook_event_name: 'Stop' },
+    clock.now - 1
+  )
+  await collector.collect()
+  clock.now += 5000
+  await collector.collect()
+  expect(sessions.size).toBe(2)
+  // 권한 대기 세션(stuck)은 더 늦게 시작한 5001 과, calm 은 5000 과 짝지어진다. 5001 의 창을 닫는다.
+  expect(sessions.get('stuck')?.processKey).toBe('5001:200')
+  clock.now += 5000
+  const s = await collector.collect()
+  expect([...sessions.keys()]).toEqual(['calm'])
+  expect(s.agents.find((a) => a.pid === 5000)).toMatchObject({ state: 'idle', stateSource: 'hook' })
+})
