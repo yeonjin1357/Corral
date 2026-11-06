@@ -181,12 +181,11 @@ describe('createTrayController', () => {
     expect(labels(buildMenu.mock.calls[0][0])[0]).toBe('RAM 확인 중…')
   })
 
-  test('Windows: 왼쪽 클릭에도 메뉴, 더블클릭은 앱 열기', () => {
-    const { tray, actions } = setup('win32')
+  test('Windows: 왼쪽 클릭에도 메뉴. 더블클릭은 첫 클릭에 뜬 메뉴가 막아 닿지 않으므로 걸지 않는다', () => {
+    const { tray } = setup('win32')
     tray.handlers['click']()
     expect(tray.popUpContextMenu).toHaveBeenCalledTimes(1)
-    tray.handlers['double-click']()
-    expect(actions.open).toHaveBeenCalledTimes(1)
+    expect(tray.handlers['double-click']).toBeUndefined()
   })
 
   test('macOS: 클릭은 OS 가 메뉴를 띄우므로 따로 처리하지 않는다', () => {

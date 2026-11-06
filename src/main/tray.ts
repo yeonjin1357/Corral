@@ -125,7 +125,7 @@ export interface TrayLike {
   setImage(image: unknown): void
   popUpContextMenu(): void
   displayBalloon(options: { title: string; content: string; noSound?: boolean }): void
-  on(event: 'click' | 'double-click', listener: () => void): void
+  on(event: 'click', listener: () => void): void
 }
 
 export function createTrayController<Icon, Menu>(deps: {
@@ -160,10 +160,10 @@ export function createTrayController<Icon, Menu>(deps: {
     }
   }
 
-  // Windows 는 오른쪽 클릭에만 메뉴가 뜬다. 왼쪽 클릭에도 띄우고, 더블클릭은 앱을 연다. macOS 는 OS 가 클릭에 메뉴를 띄운다.
+  // Windows 는 오른쪽 클릭에만 메뉴가 뜬다. 왼쪽 클릭에도 띄운다(더블클릭은 첫 클릭에 뜬 메뉴가 막아 닿지 않는다).
+  // macOS 는 OS 가 클릭에 메뉴를 띄운다.
   if (deps.platform === 'win32') {
     deps.tray.on('click', () => deps.tray.popUpContextMenu())
-    deps.tray.on('double-click', () => deps.actions.open())
   }
   apply(null)
 
