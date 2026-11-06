@@ -151,15 +151,24 @@ const UTF8_ENV = { LC_ALL: 'en_US.UTF-8' }
 
 export async function sampleDarwin(run: Runner = runCommand): Promise<RawSample> {
   const opts = { timeoutMs: COMMAND_TIMEOUT_MS, env: UTF8_ENV }
-  const [stats, args, lsof] = await Promise.all([run(PS_STATS_ARGV, opts), run(PS_ARGS_ARGV, opts), run(LSOF_ARGV, opts)])
+  const [stats, args, lsof] = await Promise.all([
+    run(PS_STATS_ARGV, opts),
+    run(PS_ARGS_ARGV, opts),
+    run(LSOF_ARGV, opts)
+  ])
   if (stats.exitCode !== 0) throw new Error(`ps exited with ${stats.exitCode}`)
   if (args.exitCode !== 0) throw new Error(`ps exited with ${args.exitCode}`)
   // lsof 는 결과가 없을 때도 1 로 끝난다.
-  if (lsof.exitCode !== 0 && lsof.exitCode !== 1) throw new Error(`lsof exited with ${lsof.exitCode}`)
+  if (lsof.exitCode !== 0 && lsof.exitCode !== 1)
+    throw new Error(`lsof exited with ${lsof.exitCode}`)
   const tcp = parseLsofOutput(lsof.stdout)
 
   // 작업 폴더는 보조 정보라 실패해도 샘플은 성공으로 본다.
-  const listening = [...new Set(tcp.filter((t) => t.state === 'Listen' && t.localPort >= MIN_DEV_PORT).map((t) => t.pid))]
+  const listening = [
+    ...new Set(
+      tcp.filter((t) => t.state === 'Listen' && t.localPort >= MIN_DEV_PORT).map((t) => t.pid)
+    )
+  ]
   let cwds: Record<number, string> = {}
   if (listening.length) {
     try {

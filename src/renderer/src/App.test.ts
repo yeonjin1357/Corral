@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { flushPromises, mount } from '@vue/test-utils'
+import { flushPromises, mount, type DOMWrapper } from '@vue/test-utils'
 import type { Mock } from 'vitest'
 import App from './App.vue'
 import type { DashboardSnapshot, KillResult } from '../../shared/types'
@@ -8,7 +8,10 @@ import { snapshot } from './testing/fixtures'
 
 function installApi(opts: { latest?: DashboardSnapshot | null; kill?: KillResult } = {}): {
   push(s: DashboardSnapshot): void
-  api: PitwallApi & { killPort: Mock<PitwallApi['killPort']>; onSnapshot: Mock<PitwallApi['onSnapshot']> }
+  api: PitwallApi & {
+    killPort: Mock<PitwallApi['killPort']>
+    onSnapshot: Mock<PitwallApi['onSnapshot']>
+  }
   resolveLatest(): void
   off: Mock<() => void>
 } {
@@ -23,7 +26,8 @@ function installApi(opts: { latest?: DashboardSnapshot | null; kill?: KillResult
       return off
     }),
     getLatest: vi.fn(
-      () => new Promise<DashboardSnapshot | null>((r) => (resolveLatest = () => r(opts.latest ?? null)))
+      () =>
+        new Promise<DashboardSnapshot | null>((r) => (resolveLatest = () => r(opts.latest ?? null)))
     ),
     killPort: vi.fn(async (): Promise<KillResult> => opts.kill ?? { status: 'killed' })
   }
@@ -69,7 +73,8 @@ test('한 번에 카드 하나만 펼친다', async () => {
   const w = mount(App)
   push(snapshot())
   await flushPromises()
-  const card = (title: string) => w.findAll('.dash-card').find((c) => c.text().includes(title))!
+  const card = (title: string): DOMWrapper<Element> =>
+    w.findAll('.dash-card').find((c) => c.text().includes(title))!
   await card('개발 서버 포트').get('button.card-head').trigger('click')
   expect(card('개발 서버 포트').classes()).toContain('expanded')
   expect(w.find('table').exists()).toBe(true)
@@ -107,7 +112,7 @@ test('취소는 조용히 넘어가고, failed 는 메시지를 우선 보여준
   const w = mount(App)
   cancelled.push(snapshot())
   await flushPromises()
-  const open = async () => {
+  const open = async (): Promise<void> => {
     const ports = w.findAll('.dash-card').find((c) => c.text().includes('개발 서버 포트'))!
     if (!ports.classes().includes('expanded')) await ports.get('button.card-head').trigger('click')
     await w.findAll('tbody tr')[0].get('button').trigger('click')

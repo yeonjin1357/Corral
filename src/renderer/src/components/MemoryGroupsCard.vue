@@ -13,7 +13,9 @@ const LABEL: Record<ProcessGroup, string> = {
   other: text.ui.groups.other
 }
 const rows = computed(() =>
-  ORDER.map((group) => props.groups.find((g) => g.group === group)).filter((g): g is GroupUsage => !!g)
+  ORDER.map((group) => props.groups.find((g) => g.group === group)).filter(
+    (g): g is GroupUsage => !!g
+  )
 )
 </script>
 

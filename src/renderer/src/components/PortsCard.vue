@@ -25,13 +25,19 @@ const emit = defineEmits<{ kill: [port: number, pid: number] }>()
         <tr v-for="row in ports" :key="`${row.port}:${row.pid}`">
           <td class="fw-bold">:{{ row.port }}</td>
           <td>
-            <div :class="{ 'text-secondary': row.unresolvable }">{{ worktreeLabel(row.worktree) }}</div>
+            <div :class="{ 'text-secondary': row.unresolvable }">
+              {{ worktreeLabel(row.worktree) }}
+            </div>
             <small class="text-secondary">{{ row.processName }} · PID {{ row.pid }}</small>
           </td>
           <td>
             <StatusBadge
               :tone="row.clientCount > 0 ? 'primary' : 'secondary'"
-              :text="row.clientCount > 0 ? text.ui.ports.clientCount(row.clientCount) : text.ui.ports.noClients"
+              :text="
+                row.clientCount > 0
+                  ? text.ui.ports.clientCount(row.clientCount)
+                  : text.ui.ports.noClients
+              "
             />
           </td>
           <td class="text-end">{{ formatBytes(row.memoryBytes) }}</td>

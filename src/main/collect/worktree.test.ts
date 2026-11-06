@@ -8,11 +8,13 @@ describe('extractPathCandidates', () => {
   test('따옴표·섞인 슬래시·node_modules 앞에서 자르기·인자 무시', () => {
     const cl =
       '"C:\\Program Files\\nodejs\\node.exe" C:\\Users\\김개발\\work\\shop-web\\node_modules\\.bin/../vite/bin/vite.js --port=3000'
-    expect(extractPathCandidates(cl)).toEqual(['C:\\Program Files\\nodejs\\node.exe', 'C:\\Users\\김개발\\work\\shop-web'])
-    expect(extractPathCandidates('/usr/local/bin/node /Users/dev/work/shop-web/node_modules/.bin/vite')).toEqual([
-      '/usr/local/bin/node',
-      '/Users/dev/work/shop-web'
+    expect(extractPathCandidates(cl)).toEqual([
+      'C:\\Program Files\\nodejs\\node.exe',
+      'C:\\Users\\김개발\\work\\shop-web'
     ])
+    expect(
+      extractPathCandidates('/usr/local/bin/node /Users/dev/work/shop-web/node_modules/.bin/vite')
+    ).toEqual(['/usr/local/bin/node', '/Users/dev/work/shop-web'])
     expect(extractPathCandidates('claude')).toEqual([])
   })
 
@@ -24,19 +26,23 @@ describe('extractPathCandidates', () => {
   })
 
   test('작은따옴표로 감싼 공백 경로', () => {
-    expect(extractPathCandidates("node '/Users/dev/My Projects/app/node_modules/.bin/vite'")).toEqual([
-      '/Users/dev/My Projects/app'
-    ])
+    expect(
+      extractPathCandidates("node '/Users/dev/My Projects/app/node_modules/.bin/vite'")
+    ).toEqual(['/Users/dev/My Projects/app'])
   })
 
   test('네트워크(UNC)·WSL 경로는 건너뛴다(응답 없는 드라이브에 막히지 않도록)', () => {
-    expect(extractPathCandidates('node \\\\wsl.localhost\\Ubuntu\\home\\dev\\app\\server.js \\\\nas\\share\\x.js')).toEqual([])
+    expect(
+      extractPathCandidates(
+        'node \\\\wsl.localhost\\Ubuntu\\home\\dev\\app\\server.js \\\\nas\\share\\x.js'
+      )
+    ).toEqual([])
   })
 
   test('소문자 드라이브·.. 정리·중복 제거', () => {
-    expect(extractPathCandidates('c:\\work\\a\\..\\shop-web\\run.js C:\\work\\shop-web\\run.js')).toEqual([
-      'C:\\work\\shop-web\\run.js'
-    ])
+    expect(
+      extractPathCandidates('c:\\work\\a\\..\\shop-web\\run.js C:\\work\\shop-web\\run.js')
+    ).toEqual(['C:\\work\\shop-web\\run.js'])
   })
 })
 
@@ -60,7 +66,11 @@ describe('createWorktreeResolver', () => {
   test('메인 체크아웃: .git 폴더 + 브랜치', async () => {
     const repo = await makeRepo(join(tmp, 'shop-web'))
     const { resolveWorktree } = createWorktreeResolver({ homeDir: join(tmp, 'home') })
-    expect(await resolveWorktree(join(repo, 'src'))).toEqual({ root: repo, branch: 'develop', isLinkedWorktree: false })
+    expect(await resolveWorktree(join(repo, 'src'))).toEqual({
+      root: repo,
+      branch: 'develop',
+      isLinkedWorktree: false
+    })
   })
 
   test('연결된 worktree: .git 파일의 gitdir 을 따라가 HEAD 읽기', async () => {
@@ -72,7 +82,11 @@ describe('createWorktreeResolver', () => {
     await mkdir(wt)
     await writeFile(join(wt, '.git'), `gitdir: ${gitdir}\n`)
     const { resolveWorktree } = createWorktreeResolver({ homeDir: join(tmp, 'home') })
-    expect(await resolveWorktree(wt)).toEqual({ root: wt, branch: 'feat/a', isLinkedWorktree: true })
+    expect(await resolveWorktree(wt)).toEqual({
+      root: wt,
+      branch: 'feat/a',
+      isLinkedWorktree: true
+    })
   })
 
   test('상대 경로 gitdir 도 따라간다', async () => {
@@ -84,7 +98,11 @@ describe('createWorktreeResolver', () => {
     await mkdir(wt)
     await writeFile(join(wt, '.git'), 'gitdir: ../shop-web/.git/worktrees/wt-b\n')
     const { resolveWorktree } = createWorktreeResolver({ homeDir: join(tmp, 'home') })
-    expect(await resolveWorktree(wt)).toEqual({ root: wt, branch: 'feat/b', isLinkedWorktree: true })
+    expect(await resolveWorktree(wt)).toEqual({
+      root: wt,
+      branch: 'feat/b',
+      isLinkedWorktree: true
+    })
   })
 
   test('서브모듈은 연결된 worktree 가 아니다', async () => {
@@ -96,7 +114,11 @@ describe('createWorktreeResolver', () => {
     await mkdir(sub)
     await writeFile(join(sub, '.git'), 'gitdir: ../.git/modules/lib\n')
     const { resolveWorktree } = createWorktreeResolver({ homeDir: join(tmp, 'home') })
-    expect(await resolveWorktree(sub)).toEqual({ root: sub, branch: 'main', isLinkedWorktree: false })
+    expect(await resolveWorktree(sub)).toEqual({
+      root: sub,
+      branch: 'main',
+      isLinkedWorktree: false
+    })
   })
 
   test('detached HEAD 는 branch null', async () => {
@@ -144,7 +166,11 @@ describe('createWorktreeResolver', () => {
   test('캐시는 ttl 동안만 유지되어 브랜치 전환이 반영된다', async () => {
     const repo = await makeRepo(join(tmp, 'shop-web'))
     let now = 1000
-    const { resolveWorktree } = createWorktreeResolver({ homeDir: join(tmp, 'home'), ttlMs: 15000, now: () => now })
+    const { resolveWorktree } = createWorktreeResolver({
+      homeDir: join(tmp, 'home'),
+      ttlMs: 15000,
+      now: () => now
+    })
     expect((await resolveWorktree(repo))?.branch).toBe('develop')
     await writeFile(join(repo, '.git', 'HEAD'), 'ref: refs/heads/main\n')
     now += 14999
@@ -165,7 +191,10 @@ describe('createWorktreeResolver', () => {
     })
     const { resolveProcessWorktrees } = createWorktreeResolver({ homeDir: join(tmp, 'home') })
     const map = await resolveProcessWorktrees([
-      proc(1, `"${join(tmp, 'plain', 'node.exe')}" "${join(repo, 'node_modules', '.bin', 'vite')}"`),
+      proc(
+        1,
+        `"${join(tmp, 'plain', 'node.exe')}" "${join(repo, 'node_modules', '.bin', 'vite')}"`
+      ),
       proc(2, 'claude'),
       proc(3, `"${join(tmp, 'nowhere', 'x.js')}"`)
     ])
@@ -186,7 +215,11 @@ describe('createWorktreeResolver', () => {
     })
     const { resolveProcessWorktrees } = createWorktreeResolver({ homeDir: join(tmp, 'home') })
     const map = await resolveProcessWorktrees(
-      [proc(1, 'node server.js'), proc(2, `node "${join(other, 'server.js')}"`), proc(3, 'python app.py')],
+      [
+        proc(1, 'node server.js'),
+        proc(2, `node "${join(other, 'server.js')}"`),
+        proc(3, 'python app.py')
+      ],
       { 1: repo + '\\', 2: repo, 3: '\\\\wsl.localhost\\Ubuntu\\home\\dev' }
     )
     expect(map.get(1)?.root).toBe(repo)

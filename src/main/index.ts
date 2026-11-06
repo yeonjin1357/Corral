@@ -31,7 +31,9 @@ function trayIcon(level: MemoryLevel): Electron.NativeImage {
   const cached = iconCache.get(level)
   if (cached) return cached
   const color = LEVEL_COLORS[level]
-  const image = nativeImage.createFromBuffer(encodePng(createDotIcon(color, 16), 16, 16), { scaleFactor: 1 })
+  const image = nativeImage.createFromBuffer(encodePng(createDotIcon(color, 16), 16, 16), {
+    scaleFactor: 1
+  })
   image.addRepresentation({ scaleFactor: 2, buffer: encodePng(createDotIcon(color, 32), 32, 32) })
   iconCache.set(level, image)
   return image
@@ -118,7 +120,8 @@ async function confirmKill(options: KillConfirm): Promise<boolean> {
 
 const killer = createPortKiller({
   latest: () => scheduler.latest(),
-  resample: () => (platform ? sample(platform) : Promise.reject(new Error(text.unsupportedPlatform))),
+  resample: () =>
+    platform ? sample(platform) : Promise.reject(new Error(text.unsupportedPlatform)),
   confirm: confirmKill,
   signal: (pid, sig) => {
     process.kill(pid, sig)
@@ -154,7 +157,9 @@ function registerIpc(): void {
   const fromMainWindow = (sender: Electron.WebContents): boolean =>
     !!mainWindow && !mainWindow.isDestroyed() && sender === mainWindow.webContents
 
-  ipcMain.handle(IPC.getLatest, (event) => (fromMainWindow(event.sender) ? scheduler.latest() : null))
+  ipcMain.handle(IPC.getLatest, (event) =>
+    fromMainWindow(event.sender) ? scheduler.latest() : null
+  )
   ipcMain.handle(IPC.killPort, async (event, arg: unknown) => {
     if (!fromMainWindow(event.sender)) return { status: 'failed', message: text.killResult.invalid }
     const { port, pid } = (arg ?? {}) as { port?: unknown; pid?: unknown }

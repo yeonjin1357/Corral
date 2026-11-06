@@ -15,7 +15,12 @@ const GB = 1024 ** 3
 function snap(over: Partial<DashboardSnapshot> = {}): DashboardSnapshot {
   return {
     takenAt: 1,
-    memory: { totalBytes: 32 * GB, usedBytes: Math.round(26.3 * GB), usedPercent: 82.2, level: 'warn' },
+    memory: {
+      totalBytes: 32 * GB,
+      usedBytes: Math.round(26.3 * GB),
+      usedPercent: 82.2,
+      level: 'warn'
+    },
     ports: [1, 2, 3].map((i) => ({
       port: 3000 + i,
       pid: i,
@@ -43,13 +48,26 @@ const labels = (items: Electron.MenuItemConstructorOptions[]): (string | undefin
 describe('buildTrayMenu', () => {
   test('메뉴 항목(퍼센트는 내림, 정보 줄은 비활성)', () => {
     const items = buildTrayMenu(snap(), actions)
-    expect(labels(items)).toEqual(['RAM 82% (26.3 GB / 32.0 GB)', '개발 서버 포트 3개', '---', '앱 열기', '---', '종료'])
+    expect(labels(items)).toEqual([
+      'RAM 82% (26.3 GB / 32.0 GB)',
+      '개발 서버 포트 3개',
+      '---',
+      '앱 열기',
+      '---',
+      '종료'
+    ])
     expect(items[0].enabled).toBe(false)
     expect(items[1].enabled).toBe(false)
   })
 
   test('스냅샷 전에는 확인 중, 포트 줄 없음', () => {
-    expect(labels(buildTrayMenu(null, actions))).toEqual(['RAM 확인 중…', '---', '앱 열기', '---', '종료'])
+    expect(labels(buildTrayMenu(null, actions))).toEqual([
+      'RAM 확인 중…',
+      '---',
+      '앱 열기',
+      '---',
+      '종료'
+    ])
   })
 
   test('업데이트 지연과 수집 실패', () => {
@@ -125,7 +143,15 @@ describe('createTrayController', () => {
     }
   }
 
-  function setup(platform: 'win32' | 'darwin') {
+  interface Setup {
+    tray: ReturnType<typeof fakeTray>
+    makeIcon: ReturnType<typeof vi.fn>
+    buildMenu: ReturnType<typeof vi.fn>
+    actions: { open: ReturnType<typeof vi.fn>; quit: ReturnType<typeof vi.fn> }
+    controller: ReturnType<typeof createTrayController>
+  }
+
+  function setup(platform: 'win32' | 'darwin'): Setup {
     const tray = fakeTray()
     const makeIcon = vi.fn((level: string) => `icon:${level}`)
     const buildMenu = vi.fn((items: Electron.MenuItemConstructorOptions[]) => ({ items }))
@@ -140,7 +166,11 @@ describe('createTrayController', () => {
     controller.update(snap({ takenAt: 2 }))
     expect(tray.setContextMenu).toHaveBeenCalledTimes(2) // 처음(null) + 첫 스냅샷
     expect(tray.setToolTip).toHaveBeenCalledTimes(2)
-    controller.update(snap({ memory: { totalBytes: 32 * GB, usedBytes: 30 * GB, usedPercent: 93.7, level: 'danger' } }))
+    controller.update(
+      snap({
+        memory: { totalBytes: 32 * GB, usedBytes: 30 * GB, usedPercent: 93.7, level: 'danger' }
+      })
+    )
     expect(tray.setImage).toHaveBeenLastCalledWith('icon:danger')
     expect(tray.setContextMenu).toHaveBeenCalledTimes(3)
   })
@@ -171,7 +201,8 @@ describe('createTrayController', () => {
     expect(tray.displayBalloon).toHaveBeenCalledTimes(1)
     expect(tray.displayBalloon).toHaveBeenCalledWith({
       title: 'pitwall',
-      content: 'pitwall 은 트레이에서 계속 실행돼요. 끄려면 트레이 아이콘 메뉴에서 종료를 누르세요.',
+      content:
+        'pitwall 은 트레이에서 계속 실행돼요. 끄려면 트레이 아이콘 메뉴에서 종료를 누르세요.',
       noSound: true
     })
     const mac = setup('darwin')

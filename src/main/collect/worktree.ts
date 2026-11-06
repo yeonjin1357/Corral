@@ -91,7 +91,10 @@ export interface WorktreeResolverOptions {
 
 export interface WorktreeResolver {
   resolveWorktree(path: string): Promise<WorktreeInfo | null>
-  resolveProcessWorktrees(processes: ProcessInfo[], cwds?: Record<number, string>): Promise<Map<number, WorktreeInfo>>
+  resolveProcessWorktrees(
+    processes: ProcessInfo[],
+    cwds?: Record<number, string>
+  ): Promise<Map<number, WorktreeInfo>>
 }
 
 export function createWorktreeResolver(options: WorktreeResolverOptions = {}): WorktreeResolver {

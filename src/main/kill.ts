@@ -1,4 +1,11 @@
-import type { DashboardSnapshot, KillResult, Platform, PortRow, ProcessInfo, RawSample } from '../shared/types'
+import type {
+  DashboardSnapshot,
+  KillResult,
+  Platform,
+  PortRow,
+  ProcessInfo,
+  RawSample
+} from '../shared/types'
 import { worktreeLabel } from '../shared/format'
 import { text } from '../shared/text'
 import { classifyAgent, descendantsOf } from './snapshot'
@@ -14,7 +21,8 @@ export interface KillConfirm {
   cancelId: number
 }
 
-export type KillPlan = { ok: true; pids: number[] } | { ok: false; reason: 'gone' | 'changed' | 'agent' }
+export type KillPlan =
+  { ok: true; pids: number[] } | { ok: false; reason: 'gone' | 'changed' | 'agent' }
 
 /** macOS 는 먼저 정상 종료(SIGTERM)를 요청하고, 이 시간 뒤에도 남아 있으면 강제 종료한다. */
 const DARWIN_GRACE_MS = 3000
@@ -36,14 +44,21 @@ export function planKill(row: PortRow, fresh: RawSample): KillPlan {
   const descendants = descendantsOf(fresh.processes, row.pid)
   // 예: worktree 에서 띄운 IDE 를 내리면 그 터미널 안의 Claude·Codex 세션까지 같이 꺼진다.
   const byPid = new Map(fresh.processes.map((x) => [x.pid, x]))
-  if (descendants.some((pid) => { const d = byPid.get(pid); return !!d && classifyAgent(d) })) {
+  if (
+    descendants.some((pid) => {
+      const d = byPid.get(pid)
+      return !!d && classifyAgent(d)
+    })
+  ) {
     return { ok: false, reason: 'agent' }
   }
   return { ok: true, pids: [row.pid, ...descendants] }
 }
 
 function planFailure(reason: 'gone' | 'changed' | 'agent'): KillResult {
-  return reason === 'agent' ? { status: 'failed', message: text.killResult.agentInside } : { status: reason }
+  return reason === 'agent'
+    ? { status: 'failed', message: text.killResult.agentInside }
+    : { status: reason }
 }
 
 export function buildKillConfirm(row: PortRow): KillConfirm {
@@ -68,14 +83,18 @@ export interface KillDeps {
 }
 
 function errorCode(e: unknown): string | undefined {
-  return typeof e === 'object' && e !== null && 'code' in e ? String((e as { code: unknown }).code) : undefined
+  return typeof e === 'object' && e !== null && 'code' in e
+    ? String((e as { code: unknown }).code)
+    : undefined
 }
 
 function errorMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
 }
 
-export function createPortKiller(deps: KillDeps): { killPort(port: number, pid: number): Promise<KillResult> } {
+export function createPortKiller(deps: KillDeps): {
+  killPort(port: number, pid: number): Promise<KillResult>
+} {
   const busy = new Set<number>()
 
   async function freshPlan(row: PortRow): Promise<{ plan: KillPlan; sample: RawSample }> {

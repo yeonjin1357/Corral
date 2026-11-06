@@ -103,9 +103,27 @@ const devWorkBytes = computed(() =>
           :expanded="false"
           pending
         />
-        <DashCard :title="text.ui.cards.leftovers" :summary="text.ui.none" tone="secondary" :expanded="false" pending />
-        <DashCard :title="text.ui.cards.heavy" :summary="text.ui.none" tone="secondary" :expanded="false" pending />
-        <DashCard :title="text.ui.cards.disk" :summary="text.ui.none" tone="secondary" :expanded="false" pending />
+        <DashCard
+          :title="text.ui.cards.leftovers"
+          :summary="text.ui.none"
+          tone="secondary"
+          :expanded="false"
+          pending
+        />
+        <DashCard
+          :title="text.ui.cards.heavy"
+          :summary="text.ui.none"
+          tone="secondary"
+          :expanded="false"
+          pending
+        />
+        <DashCard
+          :title="text.ui.cards.disk"
+          :summary="text.ui.none"
+          tone="secondary"
+          :expanded="false"
+          pending
+        />
       </div>
     </template>
   </main>

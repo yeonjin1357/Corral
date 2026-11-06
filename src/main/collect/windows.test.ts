@@ -28,12 +28,40 @@ const json = JSON.stringify({
       WorkingSetSize: 1048576000,
       StartedAt: 1793945439824
     },
-    { ProcessId: 8, ParentProcessId: 0, Name: 'System', CommandLine: null, WorkingSetSize: 8192, StartedAt: null }
+    {
+      ProcessId: 8,
+      ParentProcessId: 0,
+      Name: 'System',
+      CommandLine: null,
+      WorkingSetSize: 8192,
+      StartedAt: null
+    }
   ],
   tcp: [
-    { OwningProcess: 4100, LocalAddress: '0.0.0.0', LocalPort: 3000, RemoteAddress: '0.0.0.0', RemotePort: 0, State: 'Listen' },
-    { OwningProcess: 4100, LocalAddress: '::1', LocalPort: 3000, RemoteAddress: '::1', RemotePort: 51234, State: 'Established' },
-    { OwningProcess: 0, LocalAddress: '::1', LocalPort: 3000, RemoteAddress: '::1', RemotePort: 51000, State: 'TimeWait' }
+    {
+      OwningProcess: 4100,
+      LocalAddress: '0.0.0.0',
+      LocalPort: 3000,
+      RemoteAddress: '0.0.0.0',
+      RemotePort: 0,
+      State: 'Listen'
+    },
+    {
+      OwningProcess: 4100,
+      LocalAddress: '::1',
+      LocalPort: 3000,
+      RemoteAddress: '::1',
+      RemotePort: 51234,
+      State: 'Established'
+    },
+    {
+      OwningProcess: 0,
+      LocalAddress: '::1',
+      LocalPort: 3000,
+      RemoteAddress: '::1',
+      RemotePort: 51000,
+      State: 'TimeWait'
+    }
   ]
 })
 
@@ -82,11 +110,20 @@ test('UTF-8 BOM 과 앞뒤 공백·줄바꿈이 있어도 파싱', () => {
 test('이름·메모리가 null 인 프로세스는 빈 문자열·0 으로', () => {
   const s = parseWindowsSample(
     JSON.stringify({
-      processes: [{ ProcessId: 9, ParentProcessId: 0, Name: null, CommandLine: null, WorkingSetSize: null }],
+      processes: [
+        { ProcessId: 9, ParentProcessId: 0, Name: null, CommandLine: null, WorkingSetSize: null }
+      ],
       tcp: []
     })
   )
-  expect(s.processes[0]).toEqual({ pid: 9, ppid: 0, name: '', commandLine: '', memoryBytes: 0, startedAt: null })
+  expect(s.processes[0]).toEqual({
+    pid: 9,
+    ppid: 0,
+    name: '',
+    commandLine: '',
+    memoryBytes: 0,
+    startedAt: null
+  })
 })
 
 test('스크립트는 프로세스 시작 시각을 유닉스 ms 로 낸다(부모 pid 재사용 판별용)', () => {
@@ -115,14 +152,17 @@ test('스크립트는 따옴표 문제 없이 -EncodedCommand(UTF-16LE base64)�
 })
 
 describe('보안 정책으로 기본 스크립트가 막힌 PC(ConstrainedLanguage 등)', () => {
-  const decode = (argv: string[]): string => Buffer.from(argv[argv.length - 1], 'base64').toString('utf16le')
+  const decode = (argv: string[]): string =>
+    Buffer.from(argv[argv.length - 1], 'base64').toString('utf16le')
 
   test('대체 스크립트는 제한 모드에서 막히는 것(Add-Type·.NET 정적 호출·New-Object)을 쓰지 않고 결과를 UTF-8 파일로 쓴다', () => {
     const script = windowsSafeScript("C:\\Users\\김'개발\\AppData\\Local\\Temp\\pitwall-1.json")
     for (const blocked of ['Add-Type', '[Console]', '::new', 'New-Object', '.ToString()']) {
       expect(script).not.toContain(blocked)
     }
-    expect(script).toContain("Out-File -LiteralPath 'C:\\Users\\김''개발\\AppData\\Local\\Temp\\pitwall-1.json' -Encoding utf8")
+    expect(script).toContain(
+      "Out-File -LiteralPath 'C:\\Users\\김''개발\\AppData\\Local\\Temp\\pitwall-1.json' -Encoding utf8"
+    )
     expect(script).toContain('CreationDate')
   })
 
@@ -148,18 +188,64 @@ describe('보안 정책으로 기본 스크립트가 막힌 PC(ConstrainedLangua
       '  UDP    0.0.0.0:5353           *:*                                    1234'
     ]
     expect(parseNetstatLines(lines)).toEqual([
-      { pid: 4100, localAddress: '0.0.0.0', localPort: 3000, remoteAddress: '0.0.0.0', remotePort: 0, state: 'Listen' },
-      { pid: 4100, localAddress: '::', localPort: 3000, remoteAddress: '::', remotePort: 0, state: 'Listen' },
-      { pid: 4100, localAddress: '::1', localPort: 3000, remoteAddress: '::1', remotePort: 51234, state: 'Established' },
-      { pid: 6848, localAddress: 'fe80::1%5', localPort: 5040, remoteAddress: '::', remotePort: 0, state: 'Listen' },
-      { pid: 0, localAddress: '::1', localPort: 3000, remoteAddress: '::1', remotePort: 51000, state: 'Other' },
-      { pid: 6000, localAddress: '0.0.0.0', localPort: 8080, remoteAddress: '0.0.0.0', remotePort: 0, state: 'Listen' }
+      {
+        pid: 4100,
+        localAddress: '0.0.0.0',
+        localPort: 3000,
+        remoteAddress: '0.0.0.0',
+        remotePort: 0,
+        state: 'Listen'
+      },
+      {
+        pid: 4100,
+        localAddress: '::',
+        localPort: 3000,
+        remoteAddress: '::',
+        remotePort: 0,
+        state: 'Listen'
+      },
+      {
+        pid: 4100,
+        localAddress: '::1',
+        localPort: 3000,
+        remoteAddress: '::1',
+        remotePort: 51234,
+        state: 'Established'
+      },
+      {
+        pid: 6848,
+        localAddress: 'fe80::1%5',
+        localPort: 5040,
+        remoteAddress: '::',
+        remotePort: 0,
+        state: 'Listen'
+      },
+      {
+        pid: 0,
+        localAddress: '::1',
+        localPort: 3000,
+        remoteAddress: '::1',
+        remotePort: 51000,
+        state: 'Other'
+      },
+      {
+        pid: 6000,
+        localAddress: '0.0.0.0',
+        localPort: 8080,
+        remoteAddress: '0.0.0.0',
+        remotePort: 0,
+        state: 'Listen'
+      }
     ])
   })
 
   test('TCP 목록이 비어 있고 netstat 줄이 있으면 그것으로 채운다', () => {
     const s = parseWindowsSample(
-      JSON.stringify({ processes: [], tcp: [], netstat: ['  TCP    0.0.0.0:3000   0.0.0.0:0   LISTENING   4100'] })
+      JSON.stringify({
+        processes: [],
+        tcp: [],
+        netstat: ['  TCP    0.0.0.0:3000   0.0.0.0:0   LISTENING   4100']
+      })
     )
     expect(s.tcp.map((t) => [t.localPort, t.state])).toEqual([[3000, 'Listen']])
   })
@@ -168,9 +254,30 @@ describe('보안 정책으로 기본 스크립트가 막힌 PC(ConstrainedLangua
     const s = parseWindowsSample(
       JSON.stringify({
         processes: [
-          { ProcessId: 1, ParentProcessId: 0, Name: 'a', CommandLine: 'a', WorkingSetSize: 1, CreationDate: '/Date(1793945439824)/' },
-          { ProcessId: 2, ParentProcessId: 0, Name: 'b', CommandLine: 'b', WorkingSetSize: 1, CreationDate: { value: '/Date(1793945439000)/', DisplayHint: 2 } },
-          { ProcessId: 3, ParentProcessId: 0, Name: 'c', CommandLine: 'c', WorkingSetSize: 1, CreationDate: null }
+          {
+            ProcessId: 1,
+            ParentProcessId: 0,
+            Name: 'a',
+            CommandLine: 'a',
+            WorkingSetSize: 1,
+            CreationDate: '/Date(1793945439824)/'
+          },
+          {
+            ProcessId: 2,
+            ParentProcessId: 0,
+            Name: 'b',
+            CommandLine: 'b',
+            WorkingSetSize: 1,
+            CreationDate: { value: '/Date(1793945439000)/', DisplayHint: 2 }
+          },
+          {
+            ProcessId: 3,
+            ParentProcessId: 0,
+            Name: 'c',
+            CommandLine: 'c',
+            WorkingSetSize: 1,
+            CreationDate: null
+          }
         ],
         tcp: []
       })
@@ -185,7 +292,12 @@ describe('보안 정책으로 기본 스크립트가 막힌 PC(ConstrainedLangua
       const script = decode(argv)
       if (script.includes('PitwallTcp')) {
         calls.push('full')
-        return { stdout: '', stderr: 'Cannot invoke method. Method invocation is supported only on core types in this language mode.', exitCode: 1 }
+        return {
+          stdout: '',
+          stderr:
+            'Cannot invoke method. Method invocation is supported only on core types in this language mode.',
+          exitCode: 1
+        }
       }
       calls.push('safe')
       const out = /Out-File -LiteralPath '(.+?)'/.exec(script)![1].replace(/''/g, "'")
@@ -237,7 +349,11 @@ describe('보안 정책으로 기본 스크립트가 막힌 PC(ConstrainedLangua
 })
 
 test('포트를 연 프로세스의 작업 폴더(cwds)를 pid → 경로로 읽고, 없으면 빈 객체', () => {
-  const withCwds = JSON.stringify({ processes: [], tcp: [], cwds: { '4100': 'C:\\Users\\김개발\\work\\shop-web\\', '7': '' } })
+  const withCwds = JSON.stringify({
+    processes: [],
+    tcp: [],
+    cwds: { '4100': 'C:\\Users\\김개발\\work\\shop-web\\', '7': '' }
+  })
   expect(parseWindowsSample(withCwds).cwds).toEqual({ 4100: 'C:\\Users\\김개발\\work\\shop-web\\' })
   expect(parseWindowsSample(json).cwds).toEqual({})
 })
@@ -260,8 +376,12 @@ test('스크립트는 포트를 연 프로세스만 골라 작업 폴더를 읽�
 })
 
 test('보조 코드 DLL 경로를 주면 한 번만 컴파일해 재사용하고, 경로의 작은따옴표는 이스케이프한다', () => {
-  const script = windowsSampleScript("C:\\Users\\김'개발\\AppData\\Roaming\\pitwall\\pitwall-native-1.dll")
-  expect(script).toContain("$dll = 'C:\\Users\\김''개발\\AppData\\Roaming\\pitwall\\pitwall-native-1.dll'")
+  const script = windowsSampleScript(
+    "C:\\Users\\김'개발\\AppData\\Roaming\\pitwall\\pitwall-native-1.dll"
+  )
+  expect(script).toContain(
+    "$dll = 'C:\\Users\\김''개발\\AppData\\Roaming\\pitwall\\pitwall-native-1.dll'"
+  )
   expect(script).toContain('Add-Type -Path $dll')
   expect(script).toContain('-OutputAssembly $dll')
   expect(windowsSampleScript(null)).not.toContain('$dll')
@@ -269,21 +389,28 @@ test('보조 코드 DLL 경로를 주면 한 번만 컴파일해 재사용하고
 })
 
 test('명령줄 길이 제한(32767자) 안에 들어간다', () => {
-  const longPath = 'C:\\Users\\' + '가'.repeat(60) + '\\AppData\\Roaming\\pitwall\\' + nativeHelperDllName()
+  const longPath =
+    'C:\\Users\\' + '가'.repeat(60) + '\\AppData\\Roaming\\pitwall\\' + nativeHelperDllName()
   const args = buildPowerShellArgs(windowsSampleScript(longPath))
   expect([powershellPath(), ...args].join(' ').length).toBeLessThan(30000)
 })
 
 test('powershell.exe 는 SystemRoot 기준 전체 경로로 실행(PATH 에 의존하지 않음)', () => {
-  expect(powershellPath({ SystemRoot: 'D:\\Win' })).toBe('D:\\Win\\System32\\WindowsPowerShell\\v1.0\\powershell.exe')
+  expect(powershellPath({ SystemRoot: 'D:\\Win' })).toBe(
+    'D:\\Win\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'
+  )
   expect(powershellPath({})).toBe('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe')
 })
 
 describe.runIf(process.platform === 'win32')('실제 Windows 에서', () => {
   test('샘플에 자기 자신과 한글 인자를 가진 자식 프로세스가 그대로 보인다', async () => {
-    const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 20000)', 'C:\\Users\\김개발\\work'], {
-      windowsHide: true
-    })
+    const child = spawn(
+      process.execPath,
+      ['-e', 'setTimeout(() => {}, 20000)', 'C:\\Users\\김개발\\work'],
+      {
+        windowsHide: true
+      }
+    )
     try {
       await new Promise((r) => setTimeout(r, 300))
       const s = await sampleWindows()
@@ -300,9 +427,13 @@ describe.runIf(process.platform === 'win32')('실제 Windows 에서', () => {
 
   test('제한 모드(ConstrainedLanguage)에서도 대체 스크립트로 수집되고 한글 인자가 보존된다', async () => {
     resetWindowsSamplerMode()
-    const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 20000)', 'C:\\Users\\김개발\\clm'], {
-      windowsHide: true
-    })
+    const child = spawn(
+      process.execPath,
+      ['-e', 'setTimeout(() => {}, 20000)', 'C:\\Users\\김개발\\clm'],
+      {
+        windowsHide: true
+      }
+    )
     try {
       await new Promise((r) => setTimeout(r, 300))
       const s = await sampleWindows({ languageModeForTest: 'ConstrainedLanguage' })

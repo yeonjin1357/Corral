@@ -27,16 +27,22 @@ describe('RamBar', () => {
 
   test('표시 퍼센트는 내림 — 79.96% 를 80% 로 보여 주면서 정상(초록)으로 칠하지 않는다', () => {
     const w = mount(RamBar, {
-      props: { memory: { totalBytes: 100 * GB, usedBytes: 79.96 * GB, usedPercent: 79.96, level: 'normal' } }
+      props: {
+        memory: { totalBytes: 100 * GB, usedBytes: 79.96 * GB, usedPercent: 79.96, level: 'normal' }
+      }
     })
     expect(w.text()).toContain('(79%)')
     expect(w.get('.progress-bar').attributes('aria-valuenow')).toBe('79')
   })
 
   test('normal 은 primary, danger 는 danger', () => {
-    const normal = mount(RamBar, { props: { memory: { totalBytes: GB, usedBytes: 0, usedPercent: 0, level: 'normal' } } })
+    const normal = mount(RamBar, {
+      props: { memory: { totalBytes: GB, usedBytes: 0, usedPercent: 0, level: 'normal' } }
+    })
     expect(normal.get('.progress-bar').classes()).toContain('bg-primary')
-    const danger = mount(RamBar, { props: { memory: { totalBytes: GB, usedBytes: GB, usedPercent: 100, level: 'danger' } } })
+    const danger = mount(RamBar, {
+      props: { memory: { totalBytes: GB, usedBytes: GB, usedPercent: 100, level: 'danger' } }
+    })
     expect(danger.get('.progress-bar').classes()).toContain('bg-danger')
   })
 })
@@ -57,7 +63,9 @@ describe('DashCard', () => {
   })
 
   test('pending 카드는 안내 문구를 보이고 눌러도 펼쳐지지 않는다', async () => {
-    const w = mount(DashCard, { props: { title: '디스크', summary: '—', expanded: false, pending: true } })
+    const w = mount(DashCard, {
+      props: { title: '디스크', summary: '—', expanded: false, pending: true }
+    })
     expect(w.text()).toContain('다음 단계에서 추가돼요')
     const head = w.get('button.card-head')
     expect(head.attributes('disabled')).toBeDefined()

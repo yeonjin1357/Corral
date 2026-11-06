@@ -1,17 +1,44 @@
-import { buildSnapshot, classifyAgent, levelOf, pidsForWorktreeLookup, RELAY_PROCESS_NAMES } from './snapshot'
+import {
+  buildSnapshot,
+  classifyAgent,
+  levelOf,
+  pidsForWorktreeLookup,
+  RELAY_PROCESS_NAMES
+} from './snapshot'
 import type { ProcessInfo, RawSample, TcpEntry, WorktreeInfo } from '../shared/types'
 
 const MB = 1024 * 1024
 const GB = 1024 * MB
 
-function proc(pid: number, ppid: number, name: string, mb: number, startedAt: number | null, commandLine = name): ProcessInfo {
+function proc(
+  pid: number,
+  ppid: number,
+  name: string,
+  mb: number,
+  startedAt: number | null,
+  commandLine = name
+): ProcessInfo {
   return { pid, ppid, name, memoryBytes: mb * MB, startedAt, commandLine }
 }
 function listen(pid: number, port: number, localAddress = '0.0.0.0'): TcpEntry {
-  return { pid, localAddress, localPort: port, remoteAddress: '0.0.0.0', remotePort: 0, state: 'Listen' }
+  return {
+    pid,
+    localAddress,
+    localPort: port,
+    remoteAddress: '0.0.0.0',
+    remotePort: 0,
+    state: 'Listen'
+  }
 }
 function est(pid: number, localPort: number, remotePort: number): TcpEntry {
-  return { pid, localAddress: '::1', localPort, remoteAddress: '::1', remotePort, state: 'Established' }
+  return {
+    pid,
+    localAddress: '::1',
+    localPort,
+    remoteAddress: '::1',
+    remotePort,
+    state: 'Established'
+  }
 }
 
 const W1: WorktreeInfo = { root: 'C:\\work\\shop-web', branch: 'develop', isLinkedWorktree: false }
@@ -38,9 +65,23 @@ const processes: ProcessInfo[] = [
   proc(7203, 7202, 'c.exe', 1, 102),
   proc(7204, 7203, 'd.exe', 1, 103),
   proc(7205, 7204, 'node.exe', 1, 104),
-  proc(8000, 1, 'claude.exe', 300, 100, 'C:\\Users\\김개발\\AppData\\Local\\AnthropicClaude\\app-1.0\\claude.exe'),
+  proc(
+    8000,
+    1,
+    'claude.exe',
+    300,
+    100,
+    'C:\\Users\\김개발\\AppData\\Local\\AnthropicClaude\\app-1.0\\claude.exe'
+  ),
   proc(8100, 1, 'codex-windows-sandbox-service.exe', 20, 100),
-  proc(8200, 1, 'node.exe', 30, 100, 'node C:\\Users\\김개발\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex\\bin\\codex.js'),
+  proc(
+    8200,
+    1,
+    'node.exe',
+    30,
+    100,
+    'node C:\\Users\\김개발\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex\\bin\\codex.js'
+  ),
   proc(8201, 8200, 'codex-x86_64-pc-windows-msvc.exe', 60, 110),
   // 서로를 부모로 가리키는 고리(pid 재사용으로 생길 수 있음)에서도 멈춰야 한다.
   proc(9100, 9101, 'loop-a.exe', 1, null),
@@ -52,7 +93,14 @@ const tcp: TcpEntry[] = [
   listen(4100, 3000, '::'),
   est(4100, 3000, 51234),
   est(7777, 51234, 3000),
-  { pid: 0, localAddress: '::1', localPort: 3000, remoteAddress: '::1', remotePort: 51000, state: 'Other' },
+  {
+    pid: 0,
+    localAddress: '::1',
+    localPort: 3000,
+    remoteAddress: '::1',
+    remotePort: 51000,
+    state: 'Other'
+  },
   listen(5100, 3003),
   listen(6000, 8080),
   listen(4, 445),
@@ -140,14 +188,23 @@ describe('묶음과 에이전트', () => {
   })
 
   test('classifyAgent: Claude Code·Codex 는 맞고, Claude 데스크톱 앱·Codex 서비스는 아니다', () => {
-    const p = (name: string, commandLine = name): ProcessInfo => proc(1, 0, name, 1, null, commandLine)
+    const p = (name: string, commandLine = name): ProcessInfo =>
+      proc(1, 0, name, 1, null, commandLine)
     expect(classifyAgent(p('claude.exe', '"C:\\Users\\a\\.local\\bin\\claude.exe"'))).toBe(true)
     expect(classifyAgent(p('claude', '/Users/a/.local/bin/claude --resume'))).toBe(true)
     expect(classifyAgent(p('codex'))).toBe(true)
     expect(classifyAgent(p('codex-aarch64-apple-darwin'))).toBe(true)
-    expect(classifyAgent(p('node', 'node /usr/local/lib/node_modules/@anthropic-ai/claude-code/cli.js'))).toBe(true)
-    expect(classifyAgent(p('node.exe', 'node C:\\npm\\node_modules\\@anthropic-ai\\claude-code\\cli.js'))).toBe(true)
-    expect(classifyAgent(p('claude.exe', 'C:\\Users\\a\\AppData\\Local\\AnthropicClaude\\app-1\\claude.exe'))).toBe(false)
+    expect(
+      classifyAgent(p('node', 'node /usr/local/lib/node_modules/@anthropic-ai/claude-code/cli.js'))
+    ).toBe(true)
+    expect(
+      classifyAgent(p('node.exe', 'node C:\\npm\\node_modules\\@anthropic-ai\\claude-code\\cli.js'))
+    ).toBe(true)
+    expect(
+      classifyAgent(
+        p('claude.exe', 'C:\\Users\\a\\AppData\\Local\\AnthropicClaude\\app-1\\claude.exe')
+      )
+    ).toBe(false)
     expect(classifyAgent(p('Claude', '/Applications/Claude.app/Contents/MacOS/Claude'))).toBe(false)
     expect(classifyAgent(p('claude.exe', 'claude.exe --type=renderer'))).toBe(false)
     expect(classifyAgent(p('codex-windows-sandbox-service.exe'))).toBe(false)

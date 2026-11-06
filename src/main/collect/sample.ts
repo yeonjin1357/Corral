@@ -11,6 +11,9 @@ type Samplers = Record<Platform, () => Promise<RawSample>>
 
 const defaultSamplers: Samplers = { win32: sampleWindows, darwin: () => sampleDarwin() }
 
-export function sample(platform: Platform, samplers: Samplers = defaultSamplers): Promise<RawSample> {
+export function sample(
+  platform: Platform,
+  samplers: Samplers = defaultSamplers
+): Promise<RawSample> {
   return samplers[platform]()
 }

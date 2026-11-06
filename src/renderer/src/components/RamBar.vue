@@ -11,7 +11,11 @@ const barClass = computed(() => LEVEL_CLASS[props.memory.level])
 // 내림: 경고 기준(정수 %)과 표시가 어긋나지 않게 한다(79.6% 를 80% 로 보여 주면서 초록으로 칠하지 않도록).
 const roundedPercent = computed(() => Math.floor(props.memory.usedPercent))
 const usage = computed(() =>
-  text.ui.ramUsage(formatBytes(props.memory.usedBytes), formatBytes(props.memory.totalBytes), roundedPercent.value)
+  text.ui.ramUsage(
+    formatBytes(props.memory.usedBytes),
+    formatBytes(props.memory.totalBytes),
+    roundedPercent.value
+  )
 )
 </script>
 

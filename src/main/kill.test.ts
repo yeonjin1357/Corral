@@ -21,7 +21,9 @@ describe.runIf(process.platform === 'win32')('실제 Windows 에서', () => {
     const child = spawn(process.execPath, [script], { windowsHide: true })
     const exited = new Promise<void>((r) => child.once('exit', () => r()))
     try {
-      const port = await new Promise<number>((resolve) => child.stdout.once('data', (d) => resolve(Number(String(d).trim()))))
+      const port = await new Promise<number>((resolve) =>
+        child.stdout.once('data', (d) => resolve(Number(String(d).trim())))
+      )
       const raw = await sampleWindows()
       const worktrees = await createWorktreeResolver().resolveProcessWorktrees(raw.processes)
       const snapshot = buildSnapshot({
@@ -56,7 +58,13 @@ describe.runIf(process.platform === 'win32')('실제 Windows 에서', () => {
 
 const MB = 1024 * 1024
 
-function proc(pid: number, ppid: number, name: string, commandLine: string, startedAt: number | null): ProcessInfo {
+function proc(
+  pid: number,
+  ppid: number,
+  name: string,
+  commandLine: string,
+  startedAt: number | null
+): ProcessInfo {
   return { pid, ppid, name, commandLine, memoryBytes: MB, startedAt }
 }
 
@@ -74,7 +82,10 @@ const row: PortRow = {
   clientCount: 0,
   startedAt: 200
 }
-const freshSample: RawSample = { processes: [proc(4000, 1, 'cmd.exe', 'cmd', 100), vite, esbuild], tcp: [] }
+const freshSample: RawSample = {
+  processes: [proc(4000, 1, 'cmd.exe', 'cmd', 100), vite, esbuild],
+  tcp: []
+}
 
 function snapshotWith(ports: PortRow[]): DashboardSnapshot {
   return {
@@ -94,7 +105,10 @@ describe('planKill', () => {
   })
 
   test('이름·명령줄·시작 시각이 다르면 changed(pid 재사용)', () => {
-    const swap = (p: Partial<ProcessInfo>): RawSample => ({ processes: [{ ...vite, ...p }], tcp: [] })
+    const swap = (p: Partial<ProcessInfo>): RawSample => ({
+      processes: [{ ...vite, ...p }],
+      tcp: []
+    })
     expect(planKill(row, swap({ commandLine: 'other' }))).toEqual({ ok: false, reason: 'changed' })
     expect(planKill(row, swap({ name: 'python.exe' }))).toEqual({ ok: false, reason: 'changed' })
     expect(planKill(row, swap({ startedAt: 999 }))).toEqual({ ok: false, reason: 'changed' })
@@ -102,7 +116,10 @@ describe('planKill', () => {
 
   test('하위에 에이전트(Claude·Codex)가 돌고 있으면 내리지 않는다(세션이 같이 꺼지므로)', () => {
     const claude = proc(4200, 4100, 'claude.exe', '"C:\\Users\\a\\.local\\bin\\claude.exe"', 500)
-    expect(planKill(row, { processes: [vite, esbuild, claude], tcp: [] })).toEqual({ ok: false, reason: 'agent' })
+    expect(planKill(row, { processes: [vite, esbuild, claude], tcp: [] })).toEqual({
+      ok: false,
+      reason: 'agent'
+    })
   })
 
   test('자손은 오래된 스냅샷이 아니라 최신 샘플에서 다시 계산한다', () => {
@@ -124,7 +141,9 @@ test('확인 창 문구', () => {
     defaultId: 1,
     cancelId: 1
   })
-  expect(buildKillConfirm({ ...row, descendantPids: [] }).detail).toBe('node.exe (PID 4100) 가 종료돼요.')
+  expect(buildKillConfirm({ ...row, descendantPids: [] }).detail).toBe(
+    'node.exe (PID 4100) 가 종료돼요.'
+  )
 })
 
 describe('killPort', () => {
@@ -166,7 +185,9 @@ describe('killPort', () => {
   })
 
   test('판별 불가 행·확인 취소·스냅샷에 없는 포트·잘못된 인자는 아무것도 종료하지 않는다', async () => {
-    const unresolvable = deps({ latest: () => snapshotWith([{ ...row, unresolvable: true, worktree: null }]) })
+    const unresolvable = deps({
+      latest: () => snapshotWith([{ ...row, unresolvable: true, worktree: null }])
+    })
     expect((await createPortKiller(unresolvable).killPort(3000, 4100)).status).toBe('failed')
     const cancel = deps({ confirm: async () => false })
     expect(await createPortKiller(cancel).killPort(3000, 4100)).toEqual({ status: 'cancelled' })
@@ -176,13 +197,15 @@ describe('killPort', () => {
     expect(await createPortKiller(nothing).killPort(3000, 4100)).toEqual({ status: 'gone' })
     const bad = deps()
     expect((await createPortKiller(bad).killPort(Number.NaN, -1)).status).toBe('failed')
-    for (const d of [unresolvable, cancel, missing, nothing, bad]) expect(d.signal).not.toHaveBeenCalled()
+    for (const d of [unresolvable, cancel, missing, nothing, bad])
+      expect(d.signal).not.toHaveBeenCalled()
   })
 
   test('확인 창을 띄운 사이 프로세스가 바뀌면 종료하지 않는다', async () => {
     let call = 0
     const d = deps({
-      resample: async () => (call++ === 0 ? freshSample : { processes: [{ ...vite, commandLine: 'other' }], tcp: [] })
+      resample: async () =>
+        call++ === 0 ? freshSample : { processes: [{ ...vite, commandLine: 'other' }], tcp: [] }
     })
     expect(await createPortKiller(d).killPort(3000, 4100)).toEqual({ status: 'changed' })
     expect(d.signal).not.toHaveBeenCalled()
@@ -191,10 +214,14 @@ describe('killPort', () => {
   test('하위에 에이전트가 있으면 확인 창 없이 이유와 함께 거절', async () => {
     const claude = proc(4200, 4100, 'claude.exe', '"C:\\Users\\a\\.local\\bin\\claude.exe"', 500)
     const confirm = vi.fn(async () => true)
-    const d = deps({ confirm, resample: async () => ({ processes: [vite, esbuild, claude], tcp: [] }) })
+    const d = deps({
+      confirm,
+      resample: async () => ({ processes: [vite, esbuild, claude], tcp: [] })
+    })
     expect(await createPortKiller(d).killPort(3000, 4100)).toEqual({
       status: 'failed',
-      message: '이 프로세스 아래에서 에이전트(Claude·Codex)가 돌고 있어 내리지 않았어요. 에이전트를 먼저 끝내 주세요.'
+      message:
+        '이 프로세스 아래에서 에이전트(Claude·Codex)가 돌고 있어 내리지 않았어요. 에이전트를 먼저 끝내 주세요.'
     })
     expect(confirm).not.toHaveBeenCalled()
     expect(d.signal).not.toHaveBeenCalled()
@@ -206,7 +233,10 @@ describe('killPort', () => {
         throw new Error('timeout')
       }
     })
-    expect(await createPortKiller(d).killPort(3000, 4100)).toEqual({ status: 'failed', message: 'timeout' })
+    expect(await createPortKiller(d).killPort(3000, 4100)).toEqual({
+      status: 'failed',
+      message: 'timeout'
+    })
   })
 
   test('루트가 이미 없으면(ESRCH) gone, 권한이 없으면(EPERM) failed + 안내', async () => {

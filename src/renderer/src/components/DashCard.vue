@@ -21,7 +21,13 @@ const toneClass = computed(() => (props.tone === 'primary' ? '' : `text-${props.
 
 <template>
   <section class="shadow-box big-padding dash-card" :class="{ expanded }">
-    <button type="button" class="card-head" :aria-expanded="expanded" :disabled="pending" @click="emit('toggle')">
+    <button
+      type="button"
+      class="card-head"
+      :aria-expanded="expanded"
+      :disabled="pending"
+      @click="emit('toggle')"
+    >
       <h3>{{ title }}</h3>
       <span class="num" :class="toneClass">{{ summary }}</span>
       <small v-if="pending" class="text-secondary">{{ text.ui.pending }}</small>

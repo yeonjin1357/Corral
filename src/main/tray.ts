@@ -5,9 +5,14 @@ import { formatBytes } from '../shared/format'
 import { text } from '../shared/text'
 
 /** Uptime Kuma vars.scss 의 $primary / $warning / $danger. */
-export const LEVEL_COLORS: Record<MemoryLevel, string> = { normal: '#5cdd8b', warn: '#f8a306', danger: '#dc3545' }
+export const LEVEL_COLORS: Record<MemoryLevel, string> = {
+  normal: '#5cdd8b',
+  warn: '#f8a306',
+  danger: '#dc3545'
+}
 
-const hasMemory = (s: DashboardSnapshot | null): s is DashboardSnapshot => !!s && s.memory.totalBytes > 0
+const hasMemory = (s: DashboardSnapshot | null): s is DashboardSnapshot =>
+  !!s && s.memory.totalBytes > 0
 // 화면(RamBar)과 같은 규칙: 내림해야 경고 기준과 표시가 어긋나지 않는다.
 const percentOf = (s: DashboardSnapshot): number => Math.floor(s.memory.usedPercent)
 
@@ -21,7 +26,11 @@ export function buildTrayMenu(
   } else if (!hasMemory(s)) {
     items.push({ label: text.tray.failed, enabled: false })
   } else {
-    const ram = text.tray.ram(percentOf(s), formatBytes(s.memory.usedBytes), formatBytes(s.memory.totalBytes))
+    const ram = text.tray.ram(
+      percentOf(s),
+      formatBytes(s.memory.usedBytes),
+      formatBytes(s.memory.totalBytes)
+    )
     items.push({ label: s.stale ? ram + text.tray.staleSuffix : ram, enabled: false })
   }
   if (s) items.push({ label: text.tray.ports(s.ports.length), enabled: false })
@@ -163,7 +172,11 @@ export function createTrayController<Icon, Menu>(deps: {
     notifyHiddenOnce() {
       if (notified || deps.platform !== 'win32') return
       notified = true
-      deps.tray.displayBalloon({ title: text.appName, content: text.tray.stillRunning, noSound: true })
+      deps.tray.displayBalloon({
+        title: text.appName,
+        content: text.tray.stillRunning,
+        noSound: true
+      })
     }
   }
 }

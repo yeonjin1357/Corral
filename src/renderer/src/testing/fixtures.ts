@@ -28,13 +28,25 @@ export const threePorts: PortRow[] = [
     clientCount: 0,
     worktree: { root: '/Users/dev/wt-a', branch: 'feat/a', isLinkedWorktree: true }
   }),
-  portRow({ port: 8080, pid: 6000, processName: 'wslrelay.exe', worktree: null, unresolvable: true, clientCount: 0 })
+  portRow({
+    port: 8080,
+    pid: 6000,
+    processName: 'wslrelay.exe',
+    worktree: null,
+    unresolvable: true,
+    clientCount: 0
+  })
 ]
 
 export function snapshot(over: Partial<DashboardSnapshot> = {}): DashboardSnapshot {
   return {
     takenAt: 1,
-    memory: { totalBytes: 32 * GB, usedBytes: Math.round(26.3 * GB), usedPercent: 82.2, level: 'warn' },
+    memory: {
+      totalBytes: 32 * GB,
+      usedBytes: Math.round(26.3 * GB),
+      usedPercent: 82.2,
+      level: 'warn'
+    },
     ports: threePorts,
     groups: [
       { group: 'devServer', memoryBytes: 2200 * MB, processCount: 5 },

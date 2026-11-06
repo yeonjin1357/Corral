@@ -38,7 +38,8 @@ export function runCommand(argv: string[], opts: CommandOptions = {}): Promise<C
         const err = stderr.toString('utf8')
         if (!error) return resolve({ stdout: out, stderr: err, exitCode: 0 })
         if (error.killed) return reject(new Error('timeout'))
-        if (typeof error.code === 'number') return resolve({ stdout: out, stderr: err, exitCode: error.code })
+        if (typeof error.code === 'number')
+          return resolve({ stdout: out, stderr: err, exitCode: error.code })
         reject(error)
       }
     )

@@ -57,7 +57,9 @@ test('닫혀 있다가 창을 열면, 마지막 수집이 오래됐으면 바로
 })
 
 test('수집이 주기보다 길면 겹쳐 실행하지 않고, 끝난 뒤부터 주기를 센다', async () => {
-  const collect = vi.fn(() => new Promise<DashboardSnapshot>((r) => setTimeout(() => r(snap(Date.now())), 12000)))
+  const collect = vi.fn(
+    () => new Promise<DashboardSnapshot>((r) => setTimeout(() => r(snap(Date.now())), 12000))
+  )
   const s = createScheduler({ collect, intervals, onSnapshot: () => {} })
   s.setWindowOpen(true)
   s.start()
@@ -97,13 +99,21 @@ test('첫 수집부터 실패하면 빈 스냅샷을 stale + 에러로 보낸다
   const s = createScheduler({ collect, intervals, onSnapshot: (x) => sent.push(x) })
   s.start()
   await vi.advanceTimersByTimeAsync(0)
-  expect(sent[0]).toMatchObject({ ports: [], groups: [], stale: true, error: 'boom', agentProcessCount: 0 })
+  expect(sent[0]).toMatchObject({
+    ports: [],
+    groups: [],
+    stale: true,
+    error: 'boom',
+    agentProcessCount: 0
+  })
   expect(sent[0].memory).toEqual({ totalBytes: 0, usedBytes: 0, usedPercent: 0, level: 'normal' })
   s.stop()
 })
 
 test('수집 중 refreshNow 는 같은 수집을 기다린다(중복 실행 없음)', async () => {
-  const collect = vi.fn(() => new Promise<DashboardSnapshot>((r) => setTimeout(() => r(snap(1)), 1000)))
+  const collect = vi.fn(
+    () => new Promise<DashboardSnapshot>((r) => setTimeout(() => r(snap(1)), 1000))
+  )
   const s = createScheduler({ collect, intervals, onSnapshot: () => {} })
   s.start()
   const refreshed = s.refreshNow()
@@ -130,7 +140,9 @@ test('refreshNow 는 다음 주기를 그 시점부터 다시 센다', async () 
 
 test('stop 이후에는 수집하지 않고, 진행 중이던 결과도 보내지 않는다', async () => {
   const sent: DashboardSnapshot[] = []
-  const collect = vi.fn(() => new Promise<DashboardSnapshot>((r) => setTimeout(() => r(snap(1)), 1000)))
+  const collect = vi.fn(
+    () => new Promise<DashboardSnapshot>((r) => setTimeout(() => r(snap(1)), 1000))
+  )
   const s = createScheduler({ collect, intervals, onSnapshot: (x) => sent.push(x) })
   s.start()
   s.stop()
@@ -143,8 +155,15 @@ describe('수집 제한 시간', () => {
   test('수집이 끝나지 않으면 제한 시간에 지연 표시를 보내고, 끝날 때까지 새 수집을 시작하지 않는다', async () => {
     const sent: DashboardSnapshot[] = []
     let n = 0
-    const collect = vi.fn(() => (n++ === 0 ? Promise.resolve(snap(1)) : new Promise<DashboardSnapshot>(() => {})))
-    const s = createScheduler({ collect, intervals, collectTimeoutMs: 20000, onSnapshot: (x) => sent.push(x) })
+    const collect = vi.fn(() =>
+      n++ === 0 ? Promise.resolve(snap(1)) : new Promise<DashboardSnapshot>(() => {})
+    )
+    const s = createScheduler({
+      collect,
+      intervals,
+      collectTimeoutMs: 20000,
+      onSnapshot: (x) => sent.push(x)
+    })
     s.setWindowOpen(true)
     s.start()
     await vi.advanceTimersByTimeAsync(0)
@@ -160,8 +179,15 @@ describe('수집 제한 시간', () => {
 
   test('제한 시간 뒤에라도 수집이 끝나면 그 결과를 보내고 다음 주기를 잡는다', async () => {
     const sent: DashboardSnapshot[] = []
-    const collect = vi.fn(() => new Promise<DashboardSnapshot>((r) => setTimeout(() => r(snap(Date.now())), 25000)))
-    const s = createScheduler({ collect, intervals, collectTimeoutMs: 20000, onSnapshot: (x) => sent.push(x) })
+    const collect = vi.fn(
+      () => new Promise<DashboardSnapshot>((r) => setTimeout(() => r(snap(Date.now())), 25000))
+    )
+    const s = createScheduler({
+      collect,
+      intervals,
+      collectTimeoutMs: 20000,
+      onSnapshot: (x) => sent.push(x)
+    })
     s.setWindowOpen(true)
     s.start()
     await vi.advanceTimersByTimeAsync(20000)
@@ -176,8 +202,15 @@ describe('수집 제한 시간', () => {
 
   test('제한 시간 안에 끝나면 지연 표시를 보내지 않는다', async () => {
     const sent: DashboardSnapshot[] = []
-    const collect = vi.fn(() => new Promise<DashboardSnapshot>((r) => setTimeout(() => r(snap(1)), 1000)))
-    const s = createScheduler({ collect, intervals, collectTimeoutMs: 20000, onSnapshot: (x) => sent.push(x) })
+    const collect = vi.fn(
+      () => new Promise<DashboardSnapshot>((r) => setTimeout(() => r(snap(1)), 1000))
+    )
+    const s = createScheduler({
+      collect,
+      intervals,
+      collectTimeoutMs: 20000,
+      onSnapshot: (x) => sent.push(x)
+    })
     s.start()
     await vi.advanceTimersByTimeAsync(25000)
     expect(sent.every((x) => !x.stale)).toBe(true)

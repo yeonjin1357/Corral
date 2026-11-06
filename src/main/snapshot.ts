@@ -28,7 +28,8 @@ const RELAY_SET = new Set(RELAY_PROCESS_NAMES.map((n) => n.toLowerCase()))
 const MIN_DEV_PORT = 1024
 const MAX_ANCESTOR_DEPTH = 3
 
-const AGENT_NAME = /^(claude(\.exe)?|codex(-(x86_64|aarch64|arm64|x64|universal)[\w.-]*)?(\.exe)?)$/i
+const AGENT_NAME =
+  /^(claude(\.exe)?|codex(-(x86_64|aarch64|arm64|x64|universal)[\w.-]*)?(\.exe)?)$/i
 const AGENT_PACKAGE = /@anthropic-ai\/claude-code|@openai\/codex/i
 /** Claude 데스크톱 앱(이름이 같은 claude.exe / Claude)과 Electron 보조 프로세스는 에이전트가 아니다. */
 const NOT_AGENT = /AnthropicClaude|Claude\.app\/|--type=/i
@@ -120,7 +121,13 @@ export function pidsForWorktreeLookup(sample: RawSample): Set<number> {
   const tree = buildTree(sample.processes)
   const pids = new Set<number>()
   for (const t of sample.tcp) {
-    if (t.state !== 'Listen' || t.localPort < MIN_DEV_PORT || pids.has(t.pid) || !tree.byPid.has(t.pid)) continue
+    if (
+      t.state !== 'Listen' ||
+      t.localPort < MIN_DEV_PORT ||
+      pids.has(t.pid) ||
+      !tree.byPid.has(t.pid)
+    )
+      continue
     pids.add(t.pid)
     for (const ancestor of tree.ancestors(t.pid, MAX_ANCESTOR_DEPTH)) pids.add(ancestor.pid)
   }
@@ -140,7 +147,12 @@ function summarizeMemory(
   const total = Math.max(0, totalBytes)
   const used = Math.min(total, Math.max(0, total - freeBytes))
   const usedPercent = total > 0 ? Math.round((used / total) * 1000) / 10 : 0
-  return { totalBytes: total, usedBytes: used, usedPercent, level: levelOf(usedPercent, thresholds) }
+  return {
+    totalBytes: total,
+    usedBytes: used,
+    usedPercent,
+    level: levelOf(usedPercent, thresholds)
+  }
 }
 
 export function buildSnapshot(input: {
@@ -155,7 +167,9 @@ export function buildSnapshot(input: {
 }): DashboardSnapshot {
   const { sample, worktrees } = input
   const tree = buildTree(sample.processes)
-  const self = new Set<number>(input.selfPid ? [input.selfPid, ...tree.descendants(input.selfPid)] : [])
+  const self = new Set<number>(
+    input.selfPid ? [input.selfPid, ...tree.descendants(input.selfPid)] : []
+  )
   const memoryOf = (pids: Iterable<number>): number => {
     let sum = 0
     for (const pid of pids) sum += tree.byPid.get(pid)?.memoryBytes ?? 0
@@ -217,7 +231,8 @@ export function buildSnapshot(input: {
   const agentPids = sample.processes.filter(classifyAgent).map((p) => p.pid)
   const agent = new Set<number>()
   for (const pid of agentPids) {
-    for (const member of [pid, ...tree.descendants(pid)]) if (!devServer.has(member)) agent.add(member)
+    for (const member of [pid, ...tree.descendants(pid)])
+      if (!devServer.has(member)) agent.add(member)
   }
   const agentSet = new Set(agentPids)
   const agentProcessCount = agentPids.filter(

@@ -11,48 +11,84 @@ import {
 
 describe('작업 폴더(cwd)', () => {
   test('lsof -d cwd 출력 파싱', () => {
-    const out = ['p4100', 'fcwd', 'n/Users/dev/My Projects/shop-web', 'p5200', 'fcwd', 'n/'].join('\n')
+    const out = ['p4100', 'fcwd', 'n/Users/dev/My Projects/shop-web', 'p5200', 'fcwd', 'n/'].join(
+      '\n'
+    )
     expect(parseLsofCwd(out)).toEqual({ 4100: '/Users/dev/My Projects/shop-web', 5200: '/' })
   })
 
   test('lsof 가 \\xNN 으로 바꿔 쓴 한글 경로를 되돌린다(그 외 역슬래시는 그대로)', () => {
-    const out = ['p1', 'fcwd', 'n/Users/\\xea\\xb9\\x80\\xea\\xb0\\x9c\\xeb\\xb0\\x9c/app', 'p2', 'fcwd', 'n/tmp/a\\b'].join('\n')
+    const out = [
+      'p1',
+      'fcwd',
+      'n/Users/\\xea\\xb9\\x80\\xea\\xb0\\x9c\\xeb\\xb0\\x9c/app',
+      'p2',
+      'fcwd',
+      'n/tmp/a\\b'
+    ].join('\n')
     expect(parseLsofCwd(out)).toEqual({ 1: '/Users/김개발/app', 2: '/tmp/a\\b' })
   })
 
   test('ps·lsof 는 UTF-8 로케일(LC_ALL)로 실행한다(Finder 로 켠 앱은 LANG 이 없어 한글이 깨지므로)', async () => {
-    const run = vi.fn(async (argv: string[], _opts?: { env?: Record<string, string> }) => {
-      if (argv === LSOF_ARGV) return { stdout: 'p1\nf3\nn*:3000\nTST=LISTEN\n', stderr: '', exitCode: 0 }
+    const envs: unknown[] = []
+    const run = vi.fn(async (argv: string[], opts?: { env?: Record<string, string> }) => {
+      envs.push(opts?.env)
+      if (argv === LSOF_ARGV)
+        return { stdout: 'p1\nf3\nn*:3000\nTST=LISTEN\n', stderr: '', exitCode: 0 }
       return { stdout: '  1 0 1 /x\n', stderr: '', exitCode: 0 }
     })
     await sampleDarwin(run)
     expect(run).toHaveBeenCalledTimes(4)
-    for (const call of run.mock.calls) expect(call[1]?.env).toEqual({ LC_ALL: 'en_US.UTF-8' })
+    expect(envs).toEqual(Array(4).fill({ LC_ALL: 'en_US.UTF-8' }))
   })
 
   test('포트를 연 pid 만 쉼표로 묶어 한 번에 묻는다', () => {
-    expect(lsofCwdArgv([4100, 5200])).toEqual(['/usr/sbin/lsof', '-a', '-d', 'cwd', '-Fpn', '-w', '-p', '4100,5200'])
+    expect(lsofCwdArgv([4100, 5200])).toEqual([
+      '/usr/sbin/lsof',
+      '-a',
+      '-d',
+      'cwd',
+      '-Fpn',
+      '-w',
+      '-p',
+      '4100,5200'
+    ])
   })
 
   test('sampleDarwin: LISTEN pid 의 cwd 를 붙이고, 없으면 묻지 않는다', async () => {
-    const lsof = ['p4100', 'f23', 'n*:3000', 'TST=LISTEN', 'p5200', 'f9', 'n127.0.0.1:5->127.0.0.1:3000', 'TST=ESTABLISHED'].join('\n')
+    const lsof = [
+      'p4100',
+      'f23',
+      'n*:3000',
+      'TST=LISTEN',
+      'p5200',
+      'f9',
+      'n127.0.0.1:5->127.0.0.1:3000',
+      'TST=ESTABLISHED'
+    ].join('\n')
     const run = vi.fn(async (argv: string[]) => {
       if (argv === LSOF_ARGV) return { stdout: lsof, stderr: '', exitCode: 0 }
-      if (argv.includes('cwd')) return { stdout: 'p4100\nfcwd\nn/Users/dev/app\n', stderr: '', exitCode: 0 }
+      if (argv.includes('cwd'))
+        return { stdout: 'p4100\nfcwd\nn/Users/dev/app\n', stderr: '', exitCode: 0 }
       return { stdout: '  4100 1 10 /usr/local/bin/node\n', stderr: '', exitCode: 0 }
     })
     const s = await sampleDarwin(run)
     expect(s.cwds).toEqual({ 4100: '/Users/dev/app' })
     expect(run.mock.calls.find((c) => c[0].includes('cwd'))?.[0]).toEqual(lsofCwdArgv([4100]))
 
-    const quiet = vi.fn(async (argv: string[]) => ({ stdout: argv === LSOF_ARGV ? '' : '  1 0 1 /sbin/launchd\n', stderr: '', exitCode: argv === LSOF_ARGV ? 1 : 0 }))
+    const quiet = vi.fn(async (argv: string[]) => ({
+      stdout: argv === LSOF_ARGV ? '' : '  1 0 1 /sbin/launchd\n',
+      stderr: '',
+      exitCode: argv === LSOF_ARGV ? 1 : 0
+    }))
     expect((await sampleDarwin(quiet)).cwds).toEqual({})
     expect(quiet.mock.calls.some((c) => c[0].includes('cwd'))).toBe(false)
   })
 
   test('cwd 조회가 실패해도 샘플은 성공(작업 폴더만 비움)', async () => {
     const run = vi.fn(async (argv: string[]) => {
-      if (argv === LSOF_ARGV) return { stdout: 'p1\nf3\nn*:3000\nTST=LISTEN\n', stderr: '', exitCode: 0 }
+      if (argv === LSOF_ARGV)
+        return { stdout: 'p1\nf3\nn*:3000\nTST=LISTEN\n', stderr: '', exitCode: 0 }
       if (argv.includes('cwd')) throw new Error('timeout')
       return { stdout: '  1 0 1 /x\n', stderr: '', exitCode: 0 }
     })
@@ -64,21 +100,24 @@ import type { CommandResult } from './runCommand'
 describe('parsePsOutput', () => {
   test('rss(KB)→바이트, 이름은 실행 파일 경로의 basename, 명령줄은 args', () => {
     const stats = '  4100  4000 1024000 /usr/local/bin/node\n'
-    const args = '  4100 /usr/local/bin/node /Users/dev/work/shop-web/node_modules/.bin/vite --port 3000\n'
+    const args =
+      '  4100 /usr/local/bin/node /Users/dev/work/shop-web/node_modules/.bin/vite --port 3000\n'
     expect(parsePsOutput(stats, args)).toEqual([
       {
         pid: 4100,
         ppid: 4000,
         name: 'node',
         memoryBytes: 1024000 * 1024,
-        commandLine: '/usr/local/bin/node /Users/dev/work/shop-web/node_modules/.bin/vite --port 3000',
+        commandLine:
+          '/usr/local/bin/node /Users/dev/work/shop-web/node_modules/.bin/vite --port 3000',
         startedAt: null
       }
     ])
   })
 
   test('실행 파일 경로에 공백이 있어도 이름이 맞다', () => {
-    const exe = '/Applications/Visual Studio Code.app/Contents/Frameworks/Code Helper (Renderer).app/Contents/MacOS/Code Helper (Renderer)'
+    const exe =
+      '/Applications/Visual Studio Code.app/Contents/Frameworks/Code Helper (Renderer).app/Contents/MacOS/Code Helper (Renderer)'
     const stats = `  700     1   51200 ${exe}\n`
     const args = `  700 ${exe} --type=renderer\n`
     const [p] = parsePsOutput(stats, args)
@@ -92,26 +131,67 @@ describe('parsePsOutput', () => {
 
   test('빈 줄·형식이 틀린 줄은 건너뛴다', () => {
     const stats = '\n  abc def\n  10 1 20 /bin/zsh\n   \n'
-    expect(parsePsOutput(stats, '  10 -zsh\n').map((p) => [p.pid, p.name, p.commandLine])).toEqual([[10, 'zsh', '-zsh']])
+    expect(parsePsOutput(stats, '  10 -zsh\n').map((p) => [p.pid, p.name, p.commandLine])).toEqual([
+      [10, 'zsh', '-zsh']
+    ])
   })
 })
 
 describe('parseLsofOutput', () => {
   test('LISTEN·ESTABLISHED·그 외 상태, IPv4·IPv6·와일드카드 주소', () => {
     const out = [
-      'p4100', 'f23', 'n*:3000', 'TST=LISTEN', 'TQR=0', 'TQS=0',
-      'f24', 'n[::1]:3000->[::1]:51234', 'TST=ESTABLISHED',
-      'p5200', 'f30', 'n127.0.0.1:51234->127.0.0.1:3000', 'TST=CLOSE_WAIT'
+      'p4100',
+      'f23',
+      'n*:3000',
+      'TST=LISTEN',
+      'TQR=0',
+      'TQS=0',
+      'f24',
+      'n[::1]:3000->[::1]:51234',
+      'TST=ESTABLISHED',
+      'p5200',
+      'f30',
+      'n127.0.0.1:51234->127.0.0.1:3000',
+      'TST=CLOSE_WAIT'
     ].join('\n')
     expect(parseLsofOutput(out)).toEqual([
-      { pid: 4100, localAddress: '*', localPort: 3000, remoteAddress: '', remotePort: 0, state: 'Listen' },
-      { pid: 4100, localAddress: '::1', localPort: 3000, remoteAddress: '::1', remotePort: 51234, state: 'Established' },
-      { pid: 5200, localAddress: '127.0.0.1', localPort: 51234, remoteAddress: '127.0.0.1', remotePort: 3000, state: 'Other' }
+      {
+        pid: 4100,
+        localAddress: '*',
+        localPort: 3000,
+        remoteAddress: '',
+        remotePort: 0,
+        state: 'Listen'
+      },
+      {
+        pid: 4100,
+        localAddress: '::1',
+        localPort: 3000,
+        remoteAddress: '::1',
+        remotePort: 51234,
+        state: 'Established'
+      },
+      {
+        pid: 5200,
+        localAddress: '127.0.0.1',
+        localPort: 51234,
+        remoteAddress: '127.0.0.1',
+        remotePort: 3000,
+        state: 'Other'
+      }
     ])
   })
 
   test('존(zone)이 붙은 IPv6 와 [::]:포트', () => {
-    const out = ['p1', 'f3', 'n[fe80::1%lo0]:5173', 'TST=LISTEN', 'f4', 'n[::]:8080', 'TST=LISTEN'].join('\n')
+    const out = [
+      'p1',
+      'f3',
+      'n[fe80::1%lo0]:5173',
+      'TST=LISTEN',
+      'f4',
+      'n[::]:8080',
+      'TST=LISTEN'
+    ].join('\n')
     expect(parseLsofOutput(out).map((t) => [t.localAddress, t.localPort])).toEqual([
       ['fe80::1%lo0', 5173],
       ['::', 8080]
@@ -156,7 +236,9 @@ describe('sampleDarwin', () => {
   })
 
   test('lsof 가 1 이 아닌 코드로 실패하면 에러', async () => {
-    const run = vi.fn(async (argv: string[]) => (argv === LSOF_ARGV ? ok('', 2) : ok('  10 1 20 /bin/zsh\n')))
+    const run = vi.fn(async (argv: string[]) =>
+      argv === LSOF_ARGV ? ok('', 2) : ok('  10 1 20 /bin/zsh\n')
+    )
     await expect(sampleDarwin(run)).rejects.toThrow('lsof exited with 2')
   })
 })

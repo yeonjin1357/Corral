@@ -71,7 +71,10 @@ export interface GroupUsage {
   processCount: number
 }
 
-export type KillResult = { status: 'killed' | 'cancelled' | 'gone' | 'changed' | 'failed'; message?: string }
+export type KillResult = {
+  status: 'killed' | 'cancelled' | 'gone' | 'changed' | 'failed'
+  message?: string
+}
 
 export interface DashboardSnapshot {
   takenAt: number

@@ -21,7 +21,8 @@ export const text = {
     unresolvable: '어느 작업의 포트인지 알 수 없어 내릴 수 없어요.',
     permission: '권한이 없어 내리지 못했어요. 관리자 권한으로 실행된 프로세스일 수 있어요.',
     busy: '이미 처리 중이에요.',
-    agentInside: '이 프로세스 아래에서 에이전트(Claude·Codex)가 돌고 있어 내리지 않았어요. 에이전트를 먼저 끝내 주세요.',
+    agentInside:
+      '이 프로세스 아래에서 에이전트(Claude·Codex)가 돌고 있어 내리지 않았어요. 에이전트를 먼저 끝내 주세요.',
     invalid: '잘못된 요청이에요.'
   },
   unsupportedPlatform: '지원하지 않는 OS 예요. Windows 와 macOS 만 지원해요.',
@@ -29,13 +30,15 @@ export const text = {
   tray: {
     checking: 'RAM 확인 중…',
     failed: 'RAM 정보를 가져오지 못했어요',
-    ram: (percent: number, used: string, total: string): string => `RAM ${percent}% (${used} / ${total})`,
+    ram: (percent: number, used: string, total: string): string =>
+      `RAM ${percent}% (${used} / ${total})`,
     staleSuffix: ' · 업데이트 지연',
     ports: (n: number): string => `개발 서버 포트 ${n}개`,
     open: '앱 열기',
     quit: '종료',
     tooltip: (percent: number): string => `pitwall — RAM ${percent}%`,
-    stillRunning: 'pitwall 은 트레이에서 계속 실행돼요. 끄려면 트레이 아이콘 메뉴에서 종료를 누르세요.'
+    stillRunning:
+      'pitwall 은 트레이에서 계속 실행돼요. 끄려면 트레이 아이콘 메뉴에서 종료를 누르세요.'
   },
   ui: {
     loading: '불러오는 중…',
@@ -43,7 +46,8 @@ export const text = {
     settingsLater: '설정은 다음 단계에서 추가돼요',
     pending: '다음 단계에서 추가돼요',
     ram: 'RAM',
-    ramUsage: (used: string, total: string, percent: number): string => `${used} / ${total} (${percent}%)`,
+    ramUsage: (used: string, total: string, percent: number): string =>
+      `${used} / ${total} (${percent}%)`,
     count: (n: number): string => `${n}개`,
     none: '—',
     cards: {
