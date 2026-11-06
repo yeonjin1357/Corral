@@ -37,6 +37,14 @@ const hookButton = computed(() => {
   if (h.state === 'off') return { label: text.ui.hook.enable, action: 'enable' as const }
   return { label: text.ui.hook.reenable, action: 'enable' as const }
 })
+/**
+ * 예전 설정이 남았거나(partial) 훅 포트를 못 연(error·server) 상태에서도 다시 켜지 않고 바로 끌 수 있게 한다.
+ * settings.json 을 읽을 수 없으면 끄기도 못 하므로 두지 않는다.
+ */
+const canAlsoDisable = computed(() => {
+  const h = hook.value
+  return !!h && (h.state === 'partial' || (h.state === 'error' && h.problem === 'server'))
+})
 
 const hasMemory = computed(() => props.snapshot.memory.totalBytes > 0)
 // 화면·트레이 공통 규칙: 내림해야 경고 기준과 표시가 어긋나지 않는다.
@@ -129,6 +137,15 @@ const groups = computed(() =>
           @click="emit('hook', hookButton.action)"
         >
           {{ hookButton.label }}
+        </button>
+        <button
+          v-if="canAlsoDisable"
+          type="button"
+          class="btn btn-normal btn-hook-off"
+          :disabled="hookBusy"
+          @click="emit('hook', 'disable')"
+        >
+          {{ text.ui.hook.disable }}
         </button>
       </div>
     </div>

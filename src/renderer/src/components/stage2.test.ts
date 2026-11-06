@@ -421,3 +421,32 @@ test('작업 폴더를 모르면 상세의 경로 줄을 흐리게(링크처럼 
   })
   expect(known.get('.url').classes()).not.toContain('muted')
 })
+
+describe('문제 상태에서도 Claude 연동을 끌 수 있다', () => {
+  test.each([
+    ['partial', null],
+    ['error', 'server']
+  ] as const)('%s(%s): 첫 화면에 다시 켜기와 끄기가 함께 있다', async (state, problem) => {
+    const w = mount(HomeView, {
+      props: { snapshot: snapshot({ hook: { ...HOOK_OFF, state, problem } }), ramHistory: [] },
+      global: { stubs }
+    })
+    expect(w.get('.hook-box .btn-hook').text()).toBe('Claude 연동 다시 켜기')
+    await w.get('.hook-box .btn-hook-off').trigger('click')
+    expect(w.emitted('hook')).toEqual([['disable']])
+  })
+
+  test('켜짐·꺼짐·설정 파일을 읽을 수 없음에는 끄기 버튼을 따로 두지 않는다', () => {
+    for (const hook of [
+      { ...HOOK_OFF, state: 'on' as const },
+      HOOK_OFF,
+      { ...HOOK_OFF, state: 'error' as const, problem: 'settings' as const }
+    ]) {
+      const w = mount(HomeView, {
+        props: { snapshot: snapshot({ hook }), ramHistory: [] },
+        global: { stubs }
+      })
+      expect(w.find('.hook-box .btn-hook-off').exists()).toBe(false)
+    }
+  })
+})
