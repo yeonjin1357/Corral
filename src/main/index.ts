@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, dialog, Tray, Menu, nativeImage } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
@@ -12,10 +12,28 @@ import { resolveProcessWorktrees } from './collect/worktree'
 import { buildSnapshot } from './snapshot'
 import { createScheduler } from './scheduler'
 import { createPortKiller, type KillConfirm } from './kill'
+import { createDotIcon, createTrayController, encodePng, LEVEL_COLORS } from './tray'
+import type { MemoryLevel } from '../shared/types'
 
 const APP_ID = 'io.github.yeonjin1357.pitwall'
 const platform = toPlatform(process.platform)
 let mainWindow: BrowserWindow | null = null
+// 모듈 변수로 붙잡아 두지 않으면 GC 되어 트레이 아이콘이 사라진다.
+let tray: Tray | null = null
+let trayController: ReturnType<typeof createTrayController> | null = null
+/** 트레이 '종료'·Cmd+Q 로 끝낼 때만 창을 실제로 닫는다. 그 외 닫기는 숨김. */
+let quitting = false
+
+const iconCache = new Map<MemoryLevel, Electron.NativeImage>()
+function trayIcon(level: MemoryLevel): Electron.NativeImage {
+  const cached = iconCache.get(level)
+  if (cached) return cached
+  const color = LEVEL_COLORS[level]
+  const image = nativeImage.createFromBuffer(encodePng(createDotIcon(color, 16), 16, 16), { scaleFactor: 1 })
+  image.addRepresentation({ scaleFactor: 2, buffer: encodePng(createDotIcon(color, 32), 32, 32) })
+  iconCache.set(level, image)
+  return image
+}
 
 async function collect(): Promise<DashboardSnapshot> {
   if (!platform) throw new Error(text.unsupportedPlatform)
@@ -37,8 +55,51 @@ const scheduler = createScheduler({
   intervals: DEFAULT_INTERVALS,
   onSnapshot: (snapshot) => {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.snapshot, snapshot)
+    trayController?.update(snapshot)
   }
 })
+
+function showWindow(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow()
+    return
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.show()
+  mainWindow.focus()
+  void app.dock?.show()
+}
+
+function hideWindow(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  mainWindow.hide()
+  app.dock?.hide()
+  trayController?.notifyHiddenOnce()
+}
+
+function createTray(): void {
+  tray = new Tray(trayIcon('normal'))
+  const t = tray
+  trayController = createTrayController({
+    tray: {
+      setContextMenu: (menu) => t.setContextMenu(menu as Menu),
+      setToolTip: (tooltip) => t.setToolTip(tooltip),
+      setImage: (image) => t.setImage(image as Electron.NativeImage),
+      popUpContextMenu: () => t.popUpContextMenu(),
+      displayBalloon: (options) => t.displayBalloon(options),
+      on: (event, listener) => {
+        if (event === 'click') t.on('click', listener)
+        else t.on('double-click', listener)
+      }
+    },
+    makeIcon: trayIcon,
+    buildMenu: (items) => Menu.buildFromTemplate(items),
+    actions: { open: showWindow, quit: () => app.quit() },
+    platform: platform ?? 'win32'
+  })
+  const latest = scheduler.latest()
+  if (latest) trayController.update(latest)
+}
 
 async function confirmKill(options: KillConfirm): Promise<boolean> {
   const box = { type: 'warning' as const, noLink: true, ...options }
@@ -90,9 +151,17 @@ function createWindow(): void {
     }
   })
 
-  mainWindow.on('ready-to-show', () => mainWindow?.show())
+  mainWindow.on('ready-to-show', () => showWindow())
   mainWindow.on('show', () => scheduler.setWindowOpen(true))
+  mainWindow.on('restore', () => scheduler.setWindowOpen(true))
   mainWindow.on('hide', () => scheduler.setWindowOpen(false))
+  mainWindow.on('minimize', () => scheduler.setWindowOpen(false))
+  // 창 닫기(X)는 트레이로 숨기기. 앱 종료는 트레이 메뉴의 '종료'(또는 macOS Cmd+Q)로만 한다.
+  mainWindow.on('close', (event) => {
+    if (quitting) return
+    event.preventDefault()
+    hideWindow()
+  })
   mainWindow.on('closed', () => {
     scheduler.setWindowOpen(false)
     mainWindow = null
@@ -112,24 +181,33 @@ function createWindow(): void {
   }
 }
 
-app.whenReady().then(() => {
-  electronApp.setAppUserModelId(APP_ID)
+// 두 번째로 실행하면 새로 띄우지 않고 이미 떠 있는 창을 보여 준다(트레이 아이콘이 둘이 되지 않도록).
+if (!app.requestSingleInstanceLock()) {
+  app.quit()
+} else {
+  app.on('second-instance', () => showWindow())
 
-  app.on('browser-window-created', (_, window) => {
-    optimizer.watchWindowShortcuts(window)
+  app.whenReady().then(() => {
+    electronApp.setAppUserModelId(APP_ID)
+
+    app.on('browser-window-created', (_, window) => {
+      optimizer.watchWindowShortcuts(window)
+    })
+
+    registerIpc()
+    scheduler.start()
+    createTray()
+    createWindow()
+
+    // macOS 독 아이콘을 누르면 창을 다시 보여 준다.
+    app.on('activate', () => showWindow())
   })
 
-  registerIpc()
-  scheduler.start()
-  createWindow()
+  // 창이 모두 닫혀도 트레이에서 계속 돈다.
+  app.on('window-all-closed', () => {})
 
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+  app.on('before-quit', () => {
+    quitting = true
+    scheduler.stop()
   })
-})
-
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit()
-})
-
-app.on('before-quit', () => scheduler.stop())
+}

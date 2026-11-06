@@ -24,6 +24,17 @@ export const text = {
     invalid: '잘못된 요청이에요.'
   },
   unsupportedPlatform: '지원하지 않는 OS 예요. Windows 와 macOS 만 지원해요.',
+  tray: {
+    checking: 'RAM 확인 중…',
+    failed: 'RAM 정보를 가져오지 못했어요',
+    ram: (percent: number, used: string, total: string): string => `RAM ${percent}% (${used} / ${total})`,
+    staleSuffix: ' · 업데이트 지연',
+    ports: (n: number): string => `개발 서버 포트 ${n}개`,
+    open: '앱 열기',
+    quit: '종료',
+    tooltip: (percent: number): string => `pitwall — RAM ${percent}%`,
+    stillRunning: 'pitwall 은 트레이에서 계속 실행돼요. 끄려면 트레이 아이콘 메뉴에서 종료를 누르세요.'
+  },
   ui: {
     loading: '불러오는 중…',
     stale: '업데이트 지연',
