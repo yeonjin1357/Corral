@@ -250,3 +250,37 @@ test('publish: 수집 없이 받은 스냅샷을 내보내고 latest 로 삼는�
   s.publish(snap(9))
   expect(s.latest()).toBe(restated)
 })
+
+test('setIntervals: 바뀐 주기로 바로 다시 잡는다(이미 지난 시간은 다시 세지 않음)', async () => {
+  const collect = vi.fn(async () => snap(Date.now()))
+  const s = createScheduler({ collect, intervals, onSnapshot: () => {} })
+  s.start()
+  await vi.advanceTimersByTimeAsync(0)
+  expect(collect).toHaveBeenCalledTimes(1)
+  await vi.advanceTimersByTimeAsync(8000)
+  // 닫힌 창 주기를 30초 → 10초로: 이미 8초 지났으니 2초 뒤에 수집한다.
+  s.setIntervals({ openMs: 2000, closedMs: 10000 })
+  await vi.advanceTimersByTimeAsync(1999)
+  expect(collect).toHaveBeenCalledTimes(1)
+  await vi.advanceTimersByTimeAsync(1)
+  expect(collect).toHaveBeenCalledTimes(2)
+  // 주기를 늘리면 그만큼 기다린다.
+  s.setIntervals({ openMs: 15000, closedMs: 120000 })
+  await vi.advanceTimersByTimeAsync(119999)
+  expect(collect).toHaveBeenCalledTimes(2)
+  await vi.advanceTimersByTimeAsync(1)
+  expect(collect).toHaveBeenCalledTimes(3)
+  s.stop()
+})
+
+test('setIntervals: 창을 열 때 "오래됐는지"도 새 열린 창 주기로 본다', async () => {
+  const collect = vi.fn(async () => snap(Date.now()))
+  const s = createScheduler({ collect, intervals, onSnapshot: () => {} })
+  s.start()
+  await vi.advanceTimersByTimeAsync(3000)
+  s.setIntervals({ openMs: 2000, closedMs: 10000 })
+  s.setWindowOpen(true)
+  await vi.advanceTimersByTimeAsync(0)
+  expect(collect).toHaveBeenCalledTimes(2)
+  s.stop()
+})

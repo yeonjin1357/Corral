@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createClaudeIntegration, type ClaudeIntegrationDeps } from './claudeIntegration'
 import { inspectPitwallHooks, hookCommand } from './claudeHooks'
-import { loadConfig, pickFreePort, saveConfig } from './config'
+import { loadConfig, pickFreePort, saveConfig, updateConfig } from './config'
+import { DEFAULT_SETTINGS } from '../shared/settings'
 import type { Sessions } from './sessions'
 
 let userData: string
@@ -174,6 +175,7 @@ test('저장된 포트를 다른 프로그램이 쓰고 있으면 상태는 erro
   await first.enable()
   await first.stop()
   const { hook } = await loadConfig(userData)
+  await updateConfig(userData, (c) => ({ ...c, settings: { ...c.settings, refresh: 'saver' } }))
 
   const blocker = createServer()
   await new Promise<void>((r) => blocker.listen(hook!.port, '127.0.0.1', r))
@@ -185,6 +187,8 @@ test('저장된 포트를 다른 프로그램이 쓰고 있으면 상태는 erro
     const moved = (await loadConfig(userData)).hook!
     expect(moved.port).not.toBe(hook!.port)
     expect(moved.token).toBe(hook!.token)
+    // 포트를 바꿔 저장할 때 다른 설정을 지우지 않는다.
+    expect((await loadConfig(userData)).settings.refresh).toBe('saver')
     const entry = hookCommand('win32', moved.port, moved.token, 'C:\\Windows')
     expect(inspectPitwallHooks(await readFile(settingsPath(), 'utf8'), entry).state).toBe('on')
     expect(await second.status()).toMatchObject({ state: 'on', problem: null })
@@ -196,7 +200,10 @@ test('저장된 포트를 다른 프로그램이 쓰고 있으면 상태는 erro
 
 test('pitwall 설정이 없는데 settings.json 에 pitwall 훅이 남아 있으면 partial', async () => {
   const { deps } = setup()
-  await saveConfig(userData, { hook: { port: 45123, token: 'a'.repeat(43) } })
+  await saveConfig(userData, {
+    hook: { port: 45123, token: 'a'.repeat(43) },
+    settings: DEFAULT_SETTINGS
+  })
   const integration = createClaudeIntegration(deps)
   await integration.enable()
   await integration.stop()

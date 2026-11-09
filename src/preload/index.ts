@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import { IPC, type PitwallApi } from '../shared/ipc'
 import type { DashboardSnapshot } from '../shared/types'
+import type { Settings } from '../shared/settings'
 
 /** 렌더러에는 pitwall 이 쓰는 동작만 노출한다(ipcRenderer 전체를 넘기지 않음). */
 const api: PitwallApi = {
@@ -21,6 +22,18 @@ const api: PitwallApi = {
     status: () => ipcRenderer.invoke(IPC.claudeHookStatus),
     enable: () => ipcRenderer.invoke(IPC.claudeHookEnable),
     disable: () => ipcRenderer.invoke(IPC.claudeHookDisable)
+  },
+  settings: {
+    get: () => ipcRenderer.invoke(IPC.settingsGet),
+    save: (next) => ipcRenderer.invoke(IPC.settingsSave, next),
+    pickFolder: () => ipcRenderer.invoke(IPC.settingsPickFolder),
+    onChange(callback) {
+      const handler = (_event: IpcRendererEvent, settings: Settings): void => callback(settings)
+      ipcRenderer.on(IPC.settingsChanged, handler)
+      return () => {
+        ipcRenderer.removeListener(IPC.settingsChanged, handler)
+      }
+    }
   }
 }
 

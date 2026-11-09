@@ -1,4 +1,5 @@
-import { createCollector, type CollectorDeps } from './collector'
+import { collectOptionsFrom, createCollector, type CollectorDeps } from './collector'
+import { DEFAULT_SETTINGS } from '../shared/settings'
 import type { Sessions } from './sessions'
 import { applyHookEvent } from './sessions'
 import type { ClaudeHookStatus, ProcessInfo, RawSample, WorktreeInfo } from '../shared/types'
@@ -71,8 +72,10 @@ function setup(over: Partial<CollectorDeps> = {}): {
     resolveWorktree: async (path) => (path.startsWith(W1.root) ? W1 : null),
     sessions,
     hookStatus: async () => HOOK,
-    thresholds: { ramWarnPercent: 80, ramDangerPercent: 90 },
-    idlePortMs: 20 * MIN,
+    options: () => ({
+      thresholds: { ramWarnPercent: 80, ramDangerPercent: 90 },
+      idlePortMs: 20 * MIN
+    }),
     selfPid: 999,
     now: () => clock.now,
     ...over
@@ -244,4 +247,37 @@ test('네트워크 경로(UNC·WSL)에서 연 세션은 워크트리를 찾아�
   const s = await createCollector(deps).collect()
   expect(resolveWorktree).not.toHaveBeenCalled()
   expect(s.agents[0].stateSource).toBe('cpu')
+})
+
+test('설정(기준값)을 바꾸면 다음 수집부터 반영된다', async () => {
+  const options = {
+    thresholds: { ramWarnPercent: 80, ramDangerPercent: 90 },
+    idlePortMs: 20 * MIN
+  }
+  const { deps, clock } = setup({ options: () => options })
+  const noAgents: RawSample = {
+    ...sampleAt(0),
+    processes: [proc(4100, 1, 'node.exe', 0, 'node vite')]
+  }
+  const collector = createCollector({ ...deps, sample: async () => noAgents })
+  const first = await collector.collect()
+  // 32GB 중 16GB 사용 = 50%
+  expect(first.memory.level).toBe('normal')
+  clock.now += 5 * MIN
+  options.thresholds = { ramWarnPercent: 50, ramDangerPercent: 60 }
+  options.idlePortMs = 5 * MIN
+  const second = await collector.collect()
+  expect(second.memory.level).toBe('warn')
+  expect(second.ports[0].judgement).toBe('candidate')
+})
+
+test('설정에서 수집 기준값을 만든다(분 → ms)', () => {
+  expect(
+    collectOptionsFrom({
+      ...DEFAULT_SETTINGS,
+      ramWarnPercent: 70,
+      ramDangerPercent: 85,
+      idlePortMinutes: 45
+    })
+  ).toEqual({ thresholds: { ramWarnPercent: 70, ramDangerPercent: 85 }, idlePortMs: 45 * MIN })
 })

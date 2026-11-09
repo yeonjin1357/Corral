@@ -9,8 +9,10 @@ import {
   loadConfig,
   pickFreePort,
   randomHookToken,
-  saveConfig
+  saveConfig,
+  updateConfig
 } from './config'
+import { DEFAULT_SETTINGS } from '../shared/settings'
 
 let dir: string
 beforeEach(async () => {
@@ -26,21 +28,58 @@ test('토큰은 32바이트 무작위(base64url 43자), 매번 다르다', () =>
   expect(randomHookToken()).not.toBe(a)
 })
 
-test('파일이 없거나 깨졌거나 형식이 틀리면 훅 설정 없음', async () => {
-  expect(await loadConfig(dir)).toEqual({ hook: null })
+const EMPTY = { hook: null, settings: DEFAULT_SETTINGS }
+
+test('파일이 없거나 깨졌거나 형식이 틀리면 훅 설정 없음·기본 설정', async () => {
+  expect(await loadConfig(dir)).toEqual(EMPTY)
   await writeFile(join(dir, 'config.json'), '{ broken')
-  expect(await loadConfig(dir)).toEqual({ hook: null })
+  expect(await loadConfig(dir)).toEqual(EMPTY)
   await writeFile(join(dir, 'config.json'), JSON.stringify({ hook: { port: 'x', token: 1 } }))
-  expect(await loadConfig(dir)).toEqual({ hook: null })
+  expect(await loadConfig(dir)).toEqual(EMPTY)
   await writeFile(
     join(dir, 'config.json'),
     JSON.stringify({ hook: { port: 45000, token: "a'; rm" } })
   )
-  expect(await loadConfig(dir)).toEqual({ hook: null })
+  expect(await loadConfig(dir)).toEqual(EMPTY)
+})
+
+test('설정은 읽을 때 범위 안으로 고친다', async () => {
+  await writeFile(
+    join(dir, 'config.json'),
+    JSON.stringify({ settings: { ramWarnPercent: 5, refresh: 'fast' } })
+  )
+  expect((await loadConfig(dir)).settings).toMatchObject({ ramWarnPercent: 50, refresh: 'fast' })
+})
+
+test('훅 설정과 일반 설정을 동시에 저장해도 둘 다 남는다', async () => {
+  const hook = { port: 45123, token: randomHookToken() }
+  await Promise.all([
+    updateConfig(dir, (c) => ({ ...c, hook })),
+    updateConfig(dir, (c) => ({ ...c, settings: { ...c.settings, refresh: 'saver' } })),
+    updateConfig(dir, (c) => ({ ...c, settings: { ...c.settings, idlePortMinutes: 45 } }))
+  ])
+  const saved = await loadConfig(dir)
+  expect(saved.hook).toEqual(hook)
+  expect(saved.settings).toMatchObject({ refresh: 'saver', idlePortMinutes: 45 })
+})
+
+test('고치는 중 실패해도 다음 저장은 계속된다', async () => {
+  await expect(
+    updateConfig(dir, () => {
+      throw new Error('boom')
+    })
+  ).rejects.toThrow('boom')
+  await updateConfig(dir, (c) => ({ ...c, settings: { ...c.settings, theme: 'dark' } }))
+  expect((await loadConfig(dir)).settings.theme).toBe('dark')
+})
+
+test('바뀐 것이 없으면 파일을 쓰지 않는다', async () => {
+  await updateConfig(dir, (c) => c)
+  expect(await readdir(dir)).toEqual([])
 })
 
 test('저장한 값을 다시 읽고, 임시 파일이 남지 않는다', async () => {
-  const config = { hook: { port: 45123, token: randomHookToken() } }
+  const config = { hook: { port: 45123, token: randomHookToken() }, settings: DEFAULT_SETTINGS }
   await saveConfig(dir, config)
   expect(await loadConfig(dir)).toEqual(config)
   expect(await readdir(dir)).toEqual(['config.json'])
@@ -76,6 +115,12 @@ test('훅 설정이 없을 때만 새로 만들어 저장하고, 있으면 그�
   const second = await ensureHookConfig(dir, { pickPort: async () => 50000 })
   expect(second).toEqual(first)
   expect((await loadConfig(dir)).hook).toEqual(first)
+})
+
+test('훅 설정을 만들 때 기존 일반 설정을 지우지 않는다', async () => {
+  await updateConfig(dir, (c) => ({ ...c, settings: { ...c.settings, refresh: 'fast' } }))
+  await ensureHookConfig(dir, { pickPort: async () => 45123 })
+  expect((await loadConfig(dir)).settings.refresh).toBe('fast')
 })
 
 test('훅 포트 범위는 OS 가 임시로 쓰는 동적 포트(49152~)와 겹치지 않는다', () => {

@@ -2,6 +2,7 @@ import { randomBytes, randomInt } from 'node:crypto'
 import { readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { join } from 'node:path'
+import { normalizeSettings, type Settings } from '../shared/settings'
 
 /**
  * 훅 서버 포트를 고르는 범위. 개발 서버가 흔히 쓰는 포트(3000·5173·8080 등)와 겹치지 않고,
@@ -18,6 +19,7 @@ export interface HookConfig {
 /** pitwall 자신의 설정(앱 데이터 폴더의 config.json). */
 export interface PitwallConfig {
   hook: HookConfig | null
+  settings: Settings
 }
 
 const CONFIG_FILE = 'config.json'
@@ -36,25 +38,55 @@ function validHook(value: unknown): HookConfig | null {
 }
 
 export async function loadConfig(userData: string): Promise<PitwallConfig> {
+  let value: unknown = null
   try {
-    const value = JSON.parse(await readFile(join(userData, CONFIG_FILE), 'utf8')) as {
-      hook?: unknown
-    }
-    return { hook: validHook(value?.hook) }
+    value = JSON.parse(await readFile(join(userData, CONFIG_FILE), 'utf8'))
   } catch {
-    return { hook: null }
+    // 없거나 깨진 파일은 빈 설정으로 본다(앱은 기본값으로 뜬다).
   }
+  const v = (value && typeof value === 'object' ? value : {}) as {
+    hook?: unknown
+    settings?: unknown
+  }
+  return { hook: validHook(v.hook), settings: normalizeSettings(v.settings) }
 }
 
+/** 바로 쓰기보다 updateConfig 를 쓴다(같은 파일을 동시에 고치면 한쪽이 지워질 수 있다). */
 export async function saveConfig(userData: string, config: PitwallConfig): Promise<void> {
   const path = join(userData, CONFIG_FILE)
   const tmp = `${path}.tmp-${process.pid}`
+  const data = { hook: config.hook, settings: normalizeSettings(config.settings) }
   try {
-    await writeFile(tmp, JSON.stringify(config, null, 2) + '\n')
+    await writeFile(tmp, JSON.stringify(data, null, 2) + '\n')
     await rename(tmp, path)
   } catch (e) {
     await rm(tmp, { force: true })
     throw e
+  }
+}
+
+/** 파일마다 읽기·고치기·쓰기를 한 줄로 세운다. 훅 설정과 일반 설정을 동시에 저장해도 서로 지우지 않는다. */
+const queues = new Map<string, Promise<unknown>>()
+
+export async function updateConfig(
+  userData: string,
+  mutate: (current: PitwallConfig) => PitwallConfig | Promise<PitwallConfig>
+): Promise<PitwallConfig> {
+  const path = join(userData, CONFIG_FILE)
+  const previous = queues.get(path) ?? Promise.resolve()
+  const run = previous
+    .catch(() => {})
+    .then(async () => {
+      const current = await loadConfig(userData)
+      const next = await mutate(current)
+      if (next !== current) await saveConfig(userData, next)
+      return next
+    })
+  queues.set(path, run)
+  try {
+    return await run
+  } finally {
+    if (queues.get(path) === run) queues.delete(path)
   }
 }
 
@@ -83,9 +115,13 @@ export async function ensureHookConfig(
   userData: string,
   deps: { pickPort?: () => Promise<number> } = {}
 ): Promise<HookConfig> {
-  const config = await loadConfig(userData)
-  if (config.hook) return config.hook
-  const hook = { port: await (deps.pickPort ?? pickFreePort)(), token: randomHookToken() }
-  await saveConfig(userData, { ...config, hook })
-  return hook
+  const config = await updateConfig(userData, async (current) =>
+    current.hook
+      ? current
+      : {
+          ...current,
+          hook: { port: await (deps.pickPort ?? pickFreePort)(), token: randomHookToken() }
+        }
+  )
+  return config.hook!
 }

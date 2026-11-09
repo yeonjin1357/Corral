@@ -4,7 +4,12 @@ import { homedir } from 'os'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import type { DashboardSnapshot } from '../shared/types'
-import { DEFAULT_IDLE_PORT_MS, DEFAULT_INTERVALS, DEFAULT_THRESHOLDS } from '../shared/defaults'
+import {
+  DEFAULT_SETTINGS,
+  normalizeSettings,
+  REFRESH_INTERVALS,
+  type Settings
+} from '../shared/settings'
 import { IPC } from '../shared/ipc'
 import { text } from '../shared/text'
 import { mkdirSync, readdirSync, rmSync } from 'fs'
@@ -12,7 +17,8 @@ import { sample, toPlatform } from './collect/sample'
 import { configureWindowsSampler, nativeHelperDllName } from './collect/windows'
 import { readMemory } from './collect/memory'
 import { resolveProcessWorktrees, resolveWorktree } from './collect/worktree'
-import { createCollector } from './collector'
+import { collectOptionsFrom, createCollector } from './collector'
+import { loadConfig, updateConfig } from './config'
 import { claudeConfigDir } from './claudeHooks'
 import { createClaudeIntegration } from './claudeIntegration'
 import type { Sessions } from './sessions'
@@ -44,6 +50,9 @@ function trayIcon(level: MemoryLevel): Electron.NativeImage {
   return image
 }
 
+/** 사용자 설정. 시작할 때 config.json 에서 읽고, 설정 화면에서 저장하면 바로 바꾼다. */
+let settings: Settings = DEFAULT_SETTINGS
+
 /** Claude 훅이 알려 주는 세션들. 훅 서버가 채우고 수집기가 읽는다. */
 const sessions: Sessions = new Map()
 
@@ -56,8 +65,7 @@ const collector = platform
       resolveWorktree,
       sessions,
       hookStatus: () => claude.status(),
-      thresholds: DEFAULT_THRESHOLDS,
-      idlePortMs: DEFAULT_IDLE_PORT_MS,
+      options: () => collectOptionsFrom(settings),
       selfPid: process.pid,
       now: Date.now
     })
@@ -70,7 +78,7 @@ async function collect(): Promise<DashboardSnapshot> {
 
 const scheduler = createScheduler({
   collect,
-  intervals: DEFAULT_INTERVALS,
+  intervals: REFRESH_INTERVALS[settings.refresh],
   onSnapshot: (snapshot) => {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.snapshot, snapshot)
     trayController?.update(snapshot)
@@ -189,6 +197,22 @@ function prepareWindowsHelper(): void {
   }
 }
 
+/** 바뀐 설정을 앱 전체에 반영한다(수집 기준값은 수집기가 매번 읽는다). */
+function applySettings(next: Settings): void {
+  settings = next
+  scheduler.setIntervals(REFRESH_INTERVALS[next.refresh])
+  if (mainWindow && !mainWindow.isDestroyed())
+    mainWindow.webContents.send(IPC.settingsChanged, next)
+}
+
+async function saveSettings(next: unknown): Promise<Settings> {
+  const normalized = normalizeSettings(next)
+  const saved = await updateConfig(app.getPath('userData'), (c) => ({ ...c, settings: normalized }))
+  applySettings(saved.settings)
+  void scheduler.refreshNow()
+  return saved.settings
+}
+
 function registerIpc(): void {
   const fromMainWindow = (sender: Electron.WebContents): boolean =>
     !!mainWindow && !mainWindow.isDestroyed() && sender === mainWindow.webContents
@@ -223,6 +247,18 @@ function registerIpc(): void {
     const result = await claude.disable()
     void scheduler.refreshNow()
     return result
+  })
+  ipcMain.handle(IPC.settingsGet, (event) =>
+    fromMainWindow(event.sender) ? settings : DEFAULT_SETTINGS
+  )
+  ipcMain.handle(IPC.settingsSave, async (event, next: unknown) => {
+    if (!fromMainWindow(event.sender)) return settings
+    return saveSettings(next)
+  })
+  ipcMain.handle(IPC.settingsPickFolder, async (event) => {
+    if (!fromMainWindow(event.sender) || !mainWindow) return null
+    const result = await dialog.showOpenDialog(mainWindow, { properties: ['openDirectory'] })
+    return result.canceled ? null : (result.filePaths[0] ?? null)
   })
   ipcMain.handle(IPC.refreshNow, async (event) => {
     if (fromMainWindow(event.sender)) await scheduler.refreshNow()
@@ -290,8 +326,11 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   app.on('second-instance', () => showWindow())
 
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
     electronApp.setAppUserModelId(APP_ID)
+    // 설정을 먼저 읽어 첫 수집부터 사용자 기준값·주기를 쓴다.
+    settings = (await loadConfig(app.getPath('userData'))).settings
+    scheduler.setIntervals(REFRESH_INTERVALS[settings.refresh])
 
     app.on('browser-window-created', (_, window) => {
       optimizer.watchWindowShortcuts(window)

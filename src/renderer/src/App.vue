@@ -12,7 +12,7 @@ import {
   faRotateRight
 } from '@fortawesome/free-solid-svg-icons'
 import type { DashboardSnapshot, KillResult } from '../../shared/types'
-import { DEFAULT_INTERVALS } from '../../shared/defaults'
+import { DEFAULT_SETTINGS, REFRESH_INTERVALS, type Settings } from '../../shared/settings'
 import { describeKillResult } from '../../shared/format'
 import { text } from '../../shared/text'
 import { watchColorScheme } from './theme'
@@ -33,6 +33,8 @@ const refreshing = ref(false)
 const actionError = ref<string | null>(null)
 const hookBusy = ref(false)
 const hookNotice = ref<{ text: string; failed: boolean } | null>(null)
+const settings = ref<Settings>(DEFAULT_SETTINGS)
+const intervals = computed(() => REFRESH_INTERVALS[settings.value.refresh])
 
 function receive(s: DashboardSnapshot): void {
   snapshot.value = s
@@ -40,11 +42,14 @@ function receive(s: DashboardSnapshot): void {
 }
 
 let unsubscribe: () => void = () => {}
+let unsubscribeSettings: () => void = () => {}
 let stopTheme: () => void = () => {}
 
 onMounted(async () => {
   stopTheme = watchColorScheme((q) => window.matchMedia(q), document.body)
   unsubscribe = window.pitwall.onSnapshot(receive)
+  unsubscribeSettings = window.pitwall.settings.onChange((s) => (settings.value = s))
+  void window.pitwall.settings.get().then((s) => (settings.value = s))
   const latest = await window.pitwall.getLatest()
   // 창이 늦게 열려 놓친 스냅샷만 채운다. 그 사이 받은 더 새 스냅샷은 덮어쓰지 않는다.
   if (!snapshot.value && latest) receive(latest)
@@ -52,6 +57,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   unsubscribe()
+  unsubscribeSettings()
   stopTheme()
 })
 
@@ -224,7 +230,7 @@ async function hookAction(action: 'enable' | 'disable'): Promise<void> {
           :history="history.ports[portKey(selectedPort)]"
           :busy="busyPid === selectedPort.pid"
           :notice="notice"
-          :intervals="DEFAULT_INTERVALS"
+          :intervals="intervals"
           @open="openSelected"
           @kill="killSelectedPort"
         />

@@ -10,7 +10,7 @@ import {
   uninstallClaudeHooks,
   type ClaudeHookEntry
 } from './claudeHooks'
-import { ensureHookConfig, loadConfig, pickFreePort, saveConfig, type HookConfig } from './config'
+import { ensureHookConfig, loadConfig, pickFreePort, updateConfig, type HookConfig } from './config'
 import { createHookServer, type HookServer } from './hookServer'
 import type { KillConfirm } from './kill'
 import { applyHookEvent, type Sessions } from './sessions'
@@ -128,7 +128,8 @@ export function createClaudeIntegration(deps: ClaudeIntegrationDeps): {
         // 저장된 포트를 다른 프로그램이 쓰고 있으면 새 포트로 바꾼다(토큰은 그대로).
         hook = { ...hook, port: await pickPort() }
         await openServer(hook)
-        await saveConfig(deps.userData, { hook })
+        const moved = hook
+        await updateConfig(deps.userData, (c) => ({ ...c, hook: moved }))
       }
       const result = await installClaudeHooks({
         dir: deps.configDir,

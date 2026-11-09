@@ -5,6 +5,7 @@ import App from './App.vue'
 import type { DashboardSnapshot, KillResult } from '../../shared/types'
 import type { ClaudeHookActionResult, PitwallApi } from '../../shared/ipc'
 import { agentRow, leftoverRow, portRow, snapshot, threePorts } from './testing/fixtures'
+import { DEFAULT_SETTINGS, type Settings } from '../../shared/settings'
 
 interface FakeApi {
   push(s: DashboardSnapshot): void
@@ -18,7 +19,9 @@ interface FakeApi {
   off: Mock<() => void>
 }
 
-function installApi(opts: { latest?: DashboardSnapshot | null; kill?: KillResult } = {}): FakeApi {
+function installApi(
+  opts: { latest?: DashboardSnapshot | null; kill?: KillResult; settings?: Settings } = {}
+): FakeApi {
   let cb: ((s: DashboardSnapshot) => void) | null = null
   let resolveLatest: () => void = () => {}
   const off = vi.fn((): void => {
@@ -41,6 +44,12 @@ function installApi(opts: { latest?: DashboardSnapshot | null; kill?: KillResult
       status: vi.fn(async () => null),
       enable: vi.fn(async (): Promise<ClaudeHookActionResult> => ({ status: 'cancelled' })),
       disable: vi.fn(async (): Promise<ClaudeHookActionResult> => ({ status: 'cancelled' }))
+    },
+    settings: {
+      get: vi.fn(async (): Promise<Settings> => opts.settings ?? DEFAULT_SETTINGS),
+      save: vi.fn(async (next: Settings): Promise<Settings> => next),
+      pickFolder: vi.fn(async (): Promise<string | null> => null),
+      onChange: vi.fn(() => () => {})
     }
   }
   ;(window as unknown as { pitwall: PitwallApi }).pitwall = api
@@ -294,4 +303,12 @@ describe('에이전트·남은 프로세스·Claude 연동', () => {
     expect(w.get('.hook-notice').text()).toContain('ipc down')
     expect(w.get('.hook-box .btn-hook').attributes('disabled')).toBeUndefined()
   })
+})
+
+test('상세 화면의 확인 주기 문구는 설정의 갱신 주기를 따른다', async () => {
+  const fake = installApi({ settings: { ...DEFAULT_SETTINGS, refresh: 'fast' } })
+  const w = await mountWith(fake)
+  await w.findAll('.monitor-list .item:not(.group-item)')[0].trigger('click')
+  await flushPromises()
+  expect(w.text()).toContain('창이 열려 있으면 2초, 닫혀 있으면 10초마다 확인')
 })

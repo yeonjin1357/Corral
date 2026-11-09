@@ -8,12 +8,27 @@ import type {
   WorktreeInfo
 } from '../shared/types'
 import { worktreeKey } from '../shared/format'
+import type { Settings } from '../shared/settings'
 import { buildAgents, cpuState, type CpuMemo } from './agents'
 import { judgePorts, type PortMemo } from './judge'
 import { agentToolOf, topLevelAgentPids } from './processTree'
 import { reconcileSessions, stateForWorktree, type LiveClaude, type Sessions } from './sessions'
 import { buildSnapshot, pidsForWorktreeLookup } from './snapshot'
 import { normalizeCandidate } from './collect/worktree'
+
+/** 수집마다 새로 읽는 사용자 기준값(설정 화면에서 바꾸면 다음 수집부터 반영). */
+export interface CollectOptions {
+  thresholds: { ramWarnPercent: number; ramDangerPercent: number }
+  /** 에이전트 없는 워크트리의 포트가 이 시간 이상 안 쓰이면 정리 후보. */
+  idlePortMs: number
+}
+
+export function collectOptionsFrom(s: Settings): CollectOptions {
+  return {
+    thresholds: { ramWarnPercent: s.ramWarnPercent, ramDangerPercent: s.ramDangerPercent },
+    idlePortMs: s.idlePortMinutes * 60 * 1000
+  }
+}
 
 export interface CollectorDeps {
   platform: Platform
@@ -29,8 +44,7 @@ export interface CollectorDeps {
   /** 훅 서버가 채우는 Claude 세션들(수집기는 읽고 끝난 것을 버린다). */
   sessions: Sessions
   hookStatus: () => Promise<ClaudeHookStatus>
-  thresholds: { ramWarnPercent: number; ramDangerPercent: number }
-  idlePortMs: number
+  options: () => CollectOptions
   selfPid: number
   now: () => number
 }
@@ -87,6 +101,7 @@ export function createCollector(deps: CollectorDeps): {
 
   async function collect(): Promise<DashboardSnapshot> {
     const sampledAt = deps.now()
+    const options = deps.options()
     const [raw, memory] = await Promise.all([deps.sample(), deps.readMemory()])
     const needed = pidsForWorktreeLookup(raw, deps.platform)
     const worktrees = await deps.resolveProcessWorktrees(
@@ -100,7 +115,7 @@ export function createCollector(deps: CollectorDeps): {
       worktrees,
       totalBytes: memory.totalBytes,
       freeBytes: memory.freeBytes,
-      thresholds: deps.thresholds,
+      thresholds: options.thresholds,
       now,
       selfPid: deps.selfPid,
       platform: deps.platform
@@ -137,7 +152,7 @@ export function createCollector(deps: CollectorDeps): {
     })
     previousCpu = cpu
 
-    const judged = judgePorts(snapshot.ports, agents, portMemo, now, deps.idlePortMs)
+    const judged = judgePorts(snapshot.ports, agents, portMemo, now, options.idlePortMs)
     portMemo = judged.memo
 
     return { ...snapshot, ports: judged.rows, agents, hook }

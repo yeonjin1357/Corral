@@ -1,4 +1,5 @@
 import type { ClaudeHookStatus, DashboardSnapshot, KillResult } from './types'
+import type { Settings } from './settings'
 
 /** 메인 ↔ 렌더러 IPC 채널 이름. */
 export const IPC = {
@@ -10,7 +11,11 @@ export const IPC = {
   openPort: 'pitwall:open-port',
   claudeHookStatus: 'pitwall:claude-hook-status',
   claudeHookEnable: 'pitwall:claude-hook-enable',
-  claudeHookDisable: 'pitwall:claude-hook-disable'
+  claudeHookDisable: 'pitwall:claude-hook-disable',
+  settingsGet: 'pitwall:settings-get',
+  settingsSave: 'pitwall:settings-save',
+  settingsPickFolder: 'pitwall:settings-pick-folder',
+  settingsChanged: 'pitwall:settings-changed'
 } as const
 
 /** Claude 연동 켜기·끄기 결과. 취소하면 메시지 없음. */
@@ -37,5 +42,14 @@ export interface PitwallApi {
     status(): Promise<ClaudeHookStatus | null>
     enable(): Promise<ClaudeHookActionResult>
     disable(): Promise<ClaudeHookActionResult>
+  }
+  /** 사용자 설정. 저장하면 메인이 범위를 고쳐 저장·반영한 값을 돌려준다. */
+  settings: {
+    get(): Promise<Settings>
+    save(next: Settings): Promise<Settings>
+    /** 폴더 고르기 창(추가 저장소). 취소하면 null. */
+    pickFolder(): Promise<string | null>
+    /** 다른 곳(트레이 등)에서 설정이 바뀌면 호출된다. 반환 함수로 구독을 끊는다. */
+    onChange(callback: (settings: Settings) => void): () => void
   }
 }

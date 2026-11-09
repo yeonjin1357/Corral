@@ -8,6 +8,8 @@ export interface Scheduler {
   start(): void
   stop(): void
   setWindowOpen(open: boolean): void
+  /** 갱신 주기를 바꾼다(설정). 다음 수집을 새 주기로 다시 잡는다. */
+  setIntervals(intervals: { openMs: number; closedMs: number }): void
   refreshNow(): Promise<void>
   /** 수집 없이 고친 스냅샷(예: 훅 이벤트로 바뀐 에이전트 상태)을 내보낸다. */
   publish(snapshot: DashboardSnapshot): void
@@ -55,8 +57,9 @@ export function createScheduler(o: {
   let inFlight: Promise<void> | null = null
   let last: DashboardSnapshot | null = null
   let lastRunAt = Number.NEGATIVE_INFINITY
+  let intervals = { ...o.intervals }
 
-  const interval = (): number => (open ? o.intervals.openMs : o.intervals.closedMs)
+  const interval = (): number => (open ? intervals.openMs : intervals.closedMs)
 
   function clearTimer(): void {
     if (timer) clearTimeout(timer)
@@ -116,8 +119,12 @@ export function createScheduler(o: {
     setWindowOpen(value: boolean) {
       open = value
       if (!running || inFlight) return
-      if (value && now() - lastRunAt >= o.intervals.openMs) void refreshNow()
+      if (value && now() - lastRunAt >= intervals.openMs) void refreshNow()
       else schedule()
+    },
+    setIntervals(next) {
+      intervals = { ...next }
+      if (running && !inFlight) schedule()
     },
     refreshNow,
     publish(snapshot: DashboardSnapshot) {
