@@ -1,4 +1,6 @@
 import {
+  agentCovers,
+  displayCpuPercent,
   formatBytes,
   worktreeLabel,
   worktreeFolder,
@@ -88,4 +90,24 @@ test('실행 시간: 초·분·시간·일, 음수·NaN 은 —', () => {
   expect(formatDuration((2 * 24 + 5) * 60 * 60 * 1000)).toBe('2일 5시간')
   expect(formatDuration(-1)).toBe('—')
   expect(formatDuration(Number.NaN)).toBe('—')
+})
+
+test('에이전트 워크트리가 같거나 상위 폴더면 그 워크트리를 덮는다(대소문자·구분자·끝 구분자 무시, 폴더 경계)', () => {
+  const roots = ['C:\\work\\workspace']
+  expect(agentCovers(roots, 'C:\\work\\workspace')).toBe(true)
+  expect(agentCovers(roots, 'c:/WORK/workspace/source/shop-web/')).toBe(true)
+  expect(agentCovers(roots, 'C:\\work\\workspace-2')).toBe(false)
+  expect(agentCovers(roots, 'C:\\work')).toBe(false)
+  expect(agentCovers([], 'C:\\work\\workspace')).toBe(false)
+  expect(agentCovers(['/Users/dev/workspace'], '/Users/dev/workspace/apps/web')).toBe(true)
+  expect(agentCovers(['/Users/dev/workspace'], '/Users/dev/workspacex')).toBe(false)
+})
+
+test('CPU 표시: Windows 는 작업 관리자처럼 전체 CPU 대비, macOS 는 활성 상태 보기처럼 코어 1개 = 100%', () => {
+  expect(displayCpuPercent(17.2, 'win32', 20)).toBe(0.9)
+  expect(displayCpuPercent(250, 'win32', 8)).toBe(31.3)
+  expect(displayCpuPercent(17.2, 'darwin', 10)).toBe(17.2)
+  expect(displayCpuPercent(null, 'win32', 8)).toBeNull()
+  expect(displayCpuPercent(5, 'win32', 0)).toBe(5)
+  expect(displayCpuPercent(5, null, 8)).toBe(5)
 })

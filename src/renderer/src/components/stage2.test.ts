@@ -271,6 +271,27 @@ describe('PortList(그룹 목록)', () => {
 })
 
 describe('AgentDetail', () => {
+  test('CPU 는 OS 기본 도구와 같은 기준: Windows 는 전체 CPU 대비, macOS 는 코어 1개 = 100%', () => {
+    const at = (platform: 'win32' | 'darwin'): string =>
+      mount(AgentDetail, {
+        props: {
+          row: agentRow(),
+          history: undefined,
+          now: 0,
+          hook: HOOK_OFF,
+          platform,
+          cpuCount: 8
+        },
+        global: { stubs }
+      })
+        .findAll('.stats .col')[3]
+        .text()
+    expect(at('win32')).toContain('1.6%')
+    expect(at('win32')).toContain('(전체 CPU 대비)')
+    expect(at('darwin')).toContain('12.5%')
+    expect(at('darwin')).toContain('(코어 1개 = 100%)')
+  })
+
   test('제목·도구와 경로·상태 배지·숫자 칸(메모리·하위 프로세스·실행 시간·CPU·상태 출처), 끄기 버튼 없음', () => {
     const w = mount(AgentDetail, {
       props: {

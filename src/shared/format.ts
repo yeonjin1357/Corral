@@ -1,4 +1,4 @@
-import type { KillResult, WorktreeInfo } from './types'
+import type { KillResult, Platform, WorktreeInfo } from './types'
 import { text } from './text'
 
 /** 수집 실패 이유를 화면·트레이에 보일 한국어 문장으로 바꾼다(이미 한국어면 그대로). */
@@ -66,7 +66,37 @@ export function worktreeKey(root: string): string {
   return root.replace(/[\\/]+$/, '').toLowerCase()
 }
 
+/**
+ * 에이전트의 워크트리가 이 워크트리와 같거나 그 상위 폴더면 true.
+ * 예: 상위 저장소(여러 저장소를 묶은 작업 공간 등)에서 일하는 에이전트가 그 안에 든 하위 저장소의 개발 서버를 다룬다.
+ * 불확실하면 정리 후보에서 빼는 쪽으로 기운다(스펙 §10).
+ */
+export function agentCovers(agentRoots: Iterable<string>, root: string): boolean {
+  const key = (p: string): string => worktreeKey(p).replace(/\\/g, '/')
+  const target = key(root)
+  for (const r of agentRoots) {
+    const a = key(r)
+    if (a && (target === a || target.startsWith(a + '/'))) return true
+  }
+  return false
+}
+
 export function worktreeLabel(worktree: WorktreeInfo | null): string {
   if (!worktree) return text.unresolvable
   return `${worktreeFolder(worktree)} · ${worktree.branch ?? text.detached}`
+}
+
+/**
+ * 화면에 보일 CPU 사용률. 수집 값은 코어 1개 = 100% 기준이다.
+ * Windows 는 작업 관리자처럼 전체 CPU 대비(÷ 논리 코어 수), macOS 는 활성 상태 보기처럼 그대로.
+ * 사용자가 OS 도구와 나란히 비교할 때 같은 숫자가 보이게 한다. 소수 1자리.
+ */
+export function displayCpuPercent(
+  cpuPercent: number | null,
+  platform: Platform | null,
+  cpuCount: number
+): number | null {
+  if (cpuPercent == null) return null
+  const value = platform === 'win32' && cpuCount > 0 ? cpuPercent / cpuCount : cpuPercent
+  return Math.round(value * 10) / 10
 }

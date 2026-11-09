@@ -87,9 +87,17 @@ export function snapshot(over: Partial<DashboardSnapshot> = {}): DashboardSnapsh
     groups: [
       { group: 'devServer', memoryBytes: 2200 * MB, processCount: 5 },
       { group: 'agent', memoryBytes: 500 * MB, processCount: 4 },
-      { group: 'other', memoryBytes: 20 * GB, processCount: 300 }
+      { group: 'heavy', memoryBytes: 0, processCount: 0 },
+      { group: 'otherApps', memoryBytes: 18 * GB, processCount: 300 },
+      { group: 'system', memoryBytes: 2 * GB, processCount: 0 }
+    ],
+    topApps: [
+      { name: 'chrome.exe', memoryBytes: 5 * GB, processCount: 40 },
+      { name: 'Code.exe', memoryBytes: 2 * GB, processCount: 12 }
     ],
     agentProcessCount: 2,
+    platform: 'win32',
+    cpuCount: 8,
     stale: false,
     error: null,
     ...over

@@ -52,7 +52,11 @@ export interface WorktreeInfo {
   isLinkedWorktree: boolean
 }
 
-export type ProcessGroup = 'devServer' | 'agent' | 'other'
+/**
+ * 메모리 묶음. heavy: 무거운 작업(설정의 명령 패턴), otherApps: 나머지 프로세스 전용 메모리 합,
+ * system: 사용 중 메모리 중 어느 프로세스 몫으로도 안 잡히는 부분(커널·드라이버·공유·읽지 못한 프로세스).
+ */
+export type ProcessGroup = 'devServer' | 'agent' | 'heavy' | 'otherApps' | 'system'
 
 export type MemoryLevel = 'normal' | 'warn' | 'danger'
 
@@ -110,6 +114,13 @@ export interface GroupUsage {
   processCount: number
 }
 
+/** 다른 앱을 프로세스 이름별로 묶은 것(예: chrome.exe 40개). */
+export interface AppUsage {
+  name: string
+  memoryBytes: number
+  processCount: number
+}
+
 export type AgentTool = 'claude' | 'codex'
 
 /**
@@ -160,7 +171,13 @@ export interface DashboardSnapshot {
   /** Claude 훅 연동 상태. 아직 모르면 null. */
   hook: ClaudeHookStatus | null
   groups: GroupUsage[]
+  /** 다른 앱 중 메모리를 많이 쓰는 것 상위 5개. */
+  topApps: AppUsage[]
   agentProcessCount: number
+  /** CPU 표시 기준(Windows 는 전체 CPU 대비, macOS 는 코어 1개 = 100%). 모르면 null. */
+  platform: Platform | null
+  /** 논리 코어 수. */
+  cpuCount: number
   stale: boolean
   error: string | null
   collectMode?: CollectMode | null

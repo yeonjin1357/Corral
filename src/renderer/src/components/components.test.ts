@@ -153,7 +153,7 @@ describe('HomeView', () => {
     expect(none.find('.collect-mode').exists()).toBe(false)
   })
 
-  test('메모리 묶음 표: 개발 서버·에이전트·그 외', () => {
+  test('메모리 묶음 표: 개발 서버·에이전트·무거운 작업·다른 앱·시스템', () => {
     const w = mount(HomeView, {
       props: { snapshot: snapshot(), ramHistory: [] },
       global: { stubs }
@@ -162,7 +162,10 @@ describe('HomeView', () => {
     expect(rows[0]).toContain('개발 서버')
     expect(rows[0]).toContain('2.1 GB')
     expect(rows[1]).toContain(`${Math.round((500 * MB) / MB)} MB`)
-    expect(rows[2]).toContain('그 외')
+    expect(rows[2]).toContain('무거운 작업')
+    expect(rows[3]).toContain('다른 앱')
+    expect(rows[3]).toContain('18.0 GB')
+    expect(rows[4]).toContain('시스템·공유 메모리')
   })
 
   test('RAM 위험 단계는 빨강, 총량 0 은 — 로', () => {

@@ -1,6 +1,6 @@
 import { app, shell, BrowserWindow, ipcMain, dialog, Tray, Menu, nativeImage } from 'electron'
 import { join } from 'path'
-import { homedir } from 'os'
+import { cpus, homedir } from 'os'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import type { DashboardSnapshot } from '../shared/types'
@@ -67,6 +67,7 @@ const collector = platform
       hookStatus: () => claude.status(),
       options: () => collectOptionsFrom(settings),
       selfPid: process.pid,
+      cpuCount: cpus().length,
       now: Date.now
     })
   : null

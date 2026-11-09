@@ -40,7 +40,10 @@ function snap(over: Partial<DashboardSnapshot> = {}): DashboardSnapshot {
     agents: [],
     hook: null,
     groups: [],
+    topApps: [],
     agentProcessCount: 0,
+    platform: 'win32',
+    cpuCount: 8,
     stale: false,
     error: null,
     ...over

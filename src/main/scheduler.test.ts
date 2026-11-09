@@ -10,7 +10,10 @@ function snap(takenAt: number): DashboardSnapshot {
     agents: [],
     hook: null,
     groups: [],
+    topApps: [],
     agentProcessCount: 0,
+    platform: null,
+    cpuCount: 1,
     stale: false,
     error: null
   }

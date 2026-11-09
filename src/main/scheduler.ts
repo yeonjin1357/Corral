@@ -1,6 +1,7 @@
 import type { DashboardSnapshot } from '../shared/types'
 import { text } from '../shared/text'
 import { describeCollectError } from '../shared/format'
+import { blankSnapshot } from '../shared/snapshot'
 
 export const DEFAULT_COLLECT_TIMEOUT_MS = 20000
 
@@ -17,18 +18,7 @@ export interface Scheduler {
 }
 
 function emptySnapshot(takenAt: number, error: string): DashboardSnapshot {
-  return {
-    takenAt,
-    memory: { totalBytes: 0, usedBytes: 0, usedPercent: 0, level: 'normal' },
-    ports: [],
-    leftovers: [],
-    agents: [],
-    hook: null,
-    groups: [],
-    agentProcessCount: 0,
-    stale: true,
-    error
-  }
+  return { ...blankSnapshot(takenAt), stale: true, error }
 }
 
 function errorMessage(e: unknown): string {

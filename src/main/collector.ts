@@ -46,6 +46,8 @@ export interface CollectorDeps {
   hookStatus: () => Promise<ClaudeHookStatus>
   options: () => CollectOptions
   selfPid: number
+  /** 논리 코어 수(CPU 표시 기준). */
+  cpuCount: number
   now: () => number
 }
 
@@ -118,7 +120,8 @@ export function createCollector(deps: CollectorDeps): {
       thresholds: options.thresholds,
       now,
       selfPid: deps.selfPid,
-      platform: deps.platform
+      platform: deps.platform,
+      cpuCount: deps.cpuCount
     })
 
     const devServerPids = new Set(snapshot.ports.flatMap((p) => [p.pid, ...p.descendantPids]))

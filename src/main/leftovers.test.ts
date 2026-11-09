@@ -179,6 +179,15 @@ describe('남은 프로세스 찾기', () => {
     expect(rows[0].agentInWorktree).toBe(true)
   })
 
+  test('에이전트가 상위 폴더 저장소에서 일해도 표시한다', () => {
+    const rows = findLeftovers(
+      sample([proc(7100, 6998, 'node.exe', VITEST)]),
+      new Map([[7100, W1]]),
+      { exclude: new Set(), agentRoots: new Set(['c:\\work']) }
+    )
+    expect(rows[0].agentInWorktree).toBe(true)
+  })
+
   test('메모리가 큰 순서', () => {
     const rows = findLeftovers(
       sample([

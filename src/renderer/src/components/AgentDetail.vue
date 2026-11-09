@@ -5,8 +5,13 @@
 -->
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { AgentRow, ClaudeHookStatus } from '../../../shared/types'
-import { formatBytes, formatDuration, worktreeFolder } from '../../../shared/format'
+import type { AgentRow, ClaudeHookStatus, Platform } from '../../../shared/types'
+import {
+  displayCpuPercent,
+  formatBytes,
+  formatDuration,
+  worktreeFolder
+} from '../../../shared/format'
 import { text } from '../../../shared/text'
 import type { PortHistory } from '../history'
 import { AGENT_PILL } from '../tags'
@@ -19,6 +24,9 @@ const props = defineProps<{
   /** 실행 시간을 셀 기준 시각(스냅샷 시각). */
   now: number
   hook: ClaudeHookStatus | null
+  /** CPU 를 OS 기본 도구와 같은 기준으로 보이는 데 쓴다(없으면 코어 1개 = 100%). */
+  platform?: Platform | null
+  cpuCount?: number
 }>()
 
 const title = computed(() =>
@@ -31,8 +39,12 @@ const where = computed(() => {
 const runtime = computed(() =>
   props.row.startedAt == null ? text.ui.none : formatDuration(props.now - props.row.startedAt)
 )
-const cpu = computed(() =>
-  props.row.cpuPercent == null ? text.ui.none : `${props.row.cpuPercent}%`
+const cpu = computed(() => {
+  const value = displayCpuPercent(props.row.cpuPercent, props.platform ?? null, props.cpuCount ?? 1)
+  return value == null ? text.ui.none : `${value}%`
+})
+const cpuSub = computed(() =>
+  props.platform === 'win32' ? text.ui.agent.cpuSubWindows : text.ui.agent.cpuSub
 )
 const note = computed(() => {
   if (props.row.tool === 'codex') return text.ui.agent.codexNote
@@ -83,7 +95,7 @@ const note = computed(() => {
         </div>
         <div class="col">
           <h4>{{ text.ui.agent.cpu }}</h4>
-          <p>{{ text.ui.agent.cpuSub }}</p>
+          <p>{{ cpuSub }}</p>
           <span class="num">{{ cpu }}</span>
         </div>
         <div class="col">

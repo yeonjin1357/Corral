@@ -1,10 +1,12 @@
 import type {
+  AppUsage,
   DashboardSnapshot,
   GroupUsage,
   MemoryLevel,
   MemorySummary,
   Platform,
   PortRow,
+  ProcessInfo,
   RawSample,
   WorktreeInfo
 } from '../shared/types'
@@ -91,6 +93,24 @@ function summarizeMemory(
   }
 }
 
+const TOP_APPS = 5
+
+/** 프로세스 이름별로 묶어 메모리 큰 순(같으면 이름 순) 상위 몇 개. 이름은 대소문자를 무시하고 묶는다. */
+function topAppsOf(processes: ProcessInfo[]): AppUsage[] {
+  const byName = new Map<string, AppUsage>()
+  for (const p of processes) {
+    const key = p.name.toLowerCase()
+    const app = byName.get(key)
+    if (app) {
+      app.memoryBytes += p.memoryBytes
+      app.processCount++
+    } else byName.set(key, { name: p.name, memoryBytes: p.memoryBytes, processCount: 1 })
+  }
+  return [...byName.values()]
+    .sort((a, b) => b.memoryBytes - a.memoryBytes || a.name.localeCompare(b.name))
+    .slice(0, TOP_APPS)
+}
+
 export function buildSnapshot(input: {
   sample: RawSample
   worktrees: Map<number, WorktreeInfo>
@@ -102,11 +122,17 @@ export function buildSnapshot(input: {
   selfPid?: number
   /** macOS 는 부모가 끝난 프로세스가 launchd(1) 아래로 옮겨진다(남은 프로세스 판단). */
   platform?: Platform
+  /** 논리 코어 수(CPU 표시 기준). */
+  cpuCount?: number
 }): DashboardSnapshot {
   const { sample, worktrees } = input
   const tree = buildTree(sample.processes)
   const self = new Set<number>(
     input.selfPid ? [input.selfPid, ...tree.descendants(input.selfPid)] : []
+  )
+  // pitwall 을 띄운 조상(개발 실행의 electron-vite 서버 등)을 내리면 pitwall 도 같이 꺼진다.
+  const selfAncestors = new Set<number>(
+    input.selfPid ? tree.ancestors(input.selfPid, 16).map((p) => p.pid) : []
   )
   const memoryOf = (pids: Iterable<number>): number => {
     let sum = 0
@@ -134,7 +160,13 @@ export function buildSnapshot(input: {
   const ports: PortRow[] = []
   const seen = new Set<string>()
   for (const t of sample.tcp) {
-    if (t.state !== 'Listen' || t.localPort < MIN_DEV_PORT || self.has(t.pid)) continue
+    if (
+      t.state !== 'Listen' ||
+      t.localPort < MIN_DEV_PORT ||
+      self.has(t.pid) ||
+      selfAncestors.has(t.pid)
+    )
+      continue
     const key = `${t.localPort}:${t.pid}`
     if (seen.has(key)) continue
     seen.add(key)
@@ -192,15 +224,28 @@ export function buildSnapshot(input: {
   })
 
   const memory = summarizeMemory(input.totalBytes, input.freeBytes, input.thresholds)
+  const heavy = new Set<number>()
   const devBytes = memoryOf(devServer)
   const agentBytes = memoryOf(agent)
+  const heavyBytes = memoryOf(heavy)
+  const rest = sample.processes.filter(
+    (p) => !devServer.has(p.pid) && !agent.has(p.pid) && !heavy.has(p.pid)
+  )
+  const known = devBytes + agentBytes + heavyBytes
+  // 기본 수집 방식(작업 집합)은 공유 메모리를 겹쳐 세어 합이 사용량을 넘을 수 있다. 사용량 안으로 줄인다.
+  const otherBytes = Math.min(
+    memoryOf(rest.map((p) => p.pid)),
+    Math.max(0, memory.usedBytes - known)
+  )
   const groups: GroupUsage[] = [
     { group: 'devServer', memoryBytes: devBytes, processCount: devServer.size },
     { group: 'agent', memoryBytes: agentBytes, processCount: agent.size },
+    { group: 'heavy', memoryBytes: heavyBytes, processCount: heavy.size },
+    { group: 'otherApps', memoryBytes: otherBytes, processCount: rest.length },
     {
-      group: 'other',
-      memoryBytes: Math.max(0, memory.usedBytes - devBytes - agentBytes),
-      processCount: Math.max(0, sample.processes.length - devServer.size - agent.size)
+      group: 'system',
+      memoryBytes: Math.max(0, memory.usedBytes - known - otherBytes),
+      processCount: 0
     }
   ]
 
@@ -212,7 +257,10 @@ export function buildSnapshot(input: {
     agents: [],
     hook: null,
     groups,
+    topApps: topAppsOf(rest),
     agentProcessCount,
+    platform: input.platform ?? null,
+    cpuCount: input.cpuCount && input.cpuCount > 0 ? input.cpuCount : 1,
     stale: false,
     error: null,
     collectMode: sample.collectMode ?? null

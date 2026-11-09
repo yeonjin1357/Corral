@@ -128,3 +128,13 @@ test('워크트리를 모르는 에이전트가 하나라도 있으면 정리 �
   const noUnknown = over([0, 30 * MIN], () => [port()], [agent(W2)])
   expect(noUnknown.rows[0].judgement).toBe('candidate')
 })
+
+test('에이전트가 상위 저장소에서 일하면(하위 저장소를 다룸) 하위 저장소 포트도 에이전트가 있는 것으로 본다', () => {
+  const nested = {
+    root: 'C:\\work\\shop-web\\vendor\\api',
+    branch: 'main',
+    isLinkedWorktree: false
+  }
+  const r = over([0, 30 * MIN], () => [port({ worktree: nested })], [agent(W1)])
+  expect(r.rows[0]).toMatchObject({ judgement: null, agentInWorktree: true })
+})

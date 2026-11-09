@@ -145,6 +145,7 @@ export const text = {
       runtime: '실행 시간',
       cpu: 'CPU',
       cpuSub: '(코어 1개 = 100%)',
+      cpuSubWindows: '(전체 CPU 대비)',
       stateSource: '상태 출처',
       codexNote: 'Codex 는 CPU 사용량으로만 작업 중인지 짐작해요.',
       noHookNote: 'Claude 연동을 켜면 권한 대기까지 정확히 알 수 있어요.'
@@ -197,7 +198,9 @@ export const text = {
     groups: {
       devServer: '개발 서버',
       agent: '에이전트',
-      other: '그 외',
+      heavy: '무거운 작업',
+      otherApps: '다른 앱',
+      system: '시스템·공유 메모리',
       processes: (n: number): string => `${n}개`
     },
     detail: {

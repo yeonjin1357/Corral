@@ -169,13 +169,49 @@ describe('묶음과 에이전트', () => {
     expect(g.agent.processCount).toBe(4)
   })
 
-  test('기타 = 사용 중 메모리 − 위 둘, 공유 메모리 때문에 음수가 되면 0', () => {
+  test('다른 앱 = 나머지 프로세스 전용 메모리 합, 시스템 = 사용 중 메모리 − 프로세스 전부', () => {
     const s = buildSnapshot(input)
-    const other = s.groups.find((x) => x.group === 'other')!
-    expect(other.memoryBytes).toBe(s.memory.usedBytes - (2220 + 500) * MB)
-    expect(other.processCount).toBe(processes.length - 9)
-    const tiny = buildSnapshot({ ...input, totalBytes: 1 * GB, freeBytes: 0 })
-    expect(tiny.groups.find((x) => x.group === 'other')!.memoryBytes).toBe(0)
+    const g = Object.fromEntries(s.groups.map((x) => [x.group, x]))
+    expect(s.groups.map((x) => x.group)).toEqual([
+      'devServer',
+      'agent',
+      'heavy',
+      'otherApps',
+      'system'
+    ])
+    const all = processes.reduce((sum, p) => sum + p.memoryBytes, 0)
+    expect(all).toBe(3483 * MB)
+    expect(g.otherApps.memoryBytes).toBe(all - (2220 + 500) * MB)
+    expect(g.otherApps.processCount).toBe(processes.length - 9)
+    expect(g.system.memoryBytes).toBe(s.memory.usedBytes - all)
+    expect(g.heavy).toMatchObject({ memoryBytes: 0, processCount: 0 })
+  })
+
+  test('프로세스 합이 사용량보다 크면(공유 메모리를 겹쳐 센 기본 수집 방식) 다른 앱을 사용량 안으로 줄이고 시스템은 0', () => {
+    const tiny = buildSnapshot({ ...input, totalBytes: 3 * GB, freeBytes: 0 })
+    const g = Object.fromEntries(tiny.groups.map((x) => [x.group, x]))
+    expect(g.otherApps.memoryBytes).toBe(3 * GB - (2220 + 500) * MB)
+    expect(g.system.memoryBytes).toBe(0)
+    const none = buildSnapshot({ ...input, totalBytes: 1 * GB, freeBytes: 0 })
+    expect(none.groups.find((x) => x.group === 'otherApps')!.memoryBytes).toBe(0)
+  })
+
+  test('다른 앱 상위 5개: 이름별로 묶어 메모리 큰 순(같으면 이름 순)', () => {
+    expect(buildSnapshot(input).topApps).toEqual([
+      { name: 'claude.exe', memoryBytes: 300 * MB, processCount: 1 },
+      { name: 'unrelated.exe', memoryBytes: 300 * MB, processCount: 1 },
+      { name: 'python.exe', memoryBytes: 80 * MB, processCount: 1 },
+      { name: 'node.exe', memoryBytes: 51 * MB, processCount: 2 },
+      { name: 'codex-windows-sandbox-service.exe', memoryBytes: 20 * MB, processCount: 1 }
+    ])
+  })
+
+  test('OS 와 논리 코어 수를 스냅샷에 담는다(CPU 표시 기준)', () => {
+    expect(buildSnapshot({ ...input, platform: 'win32', cpuCount: 16 })).toMatchObject({
+      platform: 'win32',
+      cpuCount: 16
+    })
+    expect(buildSnapshot(input)).toMatchObject({ platform: null, cpuCount: 1 })
   })
 
   test('에이전트 수는 세션 단위(에이전트 조상이 있는 프로세스는 세지 않음)', () => {
@@ -265,6 +301,21 @@ test('pitwall 자신과 그 자식 프로세스가 연 포트는 목록에 올�
   })
   expect(s.ports.map((p) => p.port)).not.toContain(3000)
   expect(s.ports.map((p) => p.port)).not.toContain(9333)
+  expect(s.ports.map((p) => p.port)).toContain(3003)
+})
+
+test('pitwall 을 띄운 조상(개발 실행의 vite 서버 등)이 연 포트도 올리지 않는다(내리면 pitwall 이 같이 꺼짐)', () => {
+  // 4100(vite, W1) 아래에서 pitwall(9900)이 떴다고 본다. 4000(npm)도 조상이다.
+  const s = buildSnapshot({
+    ...input,
+    selfPid: 9900,
+    sample: {
+      processes: [...processes, proc(9900, 4100, 'electron.exe', 100, 400)],
+      tcp: [...tcp, listen(4000, 3001)]
+    }
+  })
+  expect(s.ports.map((p) => p.port)).not.toContain(3000)
+  expect(s.ports.map((p) => p.port)).not.toContain(3001)
   expect(s.ports.map((p) => p.port)).toContain(3003)
 })
 

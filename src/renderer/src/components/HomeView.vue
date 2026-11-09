@@ -56,11 +56,13 @@ const ramClass = computed(() => {
   return { normal: '', warn: 'text-warning', danger: 'text-danger' }[props.snapshot.memory.level]
 })
 
-const ORDER: ProcessGroup[] = ['devServer', 'agent', 'other']
+const ORDER: ProcessGroup[] = ['devServer', 'agent', 'heavy', 'otherApps', 'system']
 const LABEL: Record<ProcessGroup, string> = {
   devServer: text.ui.groups.devServer,
   agent: text.ui.groups.agent,
-  other: text.ui.groups.other
+  heavy: text.ui.groups.heavy,
+  otherApps: text.ui.groups.otherApps,
+  system: text.ui.groups.system
 }
 const groups = computed(() =>
   ORDER.map((g) => props.snapshot.groups.find((x) => x.group === g)).filter(

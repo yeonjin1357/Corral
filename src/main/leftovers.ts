@@ -1,5 +1,5 @@
 import type { LeftoverRow, Platform, ProcessInfo, RawSample, WorktreeInfo } from '../shared/types'
-import { worktreeKey } from '../shared/format'
+import { agentCovers } from '../shared/format'
 import { text } from '../shared/text'
 import { buildTree, classifyAgent } from './processTree'
 
@@ -86,7 +86,7 @@ export function findLeftovers(
       memoryBytes: members.reduce((sum, m) => sum + m.memoryBytes, 0),
       descendantPids: descendants,
       startedAt: p.startedAt,
-      agentInWorktree: !!worktree && !!opts.agentRoots?.has(worktreeKey(worktree.root))
+      agentInWorktree: !!worktree && agentCovers(opts.agentRoots ?? [], worktree.root)
     })
   }
   return rows.sort((a, b) => b.memoryBytes - a.memoryBytes || a.pid - b.pid)

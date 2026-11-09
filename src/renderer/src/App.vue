@@ -240,6 +240,8 @@ async function hookAction(action: 'enable' | 'disable'): Promise<void> {
           :history="history.agents[agentKey(selectedAgent)]"
           :now="snapshot.takenAt"
           :hook="snapshot.hook"
+          :platform="snapshot.platform"
+          :cpu-count="snapshot.cpuCount"
         />
         <LeftoverDetail
           v-else-if="selectedLeftover"

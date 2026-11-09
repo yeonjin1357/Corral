@@ -1,4 +1,5 @@
 import { spawn } from 'child_process'
+import { blankSnapshot } from '../shared/snapshot'
 import { mkdtemp, mkdir, writeFile, rm } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
@@ -104,18 +105,7 @@ const freshSample: RawSample = {
 }
 
 function snapshotWith(ports: PortRow[], leftovers: LeftoverRow[] = []): DashboardSnapshot {
-  return {
-    takenAt: 1,
-    memory: { totalBytes: 1, usedBytes: 0, usedPercent: 0, level: 'normal' },
-    ports,
-    leftovers,
-    agents: [],
-    hook: null,
-    groups: [],
-    agentProcessCount: 0,
-    stale: false,
-    error: null
-  }
+  return { ...blankSnapshot(1), ports, leftovers }
 }
 
 describe('planKill', () => {

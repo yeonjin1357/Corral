@@ -77,6 +77,7 @@ function setup(over: Partial<CollectorDeps> = {}): {
       idlePortMs: 20 * MIN
     }),
     selfPid: 999,
+    cpuCount: 8,
     now: () => clock.now,
     ...over
   }
@@ -94,6 +95,7 @@ test('한 번 수집하면 스냅샷에 에이전트·포트·남은 프로세�
   expect(s.leftovers).toEqual([])
   expect(s.hook).toEqual(HOOK)
   expect(s.collectMode).toBe('helper-dll')
+  expect(s).toMatchObject({ platform: 'win32', cpuCount: 8 })
 })
 
 test('이전 샘플의 CPU 를 기억해 두 번째 수집부터 작업 중/쉬는 중을 판단한다', async () => {
