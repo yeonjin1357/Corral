@@ -303,6 +303,7 @@ describe('남은 프로세스 끄기', () => {
     label: 'Vitest',
     commandLine: 'node vite --port 3000',
     worktree: null,
+    workspace: null,
     memoryBytes: 2 * MB,
     descendantPids: [4101],
     startedAt: 200,

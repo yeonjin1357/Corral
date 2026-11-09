@@ -148,6 +148,7 @@ export interface LeftoverRow {
   label: string
   commandLine: string
   worktree: WorktreeInfo | null
+  workspace: WorkspaceInfo | null
   /** 자기 + 자손. */
   memoryBytes: number
   descendantPids: number[]
@@ -185,6 +186,7 @@ export interface AgentRow {
   pid: number
   tool: AgentTool
   worktree: WorktreeInfo | null
+  workspace: WorkspaceInfo | null
   startedAt: number | null
   /** 자기 + 자손 중 개발 서버가 아닌 것. */
   memoryBytes: number
@@ -295,6 +297,7 @@ export interface HeavyJobRow {
   processName: string
   commandLine: string
   worktree: WorktreeInfo | null
+  workspace: WorkspaceInfo | null
   /** 자기 + 자손. */
   memoryBytes: number
   descendantPids: number[]

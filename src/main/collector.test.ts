@@ -2,7 +2,13 @@ import { collectOptionsFrom, createCollector, type CollectorDeps } from './colle
 import { DEFAULT_SETTINGS } from '../shared/settings'
 import type { Sessions } from './sessions'
 import { applyHookEvent } from './sessions'
-import type { ClaudeHookStatus, ProcessInfo, RawSample, WorktreeInfo } from '../shared/types'
+import type {
+  ClaudeHookStatus,
+  ProcessInfo,
+  RawSample,
+  WorkspaceInfo,
+  WorktreeInfo
+} from '../shared/types'
 
 const MB = 1024 * 1024
 const MIN = 60 * 1000
@@ -70,6 +76,7 @@ function setup(over: Partial<CollectorDeps> = {}): {
       return map
     },
     resolveWorktree: async (path) => (path.startsWith(W1.root) ? W1 : null),
+    resolveWorkspace: async (w) => ({ root: w.root, name: 'self', branch: w.branch, outer: false }),
     sessions,
     hookStatus: async () => HOOK,
     options: () => ({
@@ -302,4 +309,56 @@ test('무거운 명령 패턴을 넘겨 무거운 작업을 찾고, 그 워크�
   const s = await createCollector({ ...deps, sample: async () => withTsc }).collect()
   expect(s.heavyJobs.map((j) => [j.pid, j.label])).toEqual([[7000, 'tsc']])
   expect(resolveProcessWorktrees.mock.calls[0][0].map((p) => p.pid)).toContain(7000)
+})
+
+test('서버·남은 프로세스·무거운 작업·에이전트에 작업 공간을 붙인다', async () => {
+  const WS: WorkspaceInfo = { root: 'C:\\work', name: 'work', branch: 'main', outer: true }
+  const resolveWorkspace = vi.fn<CollectorDeps['resolveWorkspace']>(async (w) =>
+    w.root === W1.root ? WS : { root: w.root, name: 'wt-a', branch: w.branch, outer: false }
+  )
+  const { deps, clock } = setup({
+    resolveWorkspace,
+    resolveProcessWorktrees: async (processes) => {
+      const map = new Map<number, WorktreeInfo>()
+      for (const p of processes) {
+        if ([4100, 5000, 7000, 7100].includes(p.pid)) map.set(p.pid, W1)
+        if (p.pid === 6000) map.set(p.pid, W2)
+      }
+      return map
+    }
+  })
+  clock.now = 60 * MIN
+  const sample: RawSample = {
+    ...sampleAt(0),
+    processes: [
+      ...sampleAt(0).processes,
+      proc(7000, 1, 'node.exe', 0, 'node tsc --noEmit'),
+      proc(7100, 1, 'java.exe', 0, 'java org.gradle.launcher.daemon.bootstrap.GradleDaemon')
+    ]
+  }
+  const s = await createCollector({ ...deps, sample: async () => sample }).collect()
+  expect(s.servers.map((r) => r.workspace)).toEqual([WS])
+  expect(s.heavyJobs.map((r) => r.workspace)).toEqual([WS])
+  expect(s.leftovers.map((r) => r.workspace)).toEqual([WS])
+  expect(s.agents.map((a) => [a.pid, a.workspace?.root])).toEqual([
+    [5000, 'C:\\work'],
+    [6000, W2.root]
+  ])
+  // 같은 워크트리는 한 번만 판별한다.
+  expect(resolveWorkspace).toHaveBeenCalledTimes(2)
+})
+
+test('작업 공간 판별이 실패하면 그 워크트리 자체를 작업 공간으로 본다', async () => {
+  const { deps } = setup({
+    resolveWorkspace: async () => {
+      throw new Error('EACCES')
+    }
+  })
+  const s = await createCollector(deps).collect()
+  expect(s.servers[0].workspace).toEqual({
+    root: W1.root,
+    name: 'shop-web',
+    branch: 'develop',
+    outer: false
+  })
 })

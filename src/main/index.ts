@@ -30,7 +30,7 @@ import { sample, toPlatform } from './collect/sample'
 import { configureWindowsSampler, nativeHelperDllName } from './collect/windows'
 import { allCwdsDarwin } from './collect/darwin'
 import { readMemory } from './collect/memory'
-import { resolveProcessWorktrees, resolveWorktree } from './collect/worktree'
+import { resolveProcessWorktrees, resolveWorkspace, resolveWorktree } from './collect/worktree'
 import { collectOptionsFrom, createCollector } from './collector'
 import { loadConfig, updateConfig } from './config'
 import { claudeConfigDir } from './claudeHooks'
@@ -85,6 +85,7 @@ const collector = platform
       readMemory: () => readMemory(platform),
       resolveProcessWorktrees,
       resolveWorktree,
+      resolveWorkspace,
       sessions,
       hookStatus: () => claude.status(),
       options: () => collectOptionsFrom(settings),

@@ -30,6 +30,7 @@ function agent(pid: number, state: AgentRow['state'], root = 'C:\\work\\shop-web
     pid,
     tool: 'claude',
     worktree: { root, branch: 'develop', isLinkedWorktree: false },
+    workspace: null,
     startedAt: pid,
     memoryBytes: 1,
     descendantCount: 0,
@@ -46,6 +47,7 @@ function heavy(pid: number, label: string): HeavyJobRow {
     processName: 'node.exe',
     commandLine: label,
     worktree: null,
+    workspace: null,
     memoryBytes: 4 * GB,
     descendantPids: [],
     startedAt: 1

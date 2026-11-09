@@ -97,6 +97,7 @@ export function buildAgents(input: {
       pid,
       tool,
       worktree,
+      workspace: null,
       startedAt: self.startedAt,
       memoryBytes: members.reduce((sum, m) => sum + m.memoryBytes, 0),
       descendantCount: descendants.length,

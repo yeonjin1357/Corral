@@ -101,6 +101,7 @@ describe('findHeavyJobs', () => {
         processName: 'cmd.exe',
         commandLine: 'C:\\Windows\\system32\\cmd.exe /d /s /c "vue-tsc --noEmit"',
         worktree: W1,
+        workspace: null,
         memoryBytes: 8005 * MB,
         descendantPids: [102],
         startedAt: 201

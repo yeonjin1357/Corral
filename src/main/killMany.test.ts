@@ -40,6 +40,7 @@ const daemon: LeftoverRow = {
   label: 'Gradle 데몬',
   commandLine: 'java GradleDaemon',
   worktree: { root: 'C:\\work\\api', branch: 'main', isLinkedWorktree: false },
+  workspace: null,
   memoryBytes: 1100 * MB,
   descendantPids: [],
   startedAt: 50,

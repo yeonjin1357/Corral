@@ -30,6 +30,7 @@ function agent(worktree: WorktreeInfo | null, tool: AgentRow['tool'] = 'claude')
     pid: 5000,
     tool,
     worktree,
+    workspace: null,
     startedAt: 1,
     memoryBytes: 1,
     descendantCount: 0,

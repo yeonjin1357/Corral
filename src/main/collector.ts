@@ -5,6 +5,7 @@ import type {
   Platform,
   ProcessInfo,
   RawSample,
+  WorkspaceInfo,
   WorktreeInfo
 } from '../shared/types'
 import { worktreeKey } from '../shared/format'
@@ -14,7 +15,7 @@ import { judgePorts, type PortMemo } from './judge'
 import { agentToolOf, topLevelAgentPids } from './processTree'
 import { reconcileSessions, stateForWorktree, type LiveClaude, type Sessions } from './sessions'
 import { buildSnapshot, pidsForWorktreeLookup } from './snapshot'
-import { normalizeCandidate } from './collect/worktree'
+import { normalizeCandidate, selfWorkspace } from './collect/worktree'
 
 /** 수집마다 새로 읽는 사용자 기준값(설정 화면에서 바꾸면 다음 수집부터 반영). */
 export interface CollectOptions {
@@ -44,6 +45,8 @@ export interface CollectorDeps {
   ) => Promise<Map<number, WorktreeInfo>>
   /** Claude 세션 작업 폴더의 워크트리. */
   resolveWorktree: (path: string) => Promise<WorktreeInfo | null>
+  /** 워크트리를 감싸는 작업 공간(바깥 저장소). */
+  resolveWorkspace: (worktree: WorktreeInfo) => Promise<WorkspaceInfo>
   /** 훅 서버가 채우는 Claude 세션들(수집기는 읽고 끝난 것을 버린다). */
   sessions: Sessions
   hookStatus: () => Promise<ClaudeHookStatus>
@@ -94,6 +97,27 @@ export function createCollector(deps: CollectorDeps): {
       })
     )
     return new Map([...known, ...resolved])
+  }
+
+  /** 행들의 워크트리마다 작업 공간을 한 번씩 판별한다(실패하면 그 워크트리 자체). */
+  async function resolveWorkspaces(
+    list: (WorktreeInfo | null)[]
+  ): Promise<(w: WorktreeInfo | null) => WorkspaceInfo | null> {
+    const unique = new Map<string, WorktreeInfo>()
+    for (const w of list)
+      if (w && !unique.has(worktreeKey(w.root))) unique.set(worktreeKey(w.root), w)
+    const resolved = new Map(
+      await Promise.all(
+        [...unique].map(async ([key, w]): Promise<[string, WorkspaceInfo]> => {
+          try {
+            return [key, await deps.resolveWorkspace(w)]
+          } catch {
+            return [key, selfWorkspace(w)]
+          }
+        })
+      )
+    )
+    return (w) => (w ? (resolved.get(worktreeKey(w.root)) ?? null) : null)
   }
 
   async function readHookStatus(): Promise<ClaudeHookStatus> {
@@ -162,7 +186,25 @@ export function createCollector(deps: CollectorDeps): {
     const judged = judgePorts(snapshot.ports, agents, portMemo, now, options.idlePortMs)
     portMemo = judged.memo
 
-    return { ...snapshot, ports: judged.rows, agents, hook }
+    const workspaceOf = await resolveWorkspaces([
+      ...snapshot.servers.map((r) => r.worktree),
+      ...snapshot.leftovers.map((r) => r.worktree),
+      ...snapshot.heavyJobs.map((r) => r.worktree),
+      ...agents.map((a) => a.worktree)
+    ])
+    const withWorkspace = <T extends { worktree: WorktreeInfo | null }>(
+      row: T
+    ): T & { workspace: WorkspaceInfo | null } => ({ ...row, workspace: workspaceOf(row.worktree) })
+
+    return {
+      ...snapshot,
+      ports: judged.rows,
+      servers: snapshot.servers.map(withWorkspace),
+      leftovers: snapshot.leftovers.map(withWorkspace),
+      heavyJobs: snapshot.heavyJobs.map(withWorkspace),
+      agents: agents.map(withWorkspace),
+      hook
+    }
   }
 
   async function restate(snapshot: DashboardSnapshot): Promise<DashboardSnapshot> {

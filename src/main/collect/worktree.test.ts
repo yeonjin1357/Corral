@@ -182,6 +182,70 @@ describe('createWorktreeResolver', () => {
     expect((await resolveWorktree(join(repo, 'src', 'gone', 'server.js')))?.root).toBe(repo)
   })
 
+  describe('resolveWorkspace(작업 공간)', () => {
+    test('다른 저장소 안의 저장소는 바깥 저장소가 작업 공간', async () => {
+      // 여러 저장소를 묶는 작업 공간 저장소 안의 repos/front.
+      const ws = await makeRepo(join(tmp, 'ws'), 'ref: refs/heads/main\n')
+      const front = await makeRepo(join(ws, 'repos', 'front'))
+      const r = createWorktreeResolver({ homeDir: join(tmp, 'home') })
+      const w = (await r.resolveWorktree(front))!
+      expect(await r.resolveWorkspace(w)).toEqual({
+        root: ws,
+        name: 'ws',
+        branch: 'main',
+        outer: true
+      })
+    })
+
+    test('같은 저장소 안에 만든 워크트리는 묶지 않는다', async () => {
+      const repo = await makeRepo(join(tmp, 'shop-web'))
+      const gitdir = join(repo, '.git', 'worktrees', 'x')
+      await mkdir(gitdir, { recursive: true })
+      await writeFile(join(gitdir, 'HEAD'), 'ref: refs/heads/feat/x\n')
+      await writeFile(join(gitdir, 'commondir'), '../..\n')
+      const x = join(repo, '.claude', 'worktrees', 'x')
+      await mkdir(x, { recursive: true })
+      await writeFile(join(x, '.git'), `gitdir: ${gitdir}\n`)
+      const r = createWorktreeResolver({ homeDir: join(tmp, 'home') })
+      const w = (await r.resolveWorktree(x))!
+      expect(w.isLinkedWorktree).toBe(true)
+      expect(await r.resolveWorkspace(w)).toEqual({
+        root: x,
+        name: 'x',
+        branch: 'feat/x',
+        outer: false
+      })
+    })
+
+    test('바깥 저장소가 없으면 자기 자신', async () => {
+      const repo = await makeRepo(join(tmp, 'shop-web'))
+      const r = createWorktreeResolver({ homeDir: join(tmp, 'home') })
+      const w = (await r.resolveWorktree(repo))!
+      expect(await r.resolveWorkspace(w)).toEqual({
+        root: repo,
+        name: 'shop-web',
+        branch: 'develop',
+        outer: false
+      })
+    })
+
+    test('공용 폴더를 모르는 워크트리는 묶지 않는다(확실할 때만 묶음 정리 범위를 넓힌다)', async () => {
+      const ws = await makeRepo(join(tmp, 'ws'))
+      const front = await makeRepo(join(ws, 'repos', 'front'))
+      const r = createWorktreeResolver({ homeDir: join(tmp, 'home') })
+      const w = { root: front, branch: 'develop', isLinkedWorktree: false }
+      expect((await r.resolveWorkspace(w)).outer).toBe(false)
+    })
+
+    test('홈 폴더가 저장소(dotfiles)여도 작업 공간으로 보지 않는다', async () => {
+      const home = await makeRepo(join(tmp, 'home'))
+      const repo = await makeRepo(join(home, 'shop-web'))
+      const r = createWorktreeResolver({ homeDir: home })
+      const w = (await r.resolveWorktree(repo))!
+      expect((await r.resolveWorkspace(w)).root).toBe(repo)
+    })
+  })
+
   test('캐시는 ttl 동안만 유지되어 브랜치 전환이 반영된다', async () => {
     const repo = await makeRepo(join(tmp, 'shop-web'))
     let now = 1000

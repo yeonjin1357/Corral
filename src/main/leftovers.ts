@@ -96,6 +96,7 @@ export function findLeftovers(
       memoryBytes: members.reduce((sum, m) => sum + m.memoryBytes, 0),
       descendantPids: descendants,
       startedAt: p.startedAt,
+      workspace: null,
       agentInWorktree: !!worktree && agentCovers(opts.agentRoots ?? [], worktree.root)
     })
   }

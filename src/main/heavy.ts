@@ -170,6 +170,7 @@ export function findHeavyJobs(
       processName: p.name,
       commandLine: p.commandLine,
       worktree,
+      workspace: null,
       memoryBytes,
       descendantPids,
       startedAt: p.startedAt

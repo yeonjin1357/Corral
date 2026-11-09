@@ -1,7 +1,7 @@
 import { readFile, stat } from 'fs/promises'
 import { homedir } from 'os'
 import * as nodePath from 'path'
-import type { ProcessInfo, WorktreeInfo } from '../../shared/types'
+import type { ProcessInfo, WorkspaceInfo, WorktreeInfo } from '../../shared/types'
 
 const WIN_ABSOLUTE = /^[A-Za-z]:[\\/]/
 const UNC = /^[\\/]{2}/
@@ -110,6 +110,22 @@ async function readCommonDir(gitDir: string, isLinkedWorktree: boolean): Promise
   return isLinkedWorktree ? nodePath.resolve(gitDir, '..', '..') : gitDir
 }
 
+/** 경로의 마지막 폴더 이름(Windows·POSIX 경로 모두). */
+function folderName(root: string): string {
+  const parts = root.split(/[\\/]+/).filter(Boolean)
+  return parts[parts.length - 1] ?? root
+}
+
+/** 바깥 저장소가 없을 때의 작업 공간: 그 워크트리 자체. */
+export function selfWorkspace(worktree: WorktreeInfo): WorkspaceInfo {
+  return {
+    root: worktree.root,
+    name: folderName(worktree.root),
+    branch: worktree.branch,
+    outer: false
+  }
+}
+
 export interface WorktreeResolverOptions {
   /** 이 폴더(보통 사용자 홈)는 git 저장소여도 worktree 로 보지 않는다(dotfiles 저장소 대비). */
   homeDir?: string
@@ -120,6 +136,7 @@ export interface WorktreeResolverOptions {
 
 export interface WorktreeResolver {
   resolveWorktree(path: string): Promise<WorktreeInfo | null>
+  resolveWorkspace(worktree: WorktreeInfo): Promise<WorkspaceInfo>
   resolveProcessWorktrees(
     processes: ProcessInfo[],
     cwds?: Record<number, string>,
@@ -168,6 +185,23 @@ export function createWorktreeResolver(options: WorktreeResolverOptions = {}): W
   }
 
   /**
+   * 작업 공간 = 워크트리를 감싸는 가장 가까운 바깥 git 저장소(여러 저장소를 묶는 작업 공간 저장소·서브모듈의 상위).
+   * 바깥 저장소가 그 워크트리와 같은 저장소(같은 공용 폴더)면 묶지 않는다: 저장소 안에 만든 병렬 워크트리
+   * (`<저장소>/.claude/worktrees/x`)가 메인 체크아웃과 한 묶음이 되면 묶음 정리가 다른 세션의 서버까지 끈다.
+   * 공용 폴더를 모르면 같은 저장소인지 알 수 없어 묶지 않는다. 홈 폴더·드라이브 루트에서 멈추는 규칙과
+   * 폴더별 캐시는 워크트리 판별과 같다.
+   */
+  async function resolveWorkspace(worktree: WorktreeInfo): Promise<WorkspaceInfo> {
+    const root = nodePath.resolve(worktree.root)
+    const parent = nodePath.dirname(root)
+    if (!worktree.commonDir || parent === root) return selfWorkspace(worktree)
+    const outer = await resolveDir(parent, 0)
+    if (!outer?.commonDir || keyOf(outer.commonDir) === keyOf(worktree.commonDir))
+      return selfWorkspace(worktree)
+    return { root: outer.root, name: folderName(outer.root), branch: outer.branch, outer: true }
+  }
+
+  /**
    * 명령줄의 절대 경로를 먼저 보고, 없으면 작업 폴더(cwd)로 판별한다.
    * cwdFirst 의 프로세스(에이전트)는 작업 폴더를 먼저 본다 — 명령줄에 `--add-dir <다른 저장소>` 나
    * 프롬프트 속 경로가 있을 수 있어서다.
@@ -198,9 +232,10 @@ export function createWorktreeResolver(options: WorktreeResolverOptions = {}): W
     return result
   }
 
-  return { resolveWorktree, resolveProcessWorktrees }
+  return { resolveWorktree, resolveWorkspace, resolveProcessWorktrees }
 }
 
 const defaultResolver = createWorktreeResolver()
 export const resolveWorktree = defaultResolver.resolveWorktree
+export const resolveWorkspace = defaultResolver.resolveWorkspace
 export const resolveProcessWorktrees = defaultResolver.resolveProcessWorktrees

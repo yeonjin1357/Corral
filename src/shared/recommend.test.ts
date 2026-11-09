@@ -31,6 +31,7 @@ function leftover(over: Partial<LeftoverRow>): LeftoverRow {
     label: 'Gradle 데몬',
     commandLine: 'java GradleDaemon',
     worktree: null,
+    workspace: null,
     memoryBytes: 1100 * MB,
     descendantPids: [],
     startedAt: 5,
