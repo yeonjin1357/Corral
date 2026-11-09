@@ -1,11 +1,21 @@
 <!--
-  Uptime Kuma (MIT) src/pages/Settings.vue 의 구성(h1 · 큰 상자 안 왼쪽 메뉴 col-lg-3/col-md-5 + 오른쪽 내용 col-lg-9/col-md-7,
-  내용 머리 settings-content-header, 고른 메뉴는 왼쪽 초록 줄)과 src/components/settings/General.vue·Appearance.vue 의
-  폼 구성(form-label · btn-group 의 btn-check · form-check form-switch · form-text · 아래 저장 버튼)을 가져옴.
-  바꾼 점: 메뉴를 pitwall 설정(일반·기준값·무거운 작업·알림·디스크 정리·Claude 연동·정보)으로, 라우터 대신 화면 안 상태로.
+  NeoHtop (MIT) SettingsWindow.svelte 의 설정 화면(위 가운데 구역 전환 버튼, 제목 + 설명, 카드로 묶은 항목, 아래 상태 줄).
+  바꾼 점: pitwall 의 구역(일반·기준값·무거운 작업·알림·디스크 정리·Claude 연동·정보), 왼쪽 위 "대시보드로" 버튼,
+  자동 저장 대신 저장 버튼(여러 값을 한꺼번에 검증해 저장한다).
 -->
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import {
+  ArrowLeft,
+  Bell,
+  Bot,
+  FolderPlus,
+  Gauge,
+  Hammer,
+  HardDrive,
+  Info,
+  Settings2
+} from '@lucide/vue'
 import type { ClaudeHookStatus, UpdateStatus } from '../../../shared/types'
 import {
   DEFAULT_SETTINGS,
@@ -17,6 +27,17 @@ import {
 } from '../../../shared/settings'
 import { text } from '../../../shared/text'
 import { hookControls } from '../hook'
+import ToggleGroup, { type ToggleOption } from '../ui/ToggleGroup.vue'
+import Card from '../ui/Card.vue'
+import CardHeader from '../ui/CardHeader.vue'
+import CardTitle from '../ui/CardTitle.vue'
+import CardContent from '../ui/CardContent.vue'
+import Button from '../ui/Button.vue'
+import Input from '../ui/Input.vue'
+import Textarea from '../ui/Textarea.vue'
+import NativeSelect from '../ui/NativeSelect.vue'
+import Checkbox from '../ui/Checkbox.vue'
+import Label from '../ui/Label.vue'
 
 const props = defineProps<{
   settings: Settings
@@ -33,11 +54,35 @@ const emit = defineEmits<{
   hook: [action: 'enable' | 'disable']
   updateCheck: []
   updateInstall: []
+  back: []
 }>()
 
 type Page = 'general' | 'thresholds' | 'heavy' | 'notifications' | 'disk' | 'claude' | 'about'
-const PAGES: Page[] = ['general', 'thresholds', 'heavy', 'notifications', 'disk', 'claude', 'about']
-const page = ref<Page>('general')
+const page = defineModel<Page>('page', { default: 'general' })
+const S = text.ui.settings
+const PAGE_ICONS: Record<Page, unknown> = {
+  general: Settings2,
+  thresholds: Gauge,
+  heavy: Hammer,
+  notifications: Bell,
+  disk: HardDrive,
+  claude: Bot,
+  about: Info
+}
+const pageOptions = computed<ToggleOption[]>(() =>
+  (Object.keys(PAGE_ICONS) as Page[]).map((key) => ({
+    value: key,
+    label: S.menu[key],
+    icon: PAGE_ICONS[key] as ToggleOption['icon']
+  }))
+)
+const pageValue = computed({
+  get: () => page.value as string,
+  set: (v: string) => {
+    page.value = v as Page
+    notice.value = null
+  }
+})
 
 function clone(s: Settings): Settings {
   return JSON.parse(JSON.stringify(s)) as Settings
@@ -46,21 +91,34 @@ function clone(s: Settings): Settings {
 const draft = ref<Settings>(clone(props.settings))
 const heavyText = ref(draft.value.heavyPatterns.join('\n'))
 const dirsText = ref(draft.value.dependencyDirs.join('\n'))
-// 저장된 값이 바뀌면(저장 후 메인이 고친 값, 다른 곳에서 바뀜) 폼을 그 값으로 맞춘다.
-watch(
-  () => props.settings,
-  (next) => {
-    draft.value = clone(next)
-    heavyText.value = next.heavyPatterns.join('\n')
-    dirsText.value = next.dependencyDirs.join('\n')
-  }
-)
 
 const lines = (s: string): string[] =>
   s
     .split(/\r?\n/)
     .map((l) => l.trim())
     .filter(Boolean)
+const pending = (): Settings => ({
+  ...draft.value,
+  heavyPatterns: lines(heavyText.value),
+  dependencyDirs: lines(dirsText.value)
+})
+const dirty = computed(() => JSON.stringify(pending()) !== JSON.stringify(props.settings))
+
+// 저장된 값이 바뀌면(저장 후 메인이 고친 값, 제목줄에서 테마를 바꿈) 폼을 그 값으로 맞춘다.
+// 고치던 중이면 다른 칸은 그대로 두고 테마만 맞춘다(제목줄 테마는 바로 저장되기 때문).
+watch(
+  () => props.settings,
+  (next, prev) => {
+    const editing = prev && JSON.stringify(pending()) !== JSON.stringify(prev)
+    if (editing) {
+      draft.value.theme = next.theme
+      return
+    }
+    draft.value = clone(next)
+    heavyText.value = next.heavyPatterns.join('\n')
+    dirsText.value = next.dependencyDirs.join('\n')
+  }
+)
 
 const saving = ref(false)
 const notice = ref<{ text: string; failed: boolean } | null>(null)
@@ -69,15 +127,11 @@ async function submit(): Promise<void> {
   saving.value = true
   notice.value = null
   try {
-    await props.save({
-      ...draft.value,
-      heavyPatterns: lines(heavyText.value),
-      dependencyDirs: lines(dirsText.value)
-    })
-    notice.value = { text: text.ui.settings.saved, failed: false }
+    await props.save(pending())
+    notice.value = { text: S.saved, failed: false }
   } catch (e) {
     notice.value = {
-      text: text.ui.settings.saveFailed(e instanceof Error ? e.message : String(e)),
+      text: S.saveFailed(e instanceof Error ? e.message : String(e)),
       failed: true
     }
   } finally {
@@ -85,16 +139,11 @@ async function submit(): Promise<void> {
   }
 }
 
-function choose(next: Page): void {
-  page.value = next
-  notice.value = null
-}
-
 const REFRESH: RefreshSpeed[] = ['fast', 'normal', 'saver']
 const THEMES: ThemeChoice[] = ['light', 'dark', 'auto']
 const refreshHelp = computed(() => {
   const i = REFRESH_INTERVALS[draft.value.refresh]
-  return text.ui.settings.refreshHelp(i.openMs / 1000, i.closedMs / 1000)
+  return S.refreshHelp(i.openMs / 1000, i.closedMs / 1000)
 })
 
 function resetHeavy(): void {
@@ -114,7 +163,7 @@ const controls = computed(() => hookControls(props.hook))
 
 const updateText = computed(() => {
   const u = props.update
-  const t = text.ui.settings.updates
+  const t = S.updates
   if (!u) return t.idle
   switch (u.state) {
     case 'disabled':
@@ -137,430 +186,437 @@ const updateText = computed(() => {
   return t.idle
 })
 
+const status = computed(() => {
+  if (notice.value) return notice.value
+  if (saving.value) return { text: S.saving, failed: false }
+  return { text: dirty.value ? S.dirty : S.clean, failed: false }
+})
+
 const REPO_URL = 'https://github.com/yeonjin1357/pitwall'
 const NOTICES_URL = `${REPO_URL}/blob/main/THIRD_PARTY_NOTICES.md`
 </script>
 
 <template>
-  <div class="settings-page">
-    <h1 class="mb-3">{{ text.ui.settings.title }}</h1>
+  <div class="flex min-h-0 flex-1 flex-col bg-background">
+    <header
+      class="flex shrink-0 flex-wrap items-center gap-3 border-b border-border bg-card px-6 py-4"
+    >
+      <Button variant="ghost" size="sm" class="-ml-2" data-action="back" @click="emit('back')">
+        <ArrowLeft />{{ text.ui.bar.back }}
+      </Button>
+      <div class="flex min-w-0 flex-1 justify-center">
+        <ToggleGroup
+          v-model="pageValue"
+          :options="pageOptions"
+          size="default"
+          item-class="px-3"
+          :aria-label="S.title"
+        />
+      </div>
+      <div class="w-[88px] shrink-0 max-lg:hidden" aria-hidden="true"></div>
+    </header>
 
-    <div class="shadow-box shadow-box-settings">
-      <div class="row">
-        <div class="settings-menu col-lg-3 col-md-5">
-          <a
-            v-for="key in PAGES"
-            :key="key"
-            href="#"
-            :class="{ active: page === key }"
-            @click.prevent="choose(key)"
-          >
-            <div class="menu-item">{{ text.ui.settings.menu[key] }}</div>
-          </a>
-        </div>
-        <div class="settings-content col-lg-9 col-md-7">
-          <div class="settings-content-header">{{ text.ui.settings.menu[page] }}</div>
-          <div class="mx-3">
-            <form class="my-4" autocomplete="off" @submit.prevent="submit">
-              <template v-if="page === 'general'">
-                <div class="mb-4">
-                  <label class="form-label">{{ text.ui.settings.refresh }}</label>
-                  <div>
-                    <div class="btn-group" role="group">
-                      <template v-for="speed in REFRESH" :key="speed">
-                        <input
-                          :id="`refresh-${speed}`"
-                          v-model="draft.refresh"
-                          type="radio"
-                          class="btn-check"
-                          name="refresh"
-                          :value="speed"
-                        />
-                        <label class="btn btn-outline-primary" :for="`refresh-${speed}`">
-                          {{ text.ui.settings.refreshChoices[speed] }}
-                        </label>
-                      </template>
-                    </div>
-                  </div>
-                  <div class="form-text">{{ refreshHelp }}</div>
-                </div>
-                <div class="mb-4">
-                  <label class="form-label">{{ text.ui.settings.theme }}</label>
-                  <div>
-                    <div class="btn-group" role="group">
-                      <template v-for="theme in THEMES" :key="theme">
-                        <input
-                          :id="`theme-${theme}`"
-                          v-model="draft.theme"
-                          type="radio"
-                          class="btn-check"
-                          name="theme"
-                          :value="theme"
-                        />
-                        <label class="btn btn-outline-primary" :for="`theme-${theme}`">
-                          {{ text.ui.settings.themeChoices[theme] }}
-                        </label>
-                      </template>
-                    </div>
-                  </div>
-                </div>
-                <div class="mb-4">
-                  <div class="form-check form-switch">
-                    <input
-                      id="launch-at-login"
-                      v-model="draft.launchAtLogin"
-                      class="form-check-input"
-                      type="checkbox"
-                    />
-                    <label class="form-check-label" for="launch-at-login">
-                      {{ text.ui.settings.launchAtLogin }}
-                    </label>
-                  </div>
-                  <div class="form-text">{{ text.ui.settings.launchAtLoginHelp }}</div>
-                </div>
-                <div class="mb-4">
-                  <div class="form-check form-switch">
-                    <input
-                      id="update-check"
-                      v-model="draft.updateCheck"
-                      class="form-check-input"
-                      type="checkbox"
-                    />
-                    <label class="form-check-label" for="update-check">
-                      {{ text.ui.settings.updateCheck }}
-                    </label>
-                  </div>
-                  <div class="form-text">{{ text.ui.settings.updateCheckHelp }}</div>
-                </div>
-              </template>
+    <form
+      id="settings-form"
+      class="min-h-0 flex-1 overflow-y-auto p-6"
+      autocomplete="off"
+      @submit.prevent="submit"
+    >
+      <div class="mx-auto w-full max-w-2xl">
+        <h1 class="text-lg font-semibold tracking-tight">{{ S.menu[page] }}</h1>
+        <p class="mt-1 mb-5 text-sm text-muted-foreground">{{ S.pageDesc[page] }}</p>
 
-              <template v-else-if="page === 'thresholds'">
-                <div class="mb-4">
-                  <label for="ram-warn" class="form-label">{{ text.ui.settings.ramWarn }}</label>
-                  <div class="input-group">
-                    <input
-                      id="ram-warn"
-                      v-model.number="draft.ramWarnPercent"
-                      type="number"
-                      class="form-control"
-                      :min="SETTINGS_LIMITS.ramWarn.min"
-                      :max="SETTINGS_LIMITS.ramWarn.max"
-                      required
-                    />
-                    <span class="input-group-text">%</span>
-                  </div>
-                  <div class="form-text">{{ text.ui.settings.ramWarnHelp }}</div>
-                </div>
-                <div class="mb-4">
-                  <label for="ram-danger" class="form-label">{{
-                    text.ui.settings.ramDanger
-                  }}</label>
-                  <div class="input-group">
-                    <input
-                      id="ram-danger"
-                      v-model.number="draft.ramDangerPercent"
-                      type="number"
-                      class="form-control"
-                      :min="draft.ramWarnPercent + 1"
-                      :max="SETTINGS_LIMITS.ramDangerMax"
-                      required
-                    />
-                    <span class="input-group-text">%</span>
-                  </div>
-                  <div class="form-text">{{ text.ui.settings.ramDangerHelp }}</div>
-                </div>
-                <div class="mb-4">
-                  <label for="idle-port" class="form-label">{{ text.ui.settings.idlePort }}</label>
-                  <div class="input-group">
-                    <input
-                      id="idle-port"
-                      v-model.number="draft.idlePortMinutes"
-                      type="number"
-                      class="form-control"
-                      :min="SETTINGS_LIMITS.idlePortMinutes.min"
-                      :max="SETTINGS_LIMITS.idlePortMinutes.max"
-                      required
-                    />
-                    <span class="input-group-text">{{ text.ui.settings.minutes }}</span>
-                  </div>
-                  <div class="form-text">{{ text.ui.settings.idlePortHelp }}</div>
-                </div>
-              </template>
-
-              <template v-else-if="page === 'heavy'">
-                <div class="mb-4">
-                  <label for="heavy-patterns" class="form-label">
-                    {{ text.ui.settings.heavyPatterns }}
-                  </label>
-                  <textarea
-                    id="heavy-patterns"
-                    v-model="heavyText"
-                    class="form-control"
-                    rows="10"
-                    spellcheck="false"
-                  />
-                  <div class="form-text">{{ text.ui.settings.heavyHelp }}</div>
-                  <button
-                    type="button"
-                    class="btn btn-outline-primary btn-sm mt-2"
-                    @click="resetHeavy"
-                  >
-                    {{ text.ui.settings.resetDefaults }}
-                  </button>
-                </div>
-              </template>
-
-              <template v-else-if="page === 'notifications'">
-                <div
-                  v-for="item in [
-                    {
-                      id: 'notify-ram',
-                      key: 'ramLow' as const,
-                      label: text.ui.settings.notifyRamLow,
-                      help: text.ui.settings.notifyRamLowHelp
-                    },
-                    {
-                      id: 'notify-claude',
-                      key: 'claudeWaiting' as const,
-                      label: text.ui.settings.notifyClaudeWaiting,
-                      help: text.ui.settings.notifyClaudeWaitingHelp
-                    },
-                    {
-                      id: 'notify-heavy',
-                      key: 'heavyOverlap' as const,
-                      label: text.ui.settings.notifyHeavy,
-                      help: text.ui.settings.notifyHeavyHelp
-                    }
-                  ]"
-                  :key="item.id"
-                  class="mb-4"
-                >
-                  <div class="form-check form-switch">
-                    <input
-                      :id="item.id"
-                      v-model="draft.notify[item.key]"
-                      class="form-check-input"
-                      type="checkbox"
-                    />
-                    <label class="form-check-label" :for="item.id">{{ item.label }}</label>
-                  </div>
-                  <div class="form-text">{{ item.help }}</div>
-                </div>
-              </template>
-
-              <template v-else-if="page === 'disk'">
-                <div class="mb-4">
-                  <label for="dependency-dirs" class="form-label">
-                    {{ text.ui.settings.dependencyDirs }}
-                  </label>
-                  <textarea
-                    id="dependency-dirs"
-                    v-model="dirsText"
-                    class="form-control"
-                    rows="3"
-                    spellcheck="false"
-                  />
-                  <div class="form-text">{{ text.ui.settings.dependencyDirsHelp }}</div>
-                </div>
-                <div class="mb-4">
-                  <label class="form-label">{{ text.ui.settings.extraRepos }}</label>
-                  <ul v-if="draft.extraRepos.length" class="list-group mb-2">
-                    <li
-                      v-for="repo in draft.extraRepos"
-                      :key="repo"
-                      class="list-group-item d-flex align-items-center gap-2 repo"
-                    >
-                      <span class="flex-fill text-break">{{ repo }}</span>
-                      <button
-                        type="button"
-                        class="btn btn-outline-danger btn-sm btn-remove-repo"
-                        @click="removeRepo(repo)"
-                      >
-                        {{ text.ui.settings.removeRepo }}
-                      </button>
-                    </li>
-                  </ul>
-                  <p v-else class="text-secondary small mb-2">{{ text.ui.settings.noRepos }}</p>
-                  <button
-                    type="button"
-                    class="btn btn-outline-primary btn-sm btn-add-repo"
-                    @click="addRepo"
-                  >
-                    {{ text.ui.settings.addRepo }}
-                  </button>
-                  <div class="form-text">{{ text.ui.settings.extraReposHelp }}</div>
-                </div>
-              </template>
-
-              <template v-else-if="page === 'claude'">
-                <div class="mb-4">
-                  <p class="hook-state mb-2" :class="{ 'text-danger': hook?.state === 'error' }">
-                    {{ hook ? controls.text : text.ui.loading }}
-                  </p>
-                  <p v-if="hook?.allHooksDisabled" class="text-warning small mb-2">
-                    {{ text.ui.hook.allHooksDisabled }}
-                  </p>
-                  <p v-if="hook?.settingsPath" class="form-text">
-                    {{ text.ui.settings.settingsFile(hook.settingsPath) }}
-                  </p>
-                  <div class="d-flex gap-2">
-                    <button
-                      v-if="controls.button"
-                      type="button"
-                      class="btn btn-normal btn-hook"
-                      :disabled="hookBusy"
-                      @click="emit('hook', controls.button.action)"
-                    >
-                      {{ controls.button.label }}
-                    </button>
-                    <button
-                      v-if="controls.canAlsoDisable"
-                      type="button"
-                      class="btn btn-normal btn-hook-off"
-                      :disabled="hookBusy"
-                      @click="emit('hook', 'disable')"
-                    >
-                      {{ text.ui.hook.disable }}
-                    </button>
-                  </div>
-                </div>
-              </template>
-
-              <template v-else-if="page === 'about'">
-                <div class="mb-4 about">
-                  <p class="fs-4 mb-1">{{ text.ui.settings.version(version ?? '') }}</p>
-                  <p class="mb-3">{{ text.ui.settings.description }}</p>
-                  <p class="mb-1">
-                    <a :href="REPO_URL" target="_blank" rel="noopener">{{
-                      text.ui.settings.repo
-                    }}</a>
-                  </p>
-                  <p class="mb-1">{{ text.ui.settings.license }}</p>
-                  <p class="mb-1">
-                    <a :href="NOTICES_URL" target="_blank" rel="noopener">{{
-                      text.ui.settings.notices
-                    }}</a>
+        <div v-if="page === 'general'" class="space-y-5">
+          <Card size="sm">
+            <CardHeader
+              ><CardTitle>{{ S.groups.check }}</CardTitle></CardHeader
+            >
+            <CardContent>
+              <div class="flex items-center justify-between gap-6">
+                <div>
+                  <Label for="refresh">{{ S.refresh }}</Label>
+                  <p class="mt-1 text-xs leading-relaxed text-muted-foreground">
+                    {{ refreshHelp }}
                   </p>
                 </div>
-                <div class="mb-4">
-                  <label class="form-label">{{ text.ui.settings.updates.title }}</label>
-                  <p
-                    class="update-state mb-2"
-                    :class="{ 'text-danger': update?.state === 'error' }"
-                  >
-                    {{ updateText }}
-                  </p>
-                  <div class="d-flex gap-2 flex-wrap">
-                    <button
-                      v-if="update?.state === 'ready'"
-                      type="button"
-                      class="btn btn-primary btn-update-install"
-                      @click="emit('updateInstall')"
-                    >
-                      {{ text.ui.settings.updates.install }}
-                    </button>
-                    <a
-                      v-if="update?.state === 'available' && update.url"
-                      class="btn btn-primary update-download"
-                      :href="update.url"
-                      target="_blank"
-                      rel="noopener"
-                    >
-                      {{ text.ui.settings.updates.download }}
-                    </a>
-                    <button
-                      type="button"
-                      class="btn btn-normal btn-update-check"
-                      :disabled="update?.state === 'checking' || update?.state === 'downloading'"
-                      @click="emit('updateCheck')"
-                    >
-                      {{ text.ui.settings.updates.check }}
-                    </button>
-                  </div>
-                </div>
-              </template>
-
-              <div
-                v-if="page !== 'claude' && page !== 'about'"
-                class="d-flex align-items-center gap-3"
-              >
-                <button type="submit" class="btn btn-primary btn-save" :disabled="saving">
-                  {{ text.ui.settings.save }}
-                </button>
-                <span
-                  v-if="notice"
-                  class="small save-notice"
-                  :class="notice.failed ? 'text-danger' : 'text-success'"
-                >
-                  {{ notice.text }}
-                </span>
+                <NativeSelect id="refresh" v-model="draft.refresh" class="w-28 shrink-0">
+                  <option v-for="speed in REFRESH" :key="speed" :value="speed">
+                    {{ S.refreshChoices[speed] }}
+                  </option>
+                </NativeSelect>
               </div>
-            </form>
-          </div>
+            </CardContent>
+          </Card>
+          <Card size="sm">
+            <CardHeader
+              ><CardTitle>{{ S.groups.look }}</CardTitle></CardHeader
+            >
+            <CardContent>
+              <div class="flex items-center justify-between gap-6">
+                <Label for="theme">{{ S.theme }}</Label>
+                <NativeSelect id="theme" v-model="draft.theme" class="w-36 shrink-0">
+                  <option v-for="theme in THEMES" :key="theme" :value="theme">
+                    {{ S.themeChoices[theme] }}
+                  </option>
+                </NativeSelect>
+              </div>
+            </CardContent>
+          </Card>
+          <Card size="sm">
+            <CardHeader
+              ><CardTitle>{{ S.groups.startup }}</CardTitle></CardHeader
+            >
+            <CardContent class="gap-5">
+              <div class="flex items-start gap-3">
+                <Checkbox id="launch-at-login" v-model="draft.launchAtLogin" class="mt-0.5" />
+                <div>
+                  <Label for="launch-at-login">{{ S.launchAtLogin }}</Label>
+                  <p class="mt-1 text-xs leading-relaxed text-muted-foreground">
+                    {{ S.launchAtLoginHelp }}
+                  </p>
+                </div>
+              </div>
+              <div class="flex items-start gap-3">
+                <Checkbox id="update-check" v-model="draft.updateCheck" class="mt-0.5" />
+                <div>
+                  <Label for="update-check">{{ S.updateCheck }}</Label>
+                  <p class="mt-1 text-xs leading-relaxed text-muted-foreground">
+                    {{ S.updateCheckHelp }}
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        <div v-else-if="page === 'thresholds'" class="space-y-5">
+          <Card size="sm">
+            <CardHeader
+              ><CardTitle>{{ S.groups.ram }}</CardTitle></CardHeader
+            >
+            <CardContent class="gap-5">
+              <div class="flex items-center justify-between gap-6">
+                <div>
+                  <Label for="ram-warn">{{ S.ramWarn }}</Label>
+                  <p class="mt-1 text-xs leading-relaxed text-muted-foreground">
+                    {{ S.ramWarnHelp }}
+                  </p>
+                </div>
+                <div class="flex shrink-0 items-center gap-2">
+                  <Input
+                    id="ram-warn"
+                    v-model.number="draft.ramWarnPercent"
+                    type="number"
+                    class="w-20 text-right tabular-nums"
+                    :min="SETTINGS_LIMITS.ramWarn.min"
+                    :max="SETTINGS_LIMITS.ramWarn.max"
+                    required
+                  />
+                  <span class="w-6 text-sm text-muted-foreground">%</span>
+                </div>
+              </div>
+              <div class="flex items-center justify-between gap-6">
+                <div>
+                  <Label for="ram-danger">{{ S.ramDanger }}</Label>
+                  <p class="mt-1 text-xs leading-relaxed text-muted-foreground">
+                    {{ S.ramDangerHelp }}
+                  </p>
+                </div>
+                <div class="flex shrink-0 items-center gap-2">
+                  <Input
+                    id="ram-danger"
+                    v-model.number="draft.ramDangerPercent"
+                    type="number"
+                    class="w-20 text-right tabular-nums"
+                    :min="draft.ramWarnPercent + 1"
+                    :max="SETTINGS_LIMITS.ramDangerMax"
+                    required
+                  />
+                  <span class="w-6 text-sm text-muted-foreground">%</span>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+          <Card size="sm">
+            <CardHeader
+              ><CardTitle>{{ S.groups.ports }}</CardTitle></CardHeader
+            >
+            <CardContent>
+              <div class="flex items-center justify-between gap-6">
+                <div>
+                  <Label for="idle-port">{{ S.idlePort }}</Label>
+                  <p class="mt-1 text-xs leading-relaxed text-muted-foreground">
+                    {{ S.idlePortHelp }}
+                  </p>
+                </div>
+                <div class="flex shrink-0 items-center gap-2">
+                  <Input
+                    id="idle-port"
+                    v-model.number="draft.idlePortMinutes"
+                    type="number"
+                    class="w-20 text-right tabular-nums"
+                    :min="SETTINGS_LIMITS.idlePortMinutes.min"
+                    :max="SETTINGS_LIMITS.idlePortMinutes.max"
+                    required
+                  />
+                  <span class="w-6 text-sm text-muted-foreground">{{ S.minutes }}</span>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        <div v-else-if="page === 'heavy'" class="space-y-5">
+          <Card size="sm">
+            <CardHeader
+              ><CardTitle>{{ S.groups.heavy }}</CardTitle></CardHeader
+            >
+            <CardContent>
+              <Label for="heavy-patterns" class="sr-only">{{ S.heavyPatterns }}</Label>
+              <Textarea
+                id="heavy-patterns"
+                v-model="heavyText"
+                class="min-h-56 font-mono text-xs"
+                spellcheck="false"
+              />
+              <p class="text-xs leading-relaxed text-muted-foreground">{{ S.heavyHelp }}</p>
+              <Button variant="outline" size="sm" class="self-start" @click="resetHeavy">
+                {{ S.resetDefaults }}
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+
+        <div v-else-if="page === 'notifications'" class="space-y-5">
+          <Card size="sm">
+            <CardHeader
+              ><CardTitle>{{ S.groups.notify }}</CardTitle></CardHeader
+            >
+            <CardContent class="gap-5">
+              <div
+                v-for="item in [
+                  {
+                    id: 'notify-ram',
+                    key: 'ramLow' as const,
+                    label: S.notifyRamLow,
+                    help: S.notifyRamLowHelp
+                  },
+                  {
+                    id: 'notify-claude',
+                    key: 'claudeWaiting' as const,
+                    label: S.notifyClaudeWaiting,
+                    help: S.notifyClaudeWaitingHelp
+                  },
+                  {
+                    id: 'notify-heavy',
+                    key: 'heavyOverlap' as const,
+                    label: S.notifyHeavy,
+                    help: S.notifyHeavyHelp
+                  }
+                ]"
+                :key="item.id"
+                class="flex items-start gap-3"
+              >
+                <Checkbox :id="item.id" v-model="draft.notify[item.key]" class="mt-0.5" />
+                <div>
+                  <Label :for="item.id">{{ item.label }}</Label>
+                  <p class="mt-1 text-xs leading-relaxed text-muted-foreground">{{ item.help }}</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        <div v-else-if="page === 'disk'" class="space-y-5">
+          <Card size="sm">
+            <CardHeader
+              ><CardTitle>{{ S.groups.dirs }}</CardTitle></CardHeader
+            >
+            <CardContent>
+              <Label for="dependency-dirs" class="sr-only">{{ S.dependencyDirs }}</Label>
+              <Textarea
+                id="dependency-dirs"
+                v-model="dirsText"
+                class="min-h-20 font-mono text-xs"
+                spellcheck="false"
+              />
+              <p class="text-xs leading-relaxed text-muted-foreground">
+                {{ S.dependencyDirsHelp }}
+              </p>
+            </CardContent>
+          </Card>
+          <Card size="sm">
+            <CardHeader
+              ><CardTitle>{{ S.groups.repos }}</CardTitle></CardHeader
+            >
+            <CardContent>
+              <ul
+                v-if="draft.extraRepos.length"
+                class="divide-y divide-border rounded-md border border-border"
+              >
+                <li
+                  v-for="repo in draft.extraRepos"
+                  :key="repo"
+                  class="repo flex items-center gap-2 px-3 py-2"
+                >
+                  <span class="min-w-0 flex-1 break-all font-mono text-xs" data-selectable>{{
+                    repo
+                  }}</span>
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    class="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                    data-action="remove-repo"
+                    @click="removeRepo(repo)"
+                  >
+                    {{ S.removeRepo }}
+                  </Button>
+                </li>
+              </ul>
+              <p v-else class="text-sm text-muted-foreground">{{ S.noRepos }}</p>
+              <Button
+                variant="outline"
+                size="sm"
+                class="self-start"
+                data-action="add-repo"
+                @click="addRepo"
+              >
+                <FolderPlus />{{ S.addRepo }}
+              </Button>
+              <p class="text-xs leading-relaxed text-muted-foreground">{{ S.extraReposHelp }}</p>
+            </CardContent>
+          </Card>
+        </div>
+
+        <div v-else-if="page === 'claude'" class="space-y-5">
+          <Card size="sm">
+            <CardHeader
+              ><CardTitle>{{ S.groups.hook }}</CardTitle></CardHeader
+            >
+            <CardContent>
+              <p
+                class="hook-state text-sm leading-relaxed"
+                :class="{ 'text-destructive': hook?.state === 'error' }"
+              >
+                {{ hook ? controls.text : text.ui.loading }}
+              </p>
+              <p
+                v-if="hook?.allHooksDisabled"
+                class="text-xs leading-relaxed"
+                :style="{ color: 'var(--peach)' }"
+              >
+                {{ text.ui.hook.allHooksDisabled }}
+              </p>
+              <p
+                v-if="hook?.settingsPath"
+                class="break-all font-mono text-xs text-muted-foreground"
+                data-selectable
+              >
+                {{ S.settingsFile(hook.settingsPath) }}
+              </p>
+              <div class="flex flex-wrap gap-2">
+                <Button
+                  v-if="controls.button"
+                  variant="outline"
+                  size="sm"
+                  data-action="hook"
+                  :disabled="hookBusy"
+                  @click="emit('hook', controls.button.action)"
+                >
+                  {{ controls.button.label }}
+                </Button>
+                <Button
+                  v-if="controls.canAlsoDisable"
+                  variant="ghost"
+                  size="sm"
+                  data-action="hook-off"
+                  :disabled="hookBusy"
+                  @click="emit('hook', 'disable')"
+                >
+                  {{ text.ui.hook.disable }}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        <div v-else-if="page === 'about'" class="space-y-5">
+          <Card size="sm">
+            <CardHeader
+              ><CardTitle>{{ S.version(version ?? '') }}</CardTitle></CardHeader
+            >
+            <CardContent>
+              <p class="text-sm leading-relaxed text-muted-foreground">{{ S.description }}</p>
+              <div class="flex flex-wrap gap-2">
+                <Button variant="outline" size="sm" :href="REPO_URL">{{ S.repo }}</Button>
+                <Button variant="outline" size="sm" :href="NOTICES_URL">{{ S.notices }}</Button>
+              </div>
+              <p class="text-xs text-muted-foreground">{{ S.license }}</p>
+            </CardContent>
+          </Card>
+          <Card size="sm">
+            <CardHeader
+              ><CardTitle>{{ S.updates.title }}</CardTitle></CardHeader
+            >
+            <CardContent>
+              <p
+                class="update-state text-sm"
+                :class="{ 'text-destructive': update?.state === 'error' }"
+              >
+                {{ updateText }}
+              </p>
+              <div class="flex flex-wrap gap-2">
+                <Button
+                  v-if="update?.state === 'ready'"
+                  size="sm"
+                  data-action="update-install"
+                  @click="emit('updateInstall')"
+                >
+                  {{ S.updates.install }}
+                </Button>
+                <Button
+                  v-if="update?.state === 'available' && update.url"
+                  size="sm"
+                  :href="update.url"
+                >
+                  {{ S.updates.download }}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  data-action="update-check"
+                  :disabled="update?.state === 'checking' || update?.state === 'downloading'"
+                  @click="emit('updateCheck')"
+                >
+                  {{ S.updates.check }}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
         </div>
       </div>
-    </div>
+    </form>
+
+    <footer
+      class="flex shrink-0 items-center justify-between gap-3 border-t border-border bg-card px-6 py-3"
+    >
+      <p
+        role="status"
+        class="save-notice text-xs"
+        :class="status.failed ? 'text-destructive' : 'text-muted-foreground'"
+      >
+        {{ status.text }}
+      </p>
+      <!-- 폼 밖이지만 form 으로 이어 브라우저 입력 검사(범위·필수)를 거친 뒤 저장한다. -->
+      <Button
+        type="submit"
+        form="settings-form"
+        size="sm"
+        data-action="save"
+        :disabled="saving || !dirty"
+      >
+        {{ S.save }}
+      </Button>
+    </footer>
   </div>
 </template>
-
-<style scoped lang="scss">
-@import '../styles/vars.scss';
-
-/* Uptime Kuma Settings.vue */
-.shadow-box-settings {
-  padding: 20px;
-  min-height: calc(100vh - 155px);
-}
-
-.settings-menu {
-  a {
-    text-decoration: none !important;
-    color: inherit;
-  }
-
-  .menu-item {
-    border-radius: 10px;
-    margin: 0.5em;
-    padding: 0.7em 1em;
-    cursor: pointer;
-    border-left-width: 0;
-    transition: all ease-in-out 0.1s;
-  }
-
-  .menu-item:hover {
-    background: $highlight-white;
-
-    .dark & {
-      background: $dark-header-bg;
-    }
-  }
-
-  .active .menu-item {
-    background: $highlight-white;
-    border-left: 4px solid $primary;
-    border-top-left-radius: 0;
-    border-bottom-left-radius: 0;
-
-    .dark & {
-      background: $dark-header-bg;
-    }
-  }
-}
-
-.settings-content {
-  .settings-content-header {
-    width: calc(100% + 20px);
-    border-bottom: 1px solid #dee2e6;
-    border-radius: 0 10px 0 0;
-    margin-top: -20px;
-    margin-right: -20px;
-    padding: 12.5px 1em;
-    font-size: 26px;
-
-    .dark & {
-      background: $dark-header-bg;
-      border-bottom: 0;
-    }
-  }
-}
-</style>

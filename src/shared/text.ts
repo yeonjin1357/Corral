@@ -171,6 +171,161 @@ export const text = {
     nextStage: '(다음 단계)',
     none: '—',
     nav: { dashboard: '대시보드', settings: '설정' },
+    /** 맨 위 제목줄(NeoHtop TitleBar). */
+    bar: {
+      live: (sec: number): string => `실시간 · ${sec}초`,
+      refresh: '지금 새로고침',
+      theme: '화면 테마',
+      themeTitle: '화면 테마 고르기',
+      themes: {
+        light: { label: '밝게', sub: 'GitHub Light' },
+        dark: { label: '어둡게', sub: 'Catppuccin' },
+        auto: { label: 'OS 따라', sub: '밝게·어둡게 자동' }
+      },
+      menu: 'pitwall 메뉴',
+      settings: '설정…',
+      about: 'pitwall 정보',
+      checkUpdate: '새 버전 확인…',
+      back: '대시보드로',
+      dismiss: '닫기'
+    },
+    trend: {
+      window: (ms: number): string =>
+        ms >= 60_000 ? `${Math.round(ms / 60_000)}분` : `${Math.round(ms / 1000)}초`,
+      collecting: '기록을 모으는 중…'
+    },
+    /** 맨 위 카드 줄(NeoHtop StatsBar). */
+    cards: {
+      memory: '메모리',
+      memoryOf: (used: string, total: string): string => `${total} 중 ${used} 사용`,
+      levels: { warn: '경고', danger: '위험' },
+      memoryDetails: '메모리 자세히 보기',
+      showList: '목록에서 보기',
+      count: '개',
+      memorySum: '메모리',
+      ports: '개발 서버',
+      portsSub: '열린 포트',
+      portJudge: '정리 판단',
+      candidate: '정리 후보',
+      check: '확인해볼 것',
+      inUse: '사용 중',
+      agents: '에이전트',
+      agentsSub: '실행 중인 세션',
+      stateSource: '상태 판단',
+      sourceHook: 'Claude 훅',
+      sourceCpu: 'CPU 추정',
+      agentStates: '상태',
+      agentOthers: '그 외',
+      heavy: '무거운 작업',
+      heavyRunning: '돌고 있는 작업',
+      heavyNone: '돌고 있지 않아요',
+      overlap: '겹침',
+      overlapNote: (percent: number): string => `RAM ${percent}% 에서 겹쳐 도는 중`,
+      heavyHelp: '둘 이상 겹치고 RAM 이 높으면 알려요.',
+      leftovers: '남은 프로세스',
+      leftoversSub: '주인이 끝난 개발 도구',
+      leftoversAgent: (n: number): string => `에이전트 워크트리 ${n}개는 뺐어요.`,
+      leftoversHelp: '10분 넘게 남은 것만 세요.',
+      disk: '디스크 정리',
+      diskSub: (n: number): string => `끝난 워크트리 ${n}곳에서 확보 가능`,
+      diskInUse: '사용 중이라 제외',
+      diskNotYet: '아직 찾지 않았어요',
+      diskAuto: '곧 저절로 찾아요',
+      diskScanned: (time: string): string => `${time} 에 찾음`,
+      rescan: '다시 찾기'
+    },
+    /** 표 위 탭(NeoHtop ToolBar). */
+    tabs: {
+      label: '보기',
+      ports: '개발 서버',
+      agents: '에이전트',
+      leftovers: '남은 프로세스',
+      heavy: '무거운 작업',
+      disk: '디스크 정리',
+      apps: '다른 앱'
+    },
+    search: {
+      placeholder: '이름·포트·브랜치로 찾기…',
+      clear: '검색어 지우기',
+      matches: (shown: number, total: number): string => `${total}개 중 ${shown}개`,
+      chip: (q: string): string => `검색: ${q}`,
+      clearAll: '모두 지우기',
+      none: '찾는 항목이 없어요',
+      noneHint: '다른 이름·포트·브랜치로 찾아 보세요.'
+    },
+    columns: {
+      project: '프로젝트',
+      port: '포트',
+      branch: '브랜치',
+      process: '프로세스',
+      status: '상태',
+      clients: '연결',
+      memory: '메모리',
+      cpu: 'CPU',
+      runtime: '실행 시간',
+      tool: '도구',
+      name: '이름',
+      command: '명령',
+      worktree: '워크트리',
+      evidence: '끝난 근거',
+      folders: '의존성 폴더',
+      size: '크기',
+      app: '앱',
+      processes: '프로세스 수',
+      actions: '동작'
+    },
+    rowStatus: {
+      inUse: '사용 중',
+      idle: '연결 없음',
+      candidate: '정리 후보',
+      check: '확인해볼 것',
+      agent: '에이전트 작업 중',
+      unresolvable: '판별 불가',
+      leftoverAgent: '에이전트 워크트리',
+      leftoverFree: '끌 수 있음',
+      diskInUse: '사용 중',
+      diskFree: '지울 수 있음'
+    },
+    actions: {
+      details: '자세히',
+      open: '브라우저로 열기',
+      kill: '내리기',
+      killLeftover: '끄기',
+      remove: '의존성 폴더 지우기'
+    },
+    footer: {
+      count: (label: string, n: number): string => `${label} ${n}개`,
+      takenAt: (time: string): string => `${time} 기준`
+    },
+    /** 오른쪽에서 나오는 상세 패널(NeoHtop ProcessDetailsModal·ResourceDetails). */
+    sheet: {
+      info: '정보',
+      commandLine: '명령줄',
+      path: '경로',
+      pid: 'PID',
+      children: '하위 프로세스',
+      startedAt: '시작 시각',
+      runtime: '실행 시간',
+      branchKind: '체크아웃',
+      linked: '연결된 워크트리',
+      main: '메인 체크아웃',
+      clients: '연결',
+      clientsNow: (n: number): string =>
+        n > 0 ? '브라우저 등이 연결돼 있어요' : '지금 연결이 없어요',
+      memoryTitle: '메모리',
+      memoryDesc: 'pitwall 이 묶어서 본 메모리 사용',
+      reading: (time: string): string => `${time} 측정`,
+      facts: { total: '전체 메모리', used: '사용 중', free: '남은 메모리' },
+      groupsTitle: '어디에 쓰고 있나',
+      groupsDesc: '사용 중인 메모리를 묶음별로 나눴어요.',
+      topApps: '메모리를 많이 쓰는 다른 앱',
+      trendTitle: '사용 추이',
+      done: '닫기'
+    },
+    recommend: {
+      more: (n: number): string => `외 ${n}개`,
+      overlapTitle: '무거운 작업이 겹쳐 돌고 있어요'
+    },
     settings: {
       title: '설정',
       menu: {
@@ -184,6 +339,33 @@ export const text = {
       },
       save: '저장',
       saved: '저장했어요.',
+      saving: '저장하는 중…',
+      dirty: '저장하지 않은 변경 사항이 있어요.',
+      clean: '바꾼 뒤 저장을 누르면 바로 적용돼요.',
+      pageDesc: {
+        general: 'pitwall 이 얼마나 자주 확인하고 어떻게 보일지 정해요.',
+        thresholds: '경고 색과 정리 후보를 정하는 기준이에요.',
+        heavy: '겹쳐 돌면 알려 줄 무거운 명령이에요.',
+        notifications: '어떤 때 OS 알림을 보낼지 골라요.',
+        disk: '끝난 워크트리에서 지울 폴더와 더 살펴볼 저장소예요.',
+        claude: 'Claude Code 훅으로 작업 중·권한 대기를 정확히 알아요.',
+        about:
+          '로컬 AI 코딩 에이전트·개발 서버 포트·RAM·디스크를 한눈에 보고 정리하는 트레이 앱이에요.'
+      },
+      groups: {
+        check: '확인 주기',
+        look: '화면',
+        startup: '시작과 업데이트',
+        ram: 'RAM',
+        ports: '개발 서버',
+        heavy: '무거운 명령',
+        notify: 'OS 알림',
+        dirs: '지울 폴더',
+        repos: '더 살펴볼 저장소',
+        hook: '연동 상태',
+        app: 'pitwall',
+        links: '링크'
+      },
       saveFailed: (detail: string): string => `저장하지 못했어요: ${detail}`,
       refresh: '갱신 주기',
       refreshChoices: { fast: '빠르게', normal: '보통', saver: '절약' },
@@ -254,6 +436,8 @@ export const text = {
       empty: '열려 있는 개발 서버 포트가 없어요.',
       emptyAgents: '실행 중인 에이전트가 없어요.',
       emptyLeftovers: '남은 프로세스가 없어요.',
+      emptyHeavy: '돌고 있는 무거운 작업이 없어요.',
+      emptyApps: '메모리를 많이 쓰는 다른 앱이 없어요.',
       noMatch: '찾는 항목이 없어요.',
       groups: {
         ports: '개발 서버 포트',
@@ -283,8 +467,8 @@ export const text = {
       sources: { hook: 'Claude 훅', cpu: 'CPU 추정' },
       runtime: '실행 시간',
       cpu: 'CPU',
-      cpuSub: '(코어 1개 = 100%)',
-      cpuSubWindows: '(전체 CPU 대비)',
+      cpuSub: '코어 1개 = 100% 기준',
+      cpuSubWindows: '작업 관리자처럼 전체 CPU 대비',
       stateSource: '상태 출처',
       codexNote: 'Codex 는 CPU 사용량으로만 작업 중인지 짐작해요.',
       noHookNote: 'Claude 연동을 켜면 권한 대기까지 정확히 알 수 있어요.'
@@ -355,7 +539,8 @@ export const text = {
       recommendSummary: (n: number, size: string): string =>
         `${n}개를 끄면 약 ${size} 를 확보할 수 있어요.`,
       recommendNone:
-        "정리 후보가 없어요. 아래 '메모리를 많이 쓰는 다른 앱'에서 끌 만한 것을 확인해 보세요.",
+        "정리 후보가 없어요. '다른 앱'에서 메모리를 많이 쓰는 앱 중 끌 만한 것을 확인해 보세요.",
+      showApps: '다른 앱 보기',
       killAll: '모두 끄기',
       heavyTitle: '무거운 작업',
       heavyOverlap: (percent: number, n: number): string =>

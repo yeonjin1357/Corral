@@ -1,0 +1,157 @@
+<!--
+  NeoHtop (MIT) stats/ResourceTrend.svelte 의 작은 추이 그래프(면 + 선 + 고른 점 + 아래 한 줄 설명).
+  NeoHtop 은 layerchart 로 그리지만 pitwall 은 같은 모양을 SVG 로 직접 그린다(여백 2·3·3·2, 선 1.5, 면 .32→.01).
+  가로축은 "최근 windowMs" 고정이라 기록이 쌓일수록 오른쪽부터 채워진다.
+-->
+<script setup lang="ts">
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import type { Point } from '../history'
+import { text } from '../../../shared/text'
+
+const props = withDefaults(
+  defineProps<{
+    points: Point[]
+    /** 가로축 길이(ms). */
+    windowMs: number
+    /** 세로축 최댓값. 없으면 기록의 최댓값에 여유를 둔다. */
+    max?: number | null
+    /** 선·면 색(CSS 값). */
+    color?: string
+    expanded?: boolean
+    /** 이 값이 무엇인지(설명 줄·읽어 주기용). */
+    label: string
+    format: (value: number) => string
+    /** 세로축 범위 문구(예: 0–100%). 없으면 0–(최댓값). */
+    range?: string | null
+  }>(),
+  { max: null, color: 'var(--chart-1)', expanded: false, range: null }
+)
+
+const box = ref<HTMLElement | null>(null)
+const width = ref(0)
+let observer: ResizeObserver | null = null
+onMounted(() => {
+  if (!box.value) return
+  width.value = box.value.clientWidth
+  if (typeof ResizeObserver !== 'undefined') {
+    observer = new ResizeObserver(() => (width.value = box.value?.clientWidth ?? 0))
+    observer.observe(box.value)
+  }
+})
+onBeforeUnmount(() => observer?.disconnect())
+
+const height = computed(() => (props.expanded ? 112 : 48))
+const PAD = { left: 2, right: 3, top: 3, bottom: 2 }
+const gradientId = `trend-${Math.random().toString(36).slice(2)}`
+
+const end = computed(() => props.points.at(-1)?.t ?? 0)
+const start = computed(() => end.value - props.windowMs)
+const visible = computed(() => props.points.filter((p) => p.t >= start.value))
+const ceiling = computed(() => {
+  if (props.max != null) return props.max
+  const top = Math.max(0, ...visible.value.map((p) => p.value))
+  return top > 0 ? top * 1.15 : 1
+})
+
+const x = (t: number): number =>
+  PAD.left + ((t - start.value) / props.windowMs) * Math.max(0, width.value - PAD.left - PAD.right)
+const y = (v: number): number =>
+  PAD.top +
+  (1 - Math.max(0, Math.min(1, v / ceiling.value))) * (height.value - PAD.top - PAD.bottom)
+
+const line = computed(() =>
+  visible.value
+    .map((p, i) => `${i ? 'L' : 'M'}${x(p.t).toFixed(1)},${y(p.value).toFixed(1)}`)
+    .join('')
+)
+const area = computed(() => {
+  const pts = visible.value
+  if (pts.length < 2) return ''
+  const bottom = height.value - PAD.bottom
+  return `${line.value}L${x(pts[pts.length - 1].t).toFixed(1)},${bottom}L${x(pts[0].t).toFixed(1)},${bottom}Z`
+})
+
+const hovered = ref<number | null>(null)
+const selected = computed(() =>
+  hovered.value == null
+    ? visible.value.at(-1)
+    : visible.value.reduce<Point | undefined>(
+        (best, p) =>
+          !best || Math.abs(p.t - hovered.value!) < Math.abs(best.t - hovered.value!) ? p : best,
+        undefined
+      )
+)
+function point(event: PointerEvent): void {
+  if (!box.value || !visible.value.length) return
+  const rect = box.value.getBoundingClientRect()
+  const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width))
+  hovered.value = start.value + ratio * props.windowMs
+}
+
+const time = (t: number): string =>
+  new Date(t).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+const windowText = computed(() => text.ui.trend.window(props.windowMs))
+const caption = computed(() => {
+  if (hovered.value != null && selected.value)
+    return `${time(selected.value.t)} · ${props.label} ${props.format(selected.value.value)}`
+  if (visible.value.length < 2) return text.ui.trend.collecting
+  return `${windowText.value} · ${props.range ?? `0–${props.format(ceiling.value)}`}`
+})
+const describe = computed(() =>
+  selected.value
+    ? `${props.label} ${windowText.value}: ${time(selected.value.t)} ${props.format(selected.value.value)}`
+    : `${props.label}: ${text.ui.trend.collecting}`
+)
+</script>
+
+<template>
+  <div class="mt-auto min-w-0 space-y-1">
+    <div
+      ref="box"
+      class="w-full rounded-sm"
+      :style="{ height: `${height}px` }"
+      role="img"
+      :aria-label="describe"
+      :title="describe"
+      @pointermove="point"
+      @pointerleave="hovered = null"
+    >
+      <svg
+        v-if="visible.length && width > 0"
+        :width="width"
+        :height="height"
+        class="block overflow-visible"
+      >
+        <defs>
+          <linearGradient :id="gradientId" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" :style="{ stopColor: color, stopOpacity: 0.32 }" />
+            <stop offset="100%" :style="{ stopColor: color, stopOpacity: 0.01 }" />
+          </linearGradient>
+        </defs>
+        <path v-if="area" :d="area" :fill="`url(#${gradientId})`" />
+        <path
+          :d="line"
+          fill="none"
+          :style="{ stroke: color }"
+          stroke-width="1.5"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        />
+        <circle
+          v-if="selected"
+          :cx="x(selected.t)"
+          :cy="y(selected.value)"
+          r="2"
+          :style="{ fill: color, stroke: 'var(--card)' }"
+          stroke-width="1"
+        />
+      </svg>
+      <div v-else class="flex h-full w-full items-end">
+        <div class="w-full border-b border-border/60"></div>
+      </div>
+    </div>
+    <div class="min-h-3 truncate text-[10px] leading-3 text-muted-foreground tabular-nums">
+      {{ caption }}
+    </div>
+  </div>
+</template>

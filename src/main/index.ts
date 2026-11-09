@@ -43,6 +43,7 @@ import { createNotifier, type Notice } from './notifier'
 import { loginItemOptions, shouldStartHidden } from './startup'
 import { createUpdater } from './updates'
 import { localUrlFor } from './open'
+import { backgroundFor, overlayFor, windowChrome } from './windowChrome'
 import { createDotIcon, createTrayController, encodePng, LEVEL_COLORS } from './tray'
 import type { MemoryLevel } from '../shared/types'
 
@@ -432,6 +433,7 @@ function createWindow(): void {
     show: false,
     title: text.appName,
     autoHideMenuBar: true,
+    ...windowChrome(process.platform, nativeTheme.shouldUseDarkColors),
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -440,6 +442,16 @@ function createWindow(): void {
       nodeIntegration: false
     }
   })
+
+  // 테마가 바뀌면(설정·OS) 창 단추 줄과 바탕색도 화면 제목줄 색에 맞춘다.
+  const syncChrome = (): void => {
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    const dark = nativeTheme.shouldUseDarkColors
+    mainWindow.setBackgroundColor(backgroundFor(dark))
+    if (process.platform !== 'darwin') mainWindow.setTitleBarOverlay(overlayFor(dark))
+  }
+  nativeTheme.on('updated', syncChrome)
+  mainWindow.on('closed', () => nativeTheme.off('updated', syncChrome))
 
   mainWindow.on('ready-to-show', () => showWindow())
   mainWindow.on('show', () => scheduler.setWindowOpen(true))

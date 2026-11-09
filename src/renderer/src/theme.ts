@@ -1,11 +1,14 @@
-/** OS 의 다크 모드 설정을 따라 body 에 Uptime Kuma 다크 테마 클래스(.dark)를 켜고 끈다. 반환 함수로 해제한다. */
+/**
+ * OS(또는 pitwall 설정이 정한 nativeTheme)의 다크 모드를 따라 root 요소에 .dark 를 켜고 끈다.
+ * .dark 아래에서 NeoHtop Catppuccin 색이, 그 밖에서는 GitHub Light 색이 쓰인다. 반환 함수로 해제한다.
+ */
 export function watchColorScheme(
   matchMedia: (query: string) => MediaQueryList,
-  body: HTMLElement
+  root: HTMLElement
 ): () => void {
   const mql = matchMedia('(prefers-color-scheme: dark)')
   const apply = (dark: boolean): void => {
-    body.classList.toggle('dark', dark)
+    root.classList.toggle('dark', dark)
   }
   const listener = (event: MediaQueryListEvent): void => apply(event.matches)
   apply(mql.matches)
