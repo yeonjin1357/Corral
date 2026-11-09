@@ -7,6 +7,7 @@
 import { computed } from 'vue'
 import {
   Cpu,
+  EyeOff,
   ExternalLink,
   FolderGit2,
   HardDrive,
@@ -66,7 +67,7 @@ const props = defineProps<{
   platform: Platform | null
   cpuCount: number
 }>()
-const emit = defineEmits<{ open: []; kill: []; remove: [] }>()
+const emit = defineEmits<{ open: []; kill: []; remove: []; hide: [] }>()
 const open = defineModel<boolean>('open', { required: true })
 
 const t = text.ui
@@ -83,6 +84,12 @@ const branchKind = (w: WorktreeInfo | null): string =>
   w?.isLinkedWorktree ? t.sheet.linked : t.sheet.main
 const runtime = (startedAt: number | null): string =>
   startedAt == null ? t.none : formatDuration(props.now - startedAt)
+const cpuText = (cpuPercent: number | null): string => {
+  const cpu = displayCpuPercent(cpuPercent, props.platform, props.cpuCount)
+  return cpu == null ? t.none : `${cpu.toFixed(1)}%`
+}
+const workspaceText = (ws: { name: string; root: string } | null): string =>
+  ws ? `${ws.name} · ${ws.root}` : t.none
 
 interface Fact {
   label: string
@@ -130,7 +137,20 @@ const view = computed<View | null>(() => {
             icon: MemoryStick,
             label: t.detail.memory,
             value: formatBytes(r.memoryBytes),
+            sub: r.memoryGrowth
+              ? `${t.rowStatus.memoryGrowth} · ${t.rowStatus.memoryGrowthTitle(
+                  r.memoryGrowth.minutes,
+                  formatBytes(r.memoryGrowth.fromBytes),
+                  formatBytes(r.memoryGrowth.toBytes)
+                )}`
+              : undefined,
             trend: true
+          },
+          {
+            icon: Cpu,
+            label: t.agent.cpu,
+            value: cpuText(r.cpuPercent),
+            sub: props.platform === 'win32' ? t.agent.cpuSubWindows : t.agent.cpuSub
           },
           {
             icon: Plug,
@@ -144,6 +164,7 @@ const view = computed<View | null>(() => {
         ],
         facts: [
           { label: t.columns.port, value: portList(r.ports) },
+          { label: t.sheet.workspace, value: workspaceText(r.workspace) },
           { label: t.columns.branch, value: r.worktree?.branch ?? text.detached },
           { label: t.sheet.branchKind, value: r.worktree ? branchKind(r.worktree) : t.none },
           { label: t.sheet.path, value: r.worktree?.root ?? t.none },
@@ -157,19 +178,26 @@ const view = computed<View | null>(() => {
     }
     case 'agent': {
       const r = item.row
-      const cpu = displayCpuPercent(r.cpuPercent, props.platform, props.cpuCount)
       const note =
         r.tool === 'codex'
-          ? t.agent.codexNote
+          ? r.stateSource === 'cpu'
+            ? t.agent.codexNote
+            : r.stateSource === 'rollout'
+              ? t.agent.codexRolloutNote
+              : null
           : r.stateSource === 'cpu' && props.hook?.state !== 'on'
             ? t.agent.noHookNote
             : null
+      const state = t.agent.states[r.state]
       return {
         icon: agentIcon(r),
         title: folder(r.worktree),
         description: `${t.agent.toolNames[r.tool]} · PID ${r.pid}`,
         badge: {
-          text: t.agent.states[r.state],
+          text:
+            r.stateSince != null && r.state !== 'unknown'
+              ? t.rowStatus.withTime(state, formatDuration(Math.max(0, props.now - r.stateSince)))
+              : state,
           variant: r.state === 'error' ? 'destructive' : 'secondary'
         },
         cards: [
@@ -182,7 +210,7 @@ const view = computed<View | null>(() => {
           {
             icon: Cpu,
             label: t.agent.cpu,
-            value: cpu == null ? t.none : `${cpu.toFixed(1)}%`,
+            value: cpuText(r.cpuPercent),
             sub: props.platform === 'win32' ? t.agent.cpuSubWindows : t.agent.cpuSub
           }
         ],
@@ -194,6 +222,7 @@ const view = computed<View | null>(() => {
             value: r.worktree?.branch ?? (r.worktree ? text.detached : t.none)
           },
           { label: t.sheet.path, value: r.worktree?.root ?? t.tags.noWorktree },
+          { label: t.sheet.workspace, value: workspaceText(r.workspace) },
           { label: t.sheet.children, value: `${r.descendantCount}${t.cards.count}` },
           { label: t.sheet.runtime, value: runtime(r.startedAt) }
         ],
@@ -304,8 +333,8 @@ const folderSize = (f: DiskRow['folders'][number]): string =>
       : f.skipped === 'tracked'
         ? t.disk.tracked
         : f.bytes == null
-        ? t.disk.measuring
-        : formatBytes(f.bytes)
+          ? t.disk.measuring
+          : formatBytes(f.bytes)
 </script>
 
 <template>
@@ -365,6 +394,16 @@ const folderSize = (f: DiskRow['folders'][number]): string =>
           @click="emit('kill')"
         >
           <X />{{ t.actions.kill }}
+        </Button>
+        <Button
+          v-if="item.kind === 'server'"
+          variant="outline"
+          size="sm"
+          data-action="hide"
+          :title="t.group.hideHint"
+          @click="emit('hide')"
+        >
+          <EyeOff />{{ t.actions.hide }}
         </Button>
         <Button
           v-if="item.kind === 'leftover'"

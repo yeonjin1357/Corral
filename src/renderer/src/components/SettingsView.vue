@@ -16,7 +16,7 @@ import {
   Info,
   Settings2
 } from '@lucide/vue'
-import type { ClaudeHookStatus, UpdateStatus } from '../../../shared/types'
+import type { ClaudeHookStatus, CodexHookStatus, UpdateStatus } from '../../../shared/types'
 import {
   DEFAULT_SETTINGS,
   REFRESH_INTERVALS,
@@ -43,6 +43,9 @@ const props = defineProps<{
   settings: Settings
   hook: ClaudeHookStatus | null
   hookBusy: boolean
+  /** Codex 연동 상태(F7). */
+  codexHook?: CodexHookStatus | null
+  codexHookBusy?: boolean
   version: string | null
   /** 저장하고 메인이 고친(범위 안으로) 값을 돌려준다. */
   save: (next: Settings) => Promise<Settings>
@@ -52,6 +55,7 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{
   hook: [action: 'enable' | 'disable']
+  codexHook: [action: 'enable' | 'disable']
   updateCheck: []
   updateInstall: []
   back: []
@@ -159,7 +163,16 @@ function removeRepo(path: string): void {
   draft.value.extraRepos = draft.value.extraRepos.filter((p) => p !== path)
 }
 
+function resetDirs(): void {
+  dirsText.value = DEFAULT_SETTINGS.dependencyDirs.join('\n')
+}
+
+function removeHidden(entry: string): void {
+  draft.value.hiddenServers = draft.value.hiddenServers.filter((h) => h !== entry)
+}
+
 const controls = computed(() => hookControls(props.hook))
+const codexControls = computed(() => hookControls(props.codexHook ?? null, text.ui.codexHook))
 
 const updateText = computed(() => {
   const u = props.update
@@ -364,6 +377,38 @@ const NOTICES_URL = `${REPO_URL}/blob/main/THIRD_PARTY_NOTICES.md`
               </div>
             </CardContent>
           </Card>
+          <Card size="sm">
+            <CardHeader
+              ><CardTitle>{{ S.hiddenServers }}</CardTitle></CardHeader
+            >
+            <CardContent>
+              <ul
+                v-if="draft.hiddenServers.length"
+                class="divide-y divide-border rounded-md border border-border"
+              >
+                <li
+                  v-for="entry in draft.hiddenServers"
+                  :key="entry"
+                  class="hidden-server flex items-center gap-2 px-3 py-2"
+                >
+                  <span class="min-w-0 flex-1 break-all font-mono text-xs" data-selectable>{{
+                    entry
+                  }}</span>
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    class="text-muted-foreground"
+                    data-action="remove-hidden"
+                    @click="removeHidden(entry)"
+                  >
+                    {{ S.unhide }}
+                  </Button>
+                </li>
+              </ul>
+              <p v-else class="text-sm text-muted-foreground">{{ S.noHiddenServers }}</p>
+              <p class="text-xs leading-relaxed text-muted-foreground">{{ S.hiddenServersHelp }}</p>
+            </CardContent>
+          </Card>
         </div>
 
         <div v-else-if="page === 'heavy'" class="space-y-5">
@@ -408,6 +453,12 @@ const NOTICES_URL = `${REPO_URL}/blob/main/THIRD_PARTY_NOTICES.md`
                     help: S.notifyClaudeWaitingHelp
                   },
                   {
+                    id: 'notify-done',
+                    key: 'agentDone' as const,
+                    label: S.notifyAgentDone,
+                    help: S.notifyAgentDoneHelp
+                  },
+                  {
                     id: 'notify-heavy',
                     key: 'heavyOverlap' as const,
                     label: S.notifyHeavy,
@@ -443,6 +494,9 @@ const NOTICES_URL = `${REPO_URL}/blob/main/THIRD_PARTY_NOTICES.md`
               <p class="text-xs leading-relaxed text-muted-foreground">
                 {{ S.dependencyDirsHelp }}
               </p>
+              <Button variant="outline" size="sm" class="self-start" @click="resetDirs">
+                {{ S.resetDefaults }}
+              </Button>
             </CardContent>
           </Card>
           <Card size="sm">
@@ -534,6 +588,48 @@ const NOTICES_URL = `${REPO_URL}/blob/main/THIRD_PARTY_NOTICES.md`
                   @click="emit('hook', 'disable')"
                 >
                   {{ text.ui.hook.disable }}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+          <Card size="sm">
+            <CardHeader
+              ><CardTitle>{{ text.ui.codexHook.title }}</CardTitle></CardHeader
+            >
+            <CardContent>
+              <p
+                class="codex-hook-state text-sm leading-relaxed"
+                :class="{ 'text-destructive': codexHook?.state === 'error' }"
+              >
+                {{ codexHook ? codexControls.text : text.ui.loading }}
+              </p>
+              <p
+                v-if="codexHook?.path"
+                class="break-all font-mono text-xs text-muted-foreground"
+                data-selectable
+              >
+                {{ text.ui.codexHook.file(codexHook.path) }}
+              </p>
+              <div class="flex flex-wrap gap-2">
+                <Button
+                  v-if="codexControls.button"
+                  variant="outline"
+                  size="sm"
+                  data-action="codex-hook"
+                  :disabled="codexHookBusy"
+                  @click="emit('codexHook', codexControls.button.action)"
+                >
+                  {{ codexControls.button.label }}
+                </Button>
+                <Button
+                  v-if="codexControls.canAlsoDisable"
+                  variant="ghost"
+                  size="sm"
+                  data-action="codex-hook-off"
+                  :disabled="codexHookBusy"
+                  @click="emit('codexHook', 'disable')"
+                >
+                  {{ text.ui.codexHook.disable }}
                 </Button>
               </div>
             </CardContent>

@@ -248,7 +248,8 @@ export const text = {
       count: '개',
       memorySum: '메모리',
       ports: '개발 서버',
-      portsSub: (ports: number): string => `포트 ${ports}개`,
+      portsSub: (ports: number, workspaces: number): string =>
+        workspaces > 0 ? `포트 ${ports}개 · 작업 공간 ${workspaces}곳` : `포트 ${ports}개`,
       portJudge: '정리 판단',
       candidate: '정리 후보',
       check: '확인해볼 것',
@@ -348,7 +349,10 @@ export const text = {
       list: '목록',
       grouped: '묶음',
       hiddenToggle: (n: number): string => `숨김 ${n}개`,
-      hiddenBack: '숨긴 서버 닫기'
+      hiddenBack: '숨긴 서버 닫기',
+      hideHint: '이 서버의 첫 포트로 숨겨요. 숨긴 서버는 개수·정리 추천·알림·트레이에서 빠져요.',
+      hiddenDone: (entry: string): string =>
+        `${entry} 서버를 숨겼어요. 표 아래 "숨김"에서 다시 볼 수 있어요.`
     },
     actions: {
       hide: '숨기기',
@@ -368,6 +372,7 @@ export const text = {
     /** 오른쪽에서 나오는 상세 패널(NeoHtop ProcessDetailsModal·ResourceDetails). */
     sheet: {
       info: '정보',
+      workspace: '작업 공간',
       commandLine: '명령줄',
       path: '경로',
       pid: 'PID',
@@ -402,7 +407,7 @@ export const text = {
         heavy: '무거운 작업',
         notifications: '알림',
         disk: '디스크 정리',
-        claude: 'Claude 연동',
+        claude: '에이전트 연동',
         about: '정보'
       },
       save: '저장',
@@ -416,7 +421,7 @@ export const text = {
         heavy: '겹쳐 돌면 알려 줄 무거운 명령이에요.',
         notifications: '어떤 때 OS 알림을 보낼지 골라요.',
         disk: '끝난 워크트리에서 지울 폴더와 더 살펴볼 저장소예요.',
-        claude: 'Claude Code 훅으로 작업 중·권한 대기를 정확히 알아요.',
+        claude: 'Claude Code·Codex 훅으로 작업 중·권한 대기를 정확히 알아요.',
         about:
           '로컬 AI 코딩 에이전트·개발 서버 포트·RAM·디스크를 한눈에 보고 정리하는 트레이 앱이에요.'
       },
@@ -460,14 +465,22 @@ export const text = {
       resetDefaults: '기본값으로',
       notifyRamLow: 'RAM 부족',
       notifyRamLowHelp: 'RAM 이 위험 기준을 넘으면, 끄면 확보할 수 있는 양과 함께 알려요.',
-      notifyClaudeWaiting: 'Claude 권한 대기',
+      notifyAgentDone: '에이전트 작업 끝남',
+      notifyAgentDoneHelp:
+        '정확한 상태를 아는 에이전트(Claude·Codex 연동, Codex 세션 기록)가 2분 넘게 일한 뒤 끝나면 알려요. 짧은 답에는 알리지 않아요.',
+      hiddenServers: '숨긴 서버',
+      hiddenServersHelp:
+        '목록·개수·정리 추천·알림·트레이에서 빼는 서버예요. :포트 또는 프로세스 이름으로 맞춰요. 서버 상세 패널의 "숨기기"로 더해요.',
+      noHiddenServers: '숨긴 서버가 없어요.',
+      unhide: '빼기',
+      notifyClaudeWaiting: '에이전트 권한 대기',
       notifyClaudeWaitingHelp:
-        'Claude 연동을 켜 두었을 때, 세션이 권한을 기다리기 시작하면 알려요.',
+        'Claude·Codex 연동을 켜 두었을 때, 세션이 권한을 기다리기 시작하면 알려요.',
       notifyHeavy: '무거운 작업 겹침',
       notifyHeavyHelp: '무거운 작업이 둘 이상 겹치고 RAM 이 경고 기준 이상이 되면 알려요.',
       dependencyDirs: '지울 의존성 폴더 이름',
       dependencyDirsHelp:
-        '한 줄에 하나씩. 끝난 워크트리 바로 아래의 이 이름 폴더만 지워요(예: node_modules). 경로나 .git 은 쓸 수 없어요.',
+        '한 줄에 하나씩. 끝난 워크트리 바로 아래의 이 이름 폴더 가운데 git 이 무시하는(.gitignore 등) 폴더만 지워요. 저장소에 올라간 폴더는 이름이 같아도 건너뛰어요. 경로나 .git 은 쓸 수 없어요.',
       extraRepos: '더 살펴볼 저장소',
       extraReposHelp:
         '에이전트·개발 서버를 본 저장소는 저절로 기억해요. 그 밖에 끝난 워크트리를 찾아볼 저장소를 여기 더해요.',
@@ -538,7 +551,10 @@ export const text = {
       cpuSub: '코어 1개 = 100% 기준',
       cpuSubWindows: '작업 관리자처럼 전체 CPU 대비',
       stateSource: '상태 출처',
-      codexNote: 'Codex 는 CPU 사용량으로만 작업 중인지 짐작해요.',
+      codexNote:
+        'Codex 세션 기록을 찾지 못해 CPU 사용량으로 짐작해요. Codex 연동을 켜면 권한 대기까지 알 수 있어요.',
+      codexRolloutNote:
+        'Codex 세션 기록으로 상태를 알아요. 권한 대기는 Codex 연동을 켜야 알 수 있어요.',
       noHookNote: 'Claude 연동을 켜면 권한 대기까지 정확히 알 수 있어요.'
     },
     disk: {
@@ -589,6 +605,20 @@ export const text = {
       },
       allHooksDisabled:
         'Claude 설정에서 모든 훅이 꺼져 있어요(disableAllHooks). 켜도 이벤트가 오지 않아요.'
+    },
+    codexHook: {
+      title: 'Codex 연동',
+      enable: 'Codex 연동 켜기',
+      reenable: 'Codex 연동 다시 켜기',
+      disable: 'Codex 연동 끄기',
+      states: {
+        on: '켜짐 — Codex 훅으로 작업 중·권한 대기를 알아요. 상태가 안 오면 Codex 에서 /hooks 를 열어 pitwall 훅을 승인해 주세요.',
+        off: '꺼짐 — 지금은 Codex 세션 기록(없으면 CPU 사용량)으로 짐작해요. 켜면 권한 대기까지 알 수 있어요.',
+        partial: '예전 설정이 남아 있어요. 다시 켜 주세요.',
+        server: '훅을 받을 포트를 열지 못했어요. 다시 켜면 새 포트로 바꿔요.',
+        settings: 'Codex 훅 설정 파일(hooks.json)을 읽을 수 없어요.'
+      },
+      file: (path: string): string => `설정 파일: ${path}`
     },
     home: {
       title: '한눈에 보기',

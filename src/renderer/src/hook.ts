@@ -13,19 +13,28 @@ export interface HookControls {
   canAlsoDisable: boolean
 }
 
-/** 한눈에 보기·설정 화면이 같이 쓰는 Claude 연동 상태 문구와 버튼. */
-export function hookControls(h: ClaudeHookStatus | null): HookControls {
+/** 연동 버튼·상태 문구(Claude 연동, Codex 연동). */
+interface HookLabels {
+  enable: string
+  reenable: string
+  disable: string
+  states: Record<'on' | 'off' | 'partial' | 'server' | 'settings', string>
+}
+
+/** 한눈에 보기·설정 화면이 같이 쓰는 연동 상태 문구와 버튼(기본은 Claude 연동). */
+export function hookControls(
+  h: Pick<ClaudeHookStatus, 'state' | 'problem'> | null,
+  labels: HookLabels = text.ui.hook
+): HookControls {
   if (!h) return { text: '', button: null, canAlsoDisable: false }
   const stateText =
-    h.state === 'error'
-      ? text.ui.hook.states[h.problem ?? 'settings']
-      : text.ui.hook.states[h.state]
+    h.state === 'error' ? labels.states[h.problem ?? 'settings'] : labels.states[h.state]
   const button =
     h.state === 'on'
-      ? { label: text.ui.hook.disable, action: 'disable' as const }
+      ? { label: labels.disable, action: 'disable' as const }
       : h.state === 'off'
-        ? { label: text.ui.hook.enable, action: 'enable' as const }
-        : { label: text.ui.hook.reenable, action: 'enable' as const }
+        ? { label: labels.enable, action: 'enable' as const }
+        : { label: labels.reenable, action: 'enable' as const }
   return {
     text: stateText,
     button,

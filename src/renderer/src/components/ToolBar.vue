@@ -2,12 +2,14 @@
   NeoHtop (MIT) toolbar/ToolBar.svelte · SearchBox.svelte.
   바꾼 점: "Processes 609" 제목과 목록/트리 전환 자리에 pitwall 의 보기 탭(개발 서버·에이전트·…)을 둔다.
   오른쪽 칸은 탭마다 다른 버튼(디스크 다시 찾기·Claude 연동 켜기)을 받는다.
+  개발 서버 탭에는 NeoHtop 의 "List / Tree" 전환을 "목록 / 묶음"(작업 공간)으로 둔다.
 -->
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { Search, X } from '@lucide/vue'
+import { FolderTree, List, Search, X } from '@lucide/vue'
 import { text } from '../../../shared/text'
 import type { TabKey } from '../rows'
+import type { ServerView } from '../viewState'
 import ToggleGroup, { type ToggleOption } from '../ui/ToggleGroup.vue'
 import Input from '../ui/Input.vue'
 import Button from '../ui/Button.vue'
@@ -20,6 +22,16 @@ const props = defineProps<{
 }>()
 const tab = defineModel<TabKey>('tab', { required: true })
 const query = defineModel<string>('query', { required: true })
+/** 개발 서버 보기(목록 / 작업 공간 묶음). */
+const view = defineModel<ServerView>('view', { default: 'group' })
+const viewOptions: ToggleOption[] = [
+  { value: 'list', label: text.ui.group.list, icon: List },
+  { value: 'group', label: text.ui.group.grouped, icon: FolderTree }
+]
+const viewValue = computed({
+  get: () => view.value as string,
+  set: (v: string) => (view.value = v === 'list' ? 'list' : 'group')
+})
 
 const options = computed<ToggleOption[]>(() =>
   (['ports', 'agents', 'leftovers', 'heavy', 'disk', 'apps'] as TabKey[]).map((key) => ({
@@ -75,6 +87,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', focusSearch))
         </div>
       </div>
       <div class="ml-auto flex shrink-0 items-center gap-2">
+        <ToggleGroup
+          v-if="tab === 'ports'"
+          v-model="viewValue"
+          :options="viewOptions"
+          :aria-label="text.ui.group.viewLabel"
+        />
         <slot name="actions" />
       </div>
     </div>

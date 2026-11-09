@@ -60,7 +60,11 @@ describe('카드의 메모리 합은 메모리 카드 묶음과 같은 값(같�
 test('개발 서버 카드: 큰 숫자는 서버 수, 아래 줄은 포트 수', () => {
   const s = snapshot({
     servers: [
-      serverRow({ ports: [6176, 8081, 9091], pid: 6100 }),
+      serverRow({
+        ports: [6176, 8081, 9091],
+        pid: 6100,
+        workspace: { root: 'C:/work/ws', name: 'ws', branch: null, outer: true }
+      }),
       serverRow({ ports: [3000], pid: 4100 })
     ]
   })
@@ -68,5 +72,5 @@ test('개발 서버 카드: 큰 숫자는 서버 수, 아래 줄은 포트 수',
     .findAll('[data-slot=card]')
     .find((c) => c.find('[data-slot=card-title]').text().trim() === '개발 서버')!
   expect(card.find('.text-3xl').text()).toBe('2개')
-  expect(card.text()).toContain('포트 4개')
+  expect(card.text()).toContain('포트 4개 · 작업 공간 1곳')
 })

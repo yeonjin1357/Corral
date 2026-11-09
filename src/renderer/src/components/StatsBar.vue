@@ -73,6 +73,12 @@ const portCounts = computed(() => ({
   inUse: s.value.servers.filter((p) => p.clientCount > 0 && p.judgement !== 'check').length
 }))
 const portCount = computed(() => s.value.servers.reduce((n, r) => n + r.ports.length, 0))
+/** 서버가 있는 작업 공간 수(같은 작업 공간은 한 번). */
+const workspaceCount = computed(
+  () =>
+    new Set(s.value.servers.flatMap((r) => (r.workspace ? [r.workspace.root.toLowerCase()] : [])))
+      .size
+)
 /** 로고 줄: 같은 종류(로고 제목)끼리 세어 많은 순 3개(좁은 카드에서도 한 줄). */
 interface LogoGroup {
   key: string
@@ -265,7 +271,7 @@ const diskSub = computed(() =>
             }}</span>
           </div>
           <p class="text-xs leading-4 text-muted-foreground">
-            {{ text.ui.cards.portsSub(portCount) }}
+            {{ text.ui.cards.portsSub(portCount, workspaceCount) }}
           </p>
         </div>
         <div v-if="portLogos.length" class="flex h-4 items-center gap-2.5 whitespace-nowrap">

@@ -31,12 +31,17 @@ import { hookControls } from './hook'
 import {
   TABS,
   filterRows,
+  groupServers,
+  hiddenServerTable,
   leftoverIcon,
   serverIcon,
   tableFor,
   type ActionKind,
+  type GroupedRows,
+  type Row,
   type TabKey
 } from './rows'
+import { readServerView, writeServerView, type ServerView } from './viewState'
 import logo from '../../../resources/icon.png'
 import TitleBar from './components/TitleBar.vue'
 import StatsBar from './components/StatsBar.vue'
@@ -279,6 +284,9 @@ async function act(kind: ActionKind, key: string): Promise<void> {
     }
   } else if (kind === 'kill' && server) {
     await runAction(key, async () => resultNotice(await window.pitwall.killServer(server.pid)))
+  } else if (kind === 'unhide') {
+    const hidden = s.hiddenServers.find((r) => selectionKey.server(r) === key)
+    if (hidden) await runAction(key, () => unhide(hidden))
   } else if (kind === 'kill' && leftover) {
     await runAction(key, async () => resultNotice(await window.pitwall.killLeftover(leftover.pid)))
   } else if (kind === 'remove' && disk) {
@@ -294,6 +302,58 @@ async function act(kind: ActionKind, key: string): Promise<void> {
 
 function sheetAction(kind: ActionKind): void {
   if (selectedKey.value) void act(kind, selectedKey.value)
+}
+
+// ── 묶음 보기·숨기기·별칭(F1·F2·F11) ──
+/** 설정을 바꾸고 바로 다시 수집해 화면에 반영한다(숨김·별칭은 수집기가 적용). */
+async function updateSettings(change: (s: Settings) => Settings): Promise<void> {
+  await saveSettings(change(settings.value))
+  await window.pitwall.refreshNow()
+}
+
+/** 상세 패널의 숨기기: 서버의 첫 포트로 숨긴다(포트 중 하나라도 맞으면 숨김). */
+async function hideSelected(): Promise<void> {
+  const item = selected.value
+  if (item?.kind !== 'server') return
+  const entry = `:${item.row.ports[0]}`
+  const key = selectedKey.value!
+  selectedKey.value = null
+  await runAction(key, async () => {
+    await updateSettings((s) => ({
+      ...s,
+      hiddenServers: s.hiddenServers.includes(entry) ? s.hiddenServers : [...s.hiddenServers, entry]
+    }))
+    return { text: text.ui.group.hiddenDone(entry), tone: 'success' }
+  })
+}
+
+/** 숨김 풀기: 그 서버를 숨기게 한 항목(포트 또는 프로세스 이름)을 모두 뺀다. */
+async function unhide(row: DashboardSnapshot['servers'][number]): Promise<Notice | null> {
+  const matches = (h: string): boolean =>
+    h.startsWith(':')
+      ? row.ports.includes(Number(h.slice(1)))
+      : h.toLowerCase() === row.processName.toLowerCase()
+  await updateSettings((s) => ({ ...s, hiddenServers: s.hiddenServers.filter((h) => !matches(h)) }))
+  return null
+}
+
+async function cleanupWorkspace(root: string): Promise<void> {
+  await runAction(`group:${root}`, async () =>
+    resultNotice(await window.pitwall.cleanupWorkspace(root))
+  )
+}
+
+async function renameWorkspace(root: string, name: string): Promise<void> {
+  try {
+    await updateSettings((s) => {
+      const aliases = { ...s.workspaceAliases }
+      if (name) aliases[root] = name
+      else delete aliases[root]
+      return { ...s, workspaceAliases: aliases }
+    })
+  } catch (e) {
+    say('action', { text: failureText(e), tone: 'error' })
+  }
 }
 
 async function diskScan(): Promise<void> {
@@ -317,6 +377,22 @@ async function killMany(keys: string[]): Promise<void> {
   }
 }
 
+const codexHookBusy = ref(false)
+/** Codex 연동 켜기·끄기(설정 > 에이전트 연동). 켜면 /hooks 승인 안내가 결과에 들어 있다. */
+async function codexHookAction(action: 'enable' | 'disable'): Promise<void> {
+  codexHookBusy.value = true
+  say('hook', null)
+  try {
+    const result = await window.pitwall.codexHook[action]()
+    if (result.status !== 'cancelled')
+      say('hook', { text: result.message, tone: result.status === 'failed' ? 'error' : 'success' })
+  } catch (e) {
+    say('hook', { text: failureText(e), tone: 'error' })
+  } finally {
+    codexHookBusy.value = false
+  }
+}
+
 async function hookAction(action: 'enable' | 'disable'): Promise<void> {
   hookBusy.value = true
   say('hook', null)
@@ -332,7 +408,17 @@ async function hookAction(action: 'enable' | 'disable'): Promise<void> {
 }
 
 // ── 표 ──
-const table = computed(() => (snapshot.value ? tableFor(tab.value, snapshot.value) : null))
+/** 개발 서버 탭에서 숨긴 서버를 보는 중. */
+const showHidden = ref(false)
+const hiddenCount = computed(() => snapshot.value?.hiddenServers.length ?? 0)
+watch(hiddenCount, (n) => {
+  if (n === 0) showHidden.value = false
+})
+const table = computed(() => {
+  const s = snapshot.value
+  if (!s) return null
+  return tab.value === 'ports' && showHidden.value ? hiddenServerTable(s) : tableFor(tab.value, s)
+})
 const rows = computed(() => (table.value ? filterRows(table.value.rows, query.value) : []))
 /** 탭별 정렬. 데이터가 새로 와도·탭을 오가도·다시 켜도 유지한다. */
 const storage = ((): Storage | null => {
@@ -343,6 +429,15 @@ const storage = ((): Storage | null => {
   }
 })()
 const sorts = ref<Sorts>(readSorts(storage))
+const serverView = ref<ServerView>(readServerView(storage))
+watch(serverView, (v) => writeServerView(storage, v))
+/** 접은 작업 공간 묶음. 갱신해도 유지한다(앱을 다시 켜면 모두 펼침). */
+const collapsedGroups = ref<string[]>([])
+const grouping = computed<((rows: Row[]) => GroupedRows[]) | null>(() => {
+  const s = snapshot.value
+  if (!s || tab.value !== 'ports' || showHidden.value || serverView.value !== 'group') return null
+  return (rows) => groupServers(rows, s.servers, s.agents, s.takenAt)
+})
 const NO_SORT: SortState = { id: 'name', dir: 'asc' }
 const sort = computed<SortState>({
   get: () => (table.value ? resolveSort(sorts.value[tab.value], table.value) : NO_SORT),
@@ -490,11 +585,14 @@ const takenAt = computed(() =>
         :settings="settings"
         :hook="snapshot?.hook ?? null"
         :hook-busy="hookBusy"
+        :codex-hook="snapshot?.codexHook ?? null"
+        :codex-hook-busy="codexHookBusy"
         :version="version"
         :save="saveSettings"
         :pick-folder="pickFolder"
         :update="update"
         @hook="hookAction"
+        @codex-hook="codexHookAction"
         @update-check="checkUpdate"
         @update-install="installUpdate"
         @back="goHome"
@@ -595,7 +693,13 @@ const takenAt = computed(() =>
           </template>
         </NoticeCard>
 
-        <ToolBar v-model:tab="tab" v-model:query="query" :counts="counts" :matching="rows.length">
+        <ToolBar
+          v-model:tab="tab"
+          v-model:query="query"
+          v-model:view="serverView"
+          :counts="counts"
+          :matching="rows.length"
+        >
           <template #actions>
             <Button
               v-if="tab === 'agents' && hookButton"
@@ -625,23 +729,37 @@ const takenAt = computed(() =>
         <ItemTable
           v-if="table"
           v-model:sort="sort"
+          v-model:collapsed="collapsedGroups"
           :table="table"
           :rows="rows"
           :selected-key="selectedKey"
           :searching="!!query.trim()"
           :empty-text="emptyText"
           :busy-key="busyKey"
+          :group="grouping"
           @select="select"
           @action="act"
           @clear-search="query = ''"
+          @group-action="(_, root) => cleanupWorkspace(root)"
+          @rename="renameWorkspace"
         />
 
         <footer
           class="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-border bg-card px-4 py-3"
         >
-          <span class="text-xs text-muted-foreground">{{
-            text.ui.footer.count(text.ui.tabs[tab], rows.length)
-          }}</span>
+          <span class="flex items-center gap-2 text-xs text-muted-foreground">
+            {{ text.ui.footer.count(text.ui.tabs[tab], rows.length) }}
+            <Button
+              v-if="tab === 'ports' && hiddenCount > 0"
+              variant="ghost"
+              size="sm"
+              class="h-6 px-2 text-xs"
+              data-action="toggle-hidden"
+              @click="showHidden = !showHidden"
+            >
+              {{ showHidden ? text.ui.group.hiddenBack : text.ui.group.hiddenToggle(hiddenCount) }}
+            </Button>
+          </span>
           <span class="text-xs text-muted-foreground tabular-nums">{{
             text.ui.footer.takenAt(takenAt)
           }}</span>
@@ -662,6 +780,7 @@ const takenAt = computed(() =>
       @open="sheetAction('open')"
       @kill="sheetAction('kill')"
       @remove="sheetAction('remove')"
+      @hide="hideSelected"
     />
     <MemorySheet
       v-if="snapshot"
