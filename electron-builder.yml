@@ -46,6 +46,10 @@ mac:
 dmg:
   artifactName: ${name}-${version}-${arch}.${ext}
 npmRebuild: false
+releaseInfo:
+  releaseNotes: |
+    - Windows: 서명이 없어 처음 설치할 때 SmartScreen 경고가 나와요. "추가 정보 → 실행"을 눌러 주세요.
+    - macOS: 아직 실제 Mac 에서 확인하지 않은(미검증) 빌드예요. 설치 방법은 README 를 봐 주세요.
 publish:
   provider: github
   owner: yeonjin1357

@@ -44,3 +44,18 @@ SOFTWARE.
 - 출처: https://github.com/microsoft/node-jsonc-parser (`jsonc-parser` 3.3.1)
 - 쓰는 것: Claude 설정 파일(settings.json)을 주석·후행 쉼표가 있어도 읽고, 고칠 위치를 찾는 데 쓴다.
 - 라이선스: MIT, Copyright (c) Microsoft
+
+## 함께 배포되는 라이브러리
+
+화면 코드에 묶여 들어가거나(번들) 앱과 함께 설치되는 라이브러리입니다. 모두 MIT 라이선스이며, 위 Uptime Kuma 항목과 같은 MIT 허가 문구가 적용됩니다. 앱과 함께 설치되는 라이브러리(`electron-updater`, `@electron-toolkit/utils`, `jsonc-parser` 와 그 의존성)는 각 패키지 폴더에 원래 라이선스 파일이 들어 있습니다.
+
+| 라이브러리                                                                | 버전 | 쓰는 곳               | 저작권                                        |
+| ------------------------------------------------------------------------- | ---- | --------------------- | --------------------------------------------- |
+| [Vue](https://github.com/vuejs/core)                                      | 3.5  | 화면                  | Copyright (c) 2018-present, Yuxi (Evan) You   |
+| [Bootstrap](https://github.com/twbs/bootstrap)                            | 5.3  | 화면 스타일           | Copyright (c) 2011-2025 The Bootstrap Authors |
+| [Chart.js](https://github.com/chartjs/Chart.js)                           | 4.6  | 추이 그래프           | Copyright (c) 2014-2024 Chart.js Contributors |
+| [vue-chartjs](https://github.com/apertureless/vue-chartjs)                | 5.3  | 추이 그래프           | Copyright (c) 2016 Jakub Juszczak             |
+| [electron-updater](https://github.com/electron-userland/electron-builder) | 6.8  | Windows 자동 업데이트 | Copyright (c) 2015 Loopline Systems           |
+| [@electron-toolkit/utils](https://github.com/alex8088/electron-toolkit)   | 4.0  | 메인 프로세스 도우미  | Copyright (c) 2022-present, Alex.Wei          |
+
+Electron 과 Chromium 의 라이선스는 설치 폴더의 `LICENSE.electron.txt`, `LICENSES.chromium.html` 에 있습니다.
