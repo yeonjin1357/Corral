@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
-import { IPC, type PitwallApi } from '../shared/ipc'
+import { IPC, type NavigateTarget, type PitwallApi } from '../shared/ipc'
 import type { DashboardSnapshot } from '../shared/types'
 import type { Settings } from '../shared/settings'
 
@@ -14,6 +14,13 @@ const api: PitwallApi = {
     }
   },
   getLatest: () => ipcRenderer.invoke(IPC.getLatest),
+  onNavigate(callback) {
+    const handler = (_event: IpcRendererEvent, target: NavigateTarget): void => callback(target)
+    ipcRenderer.on(IPC.navigate, handler)
+    return () => {
+      ipcRenderer.removeListener(IPC.navigate, handler)
+    }
+  },
   killPort: (port, pid) => ipcRenderer.invoke(IPC.killPort, { port, pid }),
   killLeftover: (pid) => ipcRenderer.invoke(IPC.killLeftover, pid),
   killMany: (keys) => ipcRenderer.invoke(IPC.killMany, keys),

@@ -43,12 +43,20 @@ function receive(s: DashboardSnapshot): void {
 
 let unsubscribe: () => void = () => {}
 let unsubscribeSettings: () => void = () => {}
+let unsubscribeNavigate: () => void = () => {}
 let stopTheme: () => void = () => {}
 
 onMounted(async () => {
   stopTheme = watchColorScheme((q) => window.matchMedia(q), document.body)
   unsubscribe = window.pitwall.onSnapshot(receive)
   unsubscribeSettings = window.pitwall.settings.onChange((s) => (settings.value = s))
+  // 알림·트레이에서 온 이동 요청: 그 항목을 고르거나(없으면 한눈에 보기) 다른 화면으로.
+  unsubscribeNavigate = window.pitwall.onNavigate((target) => {
+    if (target.page === 'dashboard') {
+      if (target.key) select(target.key)
+      else goHome()
+    }
+  })
   void window.pitwall.settings.get().then((s) => (settings.value = s))
   const latest = await window.pitwall.getLatest()
   // 창이 늦게 열려 놓친 스냅샷만 채운다. 그 사이 받은 더 새 스냅샷은 덮어쓰지 않는다.
@@ -58,6 +66,7 @@ onMounted(async () => {
 onUnmounted(() => {
   unsubscribe()
   unsubscribeSettings()
+  unsubscribeNavigate()
   stopTheme()
 })
 

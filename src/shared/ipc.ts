@@ -18,8 +18,12 @@ export const IPC = {
   settingsGet: 'pitwall:settings-get',
   settingsSave: 'pitwall:settings-save',
   settingsPickFolder: 'pitwall:settings-pick-folder',
-  settingsChanged: 'pitwall:settings-changed'
+  settingsChanged: 'pitwall:settings-changed',
+  navigate: 'pitwall:navigate'
 } as const
+
+/** 알림·트레이에서 창을 열며 보여 줄 곳. key 는 목록 선택 키(null 이면 한눈에 보기). */
+export type NavigateTarget = { page: 'dashboard'; key: string | null } | { page: 'settings' }
 
 /** Claude 연동 켜기·끄기 결과. 취소하면 메시지 없음. */
 export type ClaudeHookActionResult =
@@ -52,6 +56,8 @@ export interface PitwallApi {
     enable(): Promise<ClaudeHookActionResult>
     disable(): Promise<ClaudeHookActionResult>
   }
+  /** 알림·트레이에서 특정 화면으로 가라고 할 때 호출된다. 반환 함수로 구독을 끊는다. */
+  onNavigate(callback: (target: NavigateTarget) => void): () => void
   /** 사용자 설정. 저장하면 메인이 범위를 고쳐 저장·반영한 값을 돌려준다. */
   settings: {
     get(): Promise<Settings>

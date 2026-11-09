@@ -1,0 +1,223 @@
+import { createNotifier, type Notice } from './notifier'
+import { blankSnapshot } from '../shared/snapshot'
+import { DEFAULT_SETTINGS, type NotifySettings } from '../shared/settings'
+import type {
+  AgentRow,
+  DashboardSnapshot,
+  HeavyJobRow,
+  MemoryLevel,
+  PortRow
+} from '../shared/types'
+
+const MIN = 60 * 1000
+const GB = 1024 ** 3
+const MB = 1024 ** 2
+
+function snap(
+  over: Partial<DashboardSnapshot> = {},
+  level: MemoryLevel = 'normal'
+): DashboardSnapshot {
+  const usedPercent = { normal: 50, warn: 85, danger: 93.6 }[level]
+  return {
+    ...blankSnapshot(1),
+    memory: { totalBytes: 32 * GB, usedBytes: (32 * GB * usedPercent) / 100, usedPercent, level },
+    ...over
+  }
+}
+
+function agent(pid: number, state: AgentRow['state'], root = 'C:\\work\\shop-web'): AgentRow {
+  return {
+    pid,
+    tool: 'claude',
+    worktree: { root, branch: 'develop', isLinkedWorktree: false },
+    startedAt: pid,
+    memoryBytes: 1,
+    descendantCount: 0,
+    state,
+    stateSource: state === 'waiting' ? 'hook' : 'cpu',
+    cpuPercent: 0
+  }
+}
+
+function heavy(pid: number, label: string): HeavyJobRow {
+  return {
+    pid,
+    label,
+    processName: 'node.exe',
+    commandLine: label,
+    worktree: null,
+    memoryBytes: 4 * GB,
+    descendantPids: [],
+    startedAt: 1
+  }
+}
+
+const candidate = {
+  port: 3000,
+  pid: 4100,
+  processName: 'node.exe',
+  commandLine: 'node vite',
+  worktree: { root: 'C:\\work\\old', branch: 'feat/x', isLinkedWorktree: true },
+  unresolvable: false,
+  memoryBytes: 900 * MB,
+  descendantPids: [],
+  clientCount: 0,
+  startedAt: 1,
+  judgement: 'candidate',
+  idleSince: 0,
+  agentInWorktree: false
+} as PortRow
+
+function setup(over: { notify?: Partial<NotifySettings>; focused?: boolean } = {}): {
+  shown: Notice[]
+  clock: { now: number }
+  update: (s: DashboardSnapshot) => void
+} {
+  const shown: Notice[] = []
+  const clock = { now: 0 }
+  const notifier = createNotifier({
+    show: (n) => shown.push(n),
+    settings: () => ({ ...DEFAULT_SETTINGS.notify, ...over.notify }),
+    isFocused: () => over.focused ?? false,
+    now: () => clock.now
+  })
+  return { shown, clock, update: notifier.update }
+}
+
+describe('RAM 부족', () => {
+  test('위험으로 넘어갈 때 한 번, 정리 추천 합계와 함께. 정상으로 내려와야 다시 알린다', () => {
+    const { shown, clock, update } = setup()
+    update(snap())
+    update(snap({ ports: [candidate] }, 'danger'))
+    expect(shown).toEqual([
+      {
+        title: 'RAM 이 부족해요 (93%)',
+        body: '정리 후보 1개를 끄면 약 900 MB 를 확보할 수 있어요.',
+        target: null
+      }
+    ])
+    // 위험 ↔ 경고를 오가도 다시 알리지 않는다.
+    update(snap({}, 'warn'))
+    update(snap({}, 'danger'))
+    expect(shown).toHaveLength(1)
+    // 정상으로 내려왔다가 30분 뒤 다시 위험이면 알린다.
+    update(snap())
+    clock.now += 30 * MIN
+    update(snap({}, 'danger'))
+    expect(shown).toHaveLength(2)
+    expect(shown[1].body).toBe('정리할 후보가 없어요. 메모리를 많이 쓰는 앱을 확인해 보세요.')
+  })
+
+  test('30분 안에는 다시 알리지 않는다(기준선 근처에서 오르내림)', () => {
+    const { shown, clock, update } = setup()
+    update(snap())
+    update(snap({}, 'danger'))
+    update(snap())
+    clock.now += 29 * MIN
+    update(snap({}, 'danger'))
+    expect(shown).toHaveLength(1)
+  })
+
+  test('시작할 때 이미 위험이면 알리지 않고, 정상으로 내려온 뒤부터 알린다', () => {
+    const { shown, update } = setup()
+    update(snap({}, 'danger'))
+    update(snap({}, 'danger'))
+    expect(shown).toEqual([])
+  })
+
+  test('지연(stale)·RAM 정보 없음 스냅샷은 보지 않는다', () => {
+    const { shown, update } = setup()
+    update(snap())
+    update({ ...snap({}, 'danger'), stale: true })
+    update(blankSnapshot(2))
+    expect(shown).toEqual([])
+  })
+
+  test('설정에서 끄면 알리지 않는다', () => {
+    const { shown, update } = setup({ notify: { ramLow: false } })
+    update(snap())
+    update(snap({}, 'danger'))
+    expect(shown).toEqual([])
+  })
+})
+
+describe('Claude 권한 대기', () => {
+  test('훅으로 권한 대기로 바뀐 세션마다 알리고, 그 에이전트로 가는 대상을 담는다', () => {
+    const { shown, update } = setup()
+    update(snap({ agents: [agent(5000, 'working')] }))
+    update(snap({ agents: [agent(5000, 'waiting')] }))
+    expect(shown).toEqual([
+      {
+        title: 'Claude 가 권한을 기다려요',
+        body: 'shop-web · develop',
+        target: 'agent:5000:5000'
+      }
+    ])
+    // 계속 기다리는 중이면 다시 알리지 않고, 풀렸다가 다시 기다리면 새 요청이라 알린다.
+    update(snap({ agents: [agent(5000, 'waiting')] }))
+    update(snap({ agents: [agent(5000, 'working')] }))
+    update(snap({ agents: [agent(5000, 'waiting')] }))
+    expect(shown).toHaveLength(2)
+  })
+
+  test('한꺼번에 여럿이 기다리면 하나로 묶는다', () => {
+    const { shown, update } = setup()
+    update(snap({ agents: [agent(5000, 'working'), agent(5100, 'idle', 'C:\\work\\wt-a')] }))
+    update(snap({ agents: [agent(5000, 'waiting'), agent(5100, 'waiting', 'C:\\work\\wt-a')] }))
+    expect(shown).toEqual([
+      {
+        title: 'Claude 2개가 권한을 기다려요',
+        body: 'shop-web · develop, wt-a · develop',
+        target: null
+      }
+    ])
+  })
+
+  test('시작할 때 이미 기다리던 세션, pitwall 창이 앞에 있을 때, 설정에서 끈 경우는 알리지 않는다', () => {
+    const start = setup()
+    start.update(snap({ agents: [agent(5000, 'waiting')] }))
+    expect(start.shown).toEqual([])
+
+    const focused = setup({ focused: true })
+    focused.update(snap({ agents: [agent(5000, 'working')] }))
+    focused.update(snap({ agents: [agent(5000, 'waiting')] }))
+    expect(focused.shown).toEqual([])
+
+    const off = setup({ notify: { claudeWaiting: false } })
+    off.update(snap({ agents: [agent(5000, 'working')] }))
+    off.update(snap({ agents: [agent(5000, 'waiting')] }))
+    expect(off.shown).toEqual([])
+  })
+})
+
+describe('무거운 작업 겹침', () => {
+  test('겹침이 시작될 때 알리고, 끝났다가 10분 뒤 다시 겹치면 또 알린다', () => {
+    const { shown, clock, update } = setup()
+    const jobs = [heavy(1, 'vue-tsc'), heavy(2, 'vite build')]
+    update(snap({}, 'warn'))
+    update(snap({ heavyJobs: jobs, heavyOverlap: true }, 'warn'))
+    expect(shown).toEqual([
+      {
+        title: '무거운 작업이 겹쳤어요 (RAM 85%)',
+        body: 'vue-tsc, vite build 이(가) 동시에 돌고 있어요.',
+        target: null
+      }
+    ])
+    update(snap({ heavyJobs: jobs, heavyOverlap: true }, 'warn'))
+    update(snap({}, 'warn'))
+    clock.now += 5 * MIN
+    update(snap({ heavyJobs: jobs, heavyOverlap: true }, 'warn'))
+    expect(shown).toHaveLength(1)
+    update(snap({}, 'warn'))
+    clock.now += 10 * MIN
+    update(snap({ heavyJobs: jobs, heavyOverlap: true }, 'warn'))
+    expect(shown).toHaveLength(2)
+  })
+
+  test('설정에서 끄면 알리지 않는다', () => {
+    const { shown, update } = setup({ notify: { heavyOverlap: false } })
+    update(snap({}, 'warn'))
+    update(snap({ heavyJobs: [heavy(1, 'a'), heavy(2, 'b')], heavyOverlap: true }, 'warn'))
+    expect(shown).toEqual([])
+  })
+})

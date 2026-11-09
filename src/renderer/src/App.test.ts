@@ -3,7 +3,7 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import type { Mock } from 'vitest'
 import App from './App.vue'
 import type { DashboardSnapshot, KillResult } from '../../shared/types'
-import type { ClaudeHookActionResult, PitwallApi } from '../../shared/ipc'
+import type { ClaudeHookActionResult, NavigateTarget, PitwallApi } from '../../shared/ipc'
 import { agentRow, leftoverRow, portRow, snapshot, threePorts } from './testing/fixtures'
 import { DEFAULT_SETTINGS, type Settings } from '../../shared/settings'
 
@@ -17,6 +17,7 @@ interface FakeApi {
   }
   resolveLatest(): void
   off: Mock<() => void>
+  navigate(target: NavigateTarget): void
 }
 
 function installApi(
@@ -24,6 +25,7 @@ function installApi(
 ): FakeApi {
   let cb: ((s: DashboardSnapshot) => void) | null = null
   let resolveLatest: () => void = () => {}
+  let nav: ((t: NavigateTarget) => void) | null = null
   const off = vi.fn((): void => {
     cb = null
   })
@@ -31,6 +33,10 @@ function installApi(
     onSnapshot: vi.fn((c: (s: DashboardSnapshot) => void): (() => void) => {
       cb = c
       return off
+    }),
+    onNavigate: vi.fn((c: (t: NavigateTarget) => void) => {
+      nav = c
+      return () => {}
     }),
     getLatest: vi.fn(
       () =>
@@ -56,7 +62,13 @@ function installApi(
     }
   }
   ;(window as unknown as { pitwall: PitwallApi }).pitwall = api
-  return { push: (s: DashboardSnapshot) => cb?.(s), api, resolveLatest: () => resolveLatest(), off }
+  return {
+    push: (s: DashboardSnapshot) => cb?.(s),
+    api,
+    resolveLatest: () => resolveLatest(),
+    off,
+    navigate: (t) => nav?.(t)
+  }
 }
 
 const stubs = {
@@ -314,4 +326,15 @@ test('상세 화면의 확인 주기 문구는 설정의 갱신 주기를 따른
   await w.findAll('.monitor-list .item:not(.group-item)')[0].trigger('click')
   await flushPromises()
   expect(w.text()).toContain('창이 열려 있으면 2초, 닫혀 있으면 10초마다 확인')
+})
+
+test('알림을 누르면(이동 요청) 그 항목을 고르고, 키가 없으면 한눈에 보기로 간다', async () => {
+  const fake = installApi()
+  const w = await mountWith(fake)
+  fake.navigate({ page: 'dashboard', key: 'port:3003:5100' })
+  await flushPromises()
+  expect(w.get('h1').text()).toBe('wt-a')
+  fake.navigate({ page: 'dashboard', key: null })
+  await flushPromises()
+  expect(w.get('h1').text()).toBe('한눈에 보기')
 })

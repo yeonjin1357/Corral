@@ -49,6 +49,16 @@ export const text = {
     gitMissing: 'git 을 찾지 못해 디스크 정리를 할 수 없어요. git 을 설치한 뒤 다시 시도해 주세요.',
     scanFailed: (detail: string): string => `끝난 워크트리를 찾지 못했어요: ${detail}`
   },
+  notify: {
+    ramTitle: (percent: number): string => `RAM 이 부족해요 (${percent}%)`,
+    ramBody: (n: number, size: string): string =>
+      `정리 후보 ${n}개를 끄면 약 ${size} 를 확보할 수 있어요.`,
+    ramNoCandidates: '정리할 후보가 없어요. 메모리를 많이 쓰는 앱을 확인해 보세요.',
+    waitingTitle: 'Claude 가 권한을 기다려요',
+    waitingManyTitle: (n: number): string => `Claude ${n}개가 권한을 기다려요`,
+    heavyTitle: (percent: number): string => `무거운 작업이 겹쳤어요 (RAM ${percent}%)`,
+    heavyBody: (labels: string): string => `${labels} 이(가) 동시에 돌고 있어요.`
+  },
   leftoverKill: {
     title: '남은 프로세스 끄기',
     message: (label: string, where: string): string => `${label} (${where}) 을(를) 끌까요?`,

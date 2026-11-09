@@ -1,4 +1,14 @@
-import { app, shell, BrowserWindow, ipcMain, dialog, Tray, Menu, nativeImage } from 'electron'
+import {
+  app,
+  shell,
+  BrowserWindow,
+  ipcMain,
+  dialog,
+  Tray,
+  Menu,
+  nativeImage,
+  Notification
+} from 'electron'
 import { join } from 'path'
 import { cpus, homedir } from 'os'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
@@ -10,7 +20,7 @@ import {
   REFRESH_INTERVALS,
   type Settings
 } from '../shared/settings'
-import { IPC } from '../shared/ipc'
+import { IPC, type NavigateTarget } from '../shared/ipc'
 import { text } from '../shared/text'
 import { mkdirSync, readdirSync, rmSync } from 'fs'
 import { sample, toPlatform } from './collect/sample'
@@ -25,6 +35,7 @@ import type { Sessions } from './sessions'
 import { createScheduler } from './scheduler'
 import { createKiller, type KillConfirm } from './kill'
 import { createDiskManager, createRepoMemory, snapshotWorktrees } from './disk'
+import { createNotifier, type Notice } from './notifier'
 import { localUrlFor } from './open'
 import { createDotIcon, createTrayController, encodePng, LEVEL_COLORS } from './tray'
 import type { MemoryLevel } from '../shared/types'
@@ -89,7 +100,45 @@ const scheduler = createScheduler({
   onSnapshot: (snapshot) => {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.snapshot, snapshot)
     trayController?.update(snapshot)
+    notifier.update(snapshot)
   }
+})
+
+/** 창을 열고(없으면 만들고) 화면에 보여 줄 곳을 알린다. 창이 아직 로딩 중이면 다 뜬 뒤에 보낸다. */
+function navigate(target: NavigateTarget): void {
+  showWindow()
+  const window = mainWindow
+  if (!window || window.isDestroyed()) return
+  const send = (): void => {
+    if (!window.isDestroyed()) window.webContents.send(IPC.navigate, target)
+  }
+  if (window.webContents.isLoading()) window.webContents.once('did-finish-load', send)
+  else send()
+}
+
+/** 보낸 알림을 붙잡아 둔다(가비지 컬렉션되면 Windows 에서 눌러도 반응하지 않는다). */
+const notices = new Set<Notification>()
+function showNotice(notice: Notice): void {
+  if (!Notification.isSupported()) return
+  const note = new Notification({ title: notice.title, body: notice.body })
+  notices.add(note)
+  const forget = (): void => {
+    notices.delete(note)
+  }
+  note.on('click', () => {
+    forget()
+    navigate({ page: 'dashboard', key: notice.target })
+  })
+  note.on('close', forget)
+  note.show()
+}
+
+const notifier = createNotifier({
+  show: showNotice,
+  settings: () => settings.notify,
+  isFocused: () =>
+    !!mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible() && mainWindow.isFocused(),
+  now: Date.now
 })
 
 function showWindow(): void {
