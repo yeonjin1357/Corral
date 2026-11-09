@@ -225,12 +225,12 @@ export function tableFor(tab: TabKey, s: DashboardSnapshot): Table {
         columns: [
           { id: 'name', label: c.project, width: 220 },
           { id: 'port', label: c.port, width: 124 },
-          { id: 'branch', label: c.branch, width: 240 },
-          { id: 'status', label: c.status, width: 200 },
+          { id: 'branch', label: c.branch, width: 200 },
+          { id: 'status', label: c.status, width: 170 },
           { id: 'clients', label: c.clients, width: 64, align: 'right' },
           { id: 'cpu', label: c.cpu, width: 72, align: 'right' },
           { id: 'memory', label: c.memory, width: 96, align: 'right' },
-          { id: 'process', label: c.process, width: 160 }
+          { id: 'process', label: c.process, width: 140 }
         ],
         sort: { id: 'port', dir: 'asc' },
         rows: s.servers.map((p) => ({

@@ -545,7 +545,7 @@ const NOTICES_URL = `${REPO_URL}/blob/main/THIRD_PARTY_NOTICES.md`
         <div v-else-if="page === 'claude'" class="space-y-5">
           <Card size="sm">
             <CardHeader
-              ><CardTitle>{{ S.groups.hook }}</CardTitle></CardHeader
+              ><CardTitle>{{ text.ui.hook.title }}</CardTitle></CardHeader
             >
             <CardContent>
               <p
