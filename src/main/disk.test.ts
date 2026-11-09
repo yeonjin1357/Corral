@@ -5,7 +5,7 @@ import { createDiskManager, createRepoMemory, measureDir, type DiskDeps } from '
 import { createGitFixture, type GitFixture } from './testing/gitFixture'
 import { blankSnapshot } from '../shared/snapshot'
 import type { KillConfirm } from './kill'
-import type { DashboardSnapshot, PortRow, RawSample } from '../shared/types'
+import type { AgentRow, DashboardSnapshot, PortRow, RawSample } from '../shared/types'
 
 const LINK_TYPE = process.platform === 'win32' ? 'junction' : 'dir'
 
@@ -108,7 +108,11 @@ describe('createDiskManager (실제 git)', () => {
       settings: () => ({ dependencyDirs: ['node_modules'], extraRepos: [] }),
       knownRepos: () => [join(fx.main, '.git')],
       latest: () => blankSnapshot(1),
-      resample: async (): Promise<RawSample> => ({ processes: [], tcp: [] }),
+      resample: async (): Promise<RawSample> => ({
+        processes: [],
+        tcp: [],
+        collectMode: 'helper-dll'
+      }),
       confirm: vi.fn(async () => true),
       now: () => 1000,
       onChange: () => {},
@@ -291,8 +295,122 @@ describe('createDiskManager (실제 git)', () => {
     await manager.scan()
     expect(await manager.remove(gone)).toEqual({
       status: 'failed',
-      message: '지우지 못한 폴더가 있어요(파일을 쓰는 프로그램이 있을 수 있어요): node_modules'
+      message:
+        '지우지 못한 폴더가 있어요(파일을 쓰는 프로그램이 있을 수 있어요): node_modules. 일부만 지워졌을 수 있으니 이 워크트리를 다시 쓰려면 의존성을 다시 설치해 주세요.'
     })
     expect(manager.report().rows).toHaveLength(1)
+  }, 60000)
+
+  test('확인 창을 띄운 사이 그 워크트리를 쓰기 시작하면(확인 뒤 다시 보기) 지우지 않는다', async () => {
+    const using: RawSample = {
+      processes: [
+        {
+          pid: 77,
+          ppid: 1,
+          name: 'npm.exe',
+          commandLine: 'npm install',
+          memoryBytes: 1,
+          startedAt: 1
+        }
+      ],
+      tcp: [],
+      cwds: { 77: gone },
+      collectMode: 'helper-dll'
+    }
+    const samples: RawSample[] = [{ processes: [], tcp: [], collectMode: 'helper-dll' }, using]
+    const d = deps({ resample: async () => samples.shift() ?? using })
+    const manager = createDiskManager(d)
+    await manager.scan()
+    expect(await manager.remove(gone)).toEqual({
+      status: 'failed',
+      message: '이 워크트리를 쓰는 프로세스가 있어 지우지 않았어요: npm.exe (PID 77)'
+    })
+    expect(d.confirm).toHaveBeenCalledTimes(1)
+    expect(await exists(join(gone, 'node_modules'))).toBe(true)
+  }, 60000)
+
+  test('상위 폴더에서 일하는 에이전트가 있으면 사용 중으로 보고 지우지 않는다', async () => {
+    const agent = {
+      pid: 5000,
+      tool: 'claude',
+      worktree: { root: fx.dir, branch: 'main', isLinkedWorktree: false },
+      startedAt: 1,
+      memoryBytes: 1,
+      descendantCount: 0,
+      state: 'idle',
+      stateSource: 'cpu',
+      cpuPercent: 0
+    } as AgentRow
+    const manager = createDiskManager(
+      deps({ latest: () => ({ ...blankSnapshot(1), agents: [agent] }) })
+    )
+    expect((await manager.scan()).rows[0].inUse).toBe(true)
+    expect((await manager.remove(gone)).status).toBe('failed')
+    expect(await exists(join(gone, 'node_modules'))).toBe(true)
+  }, 60000)
+
+  test('작업 폴더를 모르는 에이전트가 있으면(그 에이전트가 쓰고 있을 수 있어) 지우지 않는다', async () => {
+    const agent = {
+      pid: 5000,
+      tool: 'codex',
+      worktree: null,
+      startedAt: 1,
+      memoryBytes: 1,
+      descendantCount: 0,
+      state: 'idle',
+      stateSource: 'cpu',
+      cpuPercent: 0
+    } as AgentRow
+    const d = deps({ latest: () => ({ ...blankSnapshot(1), agents: [agent] }) })
+    const manager = createDiskManager(d)
+    await manager.scan()
+    expect(await manager.remove(gone)).toEqual({
+      status: 'failed',
+      message:
+        '작업 폴더를 모르는 에이전트가 있어 지우지 않았어요. 그 에이전트가 이 워크트리를 쓰고 있을 수 있어요.'
+    })
+    expect(d.confirm).not.toHaveBeenCalled()
+  }, 60000)
+
+  test('수집이 모든 작업 폴더를 읽지 못하면(macOS 등) 지우기 직전에 전체 작업 폴더를 따로 읽어 확인한다', async () => {
+    const partial: RawSample = {
+      processes: [
+        { pid: 55, ppid: 1, name: 'zsh', commandLine: '-zsh', memoryBytes: 1, startedAt: 1 }
+      ],
+      tcp: [],
+      collectMode: 'darwin'
+    }
+    const fullCwds = vi.fn(async () => ({ 55: join(gone, 'src') }))
+    const manager = createDiskManager(deps({ resample: async () => partial, fullCwds }))
+    await manager.scan()
+    expect(await manager.remove(gone)).toEqual({
+      status: 'failed',
+      message: '이 워크트리를 쓰는 프로세스가 있어 지우지 않았어요: zsh (PID 55)'
+    })
+    expect(fullCwds).toHaveBeenCalled()
+  }, 60000)
+
+  test('작업 폴더를 확인할 수 없는 수집 방식이면 확인 창에 그 사실을 알린다', async () => {
+    const d = deps({ resample: async () => ({ processes: [], tcp: [], collectMode: 'safe' }) })
+    const manager = createDiskManager(d)
+    await manager.scan()
+    await manager.remove(gone)
+    expect((d.confirm.mock.calls[0][0] as KillConfirm).detail).toContain(
+      '이 PC 에서는 프로세스의 작업 폴더를 모두 확인할 수 없어'
+    )
+  }, 60000)
+
+  test('잠긴 워크트리(다른 도구가 쓰는 중)는 대상이 아니다', async () => {
+    fx.git(fx.main, 'worktree', 'lock', gone)
+    expect((await createDiskManager(deps()).scan()).rows).toEqual([])
+  }, 60000)
+
+  test('저장소 하나를 읽지 못해도 다른 저장소는 보여 준다', async () => {
+    const manager = createDiskManager(
+      deps({ knownRepos: () => [join(fx.dir, 'no-such-repo', '.git'), join(fx.main, '.git')] })
+    )
+    const report = await manager.scan()
+    expect(report.error).toBeNull()
+    expect(report.rows.map((r) => r.worktreeRoot)).toEqual([gone])
   }, 60000)
 })

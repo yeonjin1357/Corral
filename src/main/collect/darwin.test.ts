@@ -3,6 +3,7 @@ import {
   parseLsofOutput,
   parseLsofCwd,
   lsofCwdArgv,
+  allCwdsDarwin,
   sampleDarwin,
   PS_STATS_ARGV,
   PS_ARGS_ARGV,
@@ -40,6 +41,18 @@ describe('작업 폴더(cwd)', () => {
     await sampleDarwin(run)
     expect(run).toHaveBeenCalledTimes(4)
     expect(envs).toEqual(Array(4).fill({ LC_ALL: 'en_US.UTF-8' }))
+  })
+
+  test('allCwdsDarwin: 지우기 직전 확인용으로 이 사용자의 모든 프로세스 작업 폴더를 한 번에 묻는다', async () => {
+    const calls: string[][] = []
+    const run = async (argv: string[]): Promise<CommandResult> => {
+      calls.push(argv)
+      return { stdout: 'p55\nfcwd\nn/Users/dev/wt-a/src\n', stderr: '', exitCode: 0 }
+    }
+    expect(await allCwdsDarwin(run, 501)).toEqual({ 55: '/Users/dev/wt-a/src' })
+    expect(calls).toEqual([['/usr/sbin/lsof', '-a', '-d', 'cwd', '-Fpn', '-w', '-u', '501']])
+    const failing = async (): Promise<CommandResult> => ({ stdout: '', stderr: 'x', exitCode: 2 })
+    expect(await allCwdsDarwin(failing, 501)).toBeNull()
   })
 
   test('포트를 연 pid 만 쉼표로 묶어 한 번에 묻는다', () => {

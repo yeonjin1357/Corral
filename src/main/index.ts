@@ -28,6 +28,7 @@ import { text } from '../shared/text'
 import { mkdirSync, readdirSync, rmSync } from 'fs'
 import { sample, toPlatform } from './collect/sample'
 import { configureWindowsSampler, nativeHelperDllName } from './collect/windows'
+import { allCwdsDarwin } from './collect/darwin'
 import { readMemory } from './collect/memory'
 import { resolveProcessWorktrees, resolveWorktree } from './collect/worktree'
 import { collectOptionsFrom, createCollector } from './collector'
@@ -216,6 +217,8 @@ const disk = createDiskManager({
   resample: () =>
     platform ? sample(platform) : Promise.reject(new Error(text.unsupportedPlatform)),
   confirm: (o) => confirmDialog(o),
+  // macOS 수집은 포트를 연 프로세스·에이전트의 작업 폴더만 읽어, 지우기 직전에 전체를 한 번 읽는다.
+  fullCwds: platform === 'darwin' ? () => allCwdsDarwin() : undefined,
   now: Date.now,
   onChange: (report) => {
     const latest = scheduler.latest()
@@ -332,7 +335,7 @@ async function saveSettings(next: unknown): Promise<Settings> {
   const diskChanged =
     JSON.stringify([before.dependencyDirs, before.extraRepos]) !==
     JSON.stringify([saved.settings.dependencyDirs, saved.settings.extraRepos])
-  if (diskChanged) void disk.scan()
+  if (diskChanged) void disk.scan({ manual: true })
   return saved.settings
 }
 
@@ -362,7 +365,9 @@ function registerIpc(): void {
     void scheduler.refreshNow()
     return result
   })
-  ipcMain.handle(IPC.diskScan, async (event) => (fromMainWindow(event.sender) ? disk.scan() : null))
+  ipcMain.handle(IPC.diskScan, async (event) =>
+    fromMainWindow(event.sender) ? disk.scan({ manual: true }) : null
+  )
   ipcMain.handle(IPC.diskRemove, async (event, root: unknown) => {
     if (!fromMainWindow(event.sender)) return { status: 'failed', message: text.killResult.invalid }
     const result = await disk.remove(typeof root === 'string' ? root : '')

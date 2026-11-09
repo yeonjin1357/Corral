@@ -139,6 +139,11 @@ export interface DiskDeps {
   onChange: (report: DiskReport) => void
   /** 기본 fs.rm(재귀, 링크는 따라가지 않음). 테스트에서 바꿔 끼운다. */
   removeDir?: (path: string) => Promise<void>
+  /**
+   * 모든 프로세스의 작업 폴더(macOS: lsof). 수집이 일부 프로세스의 작업 폴더만 읽는 경우,
+   * 지우기 직전에 그 워크트리 안에 있는 셸·도구를 알아보는 데 쓴다. 없으면 null.
+   */
+  fullCwds?: () => Promise<Record<number, string> | null>
 }
 
 function errorCode(e: unknown): string | undefined {
@@ -170,8 +175,21 @@ export function processUsing(
   return null
 }
 
+/** 이 수집 방식은 모든 프로세스의 작업 폴더를 읽는다(Windows 보조 코드). */
+function hasAllCwds(sample: RawSample): boolean {
+  return sample.collectMode === 'helper-dll' || sample.collectMode === 'helper-memory'
+}
+
+/** git 이 없거나(ENOENT) macOS 명령줄 도구가 없는 경우(xcrun 오류). */
+function isGitMissing(e: unknown): boolean {
+  if (errorCode(e) === 'ENOENT') return true
+  const message = e instanceof Error ? e.message : String(e)
+  return /xcrun: error|no developer tools|CommandLineTools/i.test(message)
+}
+
 export function createDiskManager(deps: DiskDeps): {
-  scan(): Promise<DiskReport>
+  /** manual 이 아니면(주기 실행) git 이 없다고 확인된 뒤에는 다시 찾지 않는다(macOS 설치 창 반복 방지). */
+  scan(opts?: { manual?: boolean }): Promise<DiskReport>
   report(): DiskReport
   remove(worktreeRoot: string): Promise<KillResult>
 } {
@@ -183,10 +201,19 @@ export function createDiskManager(deps: DiskDeps): {
   let scannedAt: number | null = null
   let error: string | null = null
   let scanning: Promise<DiskReport> | null = null
+  let gitMissing = false
   const busy = new Set<string>()
 
+  /**
+   * 그 워크트리에서 무언가 실행 중: 스냅샷의 포트·에이전트·남은 프로세스·무거운 작업이 그 안이거나,
+   * 에이전트가 그 상위 폴더(여러 저장소를 묶은 작업 공간)에서 일한다.
+   */
   function inUse(row: DiskRow): boolean {
-    return snapshotWorktrees(deps.latest()).some((w) => agentCovers([row.worktreeRoot], w.root))
+    const latest = deps.latest()
+    if (snapshotWorktrees(latest).some((w) => agentCovers([row.worktreeRoot], w.root))) return true
+    return (latest?.agents ?? []).some(
+      (a) => !!a.worktree && agentCovers([a.worktree.root], row.worktreeRoot)
+    )
   }
 
   function report(): DiskReport {
@@ -226,32 +253,29 @@ export function createDiskManager(deps: DiskDeps): {
     const extra = await Promise.all(deps.settings().extraRepos.map((p) => gitCommonDir(p)))
     const all: string[] = []
     for (const dir of [...deps.knownRepos(), ...extra]) {
-      if (dir && !all.some((d) => samePath(d, dir))) all.push(dir)
+      // 네트워크 공유는 응답이 없으면 찾기 전체가 멈출 수 있어 보지 않는다(설정의 추가 저장소와 같은 규칙).
+      if (!dir || /^[\\/]{2}/.test(dir) || all.some((d) => samePath(d, dir))) continue
+      all.push(dir)
     }
     return all
   }
 
-  async function findRows(): Promise<DiskRow[]> {
+  /** 저장소 하나의 끝난 워크트리. 그 저장소만의 문제(지워짐·시간 초과)는 빈 목록으로, git 이 없으면 던진다. */
+  async function rowsOf(commonDir: string): Promise<DiskRow[]> {
     const found: DiskRow[] = []
-    for (const commonDir of await repoList()) {
-      let list
-      try {
-        list = await listWorktrees(commonDir)
-      } catch (e) {
-        if (errorCode(e) === 'ENOENT') throw e
-        continue // 지워진 저장소 등은 건너뛴다.
-      }
+    try {
+      const list = await listWorktrees(commonDir)
+      // 첫 항목은 메인 체크아웃(또는 bare 저장소)이라 대상이 아니다. 연결된 워크트리가 없으면 더 볼 것도 없다.
+      if (list.length < 2) return found
       const defaultRef = await defaultBranch(commonDir)
-      // 첫 항목은 메인 체크아웃(또는 bare 저장소)이라 대상이 아니다.
       for (const wt of list.slice(1)) {
-        if (wt.bare || wt.prunable || !wt.branch) continue
-        if (
-          !(await stat(wt.path).then(
-            (s) => s.isDirectory(),
-            () => false
-          ))
+        // 잠긴 워크트리는 다른 도구가 쓰는 중이라는 표시다.
+        if (wt.bare || wt.prunable || wt.locked || !wt.branch) continue
+        const isDir = await stat(wt.path).then(
+          (s) => s.isDirectory(),
+          () => false
         )
-          continue
+        if (!isDir) continue
         const evidence = await finishedEvidence(commonDir, wt, defaultRef)
         if (!evidence) continue
         const folders = await dependencyFolders(wt.path)
@@ -266,7 +290,15 @@ export function createDiskManager(deps: DiskDeps): {
           inUse: false
         })
       }
+    } catch (e) {
+      if (isGitMissing(e)) throw e
     }
+    return found
+  }
+
+  async function findRows(): Promise<DiskRow[]> {
+    const found: DiskRow[] = []
+    for (const commonDir of await repoList()) found.push(...(await rowsOf(commonDir)))
     return found
   }
 
@@ -274,12 +306,18 @@ export function createDiskManager(deps: DiskDeps): {
     try {
       rows = await findRows()
       error = null
+      gitMissing = false
       scannedAt = deps.now()
       emit()
       for (const row of rows) {
         for (const folder of row.folders) {
           if (folder.skipped) continue
-          folder.bytes = await measureCached(folder.path).catch(() => null)
+          try {
+            folder.bytes = await measureCached(folder.path)
+          } catch {
+            // 읽을 수 없는 폴더는 "재는 중"으로 남기지 않고 건너뛴다고 보인다.
+            folder.skipped = 'unreadable'
+          }
         }
         row.totalBytes = row.folders.reduce((sum, f) => sum + (f.bytes ?? 0), 0)
         emit()
@@ -287,15 +325,16 @@ export function createDiskManager(deps: DiskDeps): {
       rows.sort((a, b) => (b.totalBytes ?? 0) - (a.totalBytes ?? 0))
     } catch (e) {
       rows = []
-      error =
-        errorCode(e) === 'ENOENT'
-          ? text.disk.gitMissing
-          : text.disk.scanFailed(e instanceof Error ? e.message : String(e))
+      gitMissing = isGitMissing(e)
+      error = gitMissing
+        ? text.disk.gitMissing
+        : text.disk.scanFailed(e instanceof Error ? e.message : String(e))
     }
     return report()
   }
 
-  function scan(): Promise<DiskReport> {
+  function scan(opts: { manual?: boolean } = {}): Promise<DiskReport> {
+    if (gitMissing && !opts.manual) return Promise.resolve(report())
     if (!scanning) {
       scanning = runScan().finally(() => {
         scanning = null
@@ -306,24 +345,50 @@ export function createDiskManager(deps: DiskDeps): {
     return scanning.then(() => report())
   }
 
-  async function removeRow(row: DiskRow): Promise<KillResult> {
-    // 1) 아직 메인이 아닌 연결된 워크트리이고, 여전히 끝난 상태인지.
+  /**
+   * 지워도 되는지: 아직 메인이 아닌 연결된 워크트리이고 여전히 끝났고, 그 워크트리를 쓰는 것이 없다.
+   * 확인 창 앞뒤로 두 번 부른다(창을 띄운 사이 npm install·개발 서버·에이전트를 시작했을 수 있다).
+   */
+  async function checkRemovable(
+    row: DiskRow
+  ): Promise<{ problem: KillResult } | { allCwds: boolean }> {
     const list = await listWorktrees(row.commonDir)
     const index = list.findIndex((w) => samePath(w.path, row.worktreeRoot))
-    if (index <= 0) return { status: 'gone' }
+    if (index <= 0) return { problem: { status: 'gone' } }
     const evidence = await finishedEvidence(
       row.commonDir,
       list[index],
       await defaultBranch(row.commonDir)
     )
-    if (!evidence) return { status: 'failed', message: text.disk.notFinished }
+    if (!evidence || list[index].locked)
+      return { problem: { status: 'failed', message: text.disk.notFinished } }
 
-    // 2) 그 워크트리를 쓰는 것이 없어야 한다.
-    if (inUse(row)) return { status: 'failed', message: text.disk.inUse }
-    const user = processUsing(await deps.resample(), row.worktreeRoot)
-    if (user) return { status: 'failed', message: text.disk.inUseBy(user.name, user.pid) }
+    if (inUse(row)) return { problem: { status: 'failed', message: text.disk.inUse } }
+    // 작업 폴더를 모르는 에이전트는 이 워크트리에서 일하고 있을 수 있다(불확실하면 지우지 않는다).
+    if ((deps.latest()?.agents ?? []).some((a) => !a.worktree))
+      return { problem: { status: 'failed', message: text.disk.unknownAgent } }
 
-    // 3) 확인 창.
+    const sample = await deps.resample()
+    let allCwds = hasAllCwds(sample)
+    if (!allCwds && deps.fullCwds) {
+      const extra = await deps.fullCwds().catch(() => null)
+      if (extra) {
+        sample.cwds = { ...sample.cwds, ...extra }
+        allCwds = true
+      }
+    }
+    const user = processUsing(sample, row.worktreeRoot)
+    if (user)
+      return { problem: { status: 'failed', message: text.disk.inUseBy(user.name, user.pid) } }
+    return { allCwds }
+  }
+
+  async function removeRow(row: DiskRow): Promise<KillResult> {
+    // 1) 지워도 되는지.
+    const before = await checkRemovable(row)
+    if ('problem' in before) return before.problem
+
+    // 2) 확인 창.
     const targets = (await dependencyFolders(row.worktreeRoot)).filter((f) => !f.skipped)
     if (targets.length === 0) return { status: 'gone' }
     const known = new Map(row.folders.map((f) => [f.name, f.bytes ?? 0]))
@@ -332,12 +397,19 @@ export function createDiskManager(deps: DiskDeps): {
     const ok = await deps.confirm({
       title: text.disk.confirmTitle,
       message: text.disk.confirmMessage(basename(row.worktreeRoot), names, formatBytes(total)),
-      detail: text.disk.confirmDetail(targets.map((f) => f.path)),
+      detail: text.disk.confirmDetail(
+        targets.map((f) => f.path),
+        before.allCwds
+      ),
       buttons: [text.disk.confirm, text.kill.cancel],
       defaultId: 1,
       cancelId: 1
     })
     if (!ok) return { status: 'cancelled' }
+
+    // 3) 확인 창을 띄운 동안 시간이 지났으니 한 번 더 본다.
+    const after = await checkRemovable(row)
+    if ('problem' in after) return after.problem
 
     // 4) 지우기: 이름 규칙·경로·링크 여부를 한 번 더 본 뒤에만.
     const failed: string[] = []
@@ -355,6 +427,7 @@ export function createDiskManager(deps: DiskDeps): {
       } catch {
         // 아래에서 남았는지로 판단한다.
       }
+      sizeCache.delete(path)
       if (
         await lstat(path).then(
           () => true,
@@ -362,17 +435,21 @@ export function createDiskManager(deps: DiskDeps): {
         )
       )
         failed.push(folder.name)
-      else {
-        freed += known.get(folder.name) ?? 0
-        sizeCache.delete(path)
-      }
+      else freed += known.get(folder.name) ?? 0
     }
 
     // 5) 목록 갱신: 지울 것이 남지 않았으면 행을 뺀다.
     const remaining = (await dependencyFolders(row.worktreeRoot)).filter((f) => !f.skipped)
     if (remaining.length === 0) rows = rows.filter((r) => r !== row)
-    else
+    else {
+      // 일부만 지워졌으면 크기를 다시 잰다.
       row.folders = row.folders.filter((f) => f.skipped || remaining.some((r) => r.name === f.name))
+      for (const folder of row.folders) {
+        if (folder.skipped) continue
+        folder.bytes = await measureCached(folder.path).catch(() => null)
+      }
+      row.totalBytes = row.folders.reduce((sum, f) => sum + (f.bytes ?? 0), 0)
+    }
     emit()
     if (failed.length > 0)
       return { status: 'failed', message: text.disk.partial(failed.join(', ')) }

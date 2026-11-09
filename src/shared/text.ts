@@ -31,11 +31,17 @@ export const text = {
     confirmTitle: '의존성 폴더 지우기',
     confirmMessage: (folder: string, names: string, size: string): string =>
       `${folder} 의 ${names} 를 지울까요? 약 ${size}`,
-    confirmDetail: (paths: string[]): string =>
+    confirmDetail: (paths: string[], allCwds = true): string =>
       [
         ...paths,
         '',
-        '워크트리와 소스 코드는 그대로 두고 의존성 폴더만 지워요. 이 워크트리를 다시 쓰려면 npm install 등으로 다시 설치해야 해요.'
+        '워크트리와 소스 코드는 그대로 두고 의존성 폴더만 지워요. 이 워크트리를 다시 쓰려면 npm install 등으로 다시 설치해야 해요.',
+        ...(allCwds
+          ? []
+          : [
+              '',
+              '이 PC 에서는 프로세스의 작업 폴더를 모두 확인할 수 없어, 이 폴더 안에서 열어 둔 터미널·도구가 있는지 다 알아보지 못했어요. 쓰는 것이 없는지 확인한 뒤 지워 주세요.'
+            ])
       ].join('\n'),
     confirm: '지우기',
     removed: (names: string, size: string): string =>
@@ -45,7 +51,9 @@ export const text = {
       `이 워크트리를 쓰는 프로세스가 있어 지우지 않았어요: ${name} (PID ${pid})`,
     notFinished: '이 워크트리의 브랜치가 더는 끝난 상태가 아니라 지우지 않았어요.',
     partial: (names: string): string =>
-      `지우지 못한 폴더가 있어요(파일을 쓰는 프로그램이 있을 수 있어요): ${names}`,
+      `지우지 못한 폴더가 있어요(파일을 쓰는 프로그램이 있을 수 있어요): ${names}. 일부만 지워졌을 수 있으니 이 워크트리를 다시 쓰려면 의존성을 다시 설치해 주세요.`,
+    unknownAgent:
+      '작업 폴더를 모르는 에이전트가 있어 지우지 않았어요. 그 에이전트가 이 워크트리를 쓰고 있을 수 있어요.',
     gitMissing: 'git 을 찾지 못해 디스크 정리를 할 수 없어요. git 을 설치한 뒤 다시 시도해 주세요.',
     scanFailed: (detail: string): string => `끝난 워크트리를 찾지 못했어요: ${detail}`
   },
@@ -299,6 +307,7 @@ export const text = {
       inUseNote: '이 워크트리에서 개발 서버·에이전트 등이 실행 중이라 지울 수 없어요.',
       measuring: '재는 중…',
       link: '링크라 건너뜀',
+      unreadable: '읽을 수 없어 건너뜀',
       folders: '의존성 폴더',
       size: '크기',
       sizeSub: '(지울 수 있는 합계)',

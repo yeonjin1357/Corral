@@ -30,7 +30,7 @@ const total = computed(() =>
 )
 
 function folderSize(f: DiskFolder): string {
-  if (f.skipped) return text.ui.disk.link
+  if (f.skipped) return f.skipped === 'link' ? text.ui.disk.link : text.ui.disk.unreadable
   return f.bytes == null ? text.ui.disk.measuring : formatBytes(f.bytes)
 }
 </script>

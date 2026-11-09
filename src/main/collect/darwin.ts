@@ -183,6 +183,27 @@ type Runner = (argv: string[], opts?: CommandOptions) => Promise<CommandResult>
 /** Finder 로 켠 앱은 LANG 이 없어 ps·lsof 가 한글을 깨뜨리거나 \xNN 으로 바꾼다. UTF-8 로케일로 실행한다. */
 const UTF8_ENV = { LC_ALL: 'en_US.UTF-8' }
 
+/**
+ * 이 사용자의 모든 프로세스 작업 폴더. 수집 때는 비용 때문에 포트를 연 프로세스와 에이전트만 묻지만,
+ * 디스크 정리로 지우기 직전에는 그 워크트리 안에서 열어 둔 셸·도구를 알아보려고 한 번 모두 묻는다. 실패하면 null.
+ */
+export async function allCwdsDarwin(
+  run: Runner = runCommand,
+  uid: number = process.getuid?.() ?? 0
+): Promise<Record<number, string> | null> {
+  try {
+    const r = await run(['/usr/sbin/lsof', '-a', '-d', 'cwd', '-Fpn', '-w', '-u', String(uid)], {
+      timeoutMs: COMMAND_TIMEOUT_MS,
+      env: UTF8_ENV
+    })
+    // lsof 는 일부 프로세스를 못 읽어도 1 로 끝난다.
+    if (r.exitCode !== 0 && r.exitCode !== 1) return null
+    return parseLsofCwd(r.stdout)
+  } catch {
+    return null
+  }
+}
+
 export async function sampleDarwin(run: Runner = runCommand): Promise<RawSample> {
   const opts = { timeoutMs: COMMAND_TIMEOUT_MS, env: UTF8_ENV }
   const [stats, args, lsof] = await Promise.all([

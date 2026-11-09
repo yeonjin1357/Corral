@@ -209,8 +209,8 @@ export interface DiskFolder {
   path: string
   /** 크기(바이트). 아직 재는 중이거나 링크라 재지 않으면 null. */
   bytes: number | null
-  /** link: 폴더 자체가 링크(정션·심볼릭 링크)라 지우지 않는다. */
-  skipped?: 'link'
+  /** link: 폴더 자체가 링크(정션·심볼릭 링크)라, unreadable: 읽을 수 없어 지우지 않는다. */
+  skipped?: 'link' | 'unreadable'
 }
 
 /** 디스크 정리 대상: 끝난 연결된 워크트리 하나. */
