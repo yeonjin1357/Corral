@@ -119,7 +119,9 @@ export async function finishedEvidence(
   // for-each-ref 는 앞부분이 같은 하위 브랜치(feat → feat/x)도 돌려주므로 정확히 같은 줄만 본다.
   const line = r.stdout.split(/\r?\n/).find((l) => l.split('\t')[0] === ref)
   const [, upstreamRef = '', upstream = '', track = ''] = line?.split('\t') ?? []
-  if (!upstream) return null
+  // 원격 추적 브랜치(refs/remotes/…)를 따라가야 "원격에 올린 적 있는" 브랜치다. 로컬 브랜치를 따라가는 브랜치는
+  // 따라가던 브랜치를 지우면 [gone] 이 되지만 원격에 올린 적이 없다.
+  if (!upstream || !upstreamRef.startsWith('refs/remotes/')) return null
   if (track.includes('gone')) return 'upstreamGone'
   if (!defaultRef || upstream === defaultRef) return null
   const isAncestor = async (commit: string): Promise<boolean> =>

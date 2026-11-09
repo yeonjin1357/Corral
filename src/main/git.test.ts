@@ -185,6 +185,17 @@ describe('실제 git 저장소에서', () => {
     expect(await finishedEvidence(common, entry, 'origin/main')).toBeNull()
   })
 
+  test('로컬 브랜치를 따라가는 브랜치는 원격에 올린 적이 없으니, 따라가던 브랜치를 지워도 끝난 것이 아니다', async () => {
+    git(main, 'branch', 'feature-a', 'main')
+    const path = join(dir, 'fix')
+    git(main, 'worktree', 'add', '-b', 'fix', '--track', path, 'feature-a')
+    commit(path, 'local fix')
+    git(main, 'branch', '-D', 'feature-a')
+    const common = (await gitCommonDir(main))!
+    const entry = (await listWorktrees(common)).find((w) => w.branch === 'fix')!
+    expect(await finishedEvidence(common, entry, 'origin/main')).toBeNull()
+  })
+
   test('막 만든 워크트리(기본 브랜치와 같은 커밋)는 원격에 올렸어도 끝난 것이 아니다', async () => {
     const path = join(dir, 'fresh')
     git(main, 'worktree', 'add', '-b', 'fresh', path, 'main')
