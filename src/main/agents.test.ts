@@ -141,6 +141,27 @@ describe('CPU 로 작업 중 판단', () => {
     expect(idle.agents[0]).toMatchObject({ state: 'idle', cpuPercent: 1.9 })
   })
 
+  test('지난 샘플 뒤 2초도 안 돼 다시 재면(지금 새로고침) 짧은 구간으로 재지 않고 지난 값을 유지한다', () => {
+    const first = run([proc(5000, 1, 'claude.exe', { cpuMs: 1000 })], { now: 10_000 })
+    const steady = run([proc(5000, 1, 'claude.exe', { cpuMs: 1010 })], {
+      now: 15_000,
+      previousCpu: first.cpu
+    })
+    expect(steady.agents[0]).toMatchObject({ state: 'idle', cpuPercent: 0.2 })
+    // 0.3초 만에 다시: 그 사이 60ms 를 썼어도(20%) 작업 중으로 튀지 않는다.
+    const quick = run([proc(5000, 1, 'claude.exe', { cpuMs: 1070 })], {
+      now: 15_300,
+      previousCpu: steady.cpu
+    })
+    expect(quick.agents[0]).toMatchObject({ state: 'idle', cpuPercent: 0.2 })
+    // 다음 정상 샘플은 지난 기준(15초)부터 잰다: 5초 동안 100ms = 2%.
+    const next = run([proc(5000, 1, 'claude.exe', { cpuMs: 1110 })], {
+      now: 20_000,
+      previousCpu: quick.cpu
+    })
+    expect(next.agents[0]).toMatchObject({ state: 'working', cpuPercent: 2 })
+  })
+
   test('같은 pid 라도 시작 시각이 다르면 새 프로세스라 알 수 없음', () => {
     const first = run([proc(5000, 1, 'claude.exe', { cpuMs: 1000, startedAt: 100 })])
     const second = run([proc(5000, 1, 'claude.exe', { cpuMs: 9000, startedAt: 9000 })], {

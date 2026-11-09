@@ -5,8 +5,17 @@ import { agentToolOf, buildTree, topLevelAgentPids } from './processTree'
 /** 하위 트리 CPU 사용률이 코어 1개 기준 이 값(%) 이상이면 작업 중으로 본다. */
 export const WORKING_CPU_PERCENT = 2
 
-/** 프로세스별 지난 샘플의 누적 CPU 시간. 키는 `pid:시작 시각`(pid 재사용 구분). */
-export type CpuMemo = Map<string, { cpuMs: number; at: number }>
+/**
+ * 이보다 짧은 간격으로 다시 재면(지금 새로고침 등) CPU 사용률을 새로 계산하지 않는다.
+ * 짧은 구간은 잠깐 튄 값(예: 0.3초 동안 60ms = 20%)이 그대로 작업 중으로 보인다.
+ */
+export const MIN_CPU_WINDOW_MS = 2000
+
+/**
+ * 프로세스별 지난 샘플의 누적 CPU 시간. 키는 `pid:시작 시각`(pid 재사용 구분).
+ * 에이전트 자신의 기록에는 그때 계산한 사용률(percent)도 남겨, 짧은 간격으로 다시 잴 때 그대로 쓴다.
+ */
+export type CpuMemo = Map<string, { cpuMs: number; at: number; percent?: number | null }>
 
 function cpuKey(p: ProcessInfo): string {
   return `${p.pid}:${p.startedAt ?? ''}`
@@ -59,14 +68,25 @@ export function buildAgents(input: {
       .map((d) => tree.byPid.get(d))
       .filter((p): p is ProcessInfo => p !== undefined)
     const members = [self, ...descendants]
-    for (const m of members) if (m.cpuMs != null) cpu.set(cpuKey(m), { cpuMs: m.cpuMs, at: now })
-
     const prevSelf = previousCpu.get(cpuKey(self))
     let cpuPercent: number | null = null
-    if (prevSelf && self.cpuMs != null && now > prevSelf.at) {
-      const delta = cpuDelta(members, previousCpu, prevSelf.at)
-      // 표시값과 판단이 어긋나지 않게(1.98% 를 2.0% 로 보이며 쉬는 중이라 하지 않게) 내려서 쓴다.
-      cpuPercent = Math.floor((delta * 1000) / (now - prevSelf.at)) / 10
+    if (prevSelf && now - prevSelf.at < MIN_CPU_WINDOW_MS) {
+      // 짧은 간격: 지난 값을 그대로 쓰고, 기준(지난 샘플)을 넘겨 다음 샘플이 충분히 긴 구간으로 재게 한다.
+      cpuPercent = prevSelf.percent ?? null
+      for (const m of members) {
+        const prev = previousCpu.get(cpuKey(m))
+        if (prev) cpu.set(cpuKey(m), prev)
+        else if (m.cpuMs != null) cpu.set(cpuKey(m), { cpuMs: m.cpuMs, at: now })
+      }
+    } else {
+      if (prevSelf && self.cpuMs != null && now > prevSelf.at) {
+        const delta = cpuDelta(members, previousCpu, prevSelf.at)
+        // 표시값과 판단이 어긋나지 않게(1.98% 를 2.0% 로 보이며 쉬는 중이라 하지 않게) 내려서 쓴다.
+        cpuPercent = Math.floor((delta * 1000) / (now - prevSelf.at)) / 10
+      }
+      for (const m of members) if (m.cpuMs != null) cpu.set(cpuKey(m), { cpuMs: m.cpuMs, at: now })
+      if (self.cpuMs != null)
+        cpu.set(cpuKey(self), { cpuMs: self.cpuMs, at: now, percent: cpuPercent })
     }
 
     const worktree = worktrees.get(pid) ?? null
