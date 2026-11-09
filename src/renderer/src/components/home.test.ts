@@ -118,13 +118,19 @@ describe('남은 프로세스 개수', () => {
         leftovers: [leftoverRow({ pid: 1 }), leftoverRow({ pid: 2, agentInWorktree: true })]
       })
     )
-    const col = w.findAll('.stats .col')[3]
+    const col = w.findAll('.stats .stat')[3]
     expect(col.get('.num').text()).toBe('1')
     expect(col.get('.num').classes()).toContain('text-warning')
     expect(col.text()).toContain('에이전트 워크트리 1')
     const onlyAgent = home(snapshot({ leftovers: [leftoverRow({ agentInWorktree: true })] }))
-    const c2 = onlyAgent.findAll('.stats .col')[3]
+    const c2 = onlyAgent.findAll('.stats .stat')[3]
     expect(c2.get('.num').text()).toBe('0')
     expect(c2.get('.num').classes()).toContain('text-secondary')
   })
+})
+
+test('숫자 칸은 좁은 창에서 한 줄에 3개, 넓은 창에서 한 줄에 모두', () => {
+  const cols = home(snapshot()).findAll('.stats .stat')
+  expect(cols).toHaveLength(5)
+  for (const c of cols) expect(c.classes()).toEqual(expect.arrayContaining(['col-4', 'col-lg']))
 })

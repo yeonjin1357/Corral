@@ -56,22 +56,22 @@ const runtime = computed(() =>
 
     <div class="shadow-box big-padding text-center stats">
       <div class="row">
-        <div class="col">
+        <div class="col-6 col-lg stat">
           <h4>{{ text.ui.detail.memory }}</h4>
           <p>{{ text.ui.detail.current }}</p>
           <span class="num">{{ formatBytes(row.memoryBytes) }}</span>
         </div>
-        <div class="col">
+        <div class="col-6 col-lg stat">
           <h4>{{ text.ui.detail.pid }}</h4>
           <p>({{ row.processName }})</p>
           <span class="num">{{ row.pid }}</span>
         </div>
-        <div class="col">
+        <div class="col-6 col-lg stat">
           <h4>{{ text.ui.detail.children }}</h4>
           <p>{{ text.ui.detail.current }}</p>
           <span class="num">{{ row.descendantPids.length }}</span>
         </div>
-        <div class="col">
+        <div class="col-6 col-lg stat">
           <h4>{{ text.ui.leftover.runtime }}</h4>
           <p>{{ text.ui.detail.current }}</p>
           <span class="num">{{ runtime }}</span>
@@ -124,7 +124,7 @@ const runtime = computed(() =>
 .stats {
   padding: 10px;
 
-  .col {
+  .stat {
     margin: 20px 0;
   }
 
@@ -133,5 +133,10 @@ const runtime = computed(() =>
     font-weight: normal;
     color: inherit;
   }
+}
+
+/* 좁은 창에서 한글 제목(하위 프로세스 등)이 글자 중간에서 꺾이지 않게 */
+.stats h4 {
+  word-break: keep-all;
 }
 </style>

@@ -89,7 +89,7 @@ describe('DiskDetail', () => {
     expect(w.get('h1').text()).toBe('old-feature')
     expect(w.get('.url').text()).toBe('C:\\work\\old-feature')
     expect(w.get('.note').text()).toContain('원격 브랜치가 지워졌어요')
-    expect(w.findAll('.stats .col')[0].text()).toContain('1.5 GB')
+    expect(w.findAll('.stats .stat')[0].text()).toContain('1.5 GB')
     expect(w.get('.folders tbody').text()).toContain('C:\\work\\old-feature\\node_modules')
     await w.get('.btn-remove').trigger('click')
     expect(w.emitted('remove')).toHaveLength(1)

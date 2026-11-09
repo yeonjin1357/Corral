@@ -126,7 +126,7 @@ describe('HomeView', () => {
       global: { stubs }
     })
     expect(w.get('h1').text()).toBe('한눈에 보기')
-    const cols = w.findAll('.stats .col').map((c) => c.text().replace(/\s+/g, ' ').trim())
+    const cols = w.findAll('.stats .stat').map((c) => c.text().replace(/\s+/g, ' ').trim())
     expect(cols[0]).toContain('RAM')
     expect(cols[0]).toContain('82%')
     expect(cols[0]).toContain('26.3 GB / 32.0 GB')
@@ -205,7 +205,7 @@ describe('PortDetail', () => {
     expect(w.get('.url').text()).toBe('http://localhost:3000')
     expect(w.get('.status-badge').text()).toBe('사용 중')
     expect(w.get('.status-badge').classes()).toContain('bg-primary')
-    const stats = w.findAll('.stats .col').map((c) => c.text().replace(/\s+/g, ' ').trim())
+    const stats = w.findAll('.stats .stat').map((c) => c.text().replace(/\s+/g, ' ').trim())
     expect(stats[0]).toContain('메모리')
     expect(stats[0]).toContain('1.2 GB')
     expect(stats[1]).toContain('연결')

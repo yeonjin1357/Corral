@@ -110,7 +110,7 @@ test('getLatest 가 늦게 와도 먼저 받은 더 새 스냅샷을 덮어쓰�
   fake.push(snapshot({ agents: [agentRow({ pid: 1 }), agentRow({ pid: 2 })] }))
   fake.resolveLatest()
   await flushPromises()
-  const agents = w.findAll('.stats .col').find((c) => c.text().includes('에이전트'))!
+  const agents = w.findAll('.stats .stat').find((c) => c.text().includes('에이전트'))!
   expect(agents.get('.num').text()).toBe('2')
 })
 

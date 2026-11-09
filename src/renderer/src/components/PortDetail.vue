@@ -81,27 +81,27 @@ const branchKind = computed(() =>
 
     <div class="shadow-box big-padding text-center stats">
       <div class="row">
-        <div class="col">
+        <div class="col-4 col-lg stat">
           <h4>{{ text.ui.detail.memory }}</h4>
           <p>{{ text.ui.detail.current }}</p>
           <span class="num">{{ formatBytes(row.memoryBytes) }}</span>
         </div>
-        <div class="col">
+        <div class="col-4 col-lg stat">
           <h4>{{ text.ui.detail.clients }}</h4>
           <p>{{ text.ui.detail.current }}</p>
           <span class="num">{{ row.clientCount }}</span>
         </div>
-        <div class="col">
+        <div class="col-4 col-lg stat">
           <h4>{{ text.ui.detail.pid }}</h4>
           <p>({{ row.processName }})</p>
           <span class="num">{{ row.pid }}</span>
         </div>
-        <div class="col">
+        <div class="col-4 col-lg stat">
           <h4>{{ text.ui.detail.children }}</h4>
           <p>{{ text.ui.detail.current }}</p>
           <span class="num">{{ row.descendantPids.length }}</span>
         </div>
-        <div class="col">
+        <div class="col-4 col-lg stat">
           <h4>{{ text.ui.detail.branch }}</h4>
           <p>{{ branchKind }}</p>
           <span class="num branch text-truncate" :title="row.worktree?.branch ?? ''">
@@ -150,7 +150,7 @@ const branchKind = computed(() =>
 .stats {
   padding: 10px;
 
-  .col {
+  .stat {
     margin: 20px 0;
     min-width: 0;
   }
@@ -166,5 +166,10 @@ const branchKind = computed(() =>
   .branch {
     display: block;
   }
+}
+
+/* 좁은 창에서 한글 제목(하위 프로세스 등)이 글자 중간에서 꺾이지 않게 */
+.stats h4 {
+  word-break: keep-all;
 }
 </style>

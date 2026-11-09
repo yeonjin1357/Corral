@@ -60,19 +60,19 @@ function folderSize(f: DiskFolder): string {
 
     <div class="shadow-box big-padding text-center stats">
       <div class="row">
-        <div class="col">
+        <div class="col stat">
           <h4>{{ text.ui.disk.size }}</h4>
           <p>{{ text.ui.disk.sizeSub }}</p>
           <span class="num">{{ total }}</span>
         </div>
-        <div class="col">
+        <div class="col stat">
           <h4>{{ text.ui.disk.branch }}</h4>
           <p>{{ text.ui.detail.linkedWorktree }}</p>
           <span class="num text-truncate d-block" :title="row.branch ?? ''">
             {{ row.branch ?? text.detached }}
           </span>
         </div>
-        <div class="col">
+        <div class="col stat">
           <h4>{{ text.ui.disk.evidenceTitle }}</h4>
           <p>{{ text.ui.disk.evidenceSub }}</p>
           <span class="num">{{ text.ui.disk.evidence[row.evidence] }}</span>
@@ -132,7 +132,7 @@ function folderSize(f: DiskFolder): string {
 .stats {
   padding: 10px;
 
-  .col {
+  .stat {
     margin: 20px 0;
     min-width: 0;
   }
@@ -152,5 +152,10 @@ table {
   font-size: 12px;
   color: $secondary-text;
   word-break: break-all;
+}
+
+/* 좁은 창에서 한글 제목(하위 프로세스 등)이 글자 중간에서 꺾이지 않게 */
+.stats h4 {
+  word-break: keep-all;
 }
 </style>

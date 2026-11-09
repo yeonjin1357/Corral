@@ -85,7 +85,7 @@ const groups = computed(() =>
 
     <div class="shadow-box big-padding text-center mb-3 stats">
       <div class="row">
-        <div class="col">
+        <div class="col-4 col-lg stat">
           <h3>{{ text.ui.home.ram }}</h3>
           <span class="num" :class="ramClass">{{ ramPercent }}</span>
           <p v-if="hasMemory" class="sub">
@@ -97,14 +97,14 @@ const groups = computed(() =>
             }}
           </p>
         </div>
-        <div class="col">
+        <div class="col-4 col-lg stat">
           <h3>{{ text.ui.home.ports }}</h3>
           <span class="num" :class="{ 'text-secondary': snapshot.ports.length === 0 }">
             {{ snapshot.ports.length }}
           </span>
           <p class="sub">{{ text.ui.home.current }}</p>
         </div>
-        <div class="col">
+        <div class="col-4 col-lg stat">
           <h3>{{ text.ui.home.agents }}</h3>
           <span class="num" :class="{ 'text-secondary': snapshot.agents.length === 0 }">
             {{ snapshot.agents.length }}
@@ -112,7 +112,7 @@ const groups = computed(() =>
           <p v-if="waiting > 0" class="sub text-warning">{{ text.ui.home.waiting(waiting) }}</p>
           <p v-else class="sub">{{ text.ui.home.current }}</p>
         </div>
-        <div class="col">
+        <div class="col-4 col-lg stat">
           <h3>{{ text.ui.home.leftovers }}</h3>
           <span class="num" :class="leftovers ? 'text-warning' : 'text-secondary'">
             {{ leftovers }}
@@ -122,7 +122,7 @@ const groups = computed(() =>
           </p>
           <p v-else class="sub">{{ text.ui.home.current }}</p>
         </div>
-        <div class="col">
+        <div class="col-4 col-lg stat">
           <h3>{{ text.ui.home.candidates }}</h3>
           <span class="num" :class="candidates ? 'text-danger' : 'text-secondary'">
             {{ candidates }}
@@ -313,5 +313,16 @@ table {
 .stats h3 {
   font-size: 1.4rem;
   word-break: keep-all;
+}
+
+/* 좁은 창에서는 한 줄에 3칸씩 두 줄이 되므로 줄 사이를 띄우고 제목을 조금 줄인다. */
+.stats .stat {
+  margin: 8px 0;
+}
+
+@media (max-width: 991.98px) {
+  .stats h3 {
+    font-size: 1.15rem;
+  }
 }
 </style>

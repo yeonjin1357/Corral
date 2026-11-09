@@ -285,7 +285,7 @@ describe('AgentDetail', () => {
         },
         global: { stubs }
       })
-        .findAll('.stats .col')[3]
+        .findAll('.stats .stat')[3]
         .text()
     expect(at('win32')).toContain('1.6%')
     expect(at('win32')).toContain('(전체 CPU 대비)')
@@ -308,7 +308,7 @@ describe('AgentDetail', () => {
     const badge = w.get('.status-badge')
     expect(badge.text()).toBe('작업 중')
     expect(badge.classes()).toContain('bg-primary')
-    const stats = w.findAll('.stats .col').map((c) => c.text())
+    const stats = w.findAll('.stats .stat').map((c) => c.text())
     expect(stats[0]).toContain('600 MB')
     expect(stats[1]).toContain('3')
     expect(stats[2]).toContain('2시간 5분')
@@ -328,7 +328,7 @@ describe('AgentDetail', () => {
       },
       global: { stubs }
     })
-    expect(w.findAll('.stats .col')[3].text()).toContain('—')
+    expect(w.findAll('.stats .stat')[3].text()).toContain('—')
     expect(w.text()).toContain('Codex 는 CPU 사용량으로만 작업 중인지 짐작해요.')
   })
 
@@ -354,7 +354,7 @@ describe('LeftoverDetail', () => {
     expect(w.get('h1').text()).toBe('Playwright 브라우저')
     expect(w.get('.url').text()).toBe('작업 폴더 모름')
     expect(w.get('.command-line').text()).toBe('chrome.exe --remote-debugging-pipe --headless')
-    const stats = w.findAll('.stats .col').map((c) => c.text())
+    const stats = w.findAll('.stats .stat').map((c) => c.text())
     expect(stats[0]).toContain('900 MB')
     expect(stats[1]).toContain('7000')
     expect(stats[1]).toContain('chrome.exe')
@@ -386,7 +386,7 @@ describe('HomeView 2단계', () => {
       hook: HOOK_OFF
     })
     const w = mount(HomeView, { props: { snapshot: s, ramHistory: [] }, global: { stubs } })
-    const cols = w.findAll('.stats .col').map((c) => c.text())
+    const cols = w.findAll('.stats .stat').map((c) => c.text())
     expect(cols[2]).toContain('에이전트')
     expect(cols[2]).toContain('2')
     expect(cols[2]).toContain('권한 대기 1')
