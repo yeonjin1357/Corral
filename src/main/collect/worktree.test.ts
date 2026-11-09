@@ -76,7 +76,8 @@ describe('createWorktreeResolver', () => {
     expect(await resolveWorktree(join(repo, 'src'))).toEqual({
       root: repo,
       branch: 'develop',
-      isLinkedWorktree: false
+      isLinkedWorktree: false,
+      commonDir: join(repo, '.git')
     })
   })
 
@@ -85,6 +86,8 @@ describe('createWorktreeResolver', () => {
     const gitdir = join(repo, '.git', 'worktrees', 'wt-a')
     await mkdir(gitdir, { recursive: true })
     await writeFile(join(gitdir, 'HEAD'), 'ref: refs/heads/feat/a\n')
+    // git 이 연결된 worktree 의 gitdir 에 남기는 공용 폴더 위치(상대 경로).
+    await writeFile(join(gitdir, 'commondir'), '../..\n')
     const wt = join(tmp, 'wt-a')
     await mkdir(wt)
     await writeFile(join(wt, '.git'), `gitdir: ${gitdir}\n`)
@@ -92,7 +95,8 @@ describe('createWorktreeResolver', () => {
     expect(await resolveWorktree(wt)).toEqual({
       root: wt,
       branch: 'feat/a',
-      isLinkedWorktree: true
+      isLinkedWorktree: true,
+      commonDir: join(repo, '.git')
     })
   })
 
@@ -105,10 +109,12 @@ describe('createWorktreeResolver', () => {
     await mkdir(wt)
     await writeFile(join(wt, '.git'), 'gitdir: ../shop-web/.git/worktrees/wt-b\n')
     const { resolveWorktree } = createWorktreeResolver({ homeDir: join(tmp, 'home') })
+    // commondir 파일이 없으면 .git/worktrees/<이름> 의 두 단계 위를 공용 폴더로 본다.
     expect(await resolveWorktree(wt)).toEqual({
       root: wt,
       branch: 'feat/b',
-      isLinkedWorktree: true
+      isLinkedWorktree: true,
+      commonDir: join(repo, '.git')
     })
   })
 
@@ -124,7 +130,8 @@ describe('createWorktreeResolver', () => {
     expect(await resolveWorktree(sub)).toEqual({
       root: sub,
       branch: 'main',
-      isLinkedWorktree: false
+      isLinkedWorktree: false,
+      commonDir: join(repo, '.git', 'modules', 'lib')
     })
   })
 
@@ -138,7 +145,12 @@ describe('createWorktreeResolver', () => {
     const dir = join(tmp, 'nohead')
     await mkdir(join(dir, '.git'), { recursive: true })
     const { resolveWorktree } = createWorktreeResolver({ homeDir: join(tmp, 'home') })
-    expect(await resolveWorktree(dir)).toEqual({ root: dir, branch: null, isLinkedWorktree: false })
+    expect(await resolveWorktree(dir)).toEqual({
+      root: dir,
+      branch: null,
+      isLinkedWorktree: false,
+      commonDir: join(dir, '.git')
+    })
   })
 
   test('git 이 없으면 null', async () => {

@@ -50,6 +50,8 @@ export interface WorktreeInfo {
   root: string
   branch: string | null
   isLinkedWorktree: boolean
+  /** git 공용 폴더(메인 체크아웃의 `.git`). 디스크 정리에서 저장소를 기억하는 데 쓴다. 모르면 없음. */
+  commonDir?: string | null
 }
 
 /**
@@ -174,6 +176,8 @@ export interface DashboardSnapshot {
   agents: AgentRow[]
   /** Claude 훅 연동 상태. 아직 모르면 null. */
   hook: ClaudeHookStatus | null
+  /** 디스크 정리(끝난 워크트리의 의존성 폴더). 아직 찾지 않았으면 null. */
+  disk: DiskReport | null
   groups: GroupUsage[]
   /** 다른 앱 중 메모리를 많이 쓰는 것 상위 5개. */
   topApps: AppUsage[]
@@ -185,6 +189,38 @@ export interface DashboardSnapshot {
   stale: boolean
   error: string | null
   collectMode?: CollectMode | null
+}
+
+/** 끝난 워크트리의 의존성 폴더 하나. */
+export interface DiskFolder {
+  name: string
+  path: string
+  /** 크기(바이트). 아직 재는 중이거나 링크라 재지 않으면 null. */
+  bytes: number | null
+  /** link: 폴더 자체가 링크(정션·심볼릭 링크)라 지우지 않는다. */
+  skipped?: 'link'
+}
+
+/** 디스크 정리 대상: 끝난 연결된 워크트리 하나. */
+export interface DiskRow {
+  worktreeRoot: string
+  commonDir: string
+  branch: string | null
+  /** 끝났다고 본 근거: upstreamGone 원격 브랜치가 지워짐, merged 기본 브랜치에 머지됨. */
+  evidence: 'upstreamGone' | 'merged'
+  folders: DiskFolder[]
+  /** 지울 수 있는 폴더 크기의 합(재는 중이면 null). */
+  totalBytes: number | null
+  /** 그 워크트리에서 개발 서버·에이전트 등이 실행 중(지우지 않는다). */
+  inUse: boolean
+}
+
+export interface DiskReport {
+  rows: DiskRow[]
+  /** 마지막으로 다 찾은 시각. 아직 한 번도 안 찾았으면 null. */
+  scannedAt: number | null
+  scanning: boolean
+  error: string | null
 }
 
 /** 무거운 작업(설정의 명령 패턴에 맞는 프로세스 트리 하나). 경고만 하고 끄지 않는다. */

@@ -17,6 +17,8 @@ const api: PitwallApi = {
   killPort: (port, pid) => ipcRenderer.invoke(IPC.killPort, { port, pid }),
   killLeftover: (pid) => ipcRenderer.invoke(IPC.killLeftover, pid),
   killMany: (keys) => ipcRenderer.invoke(IPC.killMany, keys),
+  diskScan: () => ipcRenderer.invoke(IPC.diskScan),
+  diskRemove: (worktreeRoot) => ipcRenderer.invoke(IPC.diskRemove, worktreeRoot),
   refreshNow: () => ipcRenderer.invoke(IPC.refreshNow),
   openPort: (port) => ipcRenderer.invoke(IPC.openPort, port),
   claudeHook: {

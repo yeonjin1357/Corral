@@ -56,6 +56,12 @@ test('반올림해서 1024MB 가 되면 GB 로 표시', () => {
   expect(formatBytes(1024 * MB - 1)).toBe('1.0 GB')
 })
 
+test('1MB 미만은 KB(최소 1 KB)', () => {
+  expect(formatBytes(3000)).toBe('3 KB')
+  expect(formatBytes(10)).toBe('1 KB')
+  expect(formatBytes(1024 * 1024 - 600)).toBe('1023 KB')
+})
+
 test('0·음수·NaN 은 0 MB', () => {
   expect(formatBytes(0)).toBe('0 MB')
   expect(formatBytes(-5)).toBe('0 MB')

@@ -24,6 +24,7 @@ import { createClaudeIntegration } from './claudeIntegration'
 import type { Sessions } from './sessions'
 import { createScheduler } from './scheduler'
 import { createKiller, type KillConfirm } from './kill'
+import { createDiskManager, createRepoMemory, snapshotWorktrees } from './disk'
 import { localUrlFor } from './open'
 import { createDotIcon, createTrayController, encodePng, LEVEL_COLORS } from './tray'
 import type { MemoryLevel } from '../shared/types'
@@ -72,9 +73,14 @@ const collector = platform
     })
   : null
 
+/** 디스크 정리에서 살펴볼 저장소(에이전트·개발 서버를 본 저장소를 기억한다). */
+const repoMemory = createRepoMemory(join(app.getPath('userData'), 'state.json'))
+
 async function collect(): Promise<DashboardSnapshot> {
   if (!collector) throw new Error(text.unsupportedPlatform)
-  return collector.collect()
+  const snapshot = await collector.collect()
+  repoMemory.add(snapshotWorktrees(snapshot).map((w) => w.commonDir))
+  return { ...snapshot, disk: disk.report() }
 }
 
 const scheduler = createScheduler({
@@ -136,6 +142,23 @@ async function confirmDialog(options: KillConfirm): Promise<boolean> {
       : await dialog.showMessageBox(box)
   return result.response === 0
 }
+
+/** 디스크 정리: 시작 1분 뒤, 30분마다, 화면에서 요청할 때, 관련 설정을 바꿀 때 다시 찾는다. */
+const DISK_FIRST_SCAN_MS = 60 * 1000
+const DISK_SCAN_EVERY_MS = 30 * 60 * 1000
+const disk = createDiskManager({
+  settings: () => settings,
+  knownRepos: () => repoMemory.list(),
+  latest: () => scheduler.latest(),
+  resample: () =>
+    platform ? sample(platform) : Promise.reject(new Error(text.unsupportedPlatform)),
+  confirm: (o) => confirmDialog(o),
+  now: Date.now,
+  onChange: (report) => {
+    const latest = scheduler.latest()
+    if (latest) scheduler.publish({ ...latest, disk: report })
+  }
+})
 
 const killer = createKiller({
   latest: () => scheduler.latest(),
@@ -208,9 +231,14 @@ function applySettings(next: Settings): void {
 
 async function saveSettings(next: unknown): Promise<Settings> {
   const normalized = normalizeSettings(next)
+  const before = settings
   const saved = await updateConfig(app.getPath('userData'), (c) => ({ ...c, settings: normalized }))
   applySettings(saved.settings)
   void scheduler.refreshNow()
+  const diskChanged =
+    JSON.stringify([before.dependencyDirs, before.extraRepos]) !==
+    JSON.stringify([saved.settings.dependencyDirs, saved.settings.extraRepos])
+  if (diskChanged) void disk.scan()
   return saved.settings
 }
 
@@ -237,6 +265,13 @@ function registerIpc(): void {
   ipcMain.handle(IPC.killMany, async (event, keys: unknown) => {
     if (!fromMainWindow(event.sender)) return { status: 'failed', message: text.killResult.invalid }
     const result = await killer.killMany(keys as string[])
+    void scheduler.refreshNow()
+    return result
+  })
+  ipcMain.handle(IPC.diskScan, async (event) => (fromMainWindow(event.sender) ? disk.scan() : null))
+  ipcMain.handle(IPC.diskRemove, async (event, root: unknown) => {
+    if (!fromMainWindow(event.sender)) return { status: 'failed', message: text.killResult.invalid }
+    const result = await disk.remove(typeof root === 'string' ? root : '')
     void scheduler.refreshNow()
     return result
   })
@@ -338,6 +373,9 @@ if (!app.requestSingleInstanceLock()) {
     // 설정을 먼저 읽어 첫 수집부터 사용자 기준값·주기를 쓴다.
     settings = (await loadConfig(app.getPath('userData'))).settings
     scheduler.setIntervals(REFRESH_INTERVALS[settings.refresh])
+    await repoMemory.load()
+    setTimeout(() => void disk.scan(), DISK_FIRST_SCAN_MS)
+    setInterval(() => void disk.scan(), DISK_SCAN_EVERY_MS)
 
     app.on('browser-window-created', (_, window) => {
       optimizer.watchWindowShortcuts(window)

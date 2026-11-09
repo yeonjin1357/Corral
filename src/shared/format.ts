@@ -35,6 +35,8 @@ const GiB = 1024 * MiB
 
 export function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return '0 MB'
+  // 작은 폴더·프로세스가 "0 MB" 로 보이지 않게 1MB 미만은 KB 로.
+  if (bytes < MiB - 512) return `${Math.max(1, Math.round(bytes / 1024))} KB`
   const mb = Math.round(bytes / MiB)
   if (mb < 1024) return `${mb} MB`
   return `${(bytes / GiB).toFixed(1)} GB`

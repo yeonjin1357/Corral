@@ -1,4 +1,4 @@
-import type { ClaudeHookStatus, DashboardSnapshot, KillResult } from './types'
+import type { ClaudeHookStatus, DashboardSnapshot, DiskReport, KillResult } from './types'
 import type { Settings } from './settings'
 
 /** 메인 ↔ 렌더러 IPC 채널 이름. */
@@ -8,6 +8,8 @@ export const IPC = {
   killPort: 'pitwall:kill-port',
   killLeftover: 'pitwall:kill-leftover',
   killMany: 'pitwall:kill-many',
+  diskScan: 'pitwall:disk-scan',
+  diskRemove: 'pitwall:disk-remove',
   refreshNow: 'pitwall:refresh-now',
   openPort: 'pitwall:open-port',
   claudeHookStatus: 'pitwall:claude-hook-status',
@@ -36,6 +38,10 @@ export interface PitwallApi {
   killLeftover(pid: number): Promise<KillResult>
   /** 정리 추천 중 고른 것(선택 키)을 확인 창 하나로 끈다. */
   killMany(keys: string[]): Promise<KillResult>
+  /** 디스크 정리: 끝난 워크트리를 다시 찾고 크기를 잰다(끝날 때까지 기다린다). */
+  diskScan(): Promise<DiskReport | null>
+  /** 끝난 워크트리의 의존성 폴더를 지운다(메인에서 확인 창). */
+  diskRemove(worktreeRoot: string): Promise<KillResult>
   /** 다음 주기를 기다리지 않고 지금 수집한다(끝날 때까지 기다린다). */
   refreshNow(): Promise<void>
   /** 목록에 있는 개발 서버 포트를 기본 브라우저로 연다. 열었으면 true. */

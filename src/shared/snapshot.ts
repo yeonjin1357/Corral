@@ -11,6 +11,7 @@ export function blankSnapshot(takenAt: number): DashboardSnapshot {
     heavyOverlap: false,
     agents: [],
     hook: null,
+    disk: null,
     groups: [],
     topApps: [],
     agentProcessCount: 0,

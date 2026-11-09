@@ -27,6 +27,28 @@ export const text = {
     busy: (n: number): string => `${n}개는 이미 처리 중이라 건너뛰었어요.`,
     failed: (n: number): string => `${n}개는 끄지 못했어요(권한이 없거나 이미 끝남).`
   },
+  disk: {
+    confirmTitle: '의존성 폴더 지우기',
+    confirmMessage: (folder: string, names: string, size: string): string =>
+      `${folder} 의 ${names} 를 지울까요? 약 ${size}`,
+    confirmDetail: (paths: string[]): string =>
+      [
+        ...paths,
+        '',
+        '워크트리와 소스 코드는 그대로 두고 의존성 폴더만 지워요. 이 워크트리를 다시 쓰려면 npm install 등으로 다시 설치해야 해요.'
+      ].join('\n'),
+    confirm: '지우기',
+    removed: (names: string, size: string): string =>
+      `${names} 를 지웠어요. 약 ${size} 를 확보했어요.`,
+    inUse: '이 워크트리에서 개발 서버·에이전트 등이 실행 중이라 지우지 않았어요.',
+    inUseBy: (name: string, pid: number): string =>
+      `이 워크트리를 쓰는 프로세스가 있어 지우지 않았어요: ${name} (PID ${pid})`,
+    notFinished: '이 워크트리의 브랜치가 더는 끝난 상태가 아니라 지우지 않았어요.',
+    partial: (names: string): string =>
+      `지우지 못한 폴더가 있어요(파일을 쓰는 프로그램이 있을 수 있어요): ${names}`,
+    gitMissing: 'git 을 찾지 못해 디스크 정리를 할 수 없어요. git 을 설치한 뒤 다시 시도해 주세요.',
+    scanFailed: (detail: string): string => `끝난 워크트리를 찾지 못했어요: ${detail}`
+  },
   leftoverKill: {
     title: '남은 프로세스 끄기',
     message: (label: string, where: string): string => `${label} (${where}) 을(를) 끌까요?`,

@@ -282,6 +282,7 @@ export function buildSnapshot(input: {
     heavyOverlap: heavyJobs.length >= 2 && memory.level !== 'normal',
     agents: [],
     hook: null,
+    disk: null,
     groups,
     topApps: topAppsOf(rest),
     agentProcessCount,

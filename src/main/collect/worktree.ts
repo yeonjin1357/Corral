@@ -75,7 +75,12 @@ async function readGitAt(dir: string): Promise<WorktreeInfo | null> {
     return null
   }
   if (info.isDirectory()) {
-    return { root: dir, branch: await readBranch(dotGit), isLinkedWorktree: false }
+    return {
+      root: dir,
+      branch: await readBranch(dotGit),
+      isLinkedWorktree: false,
+      commonDir: dotGit
+    }
   }
   if (!info.isFile()) return null
   const text = await readFile(dotGit, 'utf8').catch(() => '')
@@ -83,7 +88,26 @@ async function readGitAt(dir: string): Promise<WorktreeInfo | null> {
   if (!m) return null
   const gitDir = nodePath.resolve(dir, m[1])
   const isLinkedWorktree = /[\\/]worktrees[\\/][^\\/]+[\\/]?$/.test(gitDir)
-  return { root: dir, branch: await readBranch(gitDir), isLinkedWorktree }
+  return {
+    root: dir,
+    branch: await readBranch(gitDir),
+    isLinkedWorktree,
+    commonDir: await readCommonDir(gitDir, isLinkedWorktree)
+  }
+}
+
+/**
+ * 저장소 공용 폴더(메인 체크아웃의 `.git`). 연결된 worktree 는 gitdir 의 `commondir` 파일이 가리키고,
+ * 없으면 `.git/worktrees/<이름>` 의 두 단계 위다. 서브모듈은 gitdir 자신.
+ */
+async function readCommonDir(gitDir: string, isLinkedWorktree: boolean): Promise<string> {
+  try {
+    const rel = (await readFile(nodePath.join(gitDir, 'commondir'), 'utf8')).trim()
+    if (rel) return nodePath.resolve(gitDir, rel)
+  } catch {
+    // 파일이 없으면 아래 규칙으로.
+  }
+  return isLinkedWorktree ? nodePath.resolve(gitDir, '..', '..') : gitDir
 }
 
 export interface WorktreeResolverOptions {

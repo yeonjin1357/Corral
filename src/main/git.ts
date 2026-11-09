@@ -1,0 +1,144 @@
+import { normalize, resolve } from 'path'
+import { runCommand, type CommandResult } from './collect/runCommand'
+
+/** 디스크 정리에 쓰는 git 명령. 네트워크(fetch)는 하지 않고 이 PC 에 있는 정보만 읽는다. */
+
+const GIT_TIMEOUT_MS = 10000
+/** 비밀번호 창을 띄우지 않고, 출력은 영어로(`[gone]` 같은 표시를 읽기 위해), 읽기만 하므로 잠금 파일도 만들지 않는다. */
+const GIT_ENV = { GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C', LANG: 'C', GIT_OPTIONAL_LOCKS: '0' }
+/** 기본 브랜치의 첫 부모 줄기를 이만큼까지만 본다(아주 오래된 저장소에서 시간이 길어지지 않게). */
+const FIRST_PARENT_LIMIT = 20000
+
+function git(args: string[]): Promise<CommandResult> {
+  return runCommand(['git', ...args], { timeoutMs: GIT_TIMEOUT_MS, env: GIT_ENV })
+}
+
+export interface GitWorktree {
+  path: string
+  head: string | null
+  /** `refs/heads/` 를 뺀 브랜치 이름. detached·bare 면 null. */
+  branch: string | null
+  bare: boolean
+  locked: boolean
+  /** 폴더가 사라져 `git worktree prune` 으로 정리될 수 있는 항목. */
+  prunable: boolean
+}
+
+/** `git worktree list --porcelain` 출력. 첫 항목이 메인 체크아웃(또는 bare 저장소)이다. */
+export function parseWorktreeList(porcelain: string): GitWorktree[] {
+  const result: GitWorktree[] = []
+  let current: GitWorktree | null = null
+  for (const line of porcelain.split(/\r?\n/)) {
+    if (line.startsWith('worktree ')) {
+      current = {
+        path: normalize(line.slice('worktree '.length)),
+        head: null,
+        branch: null,
+        bare: false,
+        locked: false,
+        prunable: false
+      }
+      result.push(current)
+    } else if (!current) continue
+    else if (line.startsWith('HEAD ')) current.head = line.slice(5).trim()
+    else if (line.startsWith('branch '))
+      current.branch = line.slice(7).replace(/^refs\/heads\//, '')
+    else if (line === 'bare') current.bare = true
+    else if (line === 'locked' || line.startsWith('locked ')) current.locked = true
+    else if (line === 'prunable' || line.startsWith('prunable ')) current.prunable = true
+  }
+  return result
+}
+
+/** 이 폴더가 속한 저장소의 git 공용 폴더(메인 체크아웃의 `.git`). 저장소가 아니면 null. */
+export async function gitCommonDir(path: string): Promise<string | null> {
+  let r = await git(['-C', path, 'rev-parse', '--path-format=absolute', '--git-common-dir'])
+  // git 2.31 미만은 --path-format 을 몰라 상대 경로로 받아 직접 붙인다.
+  if (r.exitCode !== 0 && /path-format/.test(r.stderr))
+    r = await git(['-C', path, 'rev-parse', '--git-common-dir'])
+  if (r.exitCode !== 0) return null
+  const out = r.stdout.trim()
+  return out ? normalize(resolve(path, out)) : null
+}
+
+export async function listWorktrees(commonDir: string): Promise<GitWorktree[]> {
+  const r = await git(['--git-dir', commonDir, 'worktree', 'list', '--porcelain'])
+  if (r.exitCode !== 0) throw new Error(r.stderr.trim() || `git worktree list (${r.exitCode})`)
+  return parseWorktreeList(r.stdout)
+}
+
+/** 원격 기본 브랜치(`origin/HEAD` → `origin/main` → `origin/master`). 모르면 null. */
+export async function defaultBranch(commonDir: string): Promise<string | null> {
+  const head = await git([
+    '--git-dir',
+    commonDir,
+    'symbolic-ref',
+    '--quiet',
+    '--short',
+    'refs/remotes/origin/HEAD'
+  ])
+  if (head.exitCode === 0 && head.stdout.trim()) return head.stdout.trim()
+  for (const name of ['origin/main', 'origin/master']) {
+    const r = await git([
+      '--git-dir',
+      commonDir,
+      'rev-parse',
+      '--verify',
+      '--quiet',
+      `refs/remotes/${name}`
+    ])
+    if (r.exitCode === 0) return name
+  }
+  return null
+}
+
+export type FinishedEvidence = 'upstreamGone' | 'merged'
+
+/**
+ * 워크트리의 브랜치가 끝났다고 볼 근거(보수적으로).
+ * - upstreamGone: 원격에 올렸던 브랜치가 원격에서 지워졌다(머지 후 삭제가 흔하다, 스쿼시 머지 포함).
+ * - merged: 원격에 올린 브랜치의 커밋이 기본 브랜치에 들어갔고, 그 커밋이 기본 브랜치의 첫 부모 줄기에 있지 않다
+ *   (첫 부모 줄기에 있으면 머지된 것이 아니라 기본 브랜치에서 막 갈라져 나온 것이다).
+ * 원격에 올린 적 없는 브랜치, detached HEAD, 기본 브랜치를 따라가는 브랜치, 기본 브랜치를 모르면 null.
+ */
+export async function finishedEvidence(
+  commonDir: string,
+  wt: GitWorktree,
+  defaultRef: string | null
+): Promise<FinishedEvidence | null> {
+  if (!wt.branch || !wt.head) return null
+  const ref = `refs/heads/${wt.branch}`
+  const r = await git([
+    '--git-dir',
+    commonDir,
+    'for-each-ref',
+    '--format=%(refname)%09%(upstream:short)%09%(upstream:track)',
+    ref
+  ])
+  if (r.exitCode !== 0) return null
+  // for-each-ref 는 앞부분이 같은 하위 브랜치(feat → feat/x)도 돌려주므로 정확히 같은 줄만 본다.
+  const line = r.stdout.split(/\r?\n/).find((l) => l.split('\t')[0] === ref)
+  const [, upstream = '', track = ''] = line?.split('\t') ?? []
+  if (!upstream) return null
+  if (track.includes('gone')) return 'upstreamGone'
+  if (!defaultRef || upstream === defaultRef) return null
+  const ancestor = await git([
+    '--git-dir',
+    commonDir,
+    'merge-base',
+    '--is-ancestor',
+    wt.head,
+    defaultRef
+  ])
+  if (ancestor.exitCode !== 0) return null
+  const firstParents = await git([
+    '--git-dir',
+    commonDir,
+    'rev-list',
+    '--first-parent',
+    `--max-count=${FIRST_PARENT_LIMIT}`,
+    defaultRef
+  ])
+  if (firstParents.exitCode !== 0) return null
+  return firstParents.stdout.split(/\r?\n/).includes(wt.head) ? null : 'merged'
+}
