@@ -21,8 +21,11 @@ import {
 import type { Platform } from '../shared/types'
 import { HOOK_PATH } from './hookServer'
 
-/** pitwall 이 넣은 훅인지 알아보는 표시(명령의 URL 경로에 들어 있다). */
-export const HOOK_MARKER = 'pitwall-hook'
+/**
+ * pitwall 이 넣은 훅인지 알아보는 표시: 명령 안의 `127.0.0.1:<포트>/pitwall-hook/claude` 주소.
+ * 'pitwall-hook' 글자만 보면 다른 도구의 훅(예: 이름이 비슷한 스크립트)을 pitwall 것으로 알고 지울 수 있다.
+ */
+const HOOK_URL = new RegExp(`127\\.0\\.0\\.1:\\d{1,5}${HOOK_PATH.replace(/\//g, '\\/')}(?![\\w-])`)
 
 export const CLAUDE_HOOK_EVENTS = [
   'SessionStart',
@@ -98,10 +101,8 @@ export function hookCommand(
 function isPitwallHook(hook: unknown): boolean {
   if (!hook || typeof hook !== 'object') return false
   const h = hook as { command?: unknown; args?: unknown }
-  if (typeof h.command === 'string' && h.command.includes(HOOK_MARKER)) return true
-  return (
-    Array.isArray(h.args) && h.args.some((a) => typeof a === 'string' && a.includes(HOOK_MARKER))
-  )
+  if (typeof h.command === 'string' && HOOK_URL.test(h.command)) return true
+  return Array.isArray(h.args) && h.args.some((a) => typeof a === 'string' && HOOK_URL.test(a))
 }
 
 type Json = Record<string, unknown>

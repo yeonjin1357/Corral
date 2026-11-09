@@ -143,10 +143,20 @@ describe('설정 글 고치기', () => {
     const execForm = {
       type: 'command',
       command: 'cmd.exe',
-      args: ['/c', 'curl .../pitwall-hook/claude']
+      args: ['/c', 'curl.exe -s http://127.0.0.1:45123/pitwall-hook/claude?t=x >nul & exit /b 0']
     }
     const text = JSON.stringify({ hooks: { Stop: [{ hooks: [execForm] }] } })
     expect(parse(removePitwallHooks(text))).toEqual({})
+  })
+
+  test('다른 도구 명령에 pitwall-hook 이라는 글자만 있으면 pitwall 훅이 아니다(지우지 않는다)', () => {
+    const lookalikes = [
+      { type: 'command', command: 'echo pitwall-hook' },
+      { type: 'command', command: 'node ~/scripts/pitwall-hook-logger.js' },
+      { type: 'command', command: 'curl https://example.com/pitwall-hook/claude' }
+    ]
+    const text = JSON.stringify({ hooks: { Stop: [{ hooks: lookalikes }] } }, null, 2)
+    expect(parse(removePitwallHooks(text))).toEqual({ hooks: { Stop: [{ hooks: lookalikes }] } })
   })
 
   test.each([
