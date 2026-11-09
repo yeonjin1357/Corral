@@ -23,6 +23,7 @@ import HomeView from './components/HomeView.vue'
 import PortDetail from './components/PortDetail.vue'
 import AgentDetail from './components/AgentDetail.vue'
 import LeftoverDetail from './components/LeftoverDetail.vue'
+import SettingsView from './components/SettingsView.vue'
 
 const snapshot = ref<DashboardSnapshot | null>(null)
 const history = ref(emptyHistory())
@@ -34,6 +35,8 @@ const actionError = ref<string | null>(null)
 const hookBusy = ref(false)
 const hookNotice = ref<{ text: string; failed: boolean } | null>(null)
 const settings = ref<Settings>(DEFAULT_SETTINGS)
+const page = ref<'dashboard' | 'settings'>('dashboard')
+const version = ref<string | null>(null)
 const intervals = computed(() => REFRESH_INTERVALS[settings.value.refresh])
 
 function receive(s: DashboardSnapshot): void {
@@ -52,12 +55,16 @@ onMounted(async () => {
   unsubscribeSettings = window.pitwall.settings.onChange((s) => (settings.value = s))
   // 알림·트레이에서 온 이동 요청: 그 항목을 고르거나(없으면 한눈에 보기) 다른 화면으로.
   unsubscribeNavigate = window.pitwall.onNavigate((target) => {
-    if (target.page === 'dashboard') {
-      if (target.key) select(target.key)
-      else goHome()
+    if (target.page === 'settings') {
+      page.value = 'settings'
+      return
     }
+    page.value = 'dashboard'
+    if (target.key) select(target.key)
+    else goHome()
   })
   void window.pitwall.settings.get().then((s) => (settings.value = s))
+  void window.pitwall.appInfo().then((info) => (version.value = info.version))
   const latest = await window.pitwall.getLatest()
   // 창이 늦게 열려 놓친 스냅샷만 채운다. 그 사이 받은 더 새 스냅샷은 덮어쓰지 않는다.
   if (!snapshot.value && latest) receive(latest)
@@ -94,9 +101,18 @@ watch(hasSelection, (has) => {
 })
 
 function goHome(): void {
+  page.value = 'dashboard'
   selectedKey.value = null
   notice.value = null
 }
+
+async function saveSettings(next: Settings): Promise<Settings> {
+  const saved = await window.pitwall.settings.save(next)
+  settings.value = saved
+  return saved
+}
+
+const pickFolder = (): Promise<string | null> => window.pitwall.settings.pickFolder()
 
 function select(key: string): void {
   if (key !== selectedKey.value) notice.value = null
@@ -179,17 +195,21 @@ async function hookAction(action: 'enable' | 'disable'): Promise<void> {
     <StatusBadge v-if="snapshot?.stale" class="me-3" tone="warning" :text="text.ui.stale" />
     <ul class="nav nav-pills me-4">
       <li class="nav-item me-2">
-        <a href="#" class="nav-link active" @click.prevent="goHome">
+        <a
+          href="#"
+          class="nav-link nav-dashboard"
+          :class="{ active: page === 'dashboard' }"
+          @click.prevent="goHome"
+        >
           <FontAwesomeIcon :icon="faGaugeHigh" /> {{ text.ui.nav.dashboard }}
         </a>
       </li>
       <li class="nav-item">
         <a
           href="#"
-          class="nav-link disabled"
-          aria-disabled="true"
-          :title="text.ui.settingsLater"
-          @click.prevent
+          class="nav-link nav-settings"
+          :class="{ active: page === 'settings' }"
+          @click.prevent="page = 'settings'"
         >
           <FontAwesomeIcon :icon="faGear" /> {{ text.ui.nav.settings }}
         </a>
@@ -207,7 +227,17 @@ async function hookAction(action: 'enable' | 'disable'): Promise<void> {
     >
       {{ hookNotice.text }}
     </p>
-    <p v-if="!snapshot" class="text-secondary">{{ text.ui.loading }}</p>
+    <SettingsView
+      v-if="page === 'settings'"
+      :settings="settings"
+      :hook="snapshot?.hook ?? null"
+      :hook-busy="hookBusy"
+      :version="version"
+      :save="saveSettings"
+      :pick-folder="pickFolder"
+      @hook="hookAction"
+    />
+    <p v-else-if="!snapshot" class="text-secondary">{{ text.ui.loading }}</p>
     <div v-else class="row">
       <div class="col-12 col-md-5 col-xl-4 ps-0">
         <div>

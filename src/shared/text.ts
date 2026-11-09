@@ -144,7 +144,11 @@ export const text = {
       waiting > 0 ? `에이전트 ${n}개 (권한 대기 ${waiting})` : `에이전트 ${n}개`,
     candidates: (n: number): string => `정리 후보 ${n}개`,
     leftovers: (n: number): string => `남은 프로세스 ${n}개`,
+    heavy: (n: number, overlap: boolean): string =>
+      overlap ? `무거운 작업 ${n}개 · 겹침(RAM 부족)` : `무거운 작업 ${n}개`,
+    disk: (size: string): string => `디스크 정리 가능 ${size}`,
     open: '앱 열기',
+    settings: '설정',
     quit: '종료',
     tooltip: (percent: number): string => `pitwall — RAM ${percent}%`,
     stillRunning:
@@ -157,6 +161,67 @@ export const text = {
     nextStage: '(다음 단계)',
     none: '—',
     nav: { dashboard: '대시보드', settings: '설정' },
+    settings: {
+      title: '설정',
+      menu: {
+        general: '일반',
+        thresholds: '기준값',
+        heavy: '무거운 작업',
+        notifications: '알림',
+        disk: '디스크 정리',
+        claude: 'Claude 연동',
+        about: '정보'
+      },
+      save: '저장',
+      saved: '저장했어요.',
+      saveFailed: (detail: string): string => `저장하지 못했어요: ${detail}`,
+      refresh: '갱신 주기',
+      refreshChoices: { fast: '빠르게', normal: '보통', saver: '절약' },
+      refreshHelp: (openSec: number, closedSec: number): string =>
+        `창이 열려 있으면 ${openSec}초, 닫혀 있으면 ${closedSec}초마다 확인해요. 빠를수록 pitwall 이 CPU 를 조금 더 써요.`,
+      theme: '화면 테마',
+      themeChoices: { light: '밝게', dark: '어둡게', auto: '자동(OS 따라)' },
+      launchAtLogin: '로그인할 때 트레이로 시작',
+      launchAtLoginHelp: '설치한 앱에서만 적용돼요(개발 실행에서는 등록하지 않아요).',
+      updateCheck: '새 버전 확인',
+      updateCheckHelp:
+        'GitHub 에서 새 버전이 있는지 확인해요. pitwall 이 하는 유일한 인터넷 접속이에요.',
+      ramWarn: 'RAM 경고 기준',
+      ramWarnHelp: '이 이상이면 RAM 이 주황색이 되고, 무거운 작업이 겹칠 때 알려요.',
+      ramDanger: 'RAM 위험 기준',
+      ramDangerHelp: '이 이상이면 빨간색이 되고 RAM 부족 알림을 보내요. 경고 기준보다 커야 해요.',
+      idlePort: '안 쓰는 포트 기준',
+      idlePortHelp:
+        '에이전트가 없는 워크트리의 포트가 이 시간 동안 연결이 없으면 정리 후보, 브라우저 탭만 연결돼 있으면 확인해볼 것으로 표시해요.',
+      minutes: '분',
+      heavyPatterns: '무거운 명령',
+      heavyHelp:
+        '한 줄에 하나씩. 명령 이름(예: vue-tsc)이나 이름과 인자(예: vite build). 둘 이상 겹치고 RAM 이 경고 기준 이상이면 알려요. 막거나 기다리게 하지는 않아요.',
+      resetDefaults: '기본값으로',
+      notifyRamLow: 'RAM 부족',
+      notifyRamLowHelp: 'RAM 이 위험 기준을 넘으면, 끄면 확보할 수 있는 양과 함께 알려요.',
+      notifyClaudeWaiting: 'Claude 권한 대기',
+      notifyClaudeWaitingHelp:
+        'Claude 연동을 켜 두었을 때, 세션이 권한을 기다리기 시작하면 알려요.',
+      notifyHeavy: '무거운 작업 겹침',
+      notifyHeavyHelp: '무거운 작업이 둘 이상 겹치고 RAM 이 경고 기준 이상이 되면 알려요.',
+      dependencyDirs: '지울 의존성 폴더 이름',
+      dependencyDirsHelp:
+        '한 줄에 하나씩. 끝난 워크트리 바로 아래의 이 이름 폴더만 지워요(예: node_modules). 경로나 .git 은 쓸 수 없어요.',
+      extraRepos: '더 살펴볼 저장소',
+      extraReposHelp:
+        '에이전트·개발 서버를 본 저장소는 저절로 기억해요. 그 밖에 끝난 워크트리를 찾아볼 저장소를 여기 더해요.',
+      addRepo: '폴더 추가',
+      removeRepo: '빼기',
+      noRepos: '더한 저장소가 없어요.',
+      settingsFile: (path: string): string => `설정 파일: ${path}`,
+      version: (v: string): string => `pitwall ${v}`,
+      repo: 'GitHub 저장소',
+      license: '라이선스: MIT',
+      notices: '가져온 오픈소스와 라이선스',
+      description:
+        '로컬 AI 코딩 에이전트·개발 서버 포트·RAM·디스크를 한눈에 보고 정리하는 트레이 앱이에요.'
+    },
     refresh: '지금 새로고침',
     list: {
       search: '검색…',

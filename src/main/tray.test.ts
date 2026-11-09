@@ -8,7 +8,7 @@ import {
   createTrayController,
   type TrayLike
 } from './tray'
-import type { AgentRow, DashboardSnapshot } from '../shared/types'
+import type { AgentRow, DashboardSnapshot, HeavyJobRow } from '../shared/types'
 import { blankSnapshot } from '../shared/snapshot'
 
 const GB = 1024 ** 3
@@ -43,7 +43,7 @@ function snap(over: Partial<DashboardSnapshot> = {}): DashboardSnapshot {
   }
 }
 
-const actions = { open: vi.fn(), quit: vi.fn() }
+const actions = { open: vi.fn(), settings: vi.fn(), quit: vi.fn() }
 const labels = (items: Electron.MenuItemConstructorOptions[]): (string | undefined)[] =>
   items.map((i) => (i.type === 'separator' ? '---' : i.label))
 
@@ -56,6 +56,7 @@ describe('buildTrayMenu', () => {
       '에이전트 0개',
       '---',
       '앱 열기',
+      '설정',
       '---',
       '종료'
     ])
@@ -111,6 +112,7 @@ describe('buildTrayMenu', () => {
       'RAM 확인 중…',
       '---',
       '앱 열기',
+      '설정',
       '---',
       '종료'
     ])
@@ -129,12 +131,60 @@ describe('buildTrayMenu', () => {
     expect(labels(buildTrayMenu(failed, actions))[0]).toBe('RAM 정보를 가져오지 못했어요')
   })
 
-  test('앱 열기·종료는 각각의 동작을 부른다', () => {
+  test('앱 열기·설정·종료는 각각의 동작을 부른다', () => {
+    actions.open.mockClear()
     const items = buildTrayMenu(snap(), actions)
     items.find((i) => i.label === '앱 열기')!.click!({} as never, undefined, {} as never)
+    items.find((i) => i.label === '설정')!.click!({} as never, undefined, {} as never)
     items.find((i) => i.label === '종료')!.click!({} as never, undefined, {} as never)
     expect(actions.open).toHaveBeenCalledTimes(1)
+    expect(actions.settings).toHaveBeenCalledTimes(1)
     expect(actions.quit).toHaveBeenCalledTimes(1)
+  })
+
+  test('무거운 작업(겹치면 표시)·디스크 정리 가능 크기 줄, 디스크 줄을 누르면 앱을 연다', () => {
+    const job = (pid: number): HeavyJobRow => ({
+      pid,
+      label: 'vue-tsc',
+      processName: 'node.exe',
+      commandLine: 'vue-tsc',
+      worktree: null,
+      memoryBytes: 1,
+      descendantPids: [],
+      startedAt: 1
+    })
+    const one = labels(buildTrayMenu(snap({ heavyJobs: [job(1)] }), actions))
+    expect(one).toContain('무거운 작업 1개')
+    const overlap = buildTrayMenu(
+      snap({ heavyJobs: [job(1), job(2)], heavyOverlap: true }),
+      actions
+    )
+    expect(labels(overlap)).toContain('무거운 작업 2개 · 겹침(RAM 부족)')
+    const disk = buildTrayMenu(
+      snap({
+        disk: {
+          rows: [
+            {
+              worktreeRoot: 'C:\\work\\old',
+              commonDir: 'C:\\work\\shop-web\\.git',
+              branch: 'feat/old',
+              evidence: 'upstreamGone',
+              folders: [],
+              totalBytes: 1.5 * GB,
+              inUse: false
+            }
+          ],
+          scannedAt: 1,
+          scanning: false,
+          error: null
+        }
+      }),
+      actions
+    )
+    const line = disk.find((i) => i.label === '디스크 정리 가능 1.5 GB')!
+    actions.open.mockClear()
+    line.click!({} as never, undefined, {} as never)
+    expect(actions.open).toHaveBeenCalledTimes(1)
   })
 })
 
@@ -193,7 +243,11 @@ describe('createTrayController', () => {
     tray: ReturnType<typeof fakeTray>
     makeIcon: ReturnType<typeof vi.fn>
     buildMenu: ReturnType<typeof vi.fn>
-    actions: { open: ReturnType<typeof vi.fn>; quit: ReturnType<typeof vi.fn> }
+    actions: {
+      open: ReturnType<typeof vi.fn>
+      settings: ReturnType<typeof vi.fn>
+      quit: ReturnType<typeof vi.fn>
+    }
     controller: ReturnType<typeof createTrayController>
   }
 
@@ -201,7 +255,7 @@ describe('createTrayController', () => {
     const tray = fakeTray()
     const makeIcon = vi.fn((level: string) => `icon:${level}`)
     const buildMenu = vi.fn((items: Electron.MenuItemConstructorOptions[]) => ({ items }))
-    const actions = { open: vi.fn(), quit: vi.fn() }
+    const actions = { open: vi.fn(), settings: vi.fn(), quit: vi.fn() }
     const controller = createTrayController({ tray, makeIcon, buildMenu, actions, platform })
     return { tray, makeIcon, buildMenu, actions, controller }
   }

@@ -34,6 +34,7 @@ function installApi(
       cb = c
       return off
     }),
+    appInfo: vi.fn(async () => ({ version: '0.1.0' })),
     onNavigate: vi.fn((c: (t: NavigateTarget) => void) => {
       nav = c
       return () => {}
@@ -218,11 +219,42 @@ test('stale 이면 헤더에 업데이트 지연 배지와 이유', async () => 
   expect(w.text()).toContain('timeout')
 })
 
-test('설정은 다음 단계라 비활성', async () => {
+test('머리의 설정을 누르면 설정 화면, 대시보드·로고를 누르면 한눈에 보기', async () => {
   const fake = installApi()
   const w = await mountWith(fake)
-  const settings = w.findAll('header .nav-link').find((l) => l.text().includes('설정'))!
-  expect(settings.classes()).toContain('disabled')
+  await w.get('header .nav-settings').trigger('click')
+  expect(w.get('h1').text()).toBe('설정')
+  expect(w.get('header .nav-settings').classes()).toContain('active')
+  expect(w.get('header .nav-dashboard').classes()).not.toContain('active')
+  expect(w.find('.monitor-list').exists()).toBe(false)
+  await w.get('header .nav-dashboard').trigger('click')
+  expect(w.get('h1').text()).toBe('한눈에 보기')
+  await w.get('header .nav-settings').trigger('click')
+  await w.get('header .brand').trigger('click')
+  expect(w.get('h1').text()).toBe('한눈에 보기')
+})
+
+test('트레이에서 설정으로 가라고 하면(이동 요청) 설정 화면을 연다', async () => {
+  const fake = installApi()
+  const w = await mountWith(fake)
+  fake.navigate({ page: 'settings' })
+  await flushPromises()
+  expect(w.get('h1').text()).toBe('설정')
+})
+
+test('설정을 저장하면 메인이 고친 값으로 화면이 바뀐다(갱신 주기 문구 포함)', async () => {
+  const fake = installApi()
+  fake.api.settings.save = vi.fn(async (next: Settings) => ({ ...next, idlePortMinutes: 1 }))
+  const w = await mountWith(fake)
+  await w.get('header .nav-settings').trigger('click')
+  await w.get('#refresh-saver').setValue(true)
+  await w.get('form').trigger('submit')
+  await flushPromises()
+  expect(fake.api.settings.save).toHaveBeenCalledWith(expect.objectContaining({ refresh: 'saver' }))
+  expect(w.text()).toContain('저장했어요.')
+  await w.get('header .nav-dashboard').trigger('click')
+  await w.findAll('.monitor-list .item:not(.group-item)')[0].trigger('click')
+  expect(w.text()).toContain('창이 열려 있으면 15초, 닫혀 있으면 120초마다 확인')
 })
 
 test('언마운트하면 구독을 끊는다', async () => {

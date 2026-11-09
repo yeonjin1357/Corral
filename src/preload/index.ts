@@ -14,6 +14,7 @@ const api: PitwallApi = {
     }
   },
   getLatest: () => ipcRenderer.invoke(IPC.getLatest),
+  appInfo: () => ipcRenderer.invoke(IPC.appInfo),
   onNavigate(callback) {
     const handler = (_event: IpcRendererEvent, target: NavigateTarget): void => callback(target)
     ipcRenderer.on(IPC.navigate, handler)

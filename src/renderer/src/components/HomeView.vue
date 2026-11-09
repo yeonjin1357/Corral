@@ -9,6 +9,7 @@ import type { DashboardSnapshot, GroupUsage, ProcessGroup } from '../../../share
 import { formatBytes } from '../../../shared/format'
 import { text } from '../../../shared/text'
 import type { Point } from '../history'
+import { hookControls } from '../hook'
 import TrendChart from './TrendChart.vue'
 
 const props = withDefaults(
@@ -24,27 +25,10 @@ const candidates = computed(
 const checks = computed(() => props.snapshot.ports.filter((p) => p.judgement === 'check').length)
 
 const hook = computed(() => props.snapshot.hook)
-const hookText = computed(() => {
-  const h = hook.value
-  if (!h) return ''
-  if (h.state === 'error') return text.ui.hook.states[h.problem ?? 'settings']
-  return text.ui.hook.states[h.state]
-})
-const hookButton = computed(() => {
-  const h = hook.value
-  if (!h) return null
-  if (h.state === 'on') return { label: text.ui.hook.disable, action: 'disable' as const }
-  if (h.state === 'off') return { label: text.ui.hook.enable, action: 'enable' as const }
-  return { label: text.ui.hook.reenable, action: 'enable' as const }
-})
-/**
- * 예전 설정이 남았거나(partial) 훅 포트를 못 연(error·server) 상태에서도 다시 켜지 않고 바로 끌 수 있게 한다.
- * settings.json 을 읽을 수 없으면 끄기도 못 하므로 두지 않는다.
- */
-const canAlsoDisable = computed(() => {
-  const h = hook.value
-  return !!h && (h.state === 'partial' || (h.state === 'error' && h.problem === 'server'))
-})
+const controls = computed(() => hookControls(hook.value))
+const hookText = computed(() => controls.value.text)
+const hookButton = computed(() => controls.value.button)
+const canAlsoDisable = computed(() => controls.value.canAlsoDisable)
 
 const hasMemory = computed(() => props.snapshot.memory.totalBytes > 0)
 // 화면·트레이 공통 규칙: 내림해야 경고 기준과 표시가 어긋나지 않는다.

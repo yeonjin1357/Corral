@@ -3,201 +3,201 @@
 // 바꾼 점: multiselect·폼·모달·페이지네이션·에디터 관련 규칙과 import 를 뺐다. 그 외 규칙은 원본 그대로다.
 // 맨 아래 "pitwall" 구역만 pitwall 이 추가한 것이다(원본 Layout.vue·DashboardHome.vue 의 헤더·숫자 스타일을 옮김).
 
-@import "vars.scss";
-@import "bootstrap/scss/bootstrap";
+@import 'vars.scss';
+@import 'bootstrap/scss/bootstrap';
 
 #app {
-    font-family:
-        "Twemoji Country Flags",
-        BlinkMacSystemFont,
-        segoe ui,
-        Roboto,
-        helvetica neue,
-        Arial,
-        noto sans,
-        sans-serif,
-        apple color emoji,
-        segoe ui emoji,
-        segoe ui symbol,
-        noto color emoji;
+  font-family:
+    'Twemoji Country Flags',
+    BlinkMacSystemFont,
+    segoe ui,
+    Roboto,
+    helvetica neue,
+    Arial,
+    noto sans,
+    sans-serif,
+    apple color emoji,
+    segoe ui emoji,
+    segoe ui symbol,
+    noto color emoji;
 }
 
 h1 {
-    font-size: 32px;
+  font-size: 32px;
 }
 
 h2 {
-    font-size: 26px;
+  font-size: 26px;
 }
 
 ::-webkit-scrollbar {
-    width: 10px;
+  width: 10px;
 }
 
 .bg-maintenance {
-    color: white !important;
-    background-color: $maintenance !important;
+  color: white !important;
+  background-color: $maintenance !important;
 }
 
 .bg-dark {
-    color: white;
+  color: white;
 }
 
 .text-maintenance {
-    color: $maintenance !important;
+  color: $maintenance !important;
 }
 
 .list-group {
-    border-radius: 0.75rem;
+  border-radius: 0.75rem;
 
-    .dark & {
-        .list-group-item {
-            background-color: $dark-bg;
-            color: $dark-font-color;
-            border-color: $dark-border-color;
-        }
+  .dark & {
+    .list-group-item {
+      background-color: $dark-bg;
+      color: $dark-font-color;
+      border-color: $dark-border-color;
     }
+  }
 }
 
 // Scrollbar
 ::-webkit-scrollbar-thumb {
-    background: #ccc;
-    border-radius: 20px;
+  background: #ccc;
+  border-radius: 20px;
 }
 
 .shadow-box {
-    box-shadow: 0 15px 70px rgba(0, 0, 0, 0.1);
-    padding: 10px;
-    border-radius: 10px;
+  box-shadow: 0 15px 70px rgba(0, 0, 0, 0.1);
+  padding: 10px;
+  border-radius: 10px;
 
-    &.big-padding {
-        padding: 20px;
-    }
+  &.big-padding {
+    padding: 20px;
+  }
 }
 
 .btn {
-    padding-left: 20px;
-    padding-right: 20px;
+  padding-left: 20px;
+  padding-right: 20px;
 }
 
 .btn-sm {
-    border-radius: 25px;
+  border-radius: 25px;
 }
 
 .btn-primary {
+  color: white;
+
+  &:hover,
+  &:active,
+  &:focus,
+  &.active {
     color: white;
+    background-color: $highlight;
+    border-color: $highlight;
+  }
 
-    &:hover,
-    &:active,
-    &:focus,
-    &.active {
-        color: white;
-        background-color: $highlight;
-        border-color: $highlight;
-    }
-
-    .dark & {
-        color: $dark-font-color2;
-    }
+  .dark & {
+    color: $dark-font-color2;
+  }
 }
 
 .btn-normal {
-    $bg-color: #f5f5f5;
+  $bg-color: #f5f5f5;
 
-    background-color: $bg-color;
-    border-color: $bg-color;
+  background-color: $bg-color;
+  border-color: $bg-color;
 
-    &:hover {
-        $hover-color: darken($bg-color, 3%);
-        background-color: $hover-color;
-        border-color: $hover-color;
-    }
+  &:hover {
+    $hover-color: darken($bg-color, 3%);
+    background-color: $hover-color;
+    border-color: $hover-color;
+  }
 }
 
 .btn-warning {
-    color: white;
+  color: white;
 
-    &:hover,
-    &:active,
-    &:focus,
-    &.active {
-        color: white;
-    }
+  &:hover,
+  &:active,
+  &:focus,
+  &.active {
+    color: white;
+  }
 }
 
 .btn-dark {
-    background-color: #161b22;
+  background-color: #161b22;
 }
 
 // Dark Theme override here
 .dark {
-    background-color: #090c10;
+  background-color: #090c10;
+  color: $dark-font-color;
+
+  &::-webkit-scrollbar-thumb,
+  ::-webkit-scrollbar-thumb {
+    background: $dark-border-color;
+  }
+
+  .shadow-box {
+    &:not(.alert) {
+      background-color: $dark-bg;
+    }
+  }
+
+  a:not(.btn),
+  .table,
+  .nav-link {
     color: $dark-font-color;
+  }
 
-    &::-webkit-scrollbar-thumb,
-    ::-webkit-scrollbar-thumb {
-        background: $dark-border-color;
+  .table-hover > tbody > tr:hover > * {
+    --bs-table-accent-bg: #070a10;
+    color: $dark-font-color;
+  }
+
+  .bg-primary {
+    color: $dark-font-color2;
+  }
+
+  .btn-secondary {
+    color: white;
+  }
+
+  .btn-normal {
+    $bg-color: $dark-header-bg;
+
+    color: $dark-font-color;
+    background-color: $bg-color;
+    border-color: $bg-color;
+
+    &:hover {
+      $hover-color: darken($bg-color, 3%);
+      background-color: $hover-color;
+      border-color: $hover-color;
     }
+  }
 
-    .shadow-box {
-        &:not(.alert) {
-            background-color: $dark-bg;
-        }
+  .btn-warning {
+    color: $dark-font-color2;
+
+    &:hover,
+    &:active,
+    &:focus,
+    &.active {
+      color: $dark-font-color2;
     }
+  }
 
-    a:not(.btn),
-    .table,
-    .nav-link {
-        color: $dark-font-color;
+  .alert {
+    &.bg-info,
+    &.bg-warning,
+    &.bg-danger,
+    &.bg-maintenance,
+    &.bg-light {
+      color: $dark-font-color2;
     }
-
-    .table-hover > tbody > tr:hover > * {
-        --bs-table-accent-bg: #070a10;
-        color: $dark-font-color;
-    }
-
-    .bg-primary {
-        color: $dark-font-color2;
-    }
-
-    .btn-secondary {
-        color: white;
-    }
-
-    .btn-normal {
-        $bg-color: $dark-header-bg;
-
-        color: $dark-font-color;
-        background-color: $bg-color;
-        border-color: $bg-color;
-
-        &:hover {
-            $hover-color: darken($bg-color, 3%);
-            background-color: $hover-color;
-            border-color: $hover-color;
-        }
-    }
-
-    .btn-warning {
-        color: $dark-font-color2;
-
-        &:hover,
-        &:active,
-        &:focus,
-        &.active {
-            color: $dark-font-color2;
-        }
-    }
-
-    .alert {
-        &.bg-info,
-        &.bg-warning,
-        &.bg-danger,
-        &.bg-maintenance,
-        &.bg-light {
-            color: $dark-font-color2;
-        }
-    }
+  }
 }
 
 /*
@@ -206,129 +206,175 @@ h2 {
 
 // page-change
 .slide-fade-enter-active {
-    transition: all 0.2s $easing-in;
+  transition: all 0.2s $easing-in;
 }
 
 .slide-fade-leave-active {
-    transition: all 0.2s $easing-in;
+  transition: all 0.2s $easing-in;
 }
 
 .slide-fade-enter-from,
 .slide-fade-leave-to {
-    transform: translateY(50px);
-    opacity: 0;
+  transform: translateY(50px);
+  opacity: 0;
 }
 
 .monitor-list {
+  &.scrollbar {
+    overflow-y: auto;
+  }
+
+  @media (max-width: 770px) {
     &.scrollbar {
-        overflow-y: auto;
+      height: calc(100% - 97px);
+    }
+  }
+
+  .item {
+    display: block;
+    text-decoration: none;
+    padding: 13px 15px 10px 15px;
+    border-radius: 10px;
+    transition: all ease-in-out 0.15s;
+
+    &.disabled {
+      opacity: 0.3;
     }
 
-    @media (max-width: 770px) {
-        &.scrollbar {
-            height: calc(100% - 97px);
-        }
+    .info {
+      white-space: nowrap;
+      overflow: hidden;
     }
 
-    .item {
-        display: block;
-        text-decoration: none;
-        padding: 13px 15px 10px 15px;
-        border-radius: 10px;
-        transition: all ease-in-out 0.15s;
-
-        &.disabled {
-            opacity: 0.3;
-        }
-
-        .info {
-            white-space: nowrap;
-            overflow: hidden;
-        }
-
-        &:hover {
-            background-color: $highlight-white;
-        }
-
-        &.active {
-            background-color: #cdf8f4;
-        }
-        .tags {
-            // Removes margin to line up tags list with uptime percentage
-            margin-left: -0.25rem;
-        }
+    &:hover {
+      background-color: $highlight-white;
     }
+
+    &.active {
+      background-color: #cdf8f4;
+    }
+    .tags {
+      // Removes margin to line up tags list with uptime percentage
+      margin-left: -0.25rem;
+    }
+  }
 }
 
 .dark .monitor-list {
-    .item {
-        &:hover {
-            background-color: $dark-bg2;
-        }
-
-        &.active {
-            background-color: $dark-bg2;
-        }
+  .item {
+    &:hover {
+      background-color: $dark-bg2;
     }
+
+    &.active {
+      background-color: $dark-bg2;
+    }
+  }
 }
 
 // --- pitwall ---
 
 // 목록 항목은 <a> 라서 글자색을 본문색으로 맞춘다(원본은 router-link 에 같은 처리를 한다).
 .monitor-list .item {
-    color: inherit;
+  color: inherit;
 }
 
 // Uptime Kuma Layout.vue 데스크톱 헤더
 header.app-header {
+  .title {
+    font-weight: bold;
+  }
+
+  .dark & {
+    background-color: $dark-header-bg;
+    border-bottom-color: $dark-header-bg !important;
+
     .title {
-        font-weight: bold;
+      color: #f0f6fc;
     }
-
-    .dark & {
-        background-color: $dark-header-bg;
-        border-bottom-color: $dark-header-bg !important;
-
-        .title {
-            color: #f0f6fc;
-        }
-    }
+  }
 }
 
 // Uptime Kuma DashboardHome.vue 의 큰 숫자
 .num {
-    font-size: 30px;
-    color: $primary;
-    font-weight: bold;
-    display: block;
+  font-size: 30px;
+  color: $primary;
+  font-weight: bold;
+  display: block;
 }
 
 .dark .table {
-    --bs-table-bg: transparent;
-    --bs-table-color: #{$dark-font-color};
-    border-color: $dark-border-color;
+  --bs-table-bg: transparent;
+  --bs-table-color: #{$dark-font-color};
+  border-color: $dark-border-color;
 }
 
 // Uptime Kuma app.scss 의 .dark 입력창 규칙(처음 옮길 때 빠뜨린 부분)
 .dark {
-    .form-control,
-    .form-control:focus,
-    .form-select,
-    .form-select:focus {
-        color: $dark-font-color;
-        background-color: $dark-bg2;
-    }
+  .form-control,
+  .form-control:focus,
+  .form-select,
+  .form-select:focus {
+    color: $dark-font-color;
+    background-color: $dark-bg2;
+  }
 
-    .form-control,
-    .form-select {
-        border-color: $dark-border-color;
-    }
+  .form-control,
+  .form-select {
+    border-color: $dark-border-color;
+  }
 
-    .form-control::placeholder {
-        color: rgba($dark-font-color, 0.5);
-    }
+  .form-control::placeholder {
+    color: rgba($dark-font-color, 0.5);
+  }
 
-    // Bootstrap 5.3 은 제목색을 --bs-heading-color 로 따로 정한다(원본이 쓰는 5.1 에는 없음). 본문색을 따르게 한다.
-    --bs-heading-color: #{$dark-font-color};
-    --bs-body-color: #{$dark-font-color};
+  // Bootstrap 5.3 은 제목색을 --bs-heading-color 로 따로 정한다(원본이 쓰는 5.1 에는 없음). 본문색을 따르게 한다.
+  --bs-heading-color: #{$dark-font-color};
+  --bs-body-color: #{$dark-font-color};
+  // Bootstrap 5.3 의 .form-text 는 --bs-secondary-color(밝은 테마용 어두운 회색)를 써서 다크에서 안 보인다.
+  // 원본(Bootstrap 5.1)처럼 $text-muted(#6c757d)로 보이게 한다.
+  --bs-secondary-color: #6c757d;
+}
+
+// Uptime Kuma app.scss 의 폼 규칙(설정 화면에서 쓰기 시작해 옮김)
+textarea.form-control {
+  border-radius: 19px;
+}
+
+.dark {
+  .form-check-input {
+    background-color: $dark-bg2;
+    border-color: $dark-border-color;
+  }
+
+  .input-group-text {
+    background-color: #282f39;
+    border-color: $dark-border-color;
+    color: $dark-font-color;
+  }
+
+  .form-check-input:checked {
+    border-color: $primary; // Re-apply bootstrap border
+  }
+
+  .form-switch .form-check-input {
+    background-color: #232f3b;
+  }
+
+  .form-select:disabled {
+    color: rgba($dark-font-color, 0.7);
+    background-color: $dark-bg;
+  }
+
+  .form-control:disabled,
+  .form-control[readonly] {
+    background-color: #232f3b;
+    opacity: 1;
+  }
+
+  .list-group-item {
+    background-color: $dark-bg2;
+    border-color: $dark-border-color;
+    color: $dark-font-color;
+  }
 }

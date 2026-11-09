@@ -7,6 +7,7 @@ import {
   Tray,
   Menu,
   nativeImage,
+  nativeTheme,
   Notification
 } from 'electron'
 import { join } from 'path'
@@ -175,7 +176,11 @@ function createTray(): void {
     },
     makeIcon: trayIcon,
     buildMenu: (items) => Menu.buildFromTemplate(items),
-    actions: { open: showWindow, quit: () => app.quit() },
+    actions: {
+      open: showWindow,
+      settings: () => navigate({ page: 'settings' }),
+      quit: () => app.quit()
+    },
     platform: platform ?? 'win32'
   })
   const latest = scheduler.latest()
@@ -274,6 +279,8 @@ function prepareWindowsHelper(): void {
 function applySettings(next: Settings): void {
   settings = next
   scheduler.setIntervals(REFRESH_INTERVALS[next.refresh])
+  // 화면(prefers-color-scheme)과 확인 창·메뉴가 같은 테마를 따르도록 OS 테마 설정을 바꾼다.
+  nativeTheme.themeSource = next.theme === 'auto' ? 'system' : next.theme
   if (mainWindow && !mainWindow.isDestroyed())
     mainWindow.webContents.send(IPC.settingsChanged, next)
 }
@@ -339,6 +346,7 @@ function registerIpc(): void {
     void scheduler.refreshNow()
     return result
   })
+  ipcMain.handle(IPC.appInfo, () => ({ version: app.getVersion() }))
   ipcMain.handle(IPC.settingsGet, (event) =>
     fromMainWindow(event.sender) ? settings : DEFAULT_SETTINGS
   )
@@ -420,8 +428,7 @@ if (!app.requestSingleInstanceLock()) {
   app.whenReady().then(async () => {
     electronApp.setAppUserModelId(APP_ID)
     // 설정을 먼저 읽어 첫 수집부터 사용자 기준값·주기를 쓴다.
-    settings = (await loadConfig(app.getPath('userData'))).settings
-    scheduler.setIntervals(REFRESH_INTERVALS[settings.refresh])
+    applySettings((await loadConfig(app.getPath('userData'))).settings)
     await repoMemory.load()
     setTimeout(() => void disk.scan(), DISK_FIRST_SCAN_MS)
     setInterval(() => void disk.scan(), DISK_SCAN_EVERY_MS)

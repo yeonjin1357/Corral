@@ -16,9 +16,15 @@ const hasMemory = (s: DashboardSnapshot | null): s is DashboardSnapshot =>
 // 화면(RamBar)과 같은 규칙: 내림해야 경고 기준과 표시가 어긋나지 않는다.
 const percentOf = (s: DashboardSnapshot): number => Math.floor(s.memory.usedPercent)
 
+export interface TrayActions {
+  open(): void
+  settings(): void
+  quit(): void
+}
+
 export function buildTrayMenu(
   s: DashboardSnapshot | null,
-  actions: { open(): void; quit(): void }
+  actions: TrayActions
 ): MenuItemConstructorOptions[] {
   const items: MenuItemConstructorOptions[] = []
   if (!s) {
@@ -43,10 +49,19 @@ export function buildTrayMenu(
       items.push({ label: text.tray.candidates(candidates), click: () => actions.open() })
     if (s.leftovers.length > 0)
       items.push({ label: text.tray.leftovers(s.leftovers.length), click: () => actions.open() })
+    if (s.heavyJobs.length > 0)
+      items.push({
+        label: text.tray.heavy(s.heavyJobs.length, s.heavyOverlap),
+        enabled: false
+      })
+    const diskBytes = (s.disk?.rows ?? []).reduce((sum, r) => sum + (r.totalBytes ?? 0), 0)
+    if (diskBytes > 0)
+      items.push({ label: text.tray.disk(formatBytes(diskBytes)), click: () => actions.open() })
   }
   items.push(
     { type: 'separator' },
     { label: text.tray.open, click: () => actions.open() },
+    { label: text.tray.settings, click: () => actions.settings() },
     { type: 'separator' },
     { label: text.tray.quit, click: () => actions.quit() }
   )
@@ -142,7 +157,7 @@ export function createTrayController<Icon, Menu>(deps: {
   tray: TrayLike
   makeIcon: (level: MemoryLevel) => Icon
   buildMenu: (items: MenuItemConstructorOptions[]) => Menu
-  actions: { open(): void; quit(): void }
+  actions: TrayActions
   platform: Platform
 }): { update(s: DashboardSnapshot | null): void; notifyHiddenOnce(): void } {
   let menuKey = ''
