@@ -27,7 +27,17 @@ describe('heavyMatch', () => {
     ['/bin/sh ./gradlew build', 'gradlew build'],
     ['C:\\WINDOWS\\system32\\cmd.exe /c ""C:\\maven\\bin\\mvn.cmd" clean install"', 'mvn'],
     ['/usr/local/bin/mvn package', 'mvn'],
-    ['NODE C:\\P\\NODE_MODULES\\VUE-TSC\\BIN\\VUE-TSC.JS', 'vue-tsc']
+    ['NODE C:\\P\\NODE_MODULES\\VUE-TSC\\BIN\\VUE-TSC.JS', 'vue-tsc'],
+    ['npx vue-tsc --noEmit', 'vue-tsc'],
+    ['npx --yes tsc -p .', 'tsc'],
+    ['npm exec tsc', 'tsc'],
+    ['pnpm dlx tsc', 'tsc'],
+    ['bash -c "npx tsc --noEmit"', 'tsc'],
+    ['powershell -Command "vue-tsc --noEmit"', 'vue-tsc'],
+    ['env NODE_OPTIONS=--max-old-space-size=8192 vue-tsc --noEmit', 'vue-tsc'],
+    ['"C:\\Program Files\\nodejs\\node.exe" C:\\p\\node_modules\\typescript\\bin\\tsc', 'tsc'],
+    // 셸이 실행하는 명령 자리이므로 맞는다(개발 서버인지는 findHeavyJobs 가 아래 프로세스로 거른다).
+    ['C:\\Windows\\system32\\cmd.exe /d /s /c "webpack serve"', 'webpack']
   ])('%s → %s', (commandLine, expected) => {
     expect(heavyMatch(commandLine, DEFAULTS)).toBe(expected)
   })
@@ -42,6 +52,12 @@ describe('heavyMatch', () => {
     '"C:\\Program Files\\Microsoft VS Code\\Code.exe" C:\\repos\\webpack',
     '/Applications/Visual Studio Code.app/Contents/MacOS/Electron /Users/dev/tsc',
     'node --config=webpack x.js',
+    // 명령의 인자로 나온 단어는 실행되는 명령이 아니다.
+    'git commit -m "fix tsc error"',
+    'rg webpack src',
+    'bash -c "grep -rn tsc src"',
+    'npm run build',
+    'C:\\Windows\\system32\\cmd.exe /c npm run vite',
     ''
   ])('%s → 없음', (commandLine) => {
     expect(heavyMatch(commandLine, DEFAULTS)).toBeNull()
@@ -119,6 +135,19 @@ describe('findHeavyJobs', () => {
       ]),
       new Map(),
       { patterns, exclude: new Set([600, 601]) }
+    )
+    expect(rows).toEqual([])
+  })
+
+  test('아래에서 개발 서버가 돌고 있는 래퍼(cmd /c "webpack serve")는 무거운 작업이 아니다', () => {
+    const rows = findHeavyJobs(
+      sample([
+        proc(590, 1, 'cmd.exe', 'C:\\Windows\\system32\\cmd.exe /d /s /c "webpack serve"', 5),
+        proc(600, 590, 'node.exe', 'node webpack.js serve', 900)
+      ]),
+      new Map(),
+      // 600 은 포트를 연 개발 서버(제외 목록).
+      { patterns, exclude: new Set([600]) }
     )
     expect(rows).toEqual([])
   })

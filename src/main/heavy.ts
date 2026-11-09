@@ -27,22 +27,98 @@ function looksExecutable(token: string): boolean {
   return parent === 'bin' || parent === '.bin'
 }
 
+/** 따옴표로 묶인 구간을 한 토큰으로 본다(`"C:\Program Files\nodejs\node.exe"`). */
+const TOKEN = /(?:[^\s"]+|"[^"]*")+/g
+/** 다음 명령을 실행하는 셸. 실행 옵션(-c·/c 등) 뒤 문자열이 명령이다. */
+const SHELLS = new Set(['cmd', 'sh', 'bash', 'zsh', 'fish', 'dash', 'pwsh', 'powershell'])
+const SHELL_RUN = new Set(['-c', '/c', '/k', '-command', '-lc', '-ic'])
+/** 뒤따르는 첫 번째 옵션 아닌 토큰이 실행할 명령·스크립트인 실행기. */
+const LAUNCHERS = new Set(['node', 'npx', 'bunx', 'env', 'nice', 'nohup', 'time', 'deno'])
+/** 하위 명령(exec·dlx·x) 뒤가 실행할 명령인 패키지 관리자(run 뒤는 스크립트 이름이라 명령이 아니다). */
+const PACKAGE_MANAGERS = new Set(['npm', 'pnpm', 'yarn', 'bun'])
+const PM_EXEC = new Set(['exec', 'dlx', 'x'])
+
+interface Token {
+  text: string
+  /** 실행되는 명령 자리(맨 앞, 셸 -c 뒤, node·npx 뒤 등). */
+  command: boolean
+}
+
+/**
+ * 명령줄을 토큰으로 나누고, 어느 토큰이 실제로 실행되는 명령 자리인지 표시한다.
+ * 셸이 실행 옵션 뒤에 따옴표로 넘긴 명령(`cmd /c "vue-tsc --noEmit"`, `bash -c "npx tsc"`)은 안을 다시 나눈다.
+ */
+function commandTokens(commandLine: string): Token[] {
+  const out: Token[] = []
+  const walk = (raw: string[]): void => {
+    type State = 'command' | 'shellString' | 'pmSub' | 'args'
+    let state: State = 'command'
+    let shell = false
+    for (const piece of raw) {
+      const text = piece.replace(/"/g, '')
+      const lower = text.toLowerCase()
+      if (!text) continue
+      if (state === 'shellString') {
+        state = 'args'
+        if (/\s/.test(text)) {
+          walk(text.match(TOKEN) ?? [])
+          continue
+        }
+        out.push({ text, command: true })
+        state = nextState(text)
+        continue
+      }
+      if (state === 'pmSub') {
+        out.push({ text, command: false })
+        state = PM_EXEC.has(lower) ? 'command' : 'args'
+        continue
+      }
+      if (state === 'command') {
+        const isFlag = lower.startsWith('-') || /^\/[a-z?]{1,8}$/i.test(lower)
+        if (isFlag) {
+          out.push({ text, command: false })
+          if (shell && SHELL_RUN.has(lower)) state = 'shellString'
+          continue
+        }
+        // env 의 변수 지정(NAME=값)은 명령이 아니다.
+        if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(text)) {
+          out.push({ text, command: false })
+          continue
+        }
+        out.push({ text, command: true })
+        shell = SHELLS.has(baseName(text))
+        state = nextState(text)
+        continue
+      }
+      out.push({ text, command: false })
+    }
+  }
+  const nextState = (command: string): 'command' | 'pmSub' | 'args' => {
+    const base = baseName(command)
+    if (SHELLS.has(base) || LAUNCHERS.has(base)) return 'command'
+    if (PACKAGE_MANAGERS.has(base)) return 'pmSub'
+    return 'args'
+  }
+  walk(commandLine.match(TOKEN) ?? [])
+  return out
+}
+
 /**
  * 명령줄이 무거운 명령 패턴("명령 이름 [인자…]") 중 하나에 맞으면 그 패턴(설정에 쓴 그대로), 아니면 null.
- * - 첫 단어: 명령줄 토큰의 파일 이름(경로·확장자 제외, 대소문자 무시)과 같아야 한다. `tsc` 는 `tsconfig.json` 에 안 걸린다.
+ * - 첫 단어: 실제로 실행되는 명령 자리의 토큰(맨 앞, 셸 -c·/c 뒤, node·npx·npm exec 뒤)의 파일 이름
+ *   (경로·확장자 제외, 대소문자 무시)과 같아야 한다. `git commit -m "fix tsc"` 의 tsc, `tsconfig.json` 에는 안 걸린다.
  * - 나머지 단어: 그 뒤 토큰에 순서대로 나와야 한다(사이의 옵션은 건너뜀). 예: `vite --mode production build`.
- * - 셸이 따옴표로 묶어 넘긴 명령(`cmd /c "vue-tsc --noEmit"`)도 보도록 따옴표는 공백으로 본다.
  */
 export function heavyMatch(commandLine: string, patterns: string[]): string | null {
-  const tokens = commandLine.replace(/"/g, ' ').split(/\s+/).filter(Boolean)
+  const tokens = commandTokens(commandLine)
   if (tokens.length === 0) return null
-  const bases = tokens.map(baseName)
-  const lower = tokens.map((t) => t.toLowerCase())
+  const bases = tokens.map((t) => baseName(t.text))
+  const lower = tokens.map((t) => t.text.toLowerCase())
   for (const pattern of patterns) {
     const [first, ...rest] = words(pattern)
     if (!first) continue
     for (let i = 0; i < tokens.length; i++) {
-      if (bases[i] !== first || !looksExecutable(tokens[i])) continue
+      if (!tokens[i].command || bases[i] !== first || !looksExecutable(tokens[i].text)) continue
       let j = i + 1
       const ok = rest.every((w) => {
         while (j < tokens.length && lower[j] !== w) j++
@@ -71,6 +147,8 @@ export function findHeavyJobs(
   for (const p of sample.processes) {
     if (o.exclude.has(p.pid)) continue
     const matched = heavyMatch(p.commandLine, o.patterns)
+    // 아래에서 개발 서버·에이전트가 도는 래퍼(`cmd /c "webpack serve"`)는 무거운 작업이 아니다.
+    if (matched && tree.descendants(p.pid).some((d) => o.exclude.has(d))) continue
     if (matched) label.set(p.pid, matched)
   }
   const rows: HeavyJobRow[] = []
