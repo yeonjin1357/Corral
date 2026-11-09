@@ -56,3 +56,32 @@ export function trayWindowBounds(
 export function shouldReopen(hiddenAt: number | null, now: number): boolean {
   return hiddenAt == null || now - hiddenAt > REOPEN_GUARD_MS
 }
+
+/** 숨긴 요약 창을 이 시간 뒤에 닫는다(열어 둔 화면 프로세스가 앱 메모리를 약 90 MB 늘리므로). */
+export const TRAY_WINDOW_CLOSE_AFTER_MS = 60_000
+
+/**
+ * 숨긴 뒤 delayMs 가 지나면 close 를 부른다. 그 사이 다시 보이면(shown) 취소한다.
+ * 자주 여닫을 때는 창을 다시 만들지 않고, 오래 안 쓰면 메모리를 돌려준다.
+ */
+export function createIdleCloser(
+  delayMs: number,
+  close: () => void
+): { hidden(): void; shown(): void; dispose(): void } {
+  let timer: ReturnType<typeof setTimeout> | null = null
+  const cancel = (): void => {
+    if (timer) clearTimeout(timer)
+    timer = null
+  }
+  return {
+    hidden() {
+      cancel()
+      timer = setTimeout(() => {
+        timer = null
+        close()
+      }, delayMs)
+    },
+    shown: cancel,
+    dispose: cancel
+  }
+}

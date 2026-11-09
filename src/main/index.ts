@@ -52,7 +52,14 @@ import { createIconSource } from './icons'
 import { createRamHistory, loadHistory, saveHistory } from './historyStore'
 import { codexHome, createCodexReader } from './codexRollout'
 import { createTrayController, LEVEL_COLORS } from './tray'
-import { shouldReopen, trayWindowBounds, TRAY_WINDOW_SIZE, type Rect } from './trayWindow'
+import {
+  createIdleCloser,
+  shouldReopen,
+  trayWindowBounds,
+  TRAY_WINDOW_CLOSE_AFTER_MS,
+  TRAY_WINDOW_SIZE,
+  type Rect
+} from './trayWindow'
 import { encodePng, renderSmallIcon } from './pixelArt'
 import type { MemoryLevel } from '../shared/types'
 
@@ -223,6 +230,10 @@ function hideWindow(): void {
 // ── 트레이 요약 창(F10): 왼쪽 클릭에 트레이 옆으로 띄우고, 다른 곳을 누르면(포커스를 잃으면) 숨긴다 ──
 let trayWindow: BrowserWindow | null = null
 let trayHiddenAt: number | null = null
+/** 숨긴 요약 창은 1분 뒤 닫아 화면 프로세스 메모리를 돌려준다(다시 열면 새로 만든다). */
+const trayCloser = createIdleCloser(TRAY_WINDOW_CLOSE_AFTER_MS, () => {
+  if (trayWindow && !trayWindow.isDestroyed() && !trayWindow.isVisible()) trayWindow.destroy()
+})
 
 function loadRenderer(window: BrowserWindow, query: Record<string, string> = {}): void {
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
@@ -269,6 +280,7 @@ function hideTrayWindow(): void {
   if (!trayWindow || trayWindow.isDestroyed() || !trayWindow.isVisible()) return
   trayHiddenAt = Date.now()
   trayWindow.hide()
+  trayCloser.hidden()
 }
 
 function toggleTrayWindow(bounds: Rect): void {
@@ -287,6 +299,7 @@ function toggleTrayWindow(bounds: Rect): void {
   window.setBounds(trayWindowBounds(bounds, display, TRAY_WINDOW_SIZE, platform ?? 'win32'))
   const latest = scheduler.latest()
   if (latest && !window.webContents.isLoading()) window.webContents.send(IPC.snapshot, latest)
+  trayCloser.shown()
   window.show()
   window.focus()
   void scheduler.refreshNow()
@@ -669,6 +682,9 @@ function createWindow(): void {
   }
 }
 
+// 화면은 표·SVG 그래프뿐이라 GPU 가 필요 없다. 끄면 GPU 프로세스 메모리(요약 창을 연 뒤 약 130 MB)를 아낀다.
+app.disableHardwareAcceleration()
+
 // 두 번째로 실행하면 새로 띄우지 않고 이미 떠 있는 창을 보여 준다(트레이 아이콘이 둘이 되지 않도록).
 if (!app.requestSingleInstanceLock()) {
   app.quit()
@@ -718,6 +734,7 @@ if (!app.requestSingleInstanceLock()) {
   app.on('before-quit', (event) => {
     quitting = true
     scheduler.stop()
+    trayCloser.dispose()
     void hookHub.stop()
     // 기록을 남기고 끝낸다. 오래 걸리면(디스크 문제) 기다리지 않는다.
     if (historySaved) return

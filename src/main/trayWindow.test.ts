@@ -1,4 +1,4 @@
-import { shouldReopen, trayWindowBounds, TRAY_WINDOW_SIZE } from './trayWindow'
+import { createIdleCloser, shouldReopen, trayWindowBounds, TRAY_WINDOW_SIZE } from './trayWindow'
 
 const size = { width: 360, height: 520 }
 /** 1920×1080 화면, 작업 표시줄 높이 48. */
@@ -88,4 +88,31 @@ test('창이 포커스를 잃어 막 숨은 직후의 트레이 클릭은 다시
   expect(shouldReopen(null, 1000)).toBe(true)
   expect(shouldReopen(1000, 1100)).toBe(false)
   expect(shouldReopen(1000, 1400)).toBe(true)
+})
+
+describe('숨긴 요약 창 닫기(메모리)', () => {
+  beforeEach(() => vi.useFakeTimers())
+  afterEach(() => vi.useRealTimers())
+
+  test('숨긴 뒤 1분이 지나면 창을 닫고, 그 사이 다시 열면 닫지 않는다', () => {
+    const close = vi.fn()
+    const closer = createIdleCloser(60_000, close)
+    closer.hidden()
+    vi.advanceTimersByTime(59_000)
+    closer.shown()
+    vi.advanceTimersByTime(10_000)
+    expect(close).not.toHaveBeenCalled()
+    closer.hidden()
+    vi.advanceTimersByTime(60_000)
+    expect(close).toHaveBeenCalledTimes(1)
+  })
+
+  test('그만 쓰면(앱 종료) 남은 타이머를 지운다', () => {
+    const close = vi.fn()
+    const closer = createIdleCloser(60_000, close)
+    closer.hidden()
+    closer.dispose()
+    vi.advanceTimersByTime(120_000)
+    expect(close).not.toHaveBeenCalled()
+  })
 })
