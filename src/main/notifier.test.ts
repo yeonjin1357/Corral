@@ -6,7 +6,7 @@ import type {
   DashboardSnapshot,
   HeavyJobRow,
   MemoryLevel,
-  PortRow
+  ServerRow
 } from '../shared/types'
 
 const MIN = 60 * 1000
@@ -55,11 +55,12 @@ function heavy(pid: number, label: string): HeavyJobRow {
 }
 
 const candidate = {
-  port: 3000,
+  ports: [3000],
   pid: 4100,
   processName: 'node.exe',
   commandLine: 'node vite',
   worktree: { root: 'C:\\work\\old', branch: 'feat/x', isLinkedWorktree: true },
+  workspace: null,
   unresolvable: false,
   memoryBytes: 900 * MB,
   descendantPids: [],
@@ -67,8 +68,10 @@ const candidate = {
   startedAt: 1,
   judgement: 'candidate',
   idleSince: 0,
-  agentInWorktree: false
-} as PortRow
+  agentInWorktree: false,
+  cpuPercent: null,
+  memoryGrowth: null
+} as ServerRow
 
 function setup(over: { notify?: Partial<NotifySettings>; focused?: boolean } = {}): {
   shown: Notice[]
@@ -90,7 +93,7 @@ describe('RAM 부족', () => {
   test('위험으로 넘어갈 때 한 번, 정리 추천 합계와 함께. 정상으로 내려와야 다시 알린다', () => {
     const { shown, clock, update } = setup()
     update(snap())
-    update(snap({ ports: [candidate] }, 'danger'))
+    update(snap({ servers: [candidate] }, 'danger'))
     expect(shown).toEqual([
       {
         title: 'RAM 이 부족해요 (93%)',

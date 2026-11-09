@@ -100,7 +100,7 @@ test('첫 수집부터 실패하면 빈 스냅샷을 stale + 에러로 보낸다
   s.start()
   await vi.advanceTimersByTimeAsync(0)
   expect(sent[0]).toMatchObject({
-    ports: [],
+    servers: [],
     groups: [],
     stale: true,
     error: '수집 중 문제가 생겼어요: boom',

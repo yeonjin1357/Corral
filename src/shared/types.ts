@@ -70,29 +70,6 @@ export interface MemorySummary {
   level: MemoryLevel
 }
 
-export interface PortRow {
-  port: number
-  pid: number
-  processName: string
-  commandLine: string
-  worktree: WorktreeInfo | null
-  unresolvable: boolean
-  memoryBytes: number
-  descendantPids: number[]
-  clientCount: number
-  /** 포트를 연 프로세스의 시작 시각. 종료 직전 같은 프로세스인지(pid 재사용 아님) 확인하는 데 쓴다. */
-  startedAt: number | null
-  /**
-   * 안 쓰는 포트 판단. candidate: 정리 후보(에이전트 없음 + 연결 0 이 기준 시간 이상),
-   * check: 확인해볼 것(에이전트 없음 + 탭 연결만 기준 시간 이상), null: 판단 없음.
-   */
-  judgement: PortJudgement | null
-  /** 지금 상태(연결 0 또는 탭만)가 시작된 시각. 에이전트가 있거나 판별 불가면 null. */
-  idleSince: number | null
-  /** 같은 워크트리에 에이전트(Claude·Codex)가 실행 중. */
-  agentInWorktree: boolean
-}
-
 /**
  * 작업 공간: 서버 워크트리를 감싸는 가장 가까운 바깥 git 저장소(여러 저장소를 묶는 작업 공간 저장소 등).
  * outer=false 면 바깥 저장소가 없거나 같은 저장소라 그 워크트리 자체가 작업 공간이다.
@@ -130,9 +107,16 @@ export interface ServerRow {
   descendantPids: number[]
   /** 서버의 모든 포트에 붙은 연결 수 합. */
   clientCount: number
+  /** 맨 위 프로세스의 시작 시각. 종료 직전 같은 프로세스인지(pid 재사용 아님) 확인하는 데 쓴다. */
   startedAt: number | null
+  /**
+   * 안 쓰는 서버 판단. candidate: 정리 후보(에이전트 없음 + 연결 0 이 기준 시간 이상),
+   * check: 확인해볼 것(에이전트 없음 + 탭 연결만 기준 시간 이상), null: 판단 없음.
+   */
   judgement: PortJudgement | null
+  /** 지금 상태(연결 0 또는 탭만)가 시작된 시각. 에이전트가 있거나 판별 불가면 null. */
   idleSince: number | null
+  /** 같은 워크트리에 에이전트(Claude·Codex)가 실행 중. */
   agentInWorktree: boolean
   /** 서버 트리 CPU 사용률(에이전트와 같은 기준). 모르면 null. */
   cpuPercent: number | null
@@ -219,7 +203,6 @@ export type KillResult = {
 export interface DashboardSnapshot {
   takenAt: number
   memory: MemorySummary
-  ports: PortRow[]
   /** 개발 서버(포트를 연 프로세스 트리 단위). 첫 포트 순. */
   servers: ServerRow[]
   leftovers: LeftoverRow[]

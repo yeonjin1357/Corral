@@ -357,10 +357,9 @@ function registerIpc(): void {
   ipcMain.handle(IPC.getLatest, (event) =>
     fromMainWindow(event.sender) ? scheduler.latest() : null
   )
-  ipcMain.handle(IPC.killPort, async (event, arg: unknown) => {
+  ipcMain.handle(IPC.killServer, async (event, pid: unknown) => {
     if (!fromMainWindow(event.sender)) return { status: 'failed', message: text.killResult.invalid }
-    const { port, pid } = (arg ?? {}) as { port?: unknown; pid?: unknown }
-    const result = await killer.killPort(Number(port), Number(pid))
+    const result = await killer.killServer(Number(pid))
     void scheduler.refreshNow()
     return result
   })

@@ -25,12 +25,13 @@ function snap(over: Partial<DashboardSnapshot> = {}): DashboardSnapshot {
       usedPercent: 82.2,
       level: 'warn'
     },
-    ports: [1, 2, 3].map((i) => ({
-      port: 3000 + i,
+    servers: [1, 2, 3].map((i) => ({
+      ports: [3000 + i],
       pid: i,
       processName: 'node',
       commandLine: 'node',
       worktree: null,
+      workspace: null,
       unresolvable: false,
       memoryBytes: 1,
       descendantPids: [],
@@ -38,7 +39,9 @@ function snap(over: Partial<DashboardSnapshot> = {}): DashboardSnapshot {
       startedAt: null,
       judgement: null,
       idleSince: null,
-      agentInWorktree: false
+      agentInWorktree: false,
+      cpuPercent: null,
+      memoryGrowth: null
     })),
     platform: 'win32',
     cpuCount: 8,
@@ -55,7 +58,7 @@ describe('buildTrayMenu', () => {
     const items = buildTrayMenu(snap(), actions)
     expect(labels(items)).toEqual([
       'RAM 82% (26.3 GB / 32.0 GB)',
-      '개발 서버 포트 3개',
+      '개발 서버 3개',
       '에이전트 0개',
       '---',
       '앱 열기',
@@ -84,7 +87,7 @@ describe('buildTrayMenu', () => {
     const base = snap()
     const s = snap({
       agents: [agent('waiting'), agent('working')],
-      ports: [{ ...base.ports[0], judgement: 'candidate' }, base.ports[1]],
+      servers: [{ ...base.servers[0], judgement: 'candidate' }, base.servers[1]],
       leftovers: [
         {
           pid: 9,
@@ -102,7 +105,7 @@ describe('buildTrayMenu', () => {
     })
     const items = buildTrayMenu(s, actions)
     expect(labels(items).slice(1, 5)).toEqual([
-      '개발 서버 포트 2개',
+      '개발 서버 2개',
       '에이전트 2개 (권한 대기 1)',
       '정리 후보 1개',
       '남은 프로세스 1개'
@@ -130,7 +133,7 @@ describe('buildTrayMenu', () => {
     const failed = snap({
       stale: true,
       error: 'x',
-      ports: [],
+      servers: [],
       memory: { totalBytes: 0, usedBytes: 0, usedPercent: 0, level: 'normal' }
     })
     expect(labels(buildTrayMenu(failed, actions))[0]).toBe('RAM 정보를 가져오지 못했어요')
@@ -348,4 +351,16 @@ test('남은 프로세스 줄은 에이전트 워크트리의 것을 빼고 센�
   expect(labels(buildTrayMenu(snap({ leftovers: [left(2, true)] }), actions)).join()).not.toContain(
     '남은 프로세스'
   )
+})
+
+test('트레이 개발 서버 수는 서버 수', () => {
+  const base = snap()
+  const s = snap({
+    servers: [
+      { ...base.servers[0], ports: [6176, 8081, 9091] },
+      { ...base.servers[1], ports: [3000, 3001] }
+    ]
+  })
+  const items = buildTrayMenu(s, actions)
+  expect(labels(items)).toContain('개발 서버 2개')
 })

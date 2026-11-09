@@ -5,7 +5,7 @@ import { createDiskManager, createRepoMemory, measureDir, type DiskDeps } from '
 import { createGitFixture, type GitFixture } from './testing/gitFixture'
 import { blankSnapshot } from '../shared/snapshot'
 import type { KillConfirm } from './kill'
-import type { AgentRow, DashboardSnapshot, PortRow, RawSample } from '../shared/types'
+import type { AgentRow, DashboardSnapshot, ServerRow, RawSample } from '../shared/types'
 
 const LINK_TYPE = process.platform === 'win32' ? 'junction' : 'dir'
 
@@ -251,10 +251,10 @@ describe('createDiskManager (실제 git)', () => {
   }, 60000)
 
   test('최신 스냅샷에 그 워크트리의 포트·에이전트가 있으면 사용 중으로 표시하고 지우지 않는다', async () => {
-    const port = {
+    const server = {
       worktree: { root: gone, branch: 'feat-gone', isLinkedWorktree: true }
-    } as PortRow
-    const latest = (): DashboardSnapshot => ({ ...blankSnapshot(1), ports: [port] })
+    } as ServerRow
+    const latest = (): DashboardSnapshot => ({ ...blankSnapshot(1), servers: [server] })
     const manager = createDiskManager(deps({ latest }))
     const report = await manager.scan()
     expect(report.rows[0].inUse).toBe(true)

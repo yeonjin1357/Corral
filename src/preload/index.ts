@@ -35,7 +35,7 @@ const api: PitwallApi = {
       ipcRenderer.removeListener(IPC.navigate, handler)
     }
   },
-  killPort: (port, pid) => ipcRenderer.invoke(IPC.killPort, { port, pid }),
+  killServer: (pid) => ipcRenderer.invoke(IPC.killServer, pid),
   killLeftover: (pid) => ipcRenderer.invoke(IPC.killLeftover, pid),
   killMany: (keys) => ipcRenderer.invoke(IPC.killMany, keys),
   diskScan: () => ipcRenderer.invoke(IPC.diskScan),

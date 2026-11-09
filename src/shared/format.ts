@@ -85,6 +85,11 @@ export function agentCovers(agentRoots: Iterable<string>, root: string): boolean
   return false
 }
 
+/** 서버가 연 포트 목록(`:6176 · :8081 · :9091`). */
+export function portList(ports: readonly number[]): string {
+  return ports.map((p) => `:${p}`).join(' · ')
+}
+
 export function worktreeLabel(worktree: WorktreeInfo | null): string {
   if (!worktree) return text.unresolvable
   return `${worktreeFolder(worktree)} · ${worktree.branch ?? text.detached}`

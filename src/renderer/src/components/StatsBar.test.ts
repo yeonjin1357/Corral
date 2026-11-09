@@ -2,7 +2,7 @@
 import { mount, type VueWrapper } from '@vue/test-utils'
 import StatsBar from './StatsBar.vue'
 import type { DashboardSnapshot } from '../../../shared/types'
-import { GB, MB, agentRow, heavyJob, portRow, snapshot } from '../testing/fixtures'
+import { GB, MB, agentRow, heavyJob, serverRow, snapshot } from '../testing/fixtures'
 
 function bar(s: DashboardSnapshot): VueWrapper {
   return mount(StatsBar, { props: { snapshot: s, ramHistory: [], windowMs: 600_000 } })
@@ -24,12 +24,9 @@ function cardMemory(w: VueWrapper, title: string): string {
 
 describe('카드의 메모리 합은 메모리 카드 묶음과 같은 값(같은 프로세스를 두 번 세지 않는다)', () => {
   test('한 프로세스가 포트 둘을 열어도 개발 서버 메모리는 한 번만 센다', () => {
-    // 같은 서버(pid 4100)가 8081·8082 를 연다. 표에는 두 줄이지만 메모리는 같은 프로세스 것이다.
+    // 같은 서버(pid 4100)가 8081·8082 를 연다. 메모리는 그 서버 한 번.
     const s = snapshot({
-      ports: [
-        portRow({ port: 8081, pid: 4100, memoryBytes: 1600 * MB }),
-        portRow({ port: 8082, pid: 4100, memoryBytes: 1600 * MB })
-      ],
+      servers: [serverRow({ ports: [8081, 8082], pid: 4100, memoryBytes: 1600 * MB })],
       groups: [
         { group: 'devServer', memoryBytes: 1600 * MB, processCount: 2 },
         { group: 'agent', memoryBytes: 500 * MB, processCount: 4 },
@@ -58,4 +55,18 @@ describe('카드의 메모리 합은 메모리 카드 묶음과 같은 값(같�
     expect(cardMemory(w, '에이전트')).toBe('600 MB')
     expect(cardMemory(w, '무거운 작업')).toBe('2.0 GB')
   })
+})
+
+test('개발 서버 카드: 큰 숫자는 서버 수, 아래 줄은 포트 수', () => {
+  const s = snapshot({
+    servers: [
+      serverRow({ ports: [6176, 8081, 9091], pid: 6100 }),
+      serverRow({ ports: [3000], pid: 4100 })
+    ]
+  })
+  const card = bar(s)
+    .findAll('[data-slot=card]')
+    .find((c) => c.find('[data-slot=card-title]').text().trim() === '개발 서버')!
+  expect(card.find('.text-3xl').text()).toBe('2개')
+  expect(card.text()).toContain('포트 4개')
 })

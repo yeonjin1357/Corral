@@ -11,7 +11,7 @@ import type { Settings } from './settings'
 export const IPC = {
   snapshot: 'pitwall:snapshot',
   getLatest: 'pitwall:get-latest',
-  killPort: 'pitwall:kill-port',
+  killServer: 'pitwall:kill-server',
   killLeftover: 'pitwall:kill-leftover',
   killMany: 'pitwall:kill-many',
   diskScan: 'pitwall:disk-scan',
@@ -49,7 +49,7 @@ export interface PitwallApi {
   onSnapshot(callback: (snapshot: DashboardSnapshot) => void): () => void
   /** 창이 늦게 열려 앞선 스냅샷을 놓쳤을 때 마지막 스냅샷을 가져온다. */
   getLatest(): Promise<DashboardSnapshot | null>
-  killPort(port: number, pid: number): Promise<KillResult>
+  killServer(pid: number): Promise<KillResult>
   /** 주인 없이 남은 프로세스를 끈다(메인에서 확인 창). */
   killLeftover(pid: number): Promise<KillResult>
   /** 정리 추천 중 고른 것(선택 키)을 확인 창 하나로 끈다. */

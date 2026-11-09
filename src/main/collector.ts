@@ -11,7 +11,7 @@ import type {
 import { worktreeKey } from '../shared/format'
 import type { Settings } from '../shared/settings'
 import { buildAgents, cpuState, type CpuMemo } from './agents'
-import { judgePorts, type PortMemo } from './judge'
+import { judgeServers, type ServerMemo } from './judge'
 import { agentToolOf, topLevelAgentPids } from './processTree'
 import { reconcileSessions, stateForWorktree, type LiveClaude, type Sessions } from './sessions'
 import { buildSnapshot, pidsForWorktreeLookup } from './snapshot'
@@ -58,8 +58,8 @@ export interface CollectorDeps {
 }
 
 /**
- * 한 번의 수집: 샘플 → 메모리 → 워크트리 → 스냅샷(포트·남은 프로세스) → 에이전트 → 포트 판단.
- * 이전 샘플의 CPU 와 포트별 "안 쓰인 시각"을 기억한다. 스냅샷을 만들 때마다 Claude 세션의 워크트리를 다시 판별한다.
+ * 한 번의 수집: 샘플 → 메모리 → 워크트리 → 스냅샷(서버·남은 프로세스) → 에이전트 → 서버 판단 → 작업 공간.
+ * 이전 샘플의 CPU 와 서버별 "안 쓰인 시각"을 기억한다. 스냅샷을 만들 때마다 Claude 세션의 워크트리를 다시 판별한다.
  */
 export function createCollector(deps: CollectorDeps): {
   collect(): Promise<DashboardSnapshot>
@@ -67,7 +67,7 @@ export function createCollector(deps: CollectorDeps): {
   restate(snapshot: DashboardSnapshot): Promise<DashboardSnapshot>
 } {
   let previousCpu: CpuMemo = new Map()
-  let portMemo: PortMemo = new Map()
+  let serverMemo: ServerMemo = new Map()
   /** 세션 작업 폴더 → 워크트리 키. 수집 때마다 다시 판별하고, 그 사이 새 세션은 restate 가 채운다. */
   let rootOfCwd = new Map<string, string | null>()
 
@@ -152,7 +152,7 @@ export function createCollector(deps: CollectorDeps): {
       heavyPatterns: options.heavyPatterns
     })
 
-    const devServerPids = new Set(snapshot.ports.flatMap((p) => [p.pid, ...p.descendantPids]))
+    const devServerPids = new Set(snapshot.servers.flatMap((p) => [p.pid, ...p.descendantPids]))
     const [roots, hook] = await Promise.all([resolveSessionRoots(), readHookStatus()])
     rootOfCwd = roots
 
@@ -183,11 +183,11 @@ export function createCollector(deps: CollectorDeps): {
     })
     previousCpu = cpu
 
-    const judged = judgePorts(snapshot.ports, agents, portMemo, now, options.idlePortMs)
-    portMemo = judged.memo
+    const judged = judgeServers(snapshot.servers, agents, serverMemo, now, options.idlePortMs)
+    serverMemo = judged.memo
 
     const workspaceOf = await resolveWorkspaces([
-      ...snapshot.servers.map((r) => r.worktree),
+      ...judged.rows.map((r) => r.worktree),
       ...snapshot.leftovers.map((r) => r.worktree),
       ...snapshot.heavyJobs.map((r) => r.worktree),
       ...agents.map((a) => a.worktree)
@@ -198,8 +198,7 @@ export function createCollector(deps: CollectorDeps): {
 
     return {
       ...snapshot,
-      ports: judged.rows,
-      servers: snapshot.servers.map(withWorkspace),
+      servers: judged.rows.map(withWorkspace),
       leftovers: snapshot.leftovers.map(withWorkspace),
       heavyJobs: snapshot.heavyJobs.map(withWorkspace),
       agents: agents.map(withWorkspace),

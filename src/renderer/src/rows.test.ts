@@ -6,7 +6,7 @@ import {
   diskRow,
   heavyJob,
   leftoverRow,
-  portRow,
+  serverRow,
   snapshot
 } from './testing/fixtures'
 
@@ -14,9 +14,9 @@ const MIN = 60_000
 
 describe('개발 서버 표', () => {
   test('포트·프로젝트·브랜치·연결·메모리를 스냅샷 값 그대로 보인다', () => {
-    const t = tableFor('ports', snapshot({ takenAt: 10 * MIN, ports: [portRow()] }))
+    const t = tableFor('ports', snapshot({ takenAt: 10 * MIN, servers: [serverRow()] }))
     const row = t.rows[0]
-    expect(row.key).toBe('port:3000:4100')
+    expect(row.key).toBe('server:4100:200')
     expect(row.cells.name.text).toBe('shop-web')
     expect(row.cells.port).toMatchObject({ text: ':3000', sort: 3000 })
     expect(row.cells.branch.text).toBe('develop')
@@ -29,13 +29,18 @@ describe('개발 서버 표', () => {
     const now = 60 * MIN
     const s = snapshot({
       takenAt: now,
-      ports: [
-        portRow({ port: 1, judgement: 'candidate', clientCount: 0, idleSince: now - 35 * MIN }),
-        portRow({ port: 2, judgement: 'check', clientCount: 1, idleSince: now - 25 * MIN }),
-        portRow({ port: 3, clientCount: 2 }),
-        portRow({ port: 4, clientCount: 0, agentInWorktree: true }),
-        portRow({ port: 5, clientCount: 0, idleSince: now - 3 * MIN }),
-        portRow({ port: 6, unresolvable: true, worktree: null, clientCount: 0 })
+      servers: [
+        serverRow({
+          ports: [1],
+          judgement: 'candidate',
+          clientCount: 0,
+          idleSince: now - 35 * MIN
+        }),
+        serverRow({ ports: [2], judgement: 'check', clientCount: 1, idleSince: now - 25 * MIN }),
+        serverRow({ ports: [3], clientCount: 2 }),
+        serverRow({ ports: [4], clientCount: 0, agentInWorktree: true }),
+        serverRow({ ports: [5], clientCount: 0, idleSince: now - 3 * MIN }),
+        serverRow({ ports: [6], unresolvable: true, worktree: null, clientCount: 0 })
       ]
     })
     const status = Object.fromEntries(
@@ -49,9 +54,17 @@ describe('개발 서버 표', () => {
     expect(status[':6']).toEqual({ text: '판별 불가', dot: 'idle' })
   })
 
-  test('판별 불가 포트는 내리기 버튼이 없다(누구의 서버인지 모르므로)', () => {
+  test('한 서버의 여러 포트를 한 칸에', () => {
+    const s = snapshot({ servers: [serverRow({ ports: [6176, 8081, 9091] })] })
+    const row = tableFor('ports', s).rows[0]
+    expect(row.cells.port).toMatchObject({ text: ':6176 · :8081 · :9091', sort: 6176 })
+    expect(filterRows([row], '9091')).toHaveLength(1)
+    expect(filterRows([row], ':8081')).toHaveLength(1)
+  })
+
+  test('판별 불가 서버는 내리기 버튼이 없다(누구의 서버인지 모르므로)', () => {
     const s = snapshot({
-      ports: [portRow(), portRow({ port: 8080, unresolvable: true, worktree: null })]
+      servers: [serverRow(), serverRow({ ports: [8080], unresolvable: true, worktree: null })]
     })
     const kinds = tableFor('ports', s).rows.map((r) => r.actions.map((a) => a.kind))
     expect(kinds[0]).toEqual(['open', 'details', 'kill'])
@@ -149,17 +162,17 @@ describe('남은 프로세스·무거운 작업·디스크·다른 앱 표', () 
   })
 
   test('모든 탭이 빈 스냅샷에서도 표를 만든다', () => {
-    const empty = snapshot({ ports: [], topApps: [], disk: null })
+    const empty = snapshot({ servers: [], topApps: [], disk: null })
     for (const tab of TABS) expect(tableFor(tab, empty).rows).toEqual([])
   })
 })
 
 describe('검색·정렬', () => {
   const s = snapshot({
-    ports: [
-      portRow({ port: 3000 }),
-      portRow({
-        port: 5173,
+    servers: [
+      serverRow({ ports: [3000] }),
+      serverRow({
+        ports: [5173],
         pid: 2,
         worktree: { root: 'C:\\work\\admin', branch: 'feat/login', isLinkedWorktree: true }
       })
@@ -179,10 +192,10 @@ describe('검색·정렬', () => {
     const big = tableFor(
       'ports',
       snapshot({
-        ports: [
-          portRow({ port: 1, memoryBytes: 9 * MB }),
-          portRow({ port: 2, pid: 2, memoryBytes: 2 * GB }),
-          portRow({ port: 3, pid: 3, memoryBytes: 100 * MB })
+        servers: [
+          serverRow({ ports: [1], memoryBytes: 9 * MB }),
+          serverRow({ ports: [2], pid: 2, memoryBytes: 2 * GB }),
+          serverRow({ ports: [3], pid: 3, memoryBytes: 100 * MB })
         ]
       })
     ).rows
@@ -199,8 +212,8 @@ describe('행 아이콘(NeoHtop 처럼 첫 칸에 무엇이 도는지)', () => {
   test('개발 서버: 명령줄로 고른 프레임워크 로고, 실행 파일이 절대 경로면 OS 아이콘 후보도 둔다', () => {
     const s = snapshot({
       platform: 'win32',
-      ports: [
-        portRow({
+      servers: [
+        serverRow({
           commandLine:
             '"C:\\Program Files\\nodejs\\node.exe" C:\\work\\shop-web\\node_modules\\vite\\bin\\vite.js'
         })

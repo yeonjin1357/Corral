@@ -3,11 +3,11 @@ import type {
   KillResult,
   LeftoverRow,
   Platform,
-  PortRow,
+  ServerRow,
   ProcessInfo,
   RawSample
 } from '../shared/types'
-import { formatBytes, worktreeLabel } from '../shared/format'
+import { formatBytes, portList, worktreeLabel } from '../shared/format'
 import { selectionKey } from '../shared/keys'
 import { cleanupRecommendation, type RecommendItem } from '../shared/recommend'
 import { text } from '../shared/text'
@@ -30,7 +30,7 @@ export interface KillConfirm {
 }
 
 /** 끌 대상(포트 행·남은 프로세스 행)에서 "같은 프로세스인지" 확인하는 데 쓰는 값. */
-export type KillTarget = Pick<PortRow, 'pid' | 'processName' | 'commandLine' | 'startedAt'>
+export type KillTarget = Pick<ServerRow, 'pid' | 'processName' | 'commandLine' | 'startedAt'>
 
 export type KillPlan =
   { ok: true; pids: number[] } | { ok: false; reason: 'gone' | 'changed' | 'agent' }
@@ -73,10 +73,10 @@ function planFailure(reason: 'gone' | 'changed' | 'agent'): KillResult {
     : { status: reason }
 }
 
-export function buildKillConfirm(row: PortRow): KillConfirm {
+export function buildKillConfirm(row: ServerRow): KillConfirm {
   return {
     title: text.kill.title,
-    message: text.kill.message(row.port, worktreeLabel(row.worktree)),
+    message: text.kill.message(portList(row.ports), worktreeLabel(row.worktree)),
     detail: [
       text.kill.detail(row.processName, row.pid, row.descendantPids.length),
       ...(row.agentInWorktree ? [text.kill.agentInWorktree] : [])
@@ -127,9 +127,9 @@ function validId(n: number): boolean {
 }
 
 /**
- * 포트 내리기와 남은 프로세스 끄기. 둘 다 같은 절차를 거친다:
+ * 서버 내리기와 남은 프로세스 끄기. 둘 다 같은 절차를 거친다:
  * 최신 샘플로 같은 프로세스인지·하위에 에이전트가 없는지 확인 → 네이티브 확인 창 → 한 번 더 확인 → 루트와 자손 종료.
- * 같은 pid 를 동시에 처리하지 않는다(포트와 남은 프로세스 사이에서도).
+ * 같은 pid 를 동시에 처리하지 않는다(서버와 남은 프로세스 사이에서도).
  */
 /** 정리 추천을 한꺼번에 끌 때의 확인 창: 항목 목록(최대 10줄)과 합계. */
 export function buildManyConfirm(items: RecommendItem[]): KillConfirm {
@@ -149,7 +149,8 @@ export function buildManyConfirm(items: RecommendItem[]): KillConfirm {
 }
 
 export function createKiller(deps: KillDeps): {
-  killPort(port: number, pid: number): Promise<KillResult>
+  /** 서버(포트를 연 프로세스 트리) 하나를 끈다. 맨 위 프로세스의 pid 로 찾는다. */
+  killServer(pid: number): Promise<KillResult>
   killLeftover(pid: number): Promise<KillResult>
   /** 정리 추천 중 고른 것들을 확인 창 하나로 끈다. 항목마다 최신 샘플로 다시 확인한다. */
   killMany(keys: string[]): Promise<KillResult>
@@ -234,11 +235,11 @@ export function createKiller(deps: KillDeps): {
     }
   }
 
-  function killPort(port: number, pid: number): Promise<KillResult> {
-    if (!validId(port) || !validId(pid))
+  function killServer(pid: number): Promise<KillResult> {
+    if (!validId(pid))
       return Promise.resolve({ status: 'failed', message: text.killResult.invalid })
     return run(pid, () => {
-      const row = deps.latest()?.ports.find((r) => r.port === port && r.pid === pid)
+      const row = deps.latest()?.servers.find((r) => r.pid === pid)
       if (!row) return 'gone'
       if (row.unresolvable) return { status: 'failed', message: text.killResult.unresolvable }
       return { target: row, confirm: buildKillConfirm(row) }
@@ -263,8 +264,8 @@ export function createKiller(deps: KillDeps): {
     const targets = cleanupRecommendation(latest).items.flatMap((item) => {
       if (!wanted.has(item.key)) return []
       const row =
-        item.kind === 'port'
-          ? latest.ports.find((r) => selectionKey.port(r) === item.key)
+        item.kind === 'server'
+          ? latest.servers.find((r) => selectionKey.server(r) === item.key)
           : latest.leftovers.find((r) => selectionKey.leftover(r) === item.key)
       return row ? [{ item, target: row as KillTarget }] : []
     })
@@ -321,5 +322,5 @@ export function createKiller(deps: KillDeps): {
     }
   }
 
-  return { killPort, killLeftover, killMany }
+  return { killServer, killLeftover, killMany }
 }

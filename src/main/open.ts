@@ -6,6 +6,6 @@ import type { DashboardSnapshot } from '../shared/types'
  */
 export function localUrlFor(port: unknown, latest: DashboardSnapshot | null): string | null {
   if (typeof port !== 'number' || !Number.isInteger(port) || port < 1 || port > 65535) return null
-  if (!latest?.ports.some((row) => row.port === port)) return null
+  if (!latest?.servers.some((row) => row.ports.includes(port))) return null
   return `http://localhost:${port}`
 }

@@ -99,7 +99,9 @@ test('한 번 수집하면 스냅샷에 에이전트·포트·남은 프로세�
     [5000, 'claude', W1.root, 'unknown'],
     [6000, 'codex', W2.root, 'unknown']
   ])
-  expect(s.ports.map((p) => [p.port, p.agentInWorktree, p.judgement])).toEqual([[3000, true, null]])
+  expect(s.servers.map((r) => [r.ports, r.agentInWorktree, r.judgement])).toEqual([
+    [[3000], true, null]
+  ])
   expect(s.leftovers).toEqual([])
   expect(s.hook).toEqual(HOOK)
   expect(s.collectMode).toBe('helper-dll')
@@ -138,7 +140,7 @@ test('에이전트가 없는 워크트리의 포트는 시간을 기억해 정�
   await collector.collect()
   clock.now += 20 * MIN
   const later = await collector.collect()
-  expect(later.ports[0]).toMatchObject({ judgement: 'candidate', idleSince: 10 * MIN })
+  expect(later.servers[0]).toMatchObject({ judgement: 'candidate', idleSince: 10 * MIN })
 })
 
 test('Claude 훅 세션의 상태가 그 워크트리의 Claude 행에 쓰인다(하위 폴더에서 연 세션 포함)', async () => {
@@ -179,7 +181,7 @@ test('restate: 다시 샘플링하지 않고 훅 상태만 새로 반영한다',
   )
   const next = await collector.restate(first)
   expect(next.agents[0]).toMatchObject({ state: 'waiting', stateSource: 'hook' })
-  expect(next.ports).toBe(first.ports)
+  expect(next.servers).toBe(first.servers)
   // 훅 세션이 끝나면 CPU 판단으로 돌아간다.
   applyHookEvent(sessions, { session_id: 's1', hook_event_name: 'SessionEnd' }, clock.now)
   expect((await collector.restate(next)).agents[0]).toMatchObject({
@@ -279,7 +281,7 @@ test('설정(기준값)을 바꾸면 다음 수집부터 반영된다', async ()
   options.idlePortMs = 5 * MIN
   const second = await collector.collect()
   expect(second.memory.level).toBe('warn')
-  expect(second.ports[0].judgement).toBe('candidate')
+  expect(second.servers[0].judgement).toBe('candidate')
 })
 
 test('설정에서 수집 기준값을 만든다(분 → ms)', () => {

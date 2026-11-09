@@ -5,7 +5,6 @@ import type {
   MemoryLevel,
   MemorySummary,
   Platform,
-  PortRow,
   ProcessInfo,
   RawSample,
   ServerRow,
@@ -138,9 +137,23 @@ function topAppsOf(processes: ProcessInfo[], platform: Platform | null): AppUsag
  * 가운데 다른 포트 프로세스가 있으면 가장 위 조상의 서버에 포트를 더한다(java 부모·자식이 포트를 나눠 여는 경우).
  * 메모리·자손은 맨 위 프로세스 기준으로 한 번만 센다. 판별 불가(중계)는 합치지 않고 그 프로세스 하나가 서버다.
  */
-export function serversOf(ports: PortRow[], tree: ProcessTree): ServerRow[] {
+/** 포트 하나와 그 포트를 연 프로세스(서버로 합치기 전). */
+interface PortEntry {
+  port: number
+  pid: number
+  processName: string
+  commandLine: string
+  worktree: WorktreeInfo | null
+  unresolvable: boolean
+  memoryBytes: number
+  descendantPids: number[]
+  clientCount: number
+  startedAt: number | null
+}
+
+function serversOf(ports: PortEntry[], tree: ProcessTree): ServerRow[] {
   const portPids = new Set(ports.filter((r) => !r.unresolvable).map((r) => r.pid))
-  const topOf = (row: PortRow): number => {
+  const topOf = (row: PortEntry): number => {
     if (row.unresolvable) return row.pid
     let top = row.pid
     // 가까운 조상부터 나오므로 마지막으로 맞는 것이 가장 위.
@@ -148,7 +161,7 @@ export function serversOf(ports: PortRow[], tree: ProcessTree): ServerRow[] {
       if (portPids.has(a.pid)) top = a.pid
     return top
   }
-  const groups = new Map<number, { head: PortRow; ports: Set<number>; clientCount: number }>()
+  const groups = new Map<number, { head: PortEntry; ports: Set<number>; clientCount: number }>()
   for (const row of ports) {
     const top = topOf(row)
     let group = groups.get(top)
@@ -232,7 +245,7 @@ export function buildSnapshot(input: {
     clients.set(key, (clients.get(key) ?? 0) + 1)
   }
 
-  const ports: PortRow[] = []
+  const ports: PortEntry[] = []
   const seen = new Set<string>()
   for (const t of sample.tcp) {
     if (
@@ -262,17 +275,14 @@ export function buildSnapshot(input: {
       memoryBytes: p.memoryBytes + memoryOf(descendantPids),
       descendantPids,
       clientCount: clients.get(`${p.pid}:${t.localPort}`) ?? 0,
-      startedAt: p.startedAt,
-      // 판단은 이전 샘플을 아는 수집기(judgePorts)가 채운다.
-      judgement: null,
-      idleSince: null,
-      agentInWorktree: false
+      startedAt: p.startedAt
     })
   }
   ports.sort((a, b) => a.port - b.port || a.pid - b.pid)
 
+  const servers = serversOf(ports, tree)
   const devServer = new Set<number>()
-  for (const row of ports) {
+  for (const row of servers) {
     devServer.add(row.pid)
     for (const pid of row.descendantPids) devServer.add(pid)
   }
@@ -336,8 +346,7 @@ export function buildSnapshot(input: {
   return {
     takenAt: input.now,
     memory,
-    ports,
-    servers: serversOf(ports, tree),
+    servers,
     leftovers,
     heavyJobs,
     // RAM 이 넉넉하면 겹쳐도 조용하다(스펙 §3-6).

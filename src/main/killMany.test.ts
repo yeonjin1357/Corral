@@ -1,6 +1,6 @@
 import { createKiller, type KillConfirm, type KillDeps } from './kill'
 import { blankSnapshot } from '../shared/snapshot'
-import type { LeftoverRow, PortRow, ProcessInfo, RawSample } from '../shared/types'
+import type { LeftoverRow, ServerRow, ProcessInfo, RawSample } from '../shared/types'
 
 const MB = 1024 * 1024
 
@@ -19,12 +19,13 @@ const esbuild = proc(4101, 4100, 'esbuild.exe', 'esbuild --service', 300)
 const gradle = proc(7100, 1, 'java.exe', 'java GradleDaemon', 50)
 const fresh: RawSample = { processes: [vite, esbuild, gradle], tcp: [] }
 
-const candidate: PortRow = {
-  port: 3000,
+const candidate: ServerRow = {
+  ports: [3000],
   pid: 4100,
   processName: 'node.exe',
   commandLine: 'node vite --port 3000',
   worktree: { root: 'C:\\work\\shop-web', branch: 'develop', isLinkedWorktree: false },
+  workspace: null,
   unresolvable: false,
   memoryBytes: 800 * MB,
   descendantPids: [4101],
@@ -32,7 +33,9 @@ const candidate: PortRow = {
   startedAt: 200,
   judgement: 'candidate',
   idleSince: 0,
-  agentInWorktree: false
+  agentInWorktree: false,
+  cpuPercent: null,
+  memoryGrowth: null
 }
 const daemon: LeftoverRow = {
   pid: 7100,
@@ -46,14 +49,14 @@ const daemon: LeftoverRow = {
   startedAt: 50,
   agentInWorktree: false
 }
-const KEYS = ['port:3000:4100', 'leftover:7100:50']
+const KEYS = ['server:4100:200', 'leftover:7100:50']
 
 function deps(over: Partial<KillDeps> = {}): KillDeps & {
   signal: ReturnType<typeof vi.fn>
   confirm: ReturnType<typeof vi.fn>
 } {
   return {
-    latest: () => ({ ...blankSnapshot(1), ports: [candidate], leftovers: [daemon] }),
+    latest: () => ({ ...blankSnapshot(1), servers: [candidate], leftovers: [daemon] }),
     resample: async () => fresh,
     confirm: vi.fn(async () => true),
     signal: vi.fn(),
@@ -84,9 +87,9 @@ test('확인 창 하나에 목록과 합계를 보이고, 확인하면 모두(�
 
 test('추천에 없는 키는 무시하고, 남는 것이 없으면 확인 창 없이 gone', async () => {
   const d = deps()
-  await expect(createKiller(d).killMany(['port:9999:1'])).resolves.toEqual({ status: 'gone' })
+  await expect(createKiller(d).killMany(['server:9999:1'])).resolves.toEqual({ status: 'gone' })
   expect(d.confirm).not.toHaveBeenCalled()
-  await createKiller(d).killMany(['leftover:7100:50', 'port:9999:1'])
+  await createKiller(d).killMany(['leftover:7100:50', 'server:9999:1'])
   expect((d.confirm.mock.calls[0][0] as KillConfirm).message).toBe(
     '1개를 끌까요? 약 1.1 GB 를 확보해요.'
   )
@@ -134,11 +137,11 @@ test('잘못된 요청(배열 아님·500개 초과·문자열 아님)은 거절
   const k = createKiller(deps())
   const invalid = { status: 'failed', message: '잘못된 요청이에요.' }
   await expect(k.killMany('x' as unknown as string[])).resolves.toEqual(invalid)
-  await expect(k.killMany(Array.from({ length: 501 }, (_, i) => `port:${i}:1`))).resolves.toEqual(
+  await expect(k.killMany(Array.from({ length: 501 }, (_, i) => `server:${i}:1`))).resolves.toEqual(
     invalid
   )
   // 추천 항목이 많아도(51개) 거절하지 않는다(없는 키는 무시돼 gone).
-  await expect(k.killMany(Array.from({ length: 51 }, (_, i) => `port:${i}:1`))).resolves.toEqual({
+  await expect(k.killMany(Array.from({ length: 51 }, (_, i) => `server:${i}:1`))).resolves.toEqual({
     status: 'gone'
   })
   await expect(k.killMany([1 as unknown as string])).resolves.toEqual(invalid)

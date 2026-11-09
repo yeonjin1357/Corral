@@ -1,8 +1,8 @@
 import type { AgentState, DashboardSnapshot } from '../../shared/types'
-import { agentKey, portKey } from '../../shared/keys'
+import { agentKey, selectionKey } from '../../shared/keys'
 
 /**
- * 하트비트 한 칸. 포트: 연결이 있었으면 up, 열려 있기만 했으면 idle.
+ * 하트비트 한 칸. 서버: 연결이 있었으면 up, 열려 있기만 했으면 idle.
  * 에이전트: 작업 중 up, 권한 대기 pending, 오류 down, 쉬는 중·확인 중 idle(화면 상태 점 색과 같은 뜻).
  */
 export type Beat = 'up' | 'idle' | 'pending' | 'down'
@@ -12,9 +12,9 @@ export interface Point {
   value: number
 }
 
-export interface PortHistory {
+export interface ItemHistory {
   beats: Beat[]
-  /** 포트를 연 프로세스(+자손) 메모리 바이트. */
+  /** 서버·에이전트(+자손) 메모리 바이트. */
   memory: Point[]
 }
 
@@ -22,15 +22,16 @@ export interface History {
   lastTakenAt: number | null
   /** RAM 사용률(%). */
   ram: Point[]
-  ports: Record<string, PortHistory>
+  /** 서버별(서버 선택 키) 연결 하트비트와 메모리. */
+  servers: Record<string, ItemHistory>
   /** 에이전트별 상태 하트비트와 메모리(자기 + 자손). */
-  agents: Record<string, PortHistory>
+  agents: Record<string, ItemHistory>
 }
 
 export const BEAT_LIMIT = 60
 export const POINT_LIMIT = 120
 
-export { agentKey, portKey, selectionKey } from '../../shared/keys'
+export { agentKey, selectionKey } from '../../shared/keys'
 
 const AGENT_BEAT: Record<AgentState, Beat> = {
   working: 'up',
@@ -41,7 +42,7 @@ const AGENT_BEAT: Record<AgentState, Beat> = {
 }
 
 export function emptyHistory(): History {
-  return { lastTakenAt: null, ram: [], ports: {}, agents: {} }
+  return { lastTakenAt: null, ram: [], servers: {}, agents: {} }
 }
 
 function keep<T>(list: T[], item: T, limit: number): T[] {
@@ -54,16 +55,16 @@ function keep<T>(list: T[], item: T, limit: number): T[] {
  */
 export function appendSnapshot(history: History, s: DashboardSnapshot): History {
   if (s.stale || s.takenAt === history.lastTakenAt) return history
-  const ports: Record<string, PortHistory> = {}
-  for (const row of s.ports) {
-    const key = portKey(row)
-    const prev = history.ports[key] ?? { beats: [], memory: [] }
-    ports[key] = {
+  const servers: Record<string, ItemHistory> = {}
+  for (const row of s.servers) {
+    const key = selectionKey.server(row)
+    const prev = history.servers[key] ?? { beats: [], memory: [] }
+    servers[key] = {
       beats: keep(prev.beats, row.clientCount > 0 ? 'up' : 'idle', BEAT_LIMIT),
       memory: keep(prev.memory, { t: s.takenAt, value: row.memoryBytes }, POINT_LIMIT)
     }
   }
-  const agents: Record<string, PortHistory> = {}
+  const agents: Record<string, ItemHistory> = {}
   for (const row of s.agents) {
     const key = agentKey(row)
     const prev = history.agents[key] ?? { beats: [], memory: [] }
@@ -75,7 +76,7 @@ export function appendSnapshot(history: History, s: DashboardSnapshot): History 
   return {
     lastTakenAt: s.takenAt,
     ram: keep(history.ram, { t: s.takenAt, value: s.memory.usedPercent }, POINT_LIMIT),
-    ports,
+    servers,
     agents
   }
 }

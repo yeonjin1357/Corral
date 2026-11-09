@@ -10,11 +10,17 @@ import type {
   HeavyJobRow,
   LeftoverRow,
   Platform,
-  PortRow,
+  ServerRow,
   WorktreeInfo
 } from '../../shared/types'
 import { selectionKey } from '../../shared/keys'
-import { displayCpuPercent, formatBytes, formatDuration, worktreeFolder } from '../../shared/format'
+import {
+  displayCpuPercent,
+  formatBytes,
+  formatDuration,
+  portList,
+  worktreeFolder
+} from '../../shared/format'
 import { exePathOf } from '../../shared/exePath'
 import { text } from '../../shared/text'
 import { appBrand, devServerBrand, heavyBrand, leftoverBrand, type Brand } from './brand'
@@ -106,7 +112,7 @@ const searchOf = (...parts: (string | number | null | undefined)[]): string =>
     .join(' ')
     .toLowerCase()
 
-function portStatus(row: DashboardSnapshot['ports'][number], now: number): Cell {
+function serverStatus(row: ServerRow, now: number): Cell {
   const idle = row.idleSince != null ? ` · ${formatDuration(now - row.idleSince)}` : ''
   if (row.unresolvable) return { text: st.unresolvable, dot: 'idle' }
   if (row.judgement === 'candidate') return { text: `${st.candidate}${idle}`, dot: 'stopped' }
@@ -118,7 +124,7 @@ function portStatus(row: DashboardSnapshot['ports'][number], now: number): Cell 
 
 const TOOL_LOGO: Record<AgentTool, string> = { claude: claudeCodeLogo, codex: codexLogo }
 
-export function portIcon(row: PortRow, platform: Platform | null): RowIcon {
+export function serverIcon(row: ServerRow, platform: Platform | null): RowIcon {
   const brand = devServerBrand(row.commandLine)
   return {
     brand,
@@ -181,7 +187,7 @@ export function tableFor(tab: TabKey, s: DashboardSnapshot): Table {
       return {
         columns: [
           { id: 'name', label: c.project, width: 220 },
-          { id: 'port', label: c.port, width: 84 },
+          { id: 'port', label: c.port, width: 124 },
           { id: 'branch', label: c.branch, width: 240 },
           { id: 'status', label: c.status, width: 180 },
           { id: 'clients', label: c.clients, width: 64, align: 'right' },
@@ -189,18 +195,19 @@ export function tableFor(tab: TabKey, s: DashboardSnapshot): Table {
           { id: 'process', label: c.process, width: 160 }
         ],
         sort: { id: 'port', dir: 'asc' },
-        rows: s.ports.map((p) => ({
-          key: selectionKey.port(p),
-          id: selectionKey.port(p),
+        rows: s.servers.map((p) => ({
+          key: selectionKey.server(p),
+          id: selectionKey.server(p),
           cells: {
             name: {
               text: folderOf(p.worktree),
               title: p.worktree?.root,
-              icon: portIcon(p, s.platform)
+              icon: serverIcon(p, s.platform)
             },
-            port: { text: `:${p.port}`, sort: p.port, mono: true },
+            // 서버가 연 포트를 한 칸에. 정렬은 첫 포트로.
+            port: { text: portList(p.ports), sort: p.ports[0], mono: true },
             branch: branchOf(p.worktree),
-            status: portStatus(p, now),
+            status: serverStatus(p, now),
             clients: { text: String(p.clientCount), sort: p.clientCount, mono: true },
             memory: memoryCell(p.memoryBytes),
             process: { text: p.processName, mono: true, muted: true }
@@ -214,8 +221,8 @@ export function tableFor(tab: TabKey, s: DashboardSnapshot): Table {
             folderOf(p.worktree),
             p.worktree?.branch,
             p.processName,
-            `:${p.port}`,
-            p.port
+            portList(p.ports),
+            p.ports.join(' ')
           )
         }))
       }

@@ -19,20 +19,13 @@ import { text } from '../../shared/text'
 import { watchColorScheme } from './theme'
 import { toIpc } from './ipc'
 import { readSorts, resolveSort, writeSorts, type SortState, type Sorts } from './sortState'
-import {
-  POINT_LIMIT,
-  agentKey,
-  appendSnapshot,
-  emptyHistory,
-  portKey,
-  selectionKey
-} from './history'
+import { POINT_LIMIT, agentKey, appendSnapshot, emptyHistory, selectionKey } from './history'
 import { hookControls } from './hook'
 import {
   TABS,
   filterRows,
   leftoverIcon,
-  portIcon,
+  serverIcon,
   tableFor,
   type ActionKind,
   type TabKey
@@ -140,8 +133,8 @@ const selected = computed<Selected | null>(() => {
   const s = snapshot.value
   const key = selectedKey.value
   if (!s || !key) return null
-  const port = s.ports.find((r) => selectionKey.port(r) === key)
-  if (port) return { kind: 'port', row: port }
+  const server = s.servers.find((r) => selectionKey.server(r) === key)
+  if (server) return { kind: 'server', row: server }
   const agent = s.agents.find((r) => selectionKey.agent(r) === key)
   if (agent) return { kind: 'agent', row: agent }
   const leftover = s.leftovers.find((r) => selectionKey.leftover(r) === key)
@@ -165,13 +158,14 @@ const sheetOpen = computed({
 })
 const sheetHistory = computed(() => {
   const item = selected.value
-  if (item?.kind === 'port') return history.value.ports[portKey(item.row)]?.memory ?? []
+  if (item?.kind === 'server')
+    return history.value.servers[selectionKey.server(item.row)]?.memory ?? []
   if (item?.kind === 'agent') return history.value.agents[agentKey(item.row)]?.memory ?? []
   return []
 })
 
 const TAB_OF: Record<string, TabKey> = {
-  port: 'ports',
+  server: 'ports',
   agent: 'agents',
   leftover: 'leftovers',
   heavy: 'heavy',
@@ -260,20 +254,19 @@ async function act(kind: ActionKind, key: string): Promise<void> {
     select(key)
     return
   }
-  const port = s.ports.find((r) => selectionKey.port(r) === key)
+  const server = s.servers.find((r) => selectionKey.server(r) === key)
   const leftover = s.leftovers.find((r) => selectionKey.leftover(r) === key)
   const disk = s.disk?.rows.find((r) => selectionKey.disk(r.worktreeRoot) === key)
-  if (kind === 'open' && port) {
+  if (kind === 'open' && server) {
     try {
-      if (!(await window.pitwall.openPort(port.port)))
+      // 서버가 연 포트 가운데 첫 포트(보통 화면을 내주는 포트)를 연다.
+      if (!(await window.pitwall.openPort(server.ports[0])))
         say('action', { text: text.openFailed, tone: 'error' })
     } catch (e) {
       say('action', { text: failureText(e), tone: 'error' })
     }
-  } else if (kind === 'kill' && port) {
-    await runAction(key, async () =>
-      resultNotice(await window.pitwall.killPort(port.port, port.pid))
-    )
+  } else if (kind === 'kill' && server) {
+    await runAction(key, async () => resultNotice(await window.pitwall.killServer(server.pid)))
   } else if (kind === 'kill' && leftover) {
     await runAction(key, async () => resultNotice(await window.pitwall.killLeftover(leftover.pid)))
   } else if (kind === 'remove' && disk) {
@@ -351,7 +344,7 @@ const counts = computed<Record<TabKey, number>>(() => {
   const zero = Object.fromEntries(TABS.map((t) => [t, 0])) as Record<TabKey, number>
   if (!s) return zero
   return {
-    ports: s.ports.length,
+    ports: s.servers.length,
     agents: s.agents.length,
     leftovers: s.leftovers.length,
     heavy: s.heavyJobs.length,
@@ -413,14 +406,14 @@ const RECOMMEND_SHOWN = 4
 const recommendChips = computed(() => {
   const s = snapshot.value
   return recommendation.value.items.slice(0, RECOMMEND_SHOWN).map((item) => {
-    const port =
-      item.kind === 'port' ? s?.ports.find((p) => selectionKey.port(p) === item.key) : null
+    const server =
+      item.kind === 'server' ? s?.servers.find((p) => selectionKey.server(p) === item.key) : null
     const leftover =
       item.kind === 'leftover'
         ? s?.leftovers.find((l) => selectionKey.leftover(l) === item.key)
         : null
-    const icon = port
-      ? portIcon(port, s?.platform ?? null)
+    const icon = server
+      ? serverIcon(server, s?.platform ?? null)
       : leftover
         ? leftoverIcon(leftover, s?.platform ?? null)
         : null

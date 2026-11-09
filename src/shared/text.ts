@@ -4,8 +4,8 @@ export const text = {
   unresolvable: '판별 불가',
   detached: '(detached)',
   kill: {
-    title: '포트 내리기',
-    message: (port: number, label: string): string => `:${port} (${label}) 을(를) 내릴까요?`,
+    title: '개발 서버 내리기',
+    message: (ports: string, label: string): string => `${ports} (${label}) 을(를) 내릴까요?`,
     detail: (processName: string, pid: number, descendantCount: number): string =>
       descendantCount > 0
         ? `${processName} (PID ${pid}) 와 하위 프로세스 ${descendantCount}개가 종료돼요.`
@@ -147,7 +147,7 @@ export const text = {
     ram: (percent: number, used: string, total: string): string =>
       `RAM ${percent}% (${used} / ${total})`,
     staleSuffix: ' · 업데이트 지연',
-    ports: (n: number): string => `개발 서버 포트 ${n}개`,
+    servers: (n: number): string => `개발 서버 ${n}개`,
     agents: (n: number, waiting: number): string =>
       waiting > 0 ? `에이전트 ${n}개 (권한 대기 ${waiting})` : `에이전트 ${n}개`,
     candidates: (n: number): string => `정리 후보 ${n}개`,
@@ -204,7 +204,7 @@ export const text = {
       count: '개',
       memorySum: '메모리',
       ports: '개발 서버',
-      portsSub: '열린 포트',
+      portsSub: (ports: number): string => `포트 ${ports}개`,
       portJudge: '정리 판단',
       candidate: '정리 후보',
       check: '확인해볼 것',

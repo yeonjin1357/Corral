@@ -10,13 +10,14 @@ function snap(): DashboardSnapshot {
     ...blankSnapshot(1),
     platform: 'win32',
     topApps: [{ name: 'chrome.exe', memoryBytes: 1, processCount: 1, exePath: CHROME }],
-    ports: [
+    servers: [
       {
-        port: 8080,
+        ports: [8080],
         pid: 1,
         processName: 'gateway.exe',
         commandLine: `"${GATEWAY}" --port 8080`,
         worktree: null,
+        workspace: null,
         unresolvable: false,
         memoryBytes: 1,
         descendantPids: [],
@@ -24,7 +25,9 @@ function snap(): DashboardSnapshot {
         startedAt: null,
         judgement: null,
         idleSince: null,
-        agentInWorktree: false
+        agentInWorktree: false,
+        cpuPercent: null,
+        memoryGrowth: null
       }
     ]
   }

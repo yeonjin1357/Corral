@@ -28,7 +28,7 @@ import PanelHeader from './PanelHeader.vue'
 import StatItem from './StatItem.vue'
 import ResourceTrend from './ResourceTrend.vue'
 import ItemIcon from './ItemIcon.vue'
-import { agentIcon, heavyIcon, leftoverIcon, portIcon, type RowIcon } from '../rows'
+import { agentIcon, heavyIcon, leftoverIcon, serverIcon, type RowIcon } from '../rows'
 import { selectionKey } from '../../../shared/keys'
 
 export type TabKey = 'ports' | 'agents' | 'leftovers' | 'heavy' | 'disk' | 'apps'
@@ -67,11 +67,12 @@ const groupRows = computed(() =>
 )
 
 const portCounts = computed(() => ({
-  candidate: s.value.ports.filter((p) => p.judgement === 'candidate').length,
-  check: s.value.ports.filter((p) => p.judgement === 'check').length,
+  candidate: s.value.servers.filter((p) => p.judgement === 'candidate').length,
+  check: s.value.servers.filter((p) => p.judgement === 'check').length,
   // "확인해볼 것"(탭만 연결)도 연결이 있지만 거기서 셌으므로 겹치지 않게 뺀다.
-  inUse: s.value.ports.filter((p) => p.clientCount > 0 && p.judgement !== 'check').length
+  inUse: s.value.servers.filter((p) => p.clientCount > 0 && p.judgement !== 'check').length
 }))
+const portCount = computed(() => s.value.servers.reduce((n, r) => n + r.ports.length, 0))
 /** 로고 줄: 같은 종류(로고 제목)끼리 세어 많은 순 3개(좁은 카드에서도 한 줄). */
 interface LogoGroup {
   key: string
@@ -89,7 +90,7 @@ function groupLogos(icons: RowIcon[]): LogoGroup[] {
   return [...groups.values()].sort((a, b) => b.count - a.count).slice(0, 3)
 }
 const portLogos = computed(() =>
-  groupLogos(s.value.ports.map((p) => portIcon(p, s.value.platform)))
+  groupLogos(s.value.servers.map((p) => serverIcon(p, s.value.platform)))
 )
 const agentLogos = computed(() => groupLogos(s.value.agents.map(agentIcon)))
 
@@ -258,12 +259,14 @@ const diskSub = computed(() =>
       <CardContent class="min-h-0 flex-1 gap-2">
         <div>
           <div class="text-3xl leading-8 font-semibold tracking-tight tabular-nums">
-            {{ s.ports.length
+            {{ s.servers.length
             }}<span class="ml-0.5 text-lg font-normal text-muted-foreground">{{
               text.ui.cards.count
             }}</span>
           </div>
-          <p class="text-xs leading-4 text-muted-foreground">{{ text.ui.cards.portsSub }}</p>
+          <p class="text-xs leading-4 text-muted-foreground">
+            {{ text.ui.cards.portsSub(portCount) }}
+          </p>
         </div>
         <div v-if="portLogos.length" class="flex h-4 items-center gap-2.5 whitespace-nowrap">
           <span

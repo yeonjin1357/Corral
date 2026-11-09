@@ -24,13 +24,14 @@ import type {
   HeavyJobRow,
   LeftoverRow,
   Platform,
-  PortRow,
+  ServerRow,
   WorktreeInfo
 } from '../../../shared/types'
 import {
   displayCpuPercent,
   formatBytes,
   formatDuration,
+  portList,
   worktreeFolder
 } from '../../../shared/format'
 import { text } from '../../../shared/text'
@@ -46,10 +47,10 @@ import Badge from '../ui/Badge.vue'
 import { TABLE } from '../ui/variants'
 import ResourceTrend from './ResourceTrend.vue'
 import ItemIcon from './ItemIcon.vue'
-import { DISK_ICON, agentIcon, heavyIcon, leftoverIcon, portIcon, type RowIcon } from '../rows'
+import { DISK_ICON, agentIcon, heavyIcon, leftoverIcon, serverIcon, type RowIcon } from '../rows'
 
 export type Selected =
-  | { kind: 'port'; row: PortRow }
+  | { kind: 'server'; row: ServerRow }
   | { kind: 'agent'; row: AgentRow }
   | { kind: 'leftover'; row: LeftoverRow }
   | { kind: 'heavy'; row: HeavyJobRow }
@@ -103,7 +104,7 @@ const view = computed<View | null>(() => {
   const item = props.item
   if (!item) return null
   switch (item.kind) {
-    case 'port': {
+    case 'server': {
       const r = item.row
       const status = r.unresolvable
         ? t.rowStatus.unresolvable
@@ -117,9 +118,9 @@ const view = computed<View | null>(() => {
                 ? t.rowStatus.agent
                 : t.rowStatus.idle
       return {
-        icon: portIcon(r, props.platform),
-        title: r.unresolvable ? `:${r.port}` : folder(r.worktree),
-        description: `${t.detail.url(r.port)} · ${r.processName} · PID ${r.pid}`,
+        icon: serverIcon(r, props.platform),
+        title: r.unresolvable ? portList(r.ports) : folder(r.worktree),
+        description: `${t.detail.url(r.ports[0])} · ${r.processName} · PID ${r.pid}`,
         badge: {
           text: status,
           variant: r.judgement === 'candidate' ? 'destructive' : 'secondary'
@@ -142,7 +143,7 @@ const view = computed<View | null>(() => {
           }
         ],
         facts: [
-          { label: t.columns.port, value: `:${r.port}` },
+          { label: t.columns.port, value: portList(r.ports) },
           { label: t.columns.branch, value: r.worktree?.branch ?? text.detached },
           { label: t.sheet.branchKind, value: r.worktree ? branchKind(r.worktree) : t.none },
           { label: t.sheet.path, value: r.worktree?.root ?? t.none },
@@ -341,11 +342,11 @@ const folderSize = (f: DiskRow['folders'][number]): string =>
       </div>
 
       <div
-        v-if="item.kind === 'port' || item.kind === 'leftover' || item.kind === 'disk'"
+        v-if="item.kind === 'server' || item.kind === 'leftover' || item.kind === 'disk'"
         class="flex flex-wrap gap-2"
       >
         <Button
-          v-if="item.kind === 'port'"
+          v-if="item.kind === 'server'"
           variant="outline"
           size="sm"
           data-action="open"
@@ -354,7 +355,7 @@ const folderSize = (f: DiskRow['folders'][number]): string =>
           <ExternalLink />{{ t.actions.open }}
         </Button>
         <Button
-          v-if="item.kind === 'port' && !item.row.unresolvable"
+          v-if="item.kind === 'server' && !item.row.unresolvable"
           variant="destructive"
           size="sm"
           data-action="kill"

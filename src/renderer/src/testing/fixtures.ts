@@ -5,20 +5,21 @@ import type {
   DiskRow,
   HeavyJobRow,
   LeftoverRow,
-  PortRow
+  ServerRow
 } from '../../../shared/types'
 import { blankSnapshot } from '../../../shared/snapshot'
 
 export const MB = 1024 * 1024
 export const GB = 1024 * MB
 
-export function portRow(over: Partial<PortRow> = {}): PortRow {
+export function serverRow(over: Partial<ServerRow> = {}): ServerRow {
   return {
-    port: 3000,
+    ports: [3000],
     pid: 4100,
     processName: 'node.exe',
     commandLine: 'node vite',
     worktree: { root: 'C:\\work\\shop-web', branch: 'develop', isLinkedWorktree: false },
+    workspace: null,
     unresolvable: false,
     memoryBytes: 1200 * MB,
     descendantPids: [4101],
@@ -27,6 +28,8 @@ export function portRow(over: Partial<PortRow> = {}): PortRow {
     judgement: null,
     idleSince: null,
     agentInWorktree: false,
+    cpuPercent: null,
+    memoryGrowth: null,
     ...over
   }
 }
@@ -93,16 +96,16 @@ export function diskRow(over: Partial<DiskRow> = {}): DiskRow {
   }
 }
 
-export const threePorts: PortRow[] = [
-  portRow(),
-  portRow({
-    port: 3003,
+export const threeServers: ServerRow[] = [
+  serverRow(),
+  serverRow({
+    ports: [3003],
     pid: 5100,
     clientCount: 0,
     worktree: { root: '/Users/dev/wt-a', branch: 'feat/a', isLinkedWorktree: true }
   }),
-  portRow({
-    port: 8080,
+  serverRow({
+    ports: [8080],
     pid: 6000,
     processName: 'wslrelay.exe',
     worktree: null,
@@ -120,7 +123,7 @@ export function snapshot(over: Partial<DashboardSnapshot> = {}): DashboardSnapsh
       usedPercent: 82.2,
       level: 'warn'
     },
-    ports: threePorts,
+    servers: threeServers,
     leftovers: [],
     agents: [],
     hook: null,

@@ -1,12 +1,12 @@
-import { agentKey, appendSnapshot, emptyHistory, portKey, selectionKey } from './history'
-import { agentRow, leftoverRow, portRow, snapshot } from './testing/fixtures'
+import { agentKey, appendSnapshot, emptyHistory, selectionKey } from './history'
+import { agentRow, leftoverRow, serverRow, snapshot } from './testing/fixtures'
 
-test('포트별 하트비트: 연결 있으면 up, 없으면 idle, 최신이 맨 뒤', () => {
+test('서버별 하트비트: 연결 있으면 up, 없으면 idle, 최신이 맨 뒤', () => {
   let h = emptyHistory()
-  h = appendSnapshot(h, snapshot({ takenAt: 1, ports: [portRow({ clientCount: 1 })] }))
-  h = appendSnapshot(h, snapshot({ takenAt: 2, ports: [portRow({ clientCount: 0 })] }))
-  expect(h.ports[portKey(portRow())].beats).toEqual(['up', 'idle'])
-  expect(h.ports[portKey(portRow())].memory.map((p) => p.t)).toEqual([1, 2])
+  h = appendSnapshot(h, snapshot({ takenAt: 1, servers: [serverRow({ clientCount: 1 })] }))
+  h = appendSnapshot(h, snapshot({ takenAt: 2, servers: [serverRow({ clientCount: 0 })] }))
+  expect(h.servers[selectionKey.server(serverRow())].beats).toEqual(['up', 'idle'])
+  expect(h.servers[selectionKey.server(serverRow())].memory.map((p) => p.t)).toEqual([1, 2])
 })
 
 test('RAM 추이는 사용률(%)로 쌓는다', () => {
@@ -33,19 +33,19 @@ test('지연(stale) 스냅샷은 옛 데이터의 반복이라 쌓지 않는다'
 test('개수 제한: 하트비트 60개, 그래프 점 120개', () => {
   let h = emptyHistory()
   for (let i = 1; i <= 130; i++) h = appendSnapshot(h, snapshot({ takenAt: i }))
-  const p = h.ports[portKey(portRow())]
+  const p = h.servers[selectionKey.server(serverRow())]
   expect(p.beats).toHaveLength(60)
   expect(p.memory).toHaveLength(120)
   expect(p.memory[0].t).toBe(11)
   expect(h.ram).toHaveLength(120)
 })
 
-test('사라진 포트의 기록은 지운다(같은 포트를 다른 pid 가 열면 새 기록)', () => {
+test('사라진 서버의 기록은 지운다(다른 pid 가 열면 새 기록)', () => {
   let h = emptyHistory()
-  h = appendSnapshot(h, snapshot({ takenAt: 1, ports: [portRow({ pid: 1 })] }))
-  h = appendSnapshot(h, snapshot({ takenAt: 2, ports: [portRow({ pid: 2 })] }))
-  expect(Object.keys(h.ports)).toEqual([portKey(portRow({ pid: 2 }))])
-  expect(h.ports[portKey(portRow({ pid: 2 }))].beats).toHaveLength(1)
+  h = appendSnapshot(h, snapshot({ takenAt: 1, servers: [serverRow({ pid: 1 })] }))
+  h = appendSnapshot(h, snapshot({ takenAt: 2, servers: [serverRow({ pid: 2 })] }))
+  expect(Object.keys(h.servers)).toEqual([selectionKey.server(serverRow({ pid: 2 }))])
+  expect(h.servers[selectionKey.server(serverRow({ pid: 2 }))].beats).toHaveLength(1)
 })
 
 test('원래 기록 객체는 바꾸지 않는다(Vue 반응성이 새 객체로 바뀐 것을 알도록)', () => {
@@ -76,7 +76,7 @@ describe('에이전트 기록', () => {
 })
 
 test('고른 항목 키는 종류를 앞에 붙여 서로 겹치지 않는다', () => {
-  expect(selectionKey.port(portRow())).toBe('port:3000:4100')
+  expect(selectionKey.server(serverRow())).toBe('server:4100:200')
   expect(selectionKey.agent(agentRow())).toBe('agent:5000:100')
   expect(selectionKey.leftover(leftoverRow())).toBe('leftover:7000:300')
 })

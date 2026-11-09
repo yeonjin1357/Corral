@@ -121,25 +121,25 @@ const input = {
   now: 123
 }
 
-describe('포트 행', () => {
+describe('포트를 연 프로세스 고르기', () => {
   test('IPv4/IPv6 중복 제거, 시스템 포트·판별 안 되는 포트 제외, 릴레이는 판별 불가, 포트 순 정렬', () => {
     const s = buildSnapshot(input)
-    expect(s.ports.map((p) => [p.port, p.pid, p.unresolvable])).toEqual([
-      [3000, 4100, false],
-      [3003, 5100, false],
-      [3010, 7100, false],
-      [8080, 6000, true]
+    expect(s.servers.map((r) => [r.ports, r.pid, r.unresolvable])).toEqual([
+      [[3000], 4100, false],
+      [[3003], 5100, false],
+      [[3010], 7100, false],
+      [[8080], 6000, true]
     ])
   })
 
   test('조상(3단계까지)의 worktree 를 물려받고, 4단계 위는 보지 않는다', () => {
     const s = buildSnapshot(input)
-    expect(s.ports.find((p) => p.port === 3010)?.worktree).toEqual(W3)
-    expect(s.ports.find((p) => p.port === 3020)).toBeUndefined()
+    expect(s.servers.find((r) => r.ports.includes(3010))?.worktree).toEqual(W3)
+    expect(s.servers.find((r) => r.ports.includes(3020))).toBeUndefined()
   })
 
   test('clientCount 는 서버 쪽 Established 만, 메모리는 자손 포함, 재사용 pid 는 자손 아님', () => {
-    const row = buildSnapshot(input).ports.find((p) => p.port === 3000)!
+    const row = buildSnapshot(input).servers.find((r) => r.ports.includes(3000))!
     expect(row.clientCount).toBe(1)
     expect(row.memoryBytes).toBe(1000 * MB + 200 * MB)
     expect(row.descendantPids).toEqual([4101])
@@ -149,14 +149,14 @@ describe('포트 행', () => {
   })
 
   test('판별 불가 행은 worktree null', () => {
-    const row = buildSnapshot(input).ports.find((p) => p.port === 8080)!
+    const row = buildSnapshot(input).servers.find((r) => r.ports.includes(8080))!
     expect(row.worktree).toBeNull()
     expect(row.clientCount).toBe(0)
   })
 
   test('ppid 가 서로를 가리키는 고리가 있어도 끝난다', () => {
     const s = buildSnapshot({ ...input, worktrees: new Map([...worktrees, [9100, W1]]) })
-    expect(s.ports.find((p) => p.port === 3030)?.descendantPids).toEqual([9101])
+    expect(s.servers.find((r) => r.ports.includes(3030))?.descendantPids).toEqual([9101])
   })
 })
 
@@ -404,7 +404,7 @@ test('에이전트(Claude Code 등)가 연 포트는 worktree 안이어도 목�
     worktrees: new Map([...worktrees, [5000, W2]]),
     sample: { processes, tcp: [...tcp, listen(5000, 7523)] }
   })
-  expect(s.ports.map((p) => p.port)).not.toContain(7523)
+  expect(s.servers.flatMap((r) => r.ports)).not.toContain(7523)
 })
 
 test('pitwall 자신과 그 자식 프로세스가 연 포트는 목록에 올리지 않는다', () => {
@@ -413,9 +413,9 @@ test('pitwall 자신과 그 자식 프로세스가 연 포트는 목록에 올�
     selfPid: 4100,
     sample: { processes, tcp: [...tcp, listen(4101, 9333)] }
   })
-  expect(s.ports.map((p) => p.port)).not.toContain(3000)
-  expect(s.ports.map((p) => p.port)).not.toContain(9333)
-  expect(s.ports.map((p) => p.port)).toContain(3003)
+  expect(s.servers.flatMap((r) => r.ports)).not.toContain(3000)
+  expect(s.servers.flatMap((r) => r.ports)).not.toContain(9333)
+  expect(s.servers.flatMap((r) => r.ports)).toContain(3003)
 })
 
 test('pitwall 을 띄운 조상(개발 실행의 vite 서버 등)이 연 포트도 올리지 않는다(내리면 pitwall 이 같이 꺼짐)', () => {
@@ -428,9 +428,9 @@ test('pitwall 을 띄운 조상(개발 실행의 vite 서버 등)이 연 포트�
       tcp: [...tcp, listen(4000, 3001)]
     }
   })
-  expect(s.ports.map((p) => p.port)).not.toContain(3000)
-  expect(s.ports.map((p) => p.port)).not.toContain(3001)
-  expect(s.ports.map((p) => p.port)).toContain(3003)
+  expect(s.servers.flatMap((r) => r.ports)).not.toContain(3000)
+  expect(s.servers.flatMap((r) => r.ports)).not.toContain(3001)
+  expect(s.servers.flatMap((r) => r.ports)).toContain(3003)
 })
 
 test('수집 방식을 스냅샷에 그대로 옮기고, 없으면 null', () => {
@@ -456,7 +456,7 @@ test('릴레이 프로세스 이름 목록은 대소문자 무관하게 비교',
     sample: { processes: [proc(1, 0, 'WslRelay.EXE', 1, null)], tcp: [listen(1, 9000)] },
     worktrees: new Map()
   })
-  expect(s.ports.map((p) => p.unresolvable)).toEqual([true])
+  expect(s.servers.map((r) => r.unresolvable)).toEqual([true])
 })
 
 describe('남은 프로세스', () => {

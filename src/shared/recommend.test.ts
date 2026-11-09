@@ -1,17 +1,18 @@
 import { cleanupRecommendation } from './recommend'
 import { blankSnapshot } from './snapshot'
-import type { LeftoverRow, PortRow, WorktreeInfo } from './types'
+import type { LeftoverRow, ServerRow, WorktreeInfo } from './types'
 
 const MB = 1024 * 1024
 const W1: WorktreeInfo = { root: 'C:\\work\\shop-web', branch: 'develop', isLinkedWorktree: false }
 
-function port(over: Partial<PortRow>): PortRow {
+function server(over: Partial<ServerRow>): ServerRow {
   return {
-    port: 3000,
+    ports: [3000],
     pid: 4100,
     processName: 'node.exe',
     commandLine: 'node vite',
     worktree: W1,
+    workspace: null,
     unresolvable: false,
     memoryBytes: 100 * MB,
     descendantPids: [],
@@ -20,6 +21,8 @@ function port(over: Partial<PortRow>): PortRow {
     judgement: 'candidate',
     idleSince: 0,
     agentInWorktree: false,
+    cpuPercent: null,
+    memoryGrowth: null,
     ...over
   }
 }
@@ -40,14 +43,14 @@ function leftover(over: Partial<LeftoverRow>): LeftoverRow {
   }
 }
 
-test('정리 후보 포트와 에이전트 없는 워크트리의 남은 프로세스를 메모리 큰 순으로, 합계와 함께(작업 폴더를 모르면 뺀다)', () => {
+test('정리 후보 서버와 에이전트 없는 워크트리의 남은 프로세스를 메모리 큰 순으로, 합계와 함께(작업 폴더를 모르면 뺀다)', () => {
   const r = cleanupRecommendation({
     ...blankSnapshot(1),
-    ports: [
-      port({ port: 3000, pid: 4100, memoryBytes: 800 * MB }),
-      port({ port: 3002, pid: 4200, judgement: 'check' }),
-      port({ port: 3003, pid: 4300, judgement: null }),
-      port({ port: 8080, pid: 6000, unresolvable: true, worktree: null })
+    servers: [
+      server({ ports: [3000], pid: 4100, memoryBytes: 800 * MB }),
+      server({ ports: [3002], pid: 4200, judgement: 'check' }),
+      server({ ports: [3003], pid: 4300, judgement: null }),
+      server({ ports: [8080], pid: 6000, unresolvable: true, worktree: null })
     ],
     leftovers: [
       leftover({ pid: 7100, worktree: W1 }),
@@ -66,8 +69,8 @@ test('정리 후보 포트와 에이전트 없는 워크트리의 남은 프로�
       memoryBytes: 1100 * MB
     },
     {
-      kind: 'port',
-      key: 'port:3000:4100',
+      kind: 'server',
+      key: 'server:4100:1',
       pid: 4100,
       title: ':3000',
       where: 'shop-web · develop',
@@ -79,4 +82,22 @@ test('정리 후보 포트와 에이전트 없는 워크트리의 남은 프로�
 
 test('추천할 것이 없으면 빈 목록과 0', () => {
   expect(cleanupRecommendation(blankSnapshot(1))).toEqual({ items: [], totalBytes: 0 })
+})
+
+test('포트가 둘인 서버는 추천에 한 번, 메모리도 한 번', () => {
+  const r = cleanupRecommendation({
+    ...blankSnapshot(1),
+    servers: [server({ ports: [3000, 3001], pid: 4100, memoryBytes: 800 * MB })]
+  })
+  expect(r.items).toEqual([
+    {
+      kind: 'server',
+      key: 'server:4100:1',
+      pid: 4100,
+      title: ':3000 · :3001',
+      where: 'shop-web · develop',
+      memoryBytes: 800 * MB
+    }
+  ])
+  expect(r.totalBytes).toBe(800 * MB)
 })
