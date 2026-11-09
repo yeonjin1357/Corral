@@ -23,6 +23,8 @@ import { activityOf, judgeServers, type ServerMemo } from './judge'
 import { agentToolOf, topLevelAgentPids } from './processTree'
 import { hookStateForWorktree, reconcileSessions, type LiveClaude, type Sessions } from './sessions'
 import { buildSnapshot, pidsForWorktreeLookup } from './snapshot'
+import { createServerHistory } from './serverHistory'
+import { selectionKey } from '../shared/keys'
 import { normalizeCandidate, selfWorkspace } from './collect/worktree'
 
 /** 수집마다 새로 읽는 사용자 기준값(설정 화면에서 바꾸면 다음 수집부터 반영). */
@@ -79,6 +81,8 @@ export function createCollector(deps: CollectorDeps): {
   let previousServerCpu: CpuMemo = new Map()
   /** 에이전트별 지금 상태를 처음 본 시각(F3). */
   let agentStates: AgentStateMemo = new Map()
+  /** 서버별 메모리 기록(F6, 1분 간격·60분). */
+  const serverHistory = createServerHistory()
   let serverMemo: ServerMemo = new Map()
   /** 서버별 지난 샘플의 연결 상대(사용 흔적 판단). */
   let serverPeers = new Map<string, Set<string>>()
@@ -233,9 +237,15 @@ export function createCollector(deps: CollectorDeps): {
       }
     })
     previousServerCpu = serverCpu
+    // 메모리가 계속 느는 서버(F6): 1분에 한 번 기록해 최근 60분으로 판단한다.
+    serverHistory.record(servers, now)
+    const measured = servers.map((row) => ({
+      ...row,
+      memoryGrowth: serverHistory.growthOf(selectionKey.server(row), now)
+    }))
 
     const workspaceOf = await resolveWorkspaces([
-      ...servers.map((r) => r.worktree),
+      ...measured.map((r) => r.worktree),
       ...snapshot.leftovers.map((r) => r.worktree),
       ...snapshot.heavyJobs.map((r) => r.worktree),
       ...agents.map((a) => a.worktree)
@@ -246,7 +256,7 @@ export function createCollector(deps: CollectorDeps): {
 
     return {
       ...snapshot,
-      servers: servers.map(withWorkspace),
+      servers: measured.map(withWorkspace),
       leftovers: snapshot.leftovers.map(withWorkspace),
       heavyJobs: snapshot.heavyJobs.map(withWorkspace),
       agents: agents.map(withWorkspace),

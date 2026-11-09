@@ -396,3 +396,25 @@ test('에이전트 상태 시작 시각: CPU 추정은 처음 본 시각부터 �
   const third = await collector.collect()
   expect(third.agents.find((a) => a.pid === 5000)!.stateSince).toBe(since)
 })
+
+test('메모리가 계속 느는 서버에 근거를 붙인다(1분마다 기록, 30분 이상)', async () => {
+  const { deps, clock, samples } = setup()
+  const GB = 1024 * MB
+  for (let i = 0; i <= 30; i++) {
+    const s = sampleAt(0)
+    samples.push({
+      ...s,
+      processes: s.processes.map((p) =>
+        p.pid === 4100 ? { ...p, memoryBytes: 2 * GB + Math.round((1.6 * GB * i) / 30) } : p
+      )
+    })
+  }
+  const collector = createCollector(deps)
+  let last = await collector.collect()
+  expect(last.servers[0].memoryGrowth).toBeNull()
+  for (let i = 1; i <= 30; i++) {
+    clock.now += 60_000
+    last = await collector.collect()
+  }
+  expect(last.servers[0].memoryGrowth).toMatchObject({ fromBytes: 2 * GB, minutes: 30 })
+})
