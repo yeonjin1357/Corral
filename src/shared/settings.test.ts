@@ -14,7 +14,7 @@ test('기본값: 보통 갱신, 자동 테마, 로그인 시 실행·업데이�
     ramWarnPercent: 80,
     ramDangerPercent: 90,
     idlePortMinutes: 20,
-    notify: { ramLow: true, claudeWaiting: true, heavyOverlap: true },
+    notify: { ramLow: true, claudeWaiting: true, heavyOverlap: true, agentDone: true },
     dependencyDirs: ['node_modules'],
     extraRepos: [],
     hiddenServers: [],
@@ -103,10 +103,13 @@ test('무거운 명령 패턴: 공백 정리·빈 값·중복(대소문자 무�
 })
 
 test('알림은 항목별로, 빠진 항목은 기본값', () => {
-  expect(normalizeSettings({ notify: { ramLow: false, heavyOverlap: 'no' } }).notify).toEqual({
+  expect(
+    normalizeSettings({ notify: { ramLow: false, heavyOverlap: 'no', agentDone: false } }).notify
+  ).toEqual({
     ramLow: false,
     claudeWaiting: true,
-    heavyOverlap: true
+    heavyOverlap: true,
+    agentDone: false
   })
 })
 

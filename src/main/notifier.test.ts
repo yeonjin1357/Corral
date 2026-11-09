@@ -227,3 +227,92 @@ describe('무거운 작업 겹침', () => {
     expect(shown).toEqual([])
   })
 })
+
+describe('작업 끝남(F4)', () => {
+  /** 정확한 상태(훅)를 아는 에이전트. */
+  function hooked(
+    pid: number,
+    state: AgentRow['state'],
+    stateSince: number,
+    root = 'C:\\work\\shop-web'
+  ): AgentRow {
+    return { ...agent(pid, state, root), stateSource: 'hook', stateSince }
+  }
+
+  test('2분 넘게 일한 뒤 끝나면 알린다(그 에이전트로 가는 대상)', () => {
+    const { shown, clock, update } = setup()
+    update(snap({ agents: [hooked(1, 'working', 0)] }))
+    clock.now = 12 * MIN
+    update(snap({ agents: [hooked(1, 'idle', 12 * MIN)] }))
+    expect(shown).toEqual([
+      {
+        title: 'shop-web 의 Claude 가 작업을 끝냈어요',
+        body: '12분 동안 일했어요.',
+        target: 'agent:1:1'
+      }
+    ])
+  })
+
+  test('2분이 안 된 짧은 답은 알리지 않는다', () => {
+    const { shown, clock, update } = setup()
+    update(snap({ agents: [hooked(1, 'working', 0)] }))
+    clock.now = 2 * MIN - 1
+    update(snap({ agents: [hooked(1, 'idle', clock.now)] }))
+    expect(shown).toEqual([])
+  })
+
+  test('CPU 추정 상태로는 알리지 않는다', () => {
+    const { shown, clock, update } = setup()
+    const cpu = (state: AgentRow['state'], since: number): AgentRow => ({
+      ...agent(1, state),
+      stateSource: 'cpu',
+      stateSince: since
+    })
+    update(snap({ agents: [cpu('working', 0)] }))
+    clock.now = 10 * MIN
+    update(snap({ agents: [cpu('idle', clock.now)] }))
+    expect(shown).toEqual([])
+  })
+
+  test('창이 앞에 있으면 알리지 않는다', () => {
+    const { shown, clock, update } = setup({ focused: true })
+    update(snap({ agents: [hooked(1, 'working', 0)] }))
+    clock.now = 10 * MIN
+    update(snap({ agents: [hooked(1, 'idle', clock.now)] }))
+    expect(shown).toEqual([])
+  })
+
+  test('설정에서 끄면 알리지 않는다', () => {
+    const { shown, clock, update } = setup({ notify: { agentDone: false } })
+    update(snap({ agents: [hooked(1, 'working', 0)] }))
+    clock.now = 10 * MIN
+    update(snap({ agents: [hooked(1, 'idle', clock.now)] }))
+    expect(shown).toEqual([])
+  })
+
+  test('여럿이 함께 끝나면 하나로 묶는다', () => {
+    const { shown, clock, update } = setup()
+    update(snap({ agents: [hooked(1, 'working', 0), hooked(2, 'working', 0, 'C:\\work\\api')] }))
+    clock.now = 5 * MIN
+    update(
+      snap({
+        agents: [hooked(1, 'idle', clock.now), hooked(2, 'idle', clock.now, 'C:\\work\\api')]
+      })
+    )
+    expect(shown).toEqual([
+      {
+        title: '에이전트 2개가 작업을 끝냈어요',
+        body: 'shop-web · develop, api · develop',
+        target: null
+      }
+    ])
+  })
+
+  test('작업 중에서 권한 대기로 바뀐 것은 끝난 것이 아니다', () => {
+    const { shown, clock, update } = setup({ notify: { claudeWaiting: false } })
+    update(snap({ agents: [hooked(1, 'working', 0)] }))
+    clock.now = 5 * MIN
+    update(snap({ agents: [hooked(1, 'waiting', clock.now)] }))
+    expect(shown).toEqual([])
+  })
+})

@@ -72,7 +72,10 @@ export const text = {
     waitingTitle: 'Claude 가 권한을 기다려요',
     waitingManyTitle: (n: number): string => `Claude ${n}개가 권한을 기다려요`,
     heavyTitle: (percent: number): string => `무거운 작업이 겹쳤어요 (RAM ${percent}%)`,
-    heavyBody: (labels: string): string => `${labels} 이(가) 동시에 돌고 있어요.`
+    heavyBody: (labels: string): string => `${labels} 이(가) 동시에 돌고 있어요.`,
+    doneTitle: (folder: string, tool: string): string => `${folder} 의 ${tool} 가 작업을 끝냈어요`,
+    doneBody: (duration: string): string => `${duration} 동안 일했어요.`,
+    doneManyTitle: (n: number): string => `에이전트 ${n}개가 작업을 끝냈어요`
   },
   leftoverKill: {
     title: '남은 프로세스 끄기',

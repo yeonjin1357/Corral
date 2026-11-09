@@ -10,6 +10,8 @@ export interface NotifySettings {
   claudeWaiting: boolean
   /** 무거운 작업이 겹치고 RAM 이 경고 기준을 넘을 때. */
   heavyOverlap: boolean
+  /** 정확한 상태를 아는 에이전트(Claude 훅·Codex)가 2분 넘게 일한 뒤 끝났을 때. */
+  agentDone: boolean
 }
 
 export interface Settings {
@@ -80,7 +82,7 @@ export const DEFAULT_SETTINGS: Settings = {
     'mvn',
     'cargo build'
   ],
-  notify: { ramLow: true, claudeWaiting: true, heavyOverlap: true },
+  notify: { ramLow: true, claudeWaiting: true, heavyOverlap: true, agentDone: true },
   dependencyDirs: ['node_modules'],
   extraRepos: [],
   hiddenServers: [],
@@ -221,7 +223,8 @@ export function normalizeSettings(value: unknown): Settings {
     notify: {
       ramLow: bool(notify.ramLow, d.notify.ramLow),
       claudeWaiting: bool(notify.claudeWaiting, d.notify.claudeWaiting),
-      heavyOverlap: bool(notify.heavyOverlap, d.notify.heavyOverlap)
+      heavyOverlap: bool(notify.heavyOverlap, d.notify.heavyOverlap),
+      agentDone: bool(notify.agentDone, d.notify.agentDone)
     },
     dependencyDirs: list(
       v.dependencyDirs,
