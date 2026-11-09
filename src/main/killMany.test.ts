@@ -39,7 +39,7 @@ const daemon: LeftoverRow = {
   processName: 'java.exe',
   label: 'Gradle 데몬',
   commandLine: 'java GradleDaemon',
-  worktree: null,
+  worktree: { root: 'C:\\work\\api', branch: 'main', isLinkedWorktree: false },
   memoryBytes: 1100 * MB,
   descendantPids: [],
   startedAt: 50,
@@ -69,7 +69,7 @@ test('확인 창 하나에 목록과 합계를 보이고, 확인하면 모두(�
   const box = d.confirm.mock.calls[0][0] as KillConfirm
   expect(box.title).toBe('메모리 정리')
   expect(box.message).toBe('2개를 끌까요? 약 1.9 GB 를 확보해요.')
-  expect(box.detail).toContain('• Gradle 데몬 (작업 폴더 모름) — 1.1 GB')
+  expect(box.detail).toContain('• Gradle 데몬 (api · main) — 1.1 GB')
   expect(box.detail).toContain('• :3000 (shop-web · develop) — 800 MB')
   expect(box.buttons).toEqual(['모두 끄기', '취소'])
   expect(box.cancelId).toBe(1)

@@ -23,7 +23,11 @@ describe('메모리 정리 추천', () => {
     judgement: 'candidate',
     memoryBytes: 800 * MB
   })
-  const leftover = leftoverRow({ pid: 7000, memoryBytes: 1100 * MB })
+  const leftover = leftoverRow({
+    pid: 7000,
+    memoryBytes: 1100 * MB,
+    worktree: { root: 'C:\\work\\api', branch: 'main', isLinkedWorktree: false }
+  })
 
   test('RAM 이 정상이면 보이지 않는다', () => {
     const w = home(snapshot({ memory: memory('normal', 50), ports: [candidate] }))

@@ -39,7 +39,7 @@ function leftover(over: Partial<LeftoverRow>): LeftoverRow {
   }
 }
 
-test('정리 후보 포트와 에이전트 없는 남은 프로세스를 메모리 큰 순으로, 합계와 함께', () => {
+test('정리 후보 포트와 에이전트 없는 워크트리의 남은 프로세스를 메모리 큰 순으로, 합계와 함께(작업 폴더를 모르면 뺀다)', () => {
   const r = cleanupRecommendation({
     ...blankSnapshot(1),
     ports: [
@@ -49,8 +49,10 @@ test('정리 후보 포트와 에이전트 없는 남은 프로세스를 메모�
       port({ port: 8080, pid: 6000, unresolvable: true, worktree: null })
     ],
     leftovers: [
-      leftover({ pid: 7100 }),
-      leftover({ pid: 7200, label: 'Vitest', agentInWorktree: true, worktree: W1 })
+      leftover({ pid: 7100, worktree: W1 }),
+      leftover({ pid: 7200, label: 'Vitest', agentInWorktree: true, worktree: W1 }),
+      // 작업 폴더를 모르면 에이전트가 띄운 것인지 알 수 없어 한꺼번에 끄는 추천에서는 뺀다.
+      leftover({ pid: 7300, label: 'Vitest', worktree: null, memoryBytes: 5000 * MB })
     ]
   })
   expect(r.items).toEqual([
@@ -59,7 +61,7 @@ test('정리 후보 포트와 에이전트 없는 남은 프로세스를 메모�
       key: 'leftover:7100:5',
       pid: 7100,
       title: 'Gradle 데몬',
-      where: '작업 폴더 모름',
+      where: 'shop-web · develop',
       memoryBytes: 1100 * MB
     },
     {

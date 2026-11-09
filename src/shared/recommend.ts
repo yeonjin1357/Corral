@@ -1,7 +1,6 @@
 import type { DashboardSnapshot } from './types'
 import { selectionKey } from './keys'
 import { worktreeLabel } from './format'
-import { text } from './text'
 
 export interface RecommendItem {
   kind: 'port' | 'leftover'
@@ -22,7 +21,8 @@ export interface Recommendation {
 
 /**
  * 메모리가 부족할 때 끄라고 권할 것(스펙 §3-7): 정리 후보 포트와, 에이전트가 없는 워크트리의 남은 프로세스.
- * "확인해볼 것"(탭이 열린 포트)과 판별 불가 포트는 넣지 않는다(불확실하면 빼는 쪽). 메모리 큰 순.
+ * "확인해볼 것"(탭이 열린 포트)·판별 불가 포트·작업 폴더를 모르는 남은 프로세스(에이전트가 띄운 것인지 알 수 없음)는
+ * 넣지 않는다(불확실하면 빼는 쪽, 목록에서 하나씩은 끌 수 있다). 메모리 큰 순.
  */
 export function cleanupRecommendation(s: DashboardSnapshot): Recommendation {
   const items: RecommendItem[] = []
@@ -38,13 +38,13 @@ export function cleanupRecommendation(s: DashboardSnapshot): Recommendation {
     })
   }
   for (const l of s.leftovers) {
-    if (l.agentInWorktree) continue
+    if (l.agentInWorktree || !l.worktree) continue
     items.push({
       kind: 'leftover',
       key: selectionKey.leftover(l),
       pid: l.pid,
       title: l.label,
-      where: l.worktree ? worktreeLabel(l.worktree) : text.leftoverKill.noWorktree,
+      where: worktreeLabel(l.worktree),
       memoryBytes: l.memoryBytes
     })
   }
