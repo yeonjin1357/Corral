@@ -220,6 +220,23 @@ describe('PortDetail', () => {
     expect(w.find('.trend-chart-stub').exists()).toBe(true)
   })
 
+  test('긴 브랜치 이름은 한 줄 말줄임, 전체 이름은 툴팁', () => {
+    const long = 'feature/a-very-long-branch-name-for-truncation'
+    const w = mount(PortDetail, {
+      props: {
+        row: portRow({ worktree: { root: 'C:\\work\\x', branch: long, isLinkedWorktree: true } }),
+        history,
+        busy: false,
+        notice: null,
+        intervals
+      },
+      global: { stubs }
+    })
+    const branch = w.get('.stats .branch')
+    expect(branch.attributes('title')).toBe(long)
+    expect(branch.classes()).toContain('text-truncate')
+  })
+
   test('연결이 없으면 회색 "연결 없음", 연결된 worktree 표시', () => {
     const w = mount(PortDetail, {
       props: {

@@ -1,21 +1,29 @@
 <!--
   Uptime Kuma (MIT) src/components/MonitorList.vue 의 목록 상자(검색창이 있는 머리 + 스크롤 목록)와
   MonitorListItem.vue 의 그룹(접기)을 가져옴.
-  바꾼 점: 감시 대상 대신 "개발 서버 포트 · 에이전트 · 남은 프로세스" 세 그룹을 보여 주고, 필터·선택 모드·끌어 놓기는 없다.
-  검색은 세 그룹 모두에 적용한다. 에이전트 그룹 머리에 Claude 연동 버튼을 둔다.
+  바꾼 점: 감시 대상 대신 "개발 서버 포트 · 에이전트 · 남은 프로세스 · 디스크 정리" 그룹을 보여 주고, 필터·선택 모드·끌어 놓기는 없다.
+  검색은 모든 그룹에 적용한다. 에이전트 그룹 머리에 Claude 연동 버튼을, 디스크 정리 그룹 머리에 다시 찾기 버튼을 둔다.
 -->
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { FontAwesomeIcon } from '@fortawesome/vue-fontawesome'
 import { faMagnifyingGlass, faXmark } from '@fortawesome/free-solid-svg-icons'
-import type { AgentRow, ClaudeHookStatus, LeftoverRow, PortRow } from '../../../shared/types'
+import type {
+  AgentRow,
+  ClaudeHookStatus,
+  DiskReport,
+  LeftoverRow,
+  PortRow
+} from '../../../shared/types'
 import { worktreeFolder, worktreeLabel } from '../../../shared/format'
 import { text } from '../../../shared/text'
 import { agentKey, portKey, selectionKey, type History } from '../history'
+import { hookControls } from '../hook'
 import ListGroup from './ListGroup.vue'
 import PortListItem from './PortListItem.vue'
 import AgentListItem from './AgentListItem.vue'
 import LeftoverListItem from './LeftoverListItem.vue'
+import DiskListItem from './DiskListItem.vue'
 
 const props = withDefaults(
   defineProps<{
@@ -26,10 +34,15 @@ const props = withDefaults(
     selectedKey: string | null
     hook: ClaudeHookStatus | null
     hookBusy?: boolean
+    disk?: DiskReport | null
   }>(),
-  { hookBusy: false }
+  { hookBusy: false, disk: null }
 )
-const emit = defineEmits<{ select: [key: string]; hook: [action: 'enable' | 'disable'] }>()
+const emit = defineEmits<{
+  select: [key: string]
+  hook: [action: 'enable' | 'disable']
+  diskScan: []
+}>()
 
 const search = ref('')
 const query = computed(() => search.value.trim().toLowerCase())
@@ -75,10 +88,28 @@ const visibleLeftovers = computed(() => {
   )
 })
 
+const diskRows = computed(() => props.disk?.rows ?? [])
+const visibleDisk = computed(() => {
+  const q = query.value
+  if (!q) return diskRows.value
+  return diskRows.value.filter((row) => matches(q, row.worktreeRoot, row.branch))
+})
+const diskEmpty = computed(() => {
+  const d = props.disk
+  if (d?.error) return d.error
+  if (d?.scanning) return text.ui.disk.scanning
+  if (!d || d.scannedAt == null) return text.ui.disk.notYet
+  return text.ui.disk.empty
+})
+
 const noMatch = computed(
   () =>
     !!query.value &&
-    visiblePorts.value.length + visibleAgents.value.length + visibleLeftovers.value.length === 0
+    visiblePorts.value.length +
+      visibleAgents.value.length +
+      visibleLeftovers.value.length +
+      visibleDisk.value.length ===
+      0
 )
 
 /** 그룹 알약 색은 그룹 안에서 가장 급한 상태(Uptime Kuma 그룹처럼). */
@@ -96,14 +127,11 @@ const agentsPill = computed(() => {
   return 'bg-secondary'
 })
 const leftoversPill = computed(() => (props.leftovers.length ? 'bg-warning' : 'bg-secondary'))
+const diskPill = computed(() =>
+  diskRows.value.some((r) => !r.inUse) ? 'bg-warning' : 'bg-secondary'
+)
 
-const hookButton = computed(() => {
-  const hook = props.hook
-  if (!hook) return null
-  if (hook.state === 'on') return { label: text.ui.hook.disable, action: 'disable' as const }
-  if (hook.state === 'off') return { label: text.ui.hook.enable, action: 'enable' as const }
-  return { label: text.ui.hook.reenable, action: 'enable' as const }
-})
+const hookButton = computed(() => hookControls(props.hook).button)
 </script>
 
 <template>
@@ -193,6 +221,34 @@ const hookButton = computed(() => {
           @select="emit('select', selectionKey.leftover(row))"
         />
       </ListGroup>
+
+      <ListGroup
+        group-id="disk"
+        :title="text.ui.list.groups.disk"
+        :count="visibleDisk.length"
+        :pill-class="diskPill"
+      >
+        <template #actions>
+          <button
+            type="button"
+            class="btn btn-sm btn-normal btn-disk-scan"
+            :disabled="!!disk?.scanning"
+            @click="emit('diskScan')"
+          >
+            {{ disk?.scanning ? text.ui.disk.scanning : text.ui.disk.rescan }}
+          </button>
+        </template>
+        <p v-if="diskRows.length === 0" class="empty text-secondary disk-empty">
+          {{ diskEmpty }}
+        </p>
+        <DiskListItem
+          v-for="row in visibleDisk"
+          :key="row.worktreeRoot"
+          :row="row"
+          :active="selectedKey === selectionKey.disk(row.worktreeRoot)"
+          @select="emit('select', selectionKey.disk(row.worktreeRoot))"
+        />
+      </ListGroup>
     </div>
   </div>
 </template>
@@ -256,7 +312,8 @@ const hookButton = computed(() => {
   margin: 4px 0 8px 10px;
 }
 
-.btn-hook {
+.btn-hook,
+.btn-disk-scan {
   white-space: nowrap;
   font-size: 12px;
   padding: 2px 10px;

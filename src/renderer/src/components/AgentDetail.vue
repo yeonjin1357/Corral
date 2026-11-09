@@ -27,6 +27,8 @@ const props = defineProps<{
   /** CPU 를 OS 기본 도구와 같은 기준으로 보이는 데 쓴다(없으면 코어 1개 = 100%). */
   platform?: Platform | null
   cpuCount?: number
+  /** 하트비트 아래 확인 주기 문구(설정의 갱신 주기). */
+  intervals?: { openMs: number; closedMs: number }
 }>()
 
 const title = computed(() =>
@@ -63,6 +65,9 @@ const note = computed(() => {
       <div class="row">
         <div class="col-md-8">
           <HeartbeatBar :beats="history?.beats ?? []" />
+          <span v-if="intervals" class="word">
+            {{ text.ui.detail.every(intervals.openMs / 1000, intervals.closedMs / 1000) }}
+          </span>
         </div>
         <div class="col-md-4 text-center d-flex align-items-center justify-content-center">
           <span
@@ -127,6 +132,11 @@ const note = computed(() => {
   &.muted {
     color: $secondary-text;
   }
+}
+
+.word {
+  color: $secondary-text;
+  font-size: 14px;
 }
 
 .note {

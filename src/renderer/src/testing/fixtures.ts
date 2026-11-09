@@ -1,5 +1,12 @@
 // 렌더러 테스트용 데이터(앱 코드에서는 import 하지 않는다).
-import type { AgentRow, DashboardSnapshot, LeftoverRow, PortRow } from '../../../shared/types'
+import type {
+  AgentRow,
+  DashboardSnapshot,
+  DiskRow,
+  HeavyJobRow,
+  LeftoverRow,
+  PortRow
+} from '../../../shared/types'
 import { blankSnapshot } from '../../../shared/snapshot'
 
 export const MB = 1024 * 1024
@@ -50,6 +57,35 @@ export function leftoverRow(over: Partial<LeftoverRow> = {}): LeftoverRow {
     descendantPids: [7001, 7002],
     startedAt: 300,
     agentInWorktree: false,
+    ...over
+  }
+}
+
+export function heavyJob(over: Partial<HeavyJobRow> = {}): HeavyJobRow {
+  return {
+    pid: 8000,
+    label: 'vue-tsc',
+    processName: 'node.exe',
+    commandLine: 'node vue-tsc.js --noEmit',
+    worktree: { root: 'C:\\work\\shop-web', branch: 'develop', isLinkedWorktree: false },
+    memoryBytes: 6 * GB,
+    descendantPids: [],
+    startedAt: 0,
+    ...over
+  }
+}
+
+export function diskRow(over: Partial<DiskRow> = {}): DiskRow {
+  return {
+    worktreeRoot: 'C:\\work\\old-feature',
+    commonDir: 'C:\\work\\shop-web\\.git',
+    branch: 'feat/old',
+    evidence: 'upstreamGone',
+    folders: [
+      { name: 'node_modules', path: 'C:\\work\\old-feature\\node_modules', bytes: 1.5 * GB }
+    ],
+    totalBytes: 1.5 * GB,
+    inUse: false,
     ...over
   }
 }

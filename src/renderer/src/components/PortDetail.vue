@@ -104,7 +104,9 @@ const branchKind = computed(() =>
         <div class="col">
           <h4>{{ text.ui.detail.branch }}</h4>
           <p>{{ branchKind }}</p>
-          <span class="num branch">{{ row.worktree?.branch ?? '(detached)' }}</span>
+          <span class="num branch text-truncate" :title="row.worktree?.branch ?? ''">
+            {{ row.worktree?.branch ?? '(detached)' }}
+          </span>
         </div>
       </div>
     </div>
@@ -150,6 +152,7 @@ const branchKind = computed(() =>
 
   .col {
     margin: 20px 0;
+    min-width: 0;
   }
 
   /* 원본 상세 화면의 값은 첫 화면의 큰 초록 숫자(.num)가 아니라 보통 글씨다. */
@@ -159,8 +162,9 @@ const branchKind = computed(() =>
     color: inherit;
   }
 
+  /* 긴 브랜치 이름이 칸을 넘어 두 줄로 꺾이지 않게 한 줄 말줄임(전체 이름은 툴팁). */
   .branch {
-    word-break: break-all;
+    display: block;
   }
 }
 </style>

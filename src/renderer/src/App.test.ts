@@ -4,7 +4,7 @@ import type { Mock } from 'vitest'
 import App from './App.vue'
 import type { DashboardSnapshot, KillResult } from '../../shared/types'
 import type { ClaudeHookActionResult, NavigateTarget, PitwallApi } from '../../shared/ipc'
-import { agentRow, leftoverRow, portRow, snapshot, threePorts } from './testing/fixtures'
+import { agentRow, diskRow, leftoverRow, portRow, snapshot, threePorts } from './testing/fixtures'
 import { DEFAULT_SETTINGS, type Settings } from '../../shared/settings'
 
 interface FakeApi {
@@ -369,4 +369,65 @@ test('알림을 누르면(이동 요청) 그 항목을 고르고, 키가 없으�
   fake.navigate({ page: 'dashboard', key: null })
   await flushPromises()
   expect(w.get('h1').text()).toBe('한눈에 보기')
+})
+
+test('메모리 정리 추천의 모두 끄기: 키 목록으로 한꺼번에 끄고 결과 문구를 보인다', async () => {
+  const fake = installApi({
+    kill: { status: 'killed', message: '1개를 껐어요. 약 800 MB 를 확보했어요.' }
+  })
+  const w = await mountWith(
+    fake,
+    snapshot({
+      memory: {
+        totalBytes: 32 * 1024 ** 3,
+        usedBytes: 28 * 1024 ** 3,
+        usedPercent: 87.5,
+        level: 'warn'
+      },
+      ports: [portRow({ port: 3005, pid: 4500, judgement: 'candidate' })]
+    })
+  )
+  await w.get('.btn-kill-many').trigger('click')
+  await flushPromises()
+  expect(fake.api.killMany).toHaveBeenCalledWith(['port:3005:4500'])
+  expect(w.get('.recommend-notice').text()).toBe('1개를 껐어요. 약 800 MB 를 확보했어요.')
+  await w.get('.recommend-item').trigger('click')
+  expect(w.get('h1').text()).toBe('shop-web')
+})
+
+test('디스크 정리: 행을 고르면 상세, 지우면 성공 문구를 화면 위에 남기고(행이 사라져도) 한눈에 보기로', async () => {
+  const fake = installApi({
+    kill: { status: 'killed', message: 'node_modules 를 지웠어요. 약 1.5 GB 를 확보했어요.' }
+  })
+  const disk = { rows: [diskRow()], scannedAt: 1, scanning: false, error: null }
+  const w = await mountWith(fake, snapshot({ disk }))
+  const item = w
+    .findAll('.monitor-list .item:not(.group-item)')
+    .find((i) => i.text().includes('old-feature'))!
+  await item.trigger('click')
+  expect(w.get('h1').text()).toBe('old-feature')
+  await w.get('.btn-remove').trigger('click')
+  await flushPromises()
+  expect(fake.api.diskRemove).toHaveBeenCalledWith('C:\\work\\old-feature')
+  fake.push(snapshot({ disk: { ...disk, rows: [] } }))
+  await flushPromises()
+  expect(w.get('h1').text()).toBe('한눈에 보기')
+  expect(w.get('.disk-notice').text()).toBe('node_modules 를 지웠어요. 약 1.5 GB 를 확보했어요.')
+})
+
+test('디스크 정리: 이미 없어졌으면 디스크에 맞는 문구, 다시 찾기는 메인에 요청', async () => {
+  const fake = installApi({ kill: { status: 'gone' } })
+  const w = await mountWith(
+    fake,
+    snapshot({ disk: { rows: [diskRow()], scannedAt: 1, scanning: false, error: null } })
+  )
+  await w.get('.btn-disk-scan').trigger('click')
+  expect(fake.api.diskScan).toHaveBeenCalled()
+  const item = w
+    .findAll('.monitor-list .item:not(.group-item)')
+    .find((i) => i.text().includes('old-feature'))!
+  await item.trigger('click')
+  await w.get('.btn-remove').trigger('click')
+  await flushPromises()
+  expect(w.get('.remove-notice').text()).toBe('이미 정리됐거나 더는 끝난 워크트리가 아니에요.')
 })

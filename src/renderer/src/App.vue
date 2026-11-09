@@ -23,6 +23,7 @@ import HomeView from './components/HomeView.vue'
 import PortDetail from './components/PortDetail.vue'
 import AgentDetail from './components/AgentDetail.vue'
 import LeftoverDetail from './components/LeftoverDetail.vue'
+import DiskDetail from './components/DiskDetail.vue'
 import SettingsView from './components/SettingsView.vue'
 
 const snapshot = ref<DashboardSnapshot | null>(null)
@@ -34,6 +35,10 @@ const refreshing = ref(false)
 const actionError = ref<string | null>(null)
 const hookBusy = ref(false)
 const hookNotice = ref<{ text: string; failed: boolean } | null>(null)
+const diskBusy = ref<string | null>(null)
+const diskNotice = ref<string | null>(null)
+const recommendBusy = ref(false)
+const recommendNotice = ref<string | null>(null)
 const settings = ref<Settings>(DEFAULT_SETTINGS)
 const page = ref<'dashboard' | 'settings'>('dashboard')
 const version = ref<string | null>(null)
@@ -88,8 +93,15 @@ const selectedLeftover = computed(
     snapshot.value?.leftovers.find((row) => selectionKey.leftover(row) === selectedKey.value) ??
     null
 )
+const selectedDisk = computed(
+  () =>
+    snapshot.value?.disk?.rows.find(
+      (row) => selectionKey.disk(row.worktreeRoot) === selectedKey.value
+    ) ?? null
+)
 const hasSelection = computed(
-  () => !!(selectedPort.value || selectedAgent.value || selectedLeftover.value)
+  () =>
+    !!(selectedPort.value || selectedAgent.value || selectedLeftover.value || selectedDisk.value)
 )
 
 // 고른 항목이 사라지면(서버 종료·세션 끝 등) 한눈에 보기로 돌아간다.
@@ -167,6 +179,46 @@ async function killSelectedLeftover(): Promise<void> {
   if (row) await runKill(row.pid, () => window.pitwall.killLeftover(row.pid))
 }
 
+/** 지우고 나면 그 행이 목록에서 사라져 한눈에 보기로 돌아가므로, 성공 문구는 화면 위에 남긴다. */
+async function removeSelectedDisk(): Promise<void> {
+  const row = selectedDisk.value
+  if (!row) return
+  diskBusy.value = row.worktreeRoot
+  notice.value = null
+  diskNotice.value = null
+  try {
+    const result = await window.pitwall.diskRemove(row.worktreeRoot)
+    if (result.status === 'killed') diskNotice.value = result.message ?? null
+    else if (result.status === 'gone') notice.value = text.ui.disk.gone
+    else notice.value = describeKillResult(result)
+  } catch (e) {
+    notice.value = failureText(e)
+  } finally {
+    diskBusy.value = null
+  }
+}
+
+async function diskScan(): Promise<void> {
+  actionError.value = null
+  try {
+    await window.pitwall.diskScan()
+  } catch (e) {
+    actionError.value = failureText(e)
+  }
+}
+
+async function killMany(keys: string[]): Promise<void> {
+  recommendBusy.value = true
+  recommendNotice.value = null
+  try {
+    recommendNotice.value = describeKillResult(await window.pitwall.killMany(keys))
+  } catch (e) {
+    recommendNotice.value = failureText(e)
+  } finally {
+    recommendBusy.value = false
+  }
+}
+
 async function hookAction(action: 'enable' | 'disable'): Promise<void> {
   hookBusy.value = true
   hookNotice.value = null
@@ -227,6 +279,7 @@ async function hookAction(action: 'enable' | 'disable'): Promise<void> {
     >
       {{ hookNotice.text }}
     </p>
+    <p v-if="diskNotice" class="disk-notice small text-success">{{ diskNotice }}</p>
     <SettingsView
       v-if="page === 'settings'"
       :settings="settings"
@@ -258,8 +311,10 @@ async function hookAction(action: 'enable' | 'disable'): Promise<void> {
           :selected-key="selectedKey"
           :hook="snapshot.hook"
           :hook-busy="hookBusy"
+          :disk="snapshot.disk"
           @select="select"
           @hook="hookAction"
+          @disk-scan="diskScan"
         />
       </div>
       <div class="col-12 col-md-7 col-xl-8 mb-3 gx-0">
@@ -281,6 +336,7 @@ async function hookAction(action: 'enable' | 'disable'): Promise<void> {
           :hook="snapshot.hook"
           :platform="snapshot.platform"
           :cpu-count="snapshot.cpuCount"
+          :intervals="intervals"
         />
         <LeftoverDetail
           v-else-if="selectedLeftover"
@@ -290,12 +346,23 @@ async function hookAction(action: 'enable' | 'disable'): Promise<void> {
           :now="snapshot.takenAt"
           @kill="killSelectedLeftover"
         />
+        <DiskDetail
+          v-else-if="selectedDisk"
+          :row="selectedDisk"
+          :busy="diskBusy === selectedDisk.worktreeRoot"
+          :notice="notice"
+          @remove="removeSelectedDisk"
+        />
         <HomeView
           v-else
           :snapshot="snapshot"
           :ram-history="history.ram"
           :hook-busy="hookBusy"
+          :recommend-busy="recommendBusy"
+          :recommend-notice="recommendNotice"
           @hook="hookAction"
+          @select="select"
+          @kill-many="killMany"
         />
       </div>
     </div>

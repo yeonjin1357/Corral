@@ -33,9 +33,11 @@ onMounted(() => {
 })
 onUnmounted(() => observer?.disconnect())
 
-const data = computed(() => trendChartData(props.points, props.label) as ChartData<'line'>)
+const data = computed(
+  () => trendChartData(props.points, props.label, props.unit) as ChartData<'line'>
+)
 const options = computed(
-  () => trendChartOptions(dark.value, props.unit) as unknown as ChartOptions<'line'>
+  () => trendChartOptions(dark.value, props.unit, props.points) as unknown as ChartOptions<'line'>
 )
 </script>
 

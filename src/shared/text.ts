@@ -230,7 +230,12 @@ export const text = {
       emptyAgents: '실행 중인 에이전트가 없어요.',
       emptyLeftovers: '남은 프로세스가 없어요.',
       noMatch: '찾는 항목이 없어요.',
-      groups: { ports: '개발 서버 포트', agents: '에이전트', leftovers: '남은 프로세스' },
+      groups: {
+        ports: '개발 서버 포트',
+        agents: '에이전트',
+        leftovers: '남은 프로세스',
+        disk: '디스크 정리'
+      },
       collapse: '접기·펼치기'
     },
     tags: {
@@ -258,6 +263,31 @@ export const text = {
       stateSource: '상태 출처',
       codexNote: 'Codex 는 CPU 사용량으로만 작업 중인지 짐작해요.',
       noHookNote: 'Claude 연동을 켜면 권한 대기까지 정확히 알 수 있어요.'
+    },
+    disk: {
+      empty: '정리할 끝난 워크트리가 없어요.',
+      notYet: '아직 찾지 않았어요. 앱을 켜고 1분 뒤에 찾아요.',
+      gone: '이미 정리됐거나 더는 끝난 워크트리가 아니에요.',
+      scanning: '찾는 중…',
+      rescan: '다시 찾기',
+      remove: '의존성 폴더 지우기',
+      evidence: { upstreamGone: '원격 삭제됨', merged: '머지됨' },
+      evidenceNote: {
+        upstreamGone:
+          '원격 브랜치가 지워졌어요(보통 머지한 뒤 지워요). 워크트리와 소스는 그대로 두고 의존성 폴더만 지워요.',
+        merged:
+          '원격 브랜치가 기본 브랜치에 머지됐어요. 워크트리와 소스는 그대로 두고 의존성 폴더만 지워요.'
+      },
+      inUse: '사용 중',
+      inUseNote: '이 워크트리에서 개발 서버·에이전트 등이 실행 중이라 지울 수 없어요.',
+      measuring: '재는 중…',
+      link: '링크라 건너뜀',
+      folders: '의존성 폴더',
+      size: '크기',
+      sizeSub: '(지울 수 있는 합계)',
+      branch: '브랜치',
+      evidenceTitle: '끝났다고 본 근거',
+      evidenceSub: '(이 PC 의 git 정보)'
     },
     leftover: {
       kill: '끄기',
@@ -294,6 +324,16 @@ export const text = {
       current: '(현재)',
       ramTrend: 'RAM 사용 추이',
       groups: '메모리 묶음',
+      recommendTitle: '메모리 정리 추천',
+      recommendSummary: (n: number, size: string): string =>
+        `${n}개를 끄면 약 ${size} 를 확보할 수 있어요.`,
+      recommendNone:
+        "정리 후보가 없어요. 아래 '메모리를 많이 쓰는 다른 앱'에서 끌 만한 것을 확인해 보세요.",
+      killAll: '모두 끄기',
+      heavyTitle: '무거운 작업',
+      heavyOverlap: (percent: number, n: number): string =>
+        `RAM 이 ${percent}% 인데 무거운 작업 ${n}개가 겹쳐 돌고 있어요. 하나가 끝날 때까지 새 작업을 미루면 좋아요.`,
+      topAppsTitle: '메모리를 많이 쓰는 다른 앱',
       groupHeaders: { name: '구분', memory: '메모리', processes: '프로세스' },
       collectMode: (label: string): string => `수집 방식: ${label}`,
       collectModes: {

@@ -183,14 +183,15 @@ describe('PortList(그룹 목록)', () => {
   const rows = (w: ReturnType<typeof mount>): string[] =>
     w.findAll('.item:not(.group-item) .name').map((n) => n.text())
 
-  test('개발 서버 포트 · 에이전트 · 남은 프로세스 세 그룹과 개수', () => {
+  test('개발 서버 포트 · 에이전트 · 남은 프로세스 · 디스크 정리 그룹과 개수', () => {
     const w = mount(PortList, { props: base })
     expect(w.findAll('.group-item .name').map((n) => n.text())).toEqual([
       '개발 서버 포트',
       '에이전트',
-      '남은 프로세스'
+      '남은 프로세스',
+      '디스크 정리'
     ])
-    expect(w.findAll('.group-item .badge').map((n) => n.text())).toEqual(['3', '2', '1'])
+    expect(w.findAll('.group-item .badge').map((n) => n.text())).toEqual(['3', '2', '1', '0'])
     expect(rows(w)).toEqual([
       'shop-web',
       'wt-a',
@@ -469,5 +470,21 @@ describe('문제 상태에서도 Claude 연동을 끌 수 있다', () => {
       })
       expect(w.find('.hook-box .btn-hook-off').exists()).toBe(false)
     }
+  })
+})
+
+describe('상세 화면 다듬기', () => {
+  test('에이전트 상세도 하트비트 아래 확인 주기를 보인다', () => {
+    const w = mount(AgentDetail, {
+      props: {
+        row: agentRow(),
+        history: undefined,
+        now: 0,
+        hook: HOOK_OFF,
+        intervals: { openMs: 2000, closedMs: 10000 }
+      },
+      global: { stubs }
+    })
+    expect(w.text()).toContain('창이 열려 있으면 2초, 닫혀 있으면 10초마다 확인')
   })
 })
