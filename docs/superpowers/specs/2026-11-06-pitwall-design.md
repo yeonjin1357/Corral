@@ -1,7 +1,7 @@
 # pitwall 설계
 
 - 작성일: 2026-11-06
-- 상태: 승인됨 (2026-11-06). 디자인 기반은 Uptime Kuma.
+- 상태: 승인됨 (2026-11-06). 디자인 기반은 Uptime Kuma → 2026-11-09 사용자 결정으로 **NeoHtop** 으로 바뀜(§7, 4단계 설계 §6).
 - 레포: https://github.com/yeonjin1357/pitwall (공개, MIT)
 
 ## 1. 왜 만드나
@@ -85,7 +85,8 @@ pitwall 은 **한 PC에서 돌아가는 개발 작업 전체를 한눈에 보여
 - **배포:** 공개 GitHub 레포 → GitHub Actions 가 Windows·macOS 설치 파일을 빌드 → GitHub Releases 에 올린다.
 - **세부 디자인·레이아웃은 확정하지 않는다.** 실제 데이터가 들어간 앱을 보면서 계속 다듬는다.
 - **시각 디자인은 Claude 가 처음부터 만들지 않는다.** "AI 가 만든 티"가 나는 디자인을 피하기 위해, 이미 개발된 오픈소스 앱(허용 라이선스: MIT·Apache-2.0 등)의 디자인을 가져와 조금 변형한다. 가져온 출처와 라이선스 고지는 레포에 남긴다.
-- **디자인 기반: Uptime Kuma** (https://github.com/louislam/uptime-kuma, MIT, Vue 3 + Bootstrap 5) — 실제 화면 3개 시안(Uptime Kuma / Podman Desktop / Beszel) 중 사용자가 골랐다. 같은 Vue 라서 스타일 코드(SCSS 변수·카드·상태 배지·하트비트 막대·다크 테마)를 직접 가져와 변형한다. 레이아웃은 위에서 정한 카드 대시보드를 따른다. 참고용으로 Stats(macOS 메뉴바 모니터)의 촘촘한 수치·미니 그래프 표현을 본다.
+- **디자인 기반(2026-11-09 변경): NeoHtop** (https://github.com/Abdenasser/neohtop, MIT, Svelte + shadcn-svelte·Tailwind) — 사용자가 "촌스럽다"며 바꾸기로 했고 NeoHtop 을 골랐다. 실제 부품(제목줄·자원 카드·도구줄·표·상세 패널·설정 창·메뉴바 요약 창)의 클래스와 구성을 Vue 로 옮기고 Pretendard·한국어 문구에 맞췄다. 레이아웃은 카드 펼치기 대신 맨 위 카드 + 탭·표 + 오른쪽 상세 패널이다. 아래는 처음 결정 기록.
+- (처음 결정, 2026-11-06) **디자인 기반: Uptime Kuma** (https://github.com/louislam/uptime-kuma, MIT, Vue 3 + Bootstrap 5) — 실제 화면 3개 시안(Uptime Kuma / Podman Desktop / Beszel) 중 사용자가 골랐다. 같은 Vue 라서 스타일 코드(SCSS 변수·카드·상태 배지·하트비트 막대·다크 테마)를 직접 가져와 변형한다. 레이아웃은 위에서 정한 카드 대시보드를 따른다. 참고용으로 Stats(macOS 메뉴바 모니터)의 촘촘한 수치·미니 그래프 표현을 본다.
 
 목업(구조 결정용, 비확정): 대화 중 브라우저로 본 화면 — A(카드 대시보드) 선택, 상세는 "그 자리 펼치기" 선택, 트레이는 "OS 기본 메뉴" 선택.
 
