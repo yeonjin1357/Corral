@@ -10,8 +10,28 @@ permissions:
   contents: write
 
 jobs:
+  draft:
+    # 두 빌드가 동시에 초안을 만들어 둘이 되지 않게, 먼저 초안을 하나 만들어 둔다.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 태그와 package.json 버전이 같은지 확인
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "태그 $GITHUB_REF_NAME 와 package.json 버전 v$version 이 다릅니다." >&2
+            exit 1
+          fi
+      - name: 초안 릴리스 만들기(이미 있으면 그대로)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1 || \
+            gh release create "$GITHUB_REF_NAME" --draft --title "$GITHUB_REF_NAME" --notes "초안 — 빌드가 끝나면 설치 파일이 올라옵니다."
+
   build:
     name: build (${{ matrix.os }})
+    needs: draft
     strategy:
       fail-fast: false
       matrix:
@@ -28,6 +48,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
       - run: npm test
       - run: npx electron-vite build
       - run: npx electron-builder ${{ matrix.target }} --publish always

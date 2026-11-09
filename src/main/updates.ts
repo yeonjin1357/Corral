@@ -3,6 +3,8 @@ import type { Platform, UpdateStatus } from '../shared/types'
 /** 새 버전 확인. pitwall 이 하는 유일한 인터넷 접속이고, 설정에서 끈다. */
 
 export const RELEASES_API = 'https://api.github.com/repos/yeonjin1357/pitwall/releases/latest'
+/** 내려받는 중 소식이 이만큼 없으면 멈춘 것으로 본다. */
+const DOWNLOAD_STALL_MS = 30 * 60 * 1000
 const RELEASE_PAGE = /^https:\/\/github\.com\/yeonjin1357\/pitwall\/releases\//
 
 /** electron-updater 의 autoUpdater 중 pitwall 이 쓰는 부분(테스트에서 가짜로 바꿔 끼운다). */
@@ -95,7 +97,13 @@ export function createUpdater(deps: {
 
   async function check(): Promise<UpdateStatus> {
     if (!deps.packaged || !deps.enabled()) return set({ state: 'disabled', error: null })
-    if (current.state === 'downloading' || current.state === 'ready') return current
+    if (current.state === 'ready') return current
+    // 내려받는 중이면 기다린다. 소식(완료·오류)이 너무 오래 없으면 멈춘 것으로 보고 다시 확인한다.
+    if (
+      current.state === 'downloading' &&
+      deps.now() - (current.checkedAt ?? 0) < DOWNLOAD_STALL_MS
+    )
+      return current
     set({ state: 'checking', error: null })
     if (auto) {
       try {

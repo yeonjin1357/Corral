@@ -449,3 +449,15 @@ test('설정 > 정보에서 지금 확인을 누르면 메인에 새 버전 확�
   await w.get('.btn-update-check').trigger('click')
   expect(fake.api.update.check).toHaveBeenCalled()
 })
+
+test('설정에서 고치다가 대시보드에 다녀와도(알림 이동 포함) 저장하지 않은 값이 남아 있다', async () => {
+  const fake = installApi()
+  const w = await mountWith(fake)
+  await w.get('header .nav-settings').trigger('click')
+  await w.get('#refresh-fast').setValue(true)
+  await w.get('header .nav-dashboard').trigger('click')
+  fake.navigate({ page: 'settings' })
+  await flushPromises()
+  expect((w.get('#refresh-fast').element as HTMLInputElement).checked).toBe(true)
+  expect(fake.api.settings.save).not.toHaveBeenCalled()
+})

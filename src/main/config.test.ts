@@ -73,6 +73,18 @@ test('고치는 중 실패해도 다음 저장은 계속된다', async () => {
   expect((await loadConfig(dir)).settings.theme).toBe('dark')
 })
 
+test('깨진 config.json 은 덮어쓰기 전에 따로 남긴다(훅 포트·토큰을 잃지 않게)', async () => {
+  await writeFile(join(dir, 'config.json'), '{ "hook": { "port": 45123, "token": "aaaa')
+  await updateConfig(dir, (c) => ({ ...c, settings: { ...c.settings, theme: 'dark' } }))
+  const files = (await readdir(dir)).sort()
+  expect(files).toHaveLength(2)
+  const broken = files.find((f) => f.startsWith('config.json.broken-'))!
+  expect(await readFile(join(dir, broken), 'utf8')).toBe(
+    '{ "hook": { "port": 45123, "token": "aaaa'
+  )
+  expect((await loadConfig(dir)).settings.theme).toBe('dark')
+})
+
 test('바뀐 것이 없으면 파일을 쓰지 않는다', async () => {
   await updateConfig(dir, (c) => c)
   expect(await readdir(dir)).toEqual([])

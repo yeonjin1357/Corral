@@ -129,13 +129,17 @@ test('하나도 못 끄면 failed 와 이유', async () => {
   })
 })
 
-test('잘못된 요청(배열 아님·50개 초과·문자열 아님)은 거절', async () => {
+test('잘못된 요청(배열 아님·500개 초과·문자열 아님)은 거절하고, 추천이 50개를 넘어도 한꺼번에 받는다', async () => {
   const k = createKiller(deps())
   const invalid = { status: 'failed', message: '잘못된 요청이에요.' }
   await expect(k.killMany('x' as unknown as string[])).resolves.toEqual(invalid)
-  await expect(k.killMany(Array.from({ length: 51 }, (_, i) => `port:${i}:1`))).resolves.toEqual(
+  await expect(k.killMany(Array.from({ length: 501 }, (_, i) => `port:${i}:1`))).resolves.toEqual(
     invalid
   )
+  // 추천 항목이 많아도(51개) 거절하지 않는다(없는 키는 무시돼 gone).
+  await expect(k.killMany(Array.from({ length: 51 }, (_, i) => `port:${i}:1`))).resolves.toEqual({
+    status: 'gone'
+  })
   await expect(k.killMany([1 as unknown as string])).resolves.toEqual(invalid)
 })
 

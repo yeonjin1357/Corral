@@ -41,6 +41,8 @@ mac:
         - arm64
   # Apple 개발자 서명이 없어 임시(ad-hoc) 서명만 한다. Apple Silicon 은 서명이 아예 없으면 실행되지 않는다.
   identity: '-'
+  # 공증(notarize)을 하지 않으므로 강화된 런타임을 끈다. 임시 서명과 함께 켜면 라이브러리 검증에 막혀 실행되지 않을 수 있다.
+  hardenedRuntime: false
   entitlementsInherit: build/entitlements.mac.plist
   notarize: false
 dmg:

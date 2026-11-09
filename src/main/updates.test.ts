@@ -124,6 +124,19 @@ describe('createUpdater', () => {
     expect(auto.quitAndInstall).not.toHaveBeenCalled()
   })
 
+  test('Windows: 내려받는 중 소식이 30분 넘게 없으면 다시 확인할 수 있다(멈춘 상태로 남지 않게)', async () => {
+    const auto = fakeAutoUpdater()
+    const clock = { now: 1000 }
+    const updater = createUpdater(deps({ autoUpdater: auto, now: () => clock.now }))
+    await updater.check()
+    auto.emit('update-available', { version: '0.2.0' })
+    await updater.check()
+    expect(auto.checkForUpdates).toHaveBeenCalledTimes(1)
+    clock.now += 31 * 60 * 1000
+    await updater.check()
+    expect(auto.checkForUpdates).toHaveBeenCalledTimes(2)
+  })
+
   test('macOS(서명 없음): 최신 릴리스만 확인해 새 버전 페이지를 알려 준다', async () => {
     const updater = createUpdater(deps({ platform: 'darwin' }))
     expect(await updater.check()).toMatchObject({

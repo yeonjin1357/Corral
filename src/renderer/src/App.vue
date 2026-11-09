@@ -287,21 +287,24 @@ async function hookAction(action: 'enable' | 'disable'): Promise<void> {
       {{ hookNotice.text }}
     </p>
     <p v-if="diskNotice" class="disk-notice small text-success">{{ diskNotice }}</p>
-    <SettingsView
-      v-if="page === 'settings'"
-      :settings="settings"
-      :hook="snapshot?.hook ?? null"
-      :hook-busy="hookBusy"
-      :version="version"
-      :save="saveSettings"
-      :pick-folder="pickFolder"
-      :update="update"
-      @hook="hookAction"
-      @update-check="checkUpdate"
-      @update-install="installUpdate"
-    />
-    <p v-else-if="!snapshot" class="text-secondary">{{ text.ui.loading }}</p>
-    <div v-else class="row">
+    <!-- 저장하지 않은 설정을 대시보드에 다녀와도 잃지 않게 화면을 치워 두었다가 그대로 되살린다. -->
+    <KeepAlive>
+      <SettingsView
+        v-if="page === 'settings'"
+        :settings="settings"
+        :hook="snapshot?.hook ?? null"
+        :hook-busy="hookBusy"
+        :version="version"
+        :save="saveSettings"
+        :pick-folder="pickFolder"
+        :update="update"
+        @hook="hookAction"
+        @update-check="checkUpdate"
+        @update-install="installUpdate"
+      />
+    </KeepAlive>
+    <p v-if="page === 'dashboard' && !snapshot" class="text-secondary">{{ text.ui.loading }}</p>
+    <div v-else-if="page === 'dashboard' && snapshot" class="row">
       <div class="col-12 col-md-5 col-xl-4 ps-0">
         <div>
           <button

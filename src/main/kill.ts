@@ -13,8 +13,8 @@ import { cleanupRecommendation, type RecommendItem } from '../shared/recommend'
 import { text } from '../shared/text'
 import { classifyAgent, descendantsOf } from './processTree'
 
-/** 한 번에 끌 수 있는 최대 항목 수(정리 추천 한꺼번에 끄기). */
-const MAX_BATCH = 50
+/** 한꺼번에 끄기 요청이 담을 수 있는 최대 항목 수(잘못된 요청을 막는 한도, 추천 항목은 이보다 훨씬 적다). */
+const MAX_BATCH = 500
 /** 확인 창에 한 줄씩 보일 최대 항목 수. */
 const CONFIRM_LINES = 10
 

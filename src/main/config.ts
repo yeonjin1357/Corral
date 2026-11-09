@@ -1,5 +1,5 @@
 import { randomBytes, randomInt } from 'node:crypto'
-import { readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { copyFile, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { join } from 'node:path'
 import { normalizeSettings, type Settings } from '../shared/settings'
@@ -65,6 +65,24 @@ export async function saveConfig(userData: string, config: PitwallConfig): Promi
   }
 }
 
+/**
+ * 있는데 읽을 수 없는(깨진) 설정 파일은 덮어쓰기 전에 옆에 남긴다. 그 안의 훅 포트·토큰이 Claude 설정에 들어간
+ * 명령과 맞아야 하므로, 사용자가 되살릴 수 있게 한다.
+ */
+async function keepBrokenFile(path: string): Promise<void> {
+  let text: string
+  try {
+    text = await readFile(path, 'utf8')
+  } catch {
+    return
+  }
+  try {
+    JSON.parse(text)
+  } catch {
+    await copyFile(path, `${path}.broken-${Date.now()}`).catch(() => {})
+  }
+}
+
 /** 파일마다 읽기·고치기·쓰기를 한 줄로 세운다. 훅 설정과 일반 설정을 동시에 저장해도 서로 지우지 않는다. */
 const queues = new Map<string, Promise<unknown>>()
 
@@ -79,7 +97,10 @@ export async function updateConfig(
     .then(async () => {
       const current = await loadConfig(userData)
       const next = await mutate(current)
-      if (next !== current) await saveConfig(userData, next)
+      if (next !== current) {
+        await keepBrokenFile(path)
+        await saveConfig(userData, next)
+      }
       return next
     })
   queues.set(path, run)

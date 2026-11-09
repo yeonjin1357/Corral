@@ -36,7 +36,7 @@ AI 코딩 에이전트(Claude Code, Codex)를 여러 git 워크트리에서 동�
 
 1. Apple Silicon 은 `pitwall-<버전>-arm64.dmg`, Intel 은 `pitwall-<버전>-x64.dmg` 를 엽니다.
 2. pitwall 을 응용 프로그램 폴더로 옮깁니다.
-3. 처음 열 때 "확인되지 않은 개발자" 경고가 나오면 Finder 에서 앱을 **오른쪽 클릭 → 열기** 합니다. "손상되었기 때문에 열 수 없습니다"가 나오면 터미널에서 아래를 실행한 뒤 다시 엽니다.
+3. 처음 열 때 "확인되지 않은 개발자" 경고가 나오면 **시스템 설정 → 개인정보 보호 및 보안** 아래쪽의 **그래도 열기**를 누릅니다(macOS 14 이하는 Finder 에서 앱을 오른쪽 클릭 → 열기). "손상되었기 때문에 열 수 없습니다"가 나오면 터미널에서 아래를 실행한 뒤 다시 엽니다.
    ```bash
    xattr -dr com.apple.quarantine /Applications/pitwall.app
    ```
