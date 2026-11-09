@@ -25,6 +25,7 @@ import { agentToolOf, topLevelAgentPids } from './processTree'
 import { hookStateForWorktree, reconcileSessions, type LiveClaude, type Sessions } from './sessions'
 import { buildSnapshot, pidsForWorktreeLookup } from './snapshot'
 import { createServerHistory, type ServerHistoryData } from './serverHistory'
+import { cwdKey, type RolloutState } from './codexRollout'
 import type { AgentStateData, ServerMemoData } from './historyStore'
 import { selectionKey } from '../shared/keys'
 import { normalizeCandidate, selfWorkspace } from './collect/worktree'
@@ -74,6 +75,11 @@ export interface CollectorDeps {
   resolveWorktree: (path: string) => Promise<WorktreeInfo | null>
   /** 워크트리를 감싸는 작업 공간(바깥 저장소). */
   resolveWorkspace: (worktree: WorktreeInfo) => Promise<WorkspaceInfo>
+  /** Codex 세션 기록으로 안 상태(F7). 기록이 없으면 null(CPU 추정). 없으면 쓰지 않는다. */
+  codexState?: (
+    agent: { cwd: string; startedAt: number | null },
+    now: number
+  ) => Promise<RolloutState | null>
   /** 훅 서버가 채우는 Claude 세션들(수집기는 읽고 끝난 것을 버린다). */
   sessions: Sessions
   hookStatus: () => Promise<ClaudeHookStatus>
@@ -136,10 +142,47 @@ export function createCollector(deps: CollectorDeps): {
     (root: string): AgentState | null =>
       hookFor(roots)(root)?.state ?? null
   /** 훅 상태 에이전트의 상태 시작 시각(이벤트 시각). */
-  const hookSinceFor =
+  /** Codex 세션 기록으로 안 상태(pid → 상태). restate 가 덮어쓰지 않도록 기억한다. */
+  let rollouts = new Map<number, RolloutState>()
+  /** 정확한 상태의 시작 시각: 훅은 이벤트 시각, Codex 세션 기록은 기록의 이벤트 시각. */
+  const exactSinceFor =
     (roots: Map<string, string | null>) =>
-    (a: AgentRow): number | null =>
-      a.tool === 'claude' && a.worktree ? (hookFor(roots)(a.worktree.root)?.since ?? null) : null
+    (a: AgentRow): number | null => {
+      if (a.stateSource === 'rollout') return rollouts.get(a.pid)?.since ?? null
+      return a.tool === 'claude' && a.worktree
+        ? (hookFor(roots)(a.worktree.root)?.since ?? null)
+        : null
+    }
+
+  /**
+   * Codex 에이전트마다 세션 기록 상태를 읽는다. 같은 폴더에서 Codex 가 둘 이상 돌면 어느 쪽 기록인지 알 수 없어
+   * 쓰지 않는다(지어내지 않음). 실패하면 그 에이전트는 CPU 추정 그대로.
+   */
+  async function readRollouts(
+    agents: AgentRow[],
+    cwds: Record<number, string>,
+    now: number
+  ): Promise<Map<number, RolloutState>> {
+    const result = new Map<number, RolloutState>()
+    const read = deps.codexState
+    if (!read) return result
+    const codex = agents.filter((a) => a.tool === 'codex' && cwds[a.pid])
+    const count = new Map<string, number>()
+    for (const a of codex) count.set(cwdKey(cwds[a.pid]), (count.get(cwdKey(cwds[a.pid])) ?? 0) + 1)
+    await Promise.all(
+      codex.map(async (a) => {
+        const cwd = cwds[a.pid]
+        if (count.get(cwdKey(cwd)) !== 1) return
+        try {
+          const state = await read({ cwd, startedAt: a.startedAt }, now)
+          if (state) result.set(a.pid, state)
+        } catch {
+          // 읽지 못하면 CPU 추정을 쓴다.
+        }
+      })
+    )
+    return result
+  }
 
   /** known 에 없는 세션 작업 폴더만 판별해 더한 새 표를 돌려준다(known 이 없으면 전부 다시). */
   async function resolveSessionRoots(
@@ -254,7 +297,12 @@ export function createCollector(deps: CollectorDeps): {
       hookStates: hookStateFor(roots)
     })
     previousCpu = cpu
-    const stated = withStateSince(built, agentStates, sampledAt, hookSinceFor(roots))
+    rollouts = await readRollouts(built, raw.cwds ?? {}, now)
+    const withRollout = built.map((a): AgentRow => {
+      const r = rollouts.get(a.pid)
+      return r ? { ...a, state: r.state, stateSource: 'rollout' } : a
+    })
+    const stated = withStateSince(withRollout, agentStates, sampledAt, exactSinceFor(roots))
     agentStates = stated.memo
     const agents = stated.agents
 
@@ -325,6 +373,8 @@ export function createCollector(deps: CollectorDeps): {
     rootOfCwd = await resolveSessionRoots(rootOfCwd)
     const hookState = hookStateFor(rootOfCwd)
     const restated = snapshot.agents.map((a): AgentRow => {
+      // Codex 세션 기록 상태는 다음 수집에서 다시 읽는다(훅 이벤트와 상관없음).
+      if (a.stateSource === 'rollout') return a
       const fromHook = a.tool === 'claude' && a.worktree ? hookState(a.worktree.root) : null
       return {
         ...a,
@@ -332,7 +382,7 @@ export function createCollector(deps: CollectorDeps): {
         stateSource: fromHook ? 'hook' : 'cpu'
       }
     })
-    const stated = withStateSince(restated, agentStates, deps.now(), hookSinceFor(rootOfCwd))
+    const stated = withStateSince(restated, agentStates, deps.now(), exactSinceFor(rootOfCwd))
     agentStates = stated.memo
     return { ...snapshot, agents: stated.agents }
   }

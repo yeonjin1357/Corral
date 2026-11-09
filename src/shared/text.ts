@@ -474,7 +474,7 @@ export const text = {
         error: '오류',
         unknown: '확인 중'
       },
-      sources: { hook: 'Claude 훅', cpu: 'CPU 추정' },
+      sources: { hook: 'Claude 훅', cpu: 'CPU 추정', rollout: 'Codex 세션 기록' },
       runtime: '실행 시간',
       cpu: 'CPU',
       cpuSub: '코어 1개 = 100% 기준',

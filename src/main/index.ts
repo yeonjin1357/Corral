@@ -46,6 +46,7 @@ import { localUrlFor } from './open'
 import { backgroundFor, overlayFor, windowChrome } from './windowChrome'
 import { createIconSource } from './icons'
 import { createRamHistory, loadHistory, saveHistory } from './historyStore'
+import { codexHome, createCodexReader } from './codexRollout'
 import { createTrayController, LEVEL_COLORS } from './tray'
 import { encodePng, renderSmallIcon } from './pixelArt'
 import type { MemoryLevel } from '../shared/types'
@@ -79,6 +80,9 @@ let settings: Settings = DEFAULT_SETTINGS
 /** Claude 훅이 알려 주는 세션들. 훅 서버가 채우고 수집기가 읽는다. */
 const sessions: Sessions = new Map()
 
+/** Codex 세션 기록 읽기(세션 폴더만, 설정은 바꾸지 않는다). */
+const codexReader = createCodexReader(codexHome(process.env, homedir()))
+
 const collector = platform
   ? createCollector({
       platform,
@@ -87,6 +91,7 @@ const collector = platform
       resolveProcessWorktrees,
       resolveWorktree,
       resolveWorkspace,
+      codexState: (agent, now) => codexReader.stateFor(agent, now),
       sessions,
       hookStatus: () => claude.status(),
       options: () => collectOptionsFrom(settings),

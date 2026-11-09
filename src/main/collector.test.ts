@@ -500,3 +500,75 @@ describe('숨기기·별칭(F11)', () => {
     expect(s.servers[0].workspace).toMatchObject({ root: W1.root, name: '쇼핑' })
   })
 })
+
+describe('Codex 세션 기록(F7)', () => {
+  test('Codex 는 세션 기록 상태와 그 시각을 쓴다', async () => {
+    const codexState = vi.fn<NonNullable<CollectorDeps['codexState']>>(async (a) =>
+      a.cwd === W2.root ? { state: 'working', since: 5 * MIN } : null
+    )
+    const { deps } = setup({ codexState })
+    const s = await createCollector(deps).collect()
+    expect(s.agents.find((a) => a.pid === 6000)).toMatchObject({
+      tool: 'codex',
+      state: 'working',
+      stateSource: 'rollout',
+      stateSince: 5 * MIN
+    })
+    expect(codexState).toHaveBeenCalledWith({ cwd: W2.root, startedAt: 100 }, 10 * MIN)
+    // Claude 에는 쓰지 않는다.
+    expect(codexState).toHaveBeenCalledTimes(1)
+  })
+
+  test('기록이 없으면(첫 입력 전·압축·resume) CPU 추정 그대로', async () => {
+    const { deps } = setup({ codexState: async () => null })
+    const s = await createCollector(deps).collect()
+    expect(s.agents.find((a) => a.pid === 6000)?.stateSource).toBe('cpu')
+  })
+
+  test('Codex 둘이 같은 폴더에서 돌면 어느 쪽 기록인지 몰라 쓰지 않는다', async () => {
+    const codexState = vi.fn(async () => ({ state: 'working' as const, since: 1 }))
+    const { deps } = setup({ codexState })
+    const two: RawSample = {
+      ...sampleAt(0),
+      processes: [...sampleAt(0).processes, proc(6100, 1, 'codex.exe', 0)],
+      cwds: { 5000: W1.root, 6000: W2.root, 6100: W2.root + '\\' }
+    }
+    const s = await createCollector({
+      ...deps,
+      sample: async () => two,
+      resolveProcessWorktrees: async (processes) =>
+        new Map(
+          processes.flatMap((p): [number, WorktreeInfo][] =>
+            p.pid === 5000 || p.pid === 4100 ? [[p.pid, W1]] : p.pid >= 6000 ? [[p.pid, W2]] : []
+          )
+        )
+    }).collect()
+    expect(codexState).not.toHaveBeenCalled()
+    expect(s.agents.filter((a) => a.tool === 'codex').map((a) => a.stateSource)).toEqual([
+      'cpu',
+      'cpu'
+    ])
+  })
+
+  test('기록 읽기가 실패해도 수집은 이어진다', async () => {
+    const { deps } = setup({
+      codexState: async () => {
+        throw new Error('EBUSY')
+      }
+    })
+    const s = await createCollector(deps).collect()
+    expect(s.agents.find((a) => a.pid === 6000)?.stateSource).toBe('cpu')
+  })
+
+  test('restate(훅 이벤트)는 세션 기록 상태를 덮어쓰지 않는다', async () => {
+    const { deps } = setup({ codexState: async () => ({ state: 'error', since: 7 * MIN }) })
+    const collector = createCollector(deps)
+    const s = await collector.collect()
+    const next = await collector.restate(s)
+    expect(next.agents.find((a) => a.pid === 6000)).toMatchObject({
+      state: 'error',
+      stateSource: 'rollout',
+      stateSince: 7 * MIN
+    })
+  })
+})

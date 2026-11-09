@@ -76,7 +76,7 @@ export function measureTreeCpu(
 export type AgentStateMemo = Map<string, { state: AgentState; since: number }>
 
 /**
- * 에이전트 상태가 시작된 시각(F3)을 채운다. 훅 상태는 그 상태가 된 이벤트 시각(hookSince),
+ * 에이전트 상태가 시작된 시각(F3)을 채운다. 정확한 상태(훅·Codex 세션 기록)는 그 상태가 된 이벤트 시각(exactSince),
  * CPU 추정은 pitwall 이 그 상태를 처음 본 시각(memo). 아직 모르는 상태(unknown)는 시각 없음.
  * memo 에는 지금 있는 에이전트만 남긴다.
  */
@@ -84,15 +84,15 @@ export function withStateSince(
   agents: AgentRow[],
   previous: AgentStateMemo,
   now: number,
-  hookSince: (agent: AgentRow) => number | null
+  exactSince: (agent: AgentRow) => number | null
 ): { agents: AgentRow[]; memo: AgentStateMemo } {
   const memo: AgentStateMemo = new Map()
   const rows = agents.map((a): AgentRow => {
     if (a.state === 'unknown') return { ...a, stateSince: null }
     const key = agentKey(a)
     const prev = previous.get(key)
-    const fromHook = a.stateSource === 'hook' ? hookSince(a) : null
-    const since = fromHook ?? (prev && prev.state === a.state ? prev.since : now)
+    const exact = a.stateSource === 'cpu' ? null : exactSince(a)
+    const since = exact ?? (prev && prev.state === a.state ? prev.since : now)
     memo.set(key, { state: a.state, since })
     return { ...a, stateSince: since }
   })

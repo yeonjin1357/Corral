@@ -182,8 +182,8 @@ export interface AgentRow {
   memoryBytes: number
   descendantCount: number
   state: AgentState
-  /** hook: Claude 훅 이벤트로 안 상태, cpu: CPU 변화로 짐작한 상태. */
-  stateSource: 'hook' | 'cpu'
+  /** hook: 훅 이벤트로 안 상태, rollout: Codex 세션 기록으로 안 상태, cpu: CPU 변화로 짐작한 상태. */
+  stateSource: 'hook' | 'cpu' | 'rollout'
   /**
    * 지금 상태가 시작된 시각. 훅 상태는 그 상태가 된 이벤트 시각, CPU 추정은 pitwall 이 그 상태를 처음 본 시각.
    * 아직 판단하지 못했으면(unknown) null.
