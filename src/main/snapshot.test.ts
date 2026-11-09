@@ -555,3 +555,24 @@ describe('무거운 작업', () => {
     expect(pids.has(7300)).toBe(true)
   })
 })
+
+test('남은 프로세스이면서 무거운 작업인 것(셸이 먼저 끝난 webpack 등)은 무거운 작업으로만 센다(정리 대상이 되지 않게)', () => {
+  // 부모(셸)가 끝나 남은 webpack: 남은 개발 도구 모양(webpack)이고 무거운 명령 패턴(webpack)에도 맞는다.
+  const orphan = proc(
+    7700,
+    6999,
+    'node.exe',
+    900,
+    10,
+    'node C:\\work\\shop-web\\node_modules\\webpack\\bin\\webpack.js --mode production'
+  )
+  const s = buildSnapshot({
+    ...input,
+    now: 60 * 60 * 1000,
+    sample: { processes: [...processes, orphan], tcp },
+    worktrees: new Map([...worktrees, [7700, W1]]),
+    heavyPatterns: ['webpack']
+  })
+  expect(s.heavyJobs.map((j) => j.pid)).toContain(7700)
+  expect(s.leftovers.map((l) => l.pid)).not.toContain(7700)
+})

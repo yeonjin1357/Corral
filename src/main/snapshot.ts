@@ -312,7 +312,8 @@ export function buildSnapshot(input: {
     })
   )
   const leftovers = findLeftovers(sample, worktrees, {
-    exclude: new Set([...self, ...devServer, ...agentTree]),
+    // 무거운 작업은 끄지 않으므로 남은 프로세스(끌 수 있는 것)로도 세지 않는다.
+    exclude: new Set([...self, ...devServer, ...agentTree, ...heavy]),
     agentRoots,
     platform: input.platform,
     now: input.now
