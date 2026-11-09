@@ -44,6 +44,7 @@ import { loginItemOptions, shouldStartHidden } from './startup'
 import { createUpdater } from './updates'
 import { localUrlFor } from './open'
 import { backgroundFor, overlayFor, windowChrome } from './windowChrome'
+import { createIconSource } from './icons'
 import { createDotIcon, createTrayController, encodePng, LEVEL_COLORS } from './tray'
 import type { MemoryLevel } from '../shared/types'
 
@@ -109,6 +110,12 @@ const scheduler = createScheduler({
     trayController?.update(snapshot)
     notifier.update(snapshot)
   }
+})
+
+/** 화면 표의 앱 아이콘(OS 아이콘). 지금 스냅샷에 나온 실행 파일만 답한다. */
+const icons = createIconSource({
+  latest: () => scheduler.latest(),
+  getFileIcon: (path) => app.getFileIcon(path, { size: 'normal' })
 })
 
 /** 창을 열고(없으면 만들고) 화면에 보여 줄 곳을 알린다. 창이 아직 로딩 중이면 다 뜬 뒤에 보낸다. */
@@ -391,6 +398,9 @@ function registerIpc(): void {
     return result
   })
   ipcMain.handle(IPC.appInfo, () => ({ version: app.getVersion() }))
+  ipcMain.handle(IPC.fileIcon, (event, path: unknown) =>
+    fromMainWindow(event.sender) ? icons.get(path) : null
+  )
   ipcMain.handle(IPC.updateGet, (event) => (fromMainWindow(event.sender) ? updater.status() : null))
   ipcMain.handle(IPC.updateCheck, async (event) =>
     fromMainWindow(event.sender) ? updater.check() : null

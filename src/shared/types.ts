@@ -121,6 +121,8 @@ export interface AppUsage {
   name: string
   memoryBytes: number
   processCount: number
+  /** 그 앱의 실행 파일(macOS 는 .app 묶음) 경로. 화면이 OS 앱 아이콘을 보이는 데 쓴다. 모르면 null. */
+  exePath: string | null
 }
 
 export type AgentTool = 'claude' | 'codex'

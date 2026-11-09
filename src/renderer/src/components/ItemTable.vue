@@ -20,6 +20,7 @@ import type { ActionKind, Column, Row, Table, Tone } from '../rows'
 import { sortRows } from '../rows'
 import { text } from '../../../shared/text'
 import Button from '../ui/Button.vue'
+import ItemIcon from './ItemIcon.vue'
 import { TABLE } from '../ui/variants'
 
 const props = defineProps<{
@@ -143,18 +144,25 @@ const DANGER: ActionKind[] = ['kill', 'remove']
                   }
                 ]"
               >
-                <template v-if="col.id === 'name'">
+                <div v-if="col.id === 'name'" class="flex min-w-0 items-center gap-2">
+                  <span
+                    v-if="row.cells.name.icon"
+                    class="flex shrink-0"
+                    :title="row.cells.name.icon.title"
+                  >
+                    <ItemIcon :icon="row.cells.name.icon" />
+                  </span>
                   <Button
                     v-if="row.key"
                     variant="link"
-                    class="h-auto min-w-0 max-w-full shrink justify-start truncate p-0 text-left text-[13px] font-normal text-foreground"
+                    class="h-auto min-w-0 shrink justify-start truncate p-0 text-left text-[13px] font-normal text-foreground"
                     :title="row.cells.name.title ?? row.cells.name.text"
                     @click="emit('select', row.key)"
                   >
                     <span class="truncate">{{ row.cells.name.text }}</span>
                   </Button>
-                  <span v-else class="block truncate text-[13px]">{{ row.cells.name.text }}</span>
-                </template>
+                  <span v-else class="truncate text-[13px]">{{ row.cells.name.text }}</span>
+                </div>
                 <span
                   v-else-if="row.cells[col.id]?.dot"
                   class="flex items-center gap-1.5 text-xs text-muted-foreground"

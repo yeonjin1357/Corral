@@ -129,8 +129,13 @@ export function snapshot(over: Partial<DashboardSnapshot> = {}): DashboardSnapsh
       { group: 'system', memoryBytes: 2 * GB, processCount: 0 }
     ],
     topApps: [
-      { name: 'chrome.exe', memoryBytes: 5 * GB, processCount: 40 },
-      { name: 'Code.exe', memoryBytes: 2 * GB, processCount: 12 }
+      {
+        name: 'chrome.exe',
+        memoryBytes: 5 * GB,
+        processCount: 40,
+        exePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
+      },
+      { name: 'Code.exe', memoryBytes: 2 * GB, processCount: 12, exePath: null }
     ],
     agentProcessCount: 2,
     platform: 'win32',

@@ -27,6 +27,7 @@ export const IPC = {
   settingsChanged: 'pitwall:settings-changed',
   navigate: 'pitwall:navigate',
   appInfo: 'pitwall:app-info',
+  fileIcon: 'pitwall:file-icon',
   updateGet: 'pitwall:update-get',
   updateCheck: 'pitwall:update-check',
   updateInstall: 'pitwall:update-install',
@@ -69,6 +70,8 @@ export interface PitwallApi {
   }
   /** 앱 버전 등(설정 > 정보). */
   appInfo(): Promise<{ version: string }>
+  /** 스냅샷에 나온 실행 파일의 OS 앱 아이콘(PNG 데이터 주소). 없으면 null. */
+  fileIcon(path: string): Promise<string | null>
   /** 새 버전 확인(설정 > 정보). */
   update: {
     get(): Promise<UpdateStatus | null>

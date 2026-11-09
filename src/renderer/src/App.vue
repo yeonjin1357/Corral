@@ -5,7 +5,7 @@
 -->
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { AlertTriangle, Lightbulb, RefreshCw, X } from '@lucide/vue'
+import { RefreshCw, X } from '@lucide/vue'
 import type { DashboardSnapshot, KillResult, UpdateStatus } from '../../shared/types'
 import {
   DEFAULT_SETTINGS,
@@ -27,7 +27,15 @@ import {
   selectionKey
 } from './history'
 import { hookControls } from './hook'
-import { TABS, filterRows, tableFor, type ActionKind, type TabKey } from './rows'
+import {
+  TABS,
+  filterRows,
+  leftoverIcon,
+  portIcon,
+  tableFor,
+  type ActionKind,
+  type TabKey
+} from './rows'
 import logo from '../../../resources/icon.png'
 import TitleBar from './components/TitleBar.vue'
 import StatsBar from './components/StatsBar.vue'
@@ -36,6 +44,7 @@ import ItemTable from './components/ItemTable.vue'
 import ItemSheet, { type Selected } from './components/ItemSheet.vue'
 import MemorySheet from './components/MemorySheet.vue'
 import NoticeCard from './components/NoticeCard.vue'
+import ItemIcon from './components/ItemIcon.vue'
 import SettingsView from './components/SettingsView.vue'
 import Button from './ui/Button.vue'
 
@@ -378,9 +387,28 @@ const showRecommend = computed(
     !!snapshot.value &&
     snapshot.value.memory.totalBytes > 0 &&
     snapshot.value.memory.level !== 'normal' &&
+    recommendation.value.items.length > 0 &&
     recommendDismissed.value !== recommendState.value
 )
 const RECOMMEND_SHOWN = 4
+/** 추천 칩: 표와 같은 아이콘을 붙인다. */
+const recommendChips = computed(() => {
+  const s = snapshot.value
+  return recommendation.value.items.slice(0, RECOMMEND_SHOWN).map((item) => {
+    const port =
+      item.kind === 'port' ? s?.ports.find((p) => selectionKey.port(p) === item.key) : null
+    const leftover =
+      item.kind === 'leftover'
+        ? s?.leftovers.find((l) => selectionKey.leftover(l) === item.key)
+        : null
+    const icon = port
+      ? portIcon(port, s?.platform ?? null)
+      : leftover
+        ? leftoverIcon(leftover, s?.platform ?? null)
+        : null
+    return { ...item, icon }
+  })
+})
 
 const takenAt = computed(() =>
   snapshot.value
@@ -474,6 +502,7 @@ const takenAt = computed(() =>
           @memory="memoryOpen = true"
           @tab="(key) => ((tab = key), (query = ''))"
           @disk-scan="diskScan"
+          @select="select"
         />
 
         <NoticeCard
@@ -481,22 +510,18 @@ const takenAt = computed(() =>
           class="recommend-box"
           dismissible
           :title="text.ui.home.recommendTitle"
-          :icon="Lightbulb"
-          :color="snapshot.memory.level === 'danger' ? 'var(--destructive)' : 'var(--peach)'"
           @dismiss="recommendDismissed = recommendState"
         >
           {{
-            recommendation.items.length
-              ? text.ui.home.recommendSummary(
-                  recommendation.items.length,
-                  formatBytes(recommendation.totalBytes)
-                )
-              : text.ui.home.recommendNone
+            text.ui.home.recommendSummary(
+              recommendation.items.length,
+              formatBytes(recommendation.totalBytes)
+            )
           }}
-          <template v-if="recommendation.items.length" #below>
+          <template #below>
             <div class="mt-2 flex flex-wrap gap-1.5">
               <Button
-                v-for="item in recommendation.items.slice(0, RECOMMEND_SHOWN)"
+                v-for="item in recommendChips"
                 :key="item.key"
                 variant="secondary"
                 size="xs"
@@ -504,7 +529,8 @@ const takenAt = computed(() =>
                 :title="item.where"
                 @click="select(item.key)"
               >
-                <span class="font-mono">{{ item.title }}</span>
+                <ItemIcon v-if="item.icon" :icon="item.icon" :size="12" />
+                <span>{{ item.title }}</span>
                 <span class="truncate text-muted-foreground">{{ item.where }}</span>
                 <span class="tabular-nums">{{ formatBytes(item.memoryBytes) }}</span>
               </Button>
@@ -517,7 +543,6 @@ const takenAt = computed(() =>
           </template>
           <template #actions>
             <Button
-              v-if="recommendation.items.length"
               variant="destructive"
               size="sm"
               data-action="kill-many"
@@ -526,15 +551,6 @@ const takenAt = computed(() =>
             >
               <X />{{ text.ui.home.killAll }}
             </Button>
-            <Button
-              v-else
-              variant="outline"
-              size="sm"
-              data-action="show-apps"
-              @click="((tab = 'apps'), (query = ''))"
-            >
-              {{ text.ui.home.showApps }}
-            </Button>
           </template>
         </NoticeCard>
 
@@ -542,8 +558,6 @@ const takenAt = computed(() =>
           v-if="snapshot.heavyOverlap"
           class="heavy-box"
           :title="text.ui.recommend.overlapTitle"
-          :icon="AlertTriangle"
-          color="var(--destructive)"
         >
           {{
             text.ui.home.heavyOverlap(
@@ -604,12 +618,9 @@ const takenAt = computed(() =>
           <span class="text-xs text-muted-foreground">{{
             text.ui.footer.count(text.ui.tabs[tab], rows.length)
           }}</span>
-          <span class="text-xs text-muted-foreground tabular-nums">
-            <template v-if="snapshot.collectMode"
-              >{{ text.ui.home.collectMode(text.ui.home.collectModes[snapshot.collectMode]) }} ·
-            </template>
-            {{ text.ui.footer.takenAt(takenAt) }}
-          </span>
+          <span class="text-xs text-muted-foreground tabular-nums">{{
+            text.ui.footer.takenAt(takenAt)
+          }}</span>
         </footer>
       </template>
     </main>

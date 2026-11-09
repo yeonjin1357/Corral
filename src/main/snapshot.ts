@@ -11,6 +11,7 @@ import type {
   WorktreeInfo
 } from '../shared/types'
 import { DEFAULT_THRESHOLDS } from '../shared/defaults'
+import { exePathOf } from '../shared/exePath'
 import { worktreeKey } from '../shared/format'
 import { findLeftovers } from './leftovers'
 import { findHeavyJobs } from './heavy'
@@ -109,7 +110,7 @@ function summarizeMemory(
 const TOP_APPS = 5
 
 /** 프로세스 이름별로 묶어 메모리 큰 순(같으면 이름 순) 상위 몇 개. 이름은 대소문자를 무시하고 묶는다. */
-function topAppsOf(processes: ProcessInfo[]): AppUsage[] {
+function topAppsOf(processes: ProcessInfo[], platform: Platform | null): AppUsage[] {
   const byName = new Map<string, AppUsage>()
   for (const p of processes) {
     const key = p.name.toLowerCase()
@@ -117,7 +118,14 @@ function topAppsOf(processes: ProcessInfo[]): AppUsage[] {
     if (app) {
       app.memoryBytes += p.memoryBytes
       app.processCount++
-    } else byName.set(key, { name: p.name, memoryBytes: p.memoryBytes, processCount: 1 })
+      app.exePath ??= exePathOf(p.commandLine, platform)
+    } else
+      byName.set(key, {
+        name: p.name,
+        memoryBytes: p.memoryBytes,
+        processCount: 1,
+        exePath: exePathOf(p.commandLine, platform)
+      })
   }
   return [...byName.values()]
     .sort((a, b) => b.memoryBytes - a.memoryBytes || a.name.localeCompare(b.name))
@@ -285,7 +293,7 @@ export function buildSnapshot(input: {
     hook: null,
     disk: null,
     groups,
-    topApps: topAppsOf(rest),
+    topApps: topAppsOf(rest, input.platform ?? null),
     agentProcessCount,
     platform: input.platform ?? null,
     cpuCount: input.cpuCount && input.cpuCount > 0 ? input.cpuCount : 1,

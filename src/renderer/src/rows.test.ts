@@ -143,7 +143,7 @@ describe('남은 프로세스·무거운 작업·디스크·다른 앱 표', () 
   test('다른 앱: 고를 수 없는 행이고 프로세스 수를 센다', () => {
     const row = tableFor('apps', snapshot()).rows[0]
     expect(row.key).toBeNull()
-    expect(row.cells.name.text).toBe('chrome.exe')
+    expect(row.cells.name).toMatchObject({ text: 'chrome', title: 'chrome.exe' })
     expect(row.cells.memory.text).toBe('5.0 GB')
     expect(row.cells.processes.text).toBe('40개')
   })
@@ -192,5 +192,54 @@ describe('검색·정렬', () => {
       ':1'
     ])
     expect(sortRows(big, 'port', 'asc').map((r) => r.cells.port.text)).toEqual([':1', ':2', ':3'])
+  })
+})
+
+describe('행 아이콘(NeoHtop 처럼 첫 칸에 무엇이 도는지)', () => {
+  test('개발 서버: 명령줄로 고른 프레임워크 로고, 실행 파일이 절대 경로면 OS 아이콘 후보도 둔다', () => {
+    const s = snapshot({
+      platform: 'win32',
+      ports: [
+        portRow({
+          commandLine:
+            '"C:\\Program Files\\nodejs\\node.exe" C:\\work\\shop-web\\node_modules\\vite\\bin\\vite.js'
+        })
+      ]
+    })
+    const icon = tableFor('ports', s).rows[0].cells.name.icon
+    expect(icon?.brand?.title).toBe('Vite')
+    expect(icon?.exePath).toBe('C:\\Program Files\\nodejs\\node.exe')
+    expect(icon?.prefer).toBe('brand')
+  })
+
+  test('에이전트: 프로젝트 칸에 도구 로고(Claude Code·Codex)를 두고, 따로 있던 도구 칸은 없앤다', () => {
+    const s = snapshot({ agents: [agentRow(), agentRow({ pid: 2, tool: 'codex' })] })
+    const t = tableFor('agents', s)
+    expect(t.columns.map((c) => c.id)).not.toContain('tool')
+    const [claude, codex] = t.rows
+    expect(claude.cells.name.icon?.image).toBeTruthy()
+    expect(claude.cells.name.icon?.title).toBe('Claude Code')
+    expect(codex.cells.name.icon?.title).toBe('Codex')
+    expect(claude.cells.name.icon?.image).not.toBe(codex.cells.name.icon?.image)
+  })
+
+  test('다른 앱: OS 앱 아이콘을 먼저, 없으면 이름으로 고른 로고', () => {
+    const icon = tableFor('apps', snapshot()).rows[0].cells.name.icon
+    expect(icon).toMatchObject({
+      prefer: 'native',
+      exePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
+    })
+    expect(icon?.brand?.title).toBe('Google Chrome')
+  })
+
+  test('남은 프로세스·무거운 작업·디스크도 첫 칸에 아이콘이 있다', () => {
+    const s = snapshot({
+      leftovers: [leftoverRow({ label: 'Gradle 데몬', commandLine: 'java GradleDaemon' })],
+      heavyJobs: [heavyJob()],
+      disk: { rows: [diskRow()], scannedAt: 1, scanning: false, error: null }
+    })
+    expect(tableFor('leftovers', s).rows[0].cells.name.icon?.brand?.title).toBe('Gradle')
+    expect(tableFor('heavy', s).rows[0].cells.name.icon?.brand?.title).toBe('TypeScript')
+    expect(tableFor('disk', s).rows[0].cells.name.icon?.fallback).toBe('folder')
   })
 })

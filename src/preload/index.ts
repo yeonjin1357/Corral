@@ -15,6 +15,7 @@ const api: PitwallApi = {
   },
   getLatest: () => ipcRenderer.invoke(IPC.getLatest),
   appInfo: () => ipcRenderer.invoke(IPC.appInfo),
+  fileIcon: (path) => ipcRenderer.invoke(IPC.fileIcon, path),
   update: {
     get: () => ipcRenderer.invoke(IPC.updateGet),
     check: () => ipcRenderer.invoke(IPC.updateCheck),

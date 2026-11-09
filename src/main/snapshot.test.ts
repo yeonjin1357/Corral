@@ -198,12 +198,45 @@ describe('묶음과 에이전트', () => {
 
   test('다른 앱 상위 5개: 이름별로 묶어 메모리 큰 순(같으면 이름 순)', () => {
     expect(buildSnapshot(input).topApps).toEqual([
-      { name: 'claude.exe', memoryBytes: 300 * MB, processCount: 1 },
-      { name: 'unrelated.exe', memoryBytes: 300 * MB, processCount: 1 },
-      { name: 'python.exe', memoryBytes: 80 * MB, processCount: 1 },
-      { name: 'node.exe', memoryBytes: 51 * MB, processCount: 2 },
-      { name: 'codex-windows-sandbox-service.exe', memoryBytes: 20 * MB, processCount: 1 }
+      { name: 'claude.exe', memoryBytes: 300 * MB, processCount: 1, exePath: null },
+      { name: 'unrelated.exe', memoryBytes: 300 * MB, processCount: 1, exePath: null },
+      { name: 'python.exe', memoryBytes: 80 * MB, processCount: 1, exePath: null },
+      { name: 'node.exe', memoryBytes: 51 * MB, processCount: 2, exePath: null },
+      {
+        name: 'codex-windows-sandbox-service.exe',
+        memoryBytes: 20 * MB,
+        processCount: 1,
+        exePath: null
+      }
     ])
+  })
+
+  test('다른 앱은 명령줄에서 찾은 실행 파일 경로를 함께 담는다(앱 아이콘용, 모르면 null)', () => {
+    const apps = buildSnapshot({
+      ...input,
+      platform: 'win32',
+      sample: {
+        ...input.sample,
+        processes: [
+          ...input.sample.processes,
+          proc(
+            9001,
+            1,
+            'Figma.exe',
+            900,
+            null,
+            '"C:\\Users\\dev\\AppData\\Local\\Figma\\Figma.exe" --type=renderer'
+          )
+        ]
+      }
+    }).topApps
+    expect(apps[0]).toEqual({
+      name: 'Figma.exe',
+      memoryBytes: 900 * MB,
+      processCount: 1,
+      exePath: 'C:\\Users\\dev\\AppData\\Local\\Figma\\Figma.exe'
+    })
+    expect(apps.find((a) => a.name === 'python.exe')?.exePath).toBeNull()
   })
 
   test('OS 와 논리 코어 수를 스냅샷에 담는다(CPU 표시 기준)', () => {

@@ -54,6 +54,18 @@ SOFTWARE.
 - 쓰는 것: 화면 아이콘(NeoHtop 과 같은 아이콘 세트).
 - 라이선스: ISC, Copyright (c) 2026 Lucide Icons and Contributors
 
+## Simple Icons
+
+- 출처: https://github.com/simple-icons/simple-icons (`simple-icons` 16.35.0)
+- 쓰는 것: 표 행의 프레임워크·런타임·앱 로고(Vite, Spring Boot, Node.js, Chrome 등). NeoHtop 도 같은 패키지를 쓴다.
+- 라이선스: CC0 1.0. 각 로고는 해당 회사·프로젝트의 상표이며, 무엇이 실행 중인지 알려 주는 용도로만 쓴다.
+
+## Lobe Icons
+
+- 출처: https://github.com/lobehub/lobe-icons (`@lobehub/icons-static-svg` 1.98.0 의 `claudecode-color.svg`, `codex-color.svg`)
+- 쓰는 것: 에이전트 표의 Claude Code·Codex 로고(`src/renderer/src/assets/brands/`).
+- 라이선스: MIT, Copyright (c) LobeHub. 로고는 Anthropic·OpenAI 의 상표이며, 어떤 에이전트인지 알려 주는 용도로만 쓴다.
+
 ## Uptime Kuma
 
 - 출처: https://github.com/louislam/uptime-kuma

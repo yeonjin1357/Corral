@@ -339,8 +339,9 @@
 /*
   좁은 창: NeoHtop 은 900px 아래에서 2칸으로 접고 높이를 넘으면 스크롤한다.
   pitwall 은 카드가 6개라 접으면 표 자리가 없어지므로, 카드를 한 줄에 두고 옆으로 스크롤한다.
+  한글 제목·숫자가 잘리지 않게 카드 한 칸이 200px 아래로 줄어들 폭(1180px)부터 그렇게 한다.
 */
-@media (max-width: 1000px) {
+@media (max-width: 1180px) {
   .resource-grid {
     grid-template-columns: 280px;
     grid-auto-flow: column;

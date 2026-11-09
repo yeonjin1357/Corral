@@ -6,19 +6,15 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import {
-  Bot,
   Cpu,
   ExternalLink,
   FolderGit2,
-  Globe,
-  Hammer,
   HardDrive,
   MemoryStick,
   Plug,
   Terminal,
   Timer,
   Trash2,
-  Unplug,
   X
 } from '@lucide/vue'
 import type {
@@ -49,6 +45,8 @@ import Button from '../ui/Button.vue'
 import Badge from '../ui/Badge.vue'
 import { TABLE } from '../ui/variants'
 import ResourceTrend from './ResourceTrend.vue'
+import ItemIcon from './ItemIcon.vue'
+import { DISK_ICON, agentIcon, heavyIcon, leftoverIcon, portIcon, type RowIcon } from '../rows'
 
 export type Selected =
   | { kind: 'port'; row: PortRow }
@@ -90,7 +88,7 @@ interface Fact {
   value: string
 }
 interface View {
-  icon: unknown
+  icon: RowIcon
   title: string
   description: string
   badge?: { text: string; variant: 'secondary' | 'destructive' } | null
@@ -119,7 +117,7 @@ const view = computed<View | null>(() => {
                 ? t.rowStatus.agent
                 : t.rowStatus.idle
       return {
-        icon: Globe,
+        icon: portIcon(r, props.platform),
         title: r.unresolvable ? `:${r.port}` : folder(r.worktree),
         description: `${t.detail.url(r.port)} · ${r.processName} · PID ${r.pid}`,
         badge: {
@@ -166,7 +164,7 @@ const view = computed<View | null>(() => {
             ? t.agent.noHookNote
             : null
       return {
-        icon: Bot,
+        icon: agentIcon(r),
         title: folder(r.worktree),
         description: `${t.agent.toolNames[r.tool]} · PID ${r.pid}`,
         badge: {
@@ -204,7 +202,7 @@ const view = computed<View | null>(() => {
     case 'leftover': {
       const r = item.row
       return {
-        icon: Unplug,
+        icon: leftoverIcon(r, props.platform),
         title: r.label,
         description: `${r.processName} · PID ${r.pid}`,
         badge: r.agentInWorktree ? { text: t.rowStatus.leftoverAgent, variant: 'secondary' } : null,
@@ -233,7 +231,7 @@ const view = computed<View | null>(() => {
     case 'heavy': {
       const r = item.row
       return {
-        icon: Hammer,
+        icon: heavyIcon(r, props.platform),
         title: r.label,
         description: `${r.processName} · PID ${r.pid}`,
         cards: [
@@ -266,7 +264,7 @@ const view = computed<View | null>(() => {
           .filter(Boolean)
           .pop() ?? r.worktreeRoot
       return {
-        icon: HardDrive,
+        icon: DISK_ICON,
         title: name,
         description: r.worktreeRoot,
         badge: r.inUse ? { text: t.disk.inUse, variant: 'secondary' } : null,
@@ -320,7 +318,7 @@ const folderSize = (f: DiskRow['folders'][number]): string =>
           <div
             class="flex size-12 shrink-0 items-center justify-center rounded-xl border border-border bg-muted"
           >
-            <component :is="view.icon" class="size-6 text-muted-foreground" />
+            <ItemIcon :icon="view.icon" :size="28" />
           </div>
           <div class="min-w-0">
             <div class="flex flex-wrap items-center gap-2">

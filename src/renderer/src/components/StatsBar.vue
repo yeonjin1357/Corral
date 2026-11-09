@@ -6,7 +6,15 @@
 -->
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Bot, Globe, Hammer, HardDrive, MemoryStick, RefreshCw, Unplug } from '@lucide/vue'
+import {
+  Globe,
+  Hammer,
+  HardDrive,
+  MemoryStick,
+  RefreshCw,
+  SquareTerminal,
+  Unplug
+} from '@lucide/vue'
 import type { DashboardSnapshot, ProcessGroup } from '../../../shared/types'
 import { formatBytes } from '../../../shared/format'
 import { text } from '../../../shared/text'
@@ -19,6 +27,9 @@ import Progress from '../ui/Progress.vue'
 import PanelHeader from './PanelHeader.vue'
 import StatItem from './StatItem.vue'
 import ResourceTrend from './ResourceTrend.vue'
+import ItemIcon from './ItemIcon.vue'
+import { agentIcon, heavyIcon, leftoverIcon, portIcon, type RowIcon } from '../rows'
+import { selectionKey } from '../../../shared/keys'
 
 export type TabKey = 'ports' | 'agents' | 'leftovers' | 'heavy' | 'disk' | 'apps'
 
@@ -28,7 +39,12 @@ const props = defineProps<{
   /** 추이 그래프 가로축(ms). */
   windowMs: number
 }>()
-const emit = defineEmits<{ memory: []; tab: [key: TabKey]; diskScan: [] }>()
+const emit = defineEmits<{
+  memory: []
+  tab: [key: TabKey]
+  diskScan: []
+  select: [key: string]
+}>()
 
 const s = computed(() => props.snapshot)
 const hasMemory = computed(() => s.value.memory.totalBytes > 0)
@@ -56,6 +72,27 @@ const portCounts = computed(() => ({
   // "확인해볼 것"(탭만 연결)도 연결이 있지만 거기서 셌으므로 겹치지 않게 뺀다.
   inUse: s.value.ports.filter((p) => p.clientCount > 0 && p.judgement !== 'check').length
 }))
+/** 로고 줄: 같은 종류(로고 제목)끼리 세어 많은 순 3개(좁은 카드에서도 한 줄). */
+interface LogoGroup {
+  key: string
+  icon: RowIcon
+  count: number
+}
+function groupLogos(icons: RowIcon[]): LogoGroup[] {
+  const groups = new Map<string, LogoGroup>()
+  for (const icon of icons) {
+    const key = icon.title ?? icon.fallback
+    const group = groups.get(key)
+    if (group) group.count++
+    else groups.set(key, { key, icon, count: 1 })
+  }
+  return [...groups.values()].sort((a, b) => b.count - a.count).slice(0, 3)
+}
+const portLogos = computed(() =>
+  groupLogos(s.value.ports.map((p) => portIcon(p, s.value.platform)))
+)
+const agentLogos = computed(() => groupLogos(s.value.agents.map(agentIcon)))
+
 const portMemory = computed(() => s.value.ports.reduce((sum, p) => sum + p.memoryBytes, 0))
 
 // 세 칸 합이 전체와 같도록 셋째 칸은 나머지 전부. 모두 쉬는 중일 때만 "쉬는 중", 확인 중·오류가 섞이면 "그 외".
@@ -82,6 +119,40 @@ const freeLeftovers = computed(() => s.value.leftovers.filter((l) => !l.agentInW
 const agentLeftovers = computed(() => s.value.leftovers.length - freeLeftovers.value.length)
 const leftoverMemory = computed(() =>
   freeLeftovers.value.reduce((sum, l) => sum + l.memoryBytes, 0)
+)
+
+/** 카드 아래 목록(NeoHtop 카드처럼 설명 대신 실제 항목을 보인다). 메모리 큰 순 3개. */
+interface MiniItem {
+  key: string
+  label: string
+  title: string
+  bytes: number
+  icon: RowIcon
+}
+const MINI = 3
+const heavyItems = computed<MiniItem[]>(() =>
+  [...s.value.heavyJobs]
+    .sort((a, b) => b.memoryBytes - a.memoryBytes)
+    .slice(0, MINI)
+    .map((j) => ({
+      key: `heavy:${j.pid}:${j.startedAt ?? ''}`,
+      label: j.label,
+      title: j.commandLine,
+      bytes: j.memoryBytes,
+      icon: heavyIcon(j, s.value.platform)
+    }))
+)
+const leftoverItems = computed<MiniItem[]>(() =>
+  [...freeLeftovers.value]
+    .sort((a, b) => b.memoryBytes - a.memoryBytes)
+    .slice(0, MINI)
+    .map((l) => ({
+      key: selectionKey.leftover(l),
+      label: l.label,
+      title: l.commandLine,
+      bytes: l.memoryBytes,
+      icon: leftoverIcon(l, s.value.platform)
+    }))
 )
 
 const disk = computed(() => s.value.disk)
@@ -188,6 +259,19 @@ const diskSub = computed(() =>
           </div>
           <p class="text-xs leading-4 text-muted-foreground">{{ text.ui.cards.portsSub }}</p>
         </div>
+        <div
+          v-if="portLogos.length"
+          class="flex h-4 items-center gap-2.5 whitespace-nowrap"
+        >
+          <span
+            v-for="g in portLogos"
+            :key="g.key"
+            class="flex items-center gap-1 text-[11px] tabular-nums text-muted-foreground"
+            :title="`${g.key} ${g.count}${text.ui.cards.count}`"
+          >
+            <ItemIcon :icon="g.icon" :size="14" />{{ g.count }}
+          </span>
+        </div>
         <StatItem :label="text.ui.cards.memorySum" :value="formatBytes(portMemory)" />
         <div class="mt-auto border-t border-border/60 pt-3">
           <p class="mb-2 text-[11px] text-muted-foreground">{{ text.ui.cards.portJudge }}</p>
@@ -223,7 +307,7 @@ const diskSub = computed(() =>
     <!-- 에이전트 -->
     <Card size="sm" class="h-60 gap-3">
       <PanelHeader
-        :icon="Bot"
+        :icon="SquareTerminal"
         :title="text.ui.cards.agents"
         color="var(--chart-2)"
         :action-label="text.ui.cards.showList"
@@ -239,13 +323,25 @@ const diskSub = computed(() =>
           </div>
           <p class="text-xs leading-4 text-muted-foreground">{{ text.ui.cards.agentsSub }}</p>
         </div>
+        <div
+          v-if="agentLogos.length"
+          class="flex h-4 items-center gap-2.5 whitespace-nowrap"
+        >
+          <span
+            v-for="g in agentLogos"
+            :key="g.key"
+            class="flex items-center gap-1 text-[11px] tabular-nums text-muted-foreground"
+            :title="`${g.key} ${g.count}${text.ui.cards.count}`"
+          >
+            <ItemIcon :icon="g.icon" :size="14" />{{ g.count }}
+          </span>
+        </div>
         <StatItem :label="text.ui.cards.memorySum" :value="formatBytes(agentMemory)" />
-        <StatItem
-          :label="text.ui.cards.stateSource"
-          :value="hookOn ? text.ui.cards.sourceHook : text.ui.cards.sourceCpu"
-        />
         <div class="mt-auto border-t border-border/60 pt-3">
-          <p class="mb-2 text-[11px] text-muted-foreground">{{ text.ui.cards.agentStates }}</p>
+          <p class="mb-2 text-[11px] text-muted-foreground" :title="text.ui.cards.stateSource">
+            {{ text.ui.cards.agentStates }} ·
+            {{ hookOn ? text.ui.cards.sourceHook : text.ui.cards.sourceCpu }}
+          </p>
           <dl class="flex justify-between gap-2">
             <div>
               <dt class="whitespace-nowrap text-[10px] text-muted-foreground">
@@ -280,6 +376,7 @@ const diskSub = computed(() =>
       <PanelHeader
         :icon="Hammer"
         :title="text.ui.cards.heavy"
+        :hint="text.ui.cards.heavyHelp"
         :color="s.heavyOverlap ? 'var(--destructive)' : null"
         :action-label="text.ui.cards.showList"
         @action="emit('tab', 'heavy')"
@@ -298,16 +395,31 @@ const diskSub = computed(() =>
               text.ui.cards.count
             }}</span>
           </div>
-          <p class="text-xs leading-4 text-muted-foreground">
-            {{ s.heavyJobs.length ? text.ui.cards.heavyRunning : text.ui.cards.heavyNone }}
-          </p>
+          <p class="text-xs leading-4 text-muted-foreground">{{ text.ui.cards.heavyRunning }}</p>
         </div>
         <StatItem :label="text.ui.cards.memorySum" :value="formatBytes(heavyMemory)" />
+        <ul v-if="heavyItems.length" class="mt-auto space-y-1.5 border-t border-border/60 pt-2.5">
+          <li v-for="item in heavyItems" :key="item.key">
+            <button
+              type="button"
+              class="flex w-full min-w-0 items-center gap-2 rounded-sm text-left text-xs outline-none hover:text-primary focus-visible:ring-3 focus-visible:ring-ring/50"
+              :title="item.title"
+              @click="emit('select', item.key)"
+            >
+              <ItemIcon :icon="item.icon" :size="14" />
+              <span class="min-w-0 truncate">{{ item.label }}</span>
+              <span class="ml-auto shrink-0 tabular-nums text-muted-foreground">{{
+                formatBytes(item.bytes)
+              }}</span>
+            </button>
+          </li>
+        </ul>
         <p
-          class="mt-auto border-t border-border/60 pt-3 text-[11px] leading-4"
-          :class="s.heavyOverlap ? 'text-destructive' : 'text-muted-foreground'"
+          v-if="s.heavyOverlap"
+          class="text-[11px] leading-4 text-destructive"
+          :class="{ 'mt-auto': !heavyItems.length }"
         >
-          {{ s.heavyOverlap ? text.ui.cards.overlapNote(ramPercent) : text.ui.cards.heavyHelp }}
+          {{ text.ui.cards.overlapNote(ramPercent) }}
         </p>
       </CardContent>
     </Card>
@@ -317,6 +429,7 @@ const diskSub = computed(() =>
       <PanelHeader
         :icon="Unplug"
         :title="text.ui.cards.leftovers"
+        :hint="text.ui.cards.leftoversHelp"
         :color="freeLeftovers.length ? 'var(--peach)' : null"
         :action-label="text.ui.cards.showList"
         @action="emit('tab', 'leftovers')"
@@ -332,14 +445,31 @@ const diskSub = computed(() =>
           <p class="text-xs leading-4 text-muted-foreground">{{ text.ui.cards.leftoversSub }}</p>
         </div>
         <StatItem :label="text.ui.cards.memorySum" :value="formatBytes(leftoverMemory)" />
-        <p
-          class="mt-auto border-t border-border/60 pt-3 text-[11px] leading-4 text-muted-foreground"
+        <ul
+          v-if="leftoverItems.length"
+          class="mt-auto space-y-1.5 border-t border-border/60 pt-2.5"
         >
-          {{
-            agentLeftovers > 0
-              ? text.ui.cards.leftoversAgent(agentLeftovers)
-              : text.ui.cards.leftoversHelp
-          }}
+          <li v-for="item in leftoverItems" :key="item.key">
+            <button
+              type="button"
+              class="flex w-full min-w-0 items-center gap-2 rounded-sm text-left text-xs outline-none hover:text-primary focus-visible:ring-3 focus-visible:ring-ring/50"
+              :title="item.title"
+              @click="emit('select', item.key)"
+            >
+              <ItemIcon :icon="item.icon" :size="14" />
+              <span class="min-w-0 truncate">{{ item.label }}</span>
+              <span class="ml-auto shrink-0 tabular-nums text-muted-foreground">{{
+                formatBytes(item.bytes)
+              }}</span>
+            </button>
+          </li>
+        </ul>
+        <p
+          v-if="agentLeftovers > 0"
+          class="text-[11px] leading-4 text-muted-foreground"
+          :class="{ 'mt-auto': !leftoverItems.length }"
+        >
+          {{ text.ui.cards.leftoversAgent(agentLeftovers) }}
         </p>
       </CardContent>
     </Card>

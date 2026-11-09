@@ -14,6 +14,8 @@ defineProps<{
   title: string
   /** 아이콘 칩 색(var(--chart-1) 등). 없으면 회색 칩(NeoHtop System 카드). */
   color?: string | null
+  /** 제목에 마우스를 올리면 보이는 설명(카드 안에 설명 문장을 두지 않는다). */
+  hint?: string | null
   /** ↗ 버튼 설명. 없으면 버튼을 두지 않는다. */
   actionLabel?: string | null
 }>()
@@ -22,7 +24,10 @@ const emit = defineEmits<{ action: [] }>()
 
 <template>
   <CardHeader class="grid-cols-[1fr_auto] items-center gap-2">
-    <CardTitle class="flex min-w-0 items-center gap-2 text-sm font-medium text-muted-foreground">
+    <CardTitle
+      class="flex min-w-0 items-center gap-2 text-sm font-medium text-muted-foreground"
+      :title="hint ?? undefined"
+    >
       <Badge
         variant="secondary"
         :class="

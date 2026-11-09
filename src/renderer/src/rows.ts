@@ -2,10 +2,24 @@
  * 표에 보일 행·칸을 스냅샷에서 만든다(화면 모양과 상관없는 순수 함수라 데이터 정확성을 따로 시험한다).
  * 표 모양은 NeoHtop (MIT) process/ProcessTable·ProcessRow 를 따른다: 첫 칸이 이름(누르면 상세), 숫자 칸은 오른쪽 정렬.
  */
-import type { DashboardSnapshot, WorktreeInfo } from '../../shared/types'
+import type {
+  AgentRow,
+  AgentTool,
+  AppUsage,
+  DashboardSnapshot,
+  HeavyJobRow,
+  LeftoverRow,
+  Platform,
+  PortRow,
+  WorktreeInfo
+} from '../../shared/types'
 import { selectionKey } from '../../shared/keys'
 import { displayCpuPercent, formatBytes, formatDuration, worktreeFolder } from '../../shared/format'
+import { exePathOf } from '../../shared/exePath'
 import { text } from '../../shared/text'
+import { appBrand, devServerBrand, heavyBrand, leftoverBrand, type Brand } from './brand'
+import claudeCodeLogo from './assets/brands/claude-code.svg'
+import codexLogo from './assets/brands/codex.svg'
 
 export type TabKey = 'ports' | 'agents' | 'leftovers' | 'heavy' | 'disk' | 'apps'
 export const TABS: TabKey[] = ['ports', 'agents', 'leftovers', 'heavy', 'disk', 'apps']
@@ -13,8 +27,23 @@ export const TABS: TabKey[] = ['ports', 'agents', 'leftovers', 'heavy', 'disk', 
 /** 상태 점 색: running 초록 · idle 회색 · stopped 빨강 · warn 주황(NeoHtop status-* 와 peach). */
 export type Tone = 'running' | 'idle' | 'stopped' | 'warn'
 
+/**
+ * 행 아이콘(NeoHtop ProcessIcon 처럼). 넣어 둔 로고(image) → OS 앱 아이콘(exePath)·브랜드 로고(brand) 중 prefer 쪽 → 기본 아이콘.
+ */
+export interface RowIcon {
+  /** 앱에 넣어 둔 로고(Claude Code·Codex). */
+  image?: string | null
+  brand?: Brand | null
+  exePath?: string | null
+  prefer?: 'native' | 'brand'
+  fallback: 'globe' | 'terminal' | 'app' | 'folder' | 'hammer' | 'unplug'
+  /** 아이콘이 뜻하는 것(알림 풍선·읽어 주기). */
+  title?: string
+}
+
 export interface Cell {
   text: string
+  icon?: RowIcon
   /** 정렬 기준(없으면 text). */
   sort?: number | string
   title?: string
@@ -87,6 +116,56 @@ function portStatus(row: DashboardSnapshot['ports'][number], now: number): Cell 
   return { text: `${st.idle}${idle}`, dot: 'idle' }
 }
 
+const TOOL_LOGO: Record<AgentTool, string> = { claude: claudeCodeLogo, codex: codexLogo }
+
+export function portIcon(row: PortRow, platform: Platform | null): RowIcon {
+  const brand = devServerBrand(row.commandLine)
+  return {
+    brand,
+    exePath: exePathOf(row.commandLine, platform),
+    prefer: 'brand',
+    fallback: 'globe',
+    title: brand?.title ?? row.processName
+  }
+}
+export function agentIcon(row: AgentRow): RowIcon {
+  return {
+    image: TOOL_LOGO[row.tool],
+    fallback: 'terminal',
+    title: text.ui.agent.toolNames[row.tool]
+  }
+}
+export function leftoverIcon(row: LeftoverRow, platform: Platform | null): RowIcon {
+  const brand = leftoverBrand(row.label, row.commandLine)
+  return {
+    brand,
+    exePath: exePathOf(row.commandLine, platform),
+    prefer: 'brand',
+    fallback: 'unplug',
+    title: brand?.title ?? row.processName
+  }
+}
+export function heavyIcon(row: HeavyJobRow, platform: Platform | null): RowIcon {
+  const brand = heavyBrand(row.label, row.commandLine)
+  return {
+    brand,
+    exePath: exePathOf(row.commandLine, platform),
+    prefer: 'brand',
+    fallback: 'hammer',
+    title: brand?.title ?? row.processName
+  }
+}
+export const DISK_ICON: RowIcon = { fallback: 'folder' }
+export function appIcon(app: AppUsage): RowIcon {
+  return {
+    brand: appBrand(app.name),
+    exePath: app.exePath,
+    prefer: 'native',
+    fallback: 'app',
+    title: app.name
+  }
+}
+
 const AGENT_TONE: Record<DashboardSnapshot['agents'][number]['state'], Tone> = {
   working: 'running',
   waiting: 'warn',
@@ -114,7 +193,11 @@ export function tableFor(tab: TabKey, s: DashboardSnapshot): Table {
           key: selectionKey.port(p),
           id: selectionKey.port(p),
           cells: {
-            name: { text: folderOf(p.worktree), title: p.worktree?.root },
+            name: {
+              text: folderOf(p.worktree),
+              title: p.worktree?.root,
+              icon: portIcon(p, s.platform)
+            },
             port: { text: `:${p.port}`, sort: p.port, mono: true },
             branch: branchOf(p.worktree),
             status: portStatus(p, now),
@@ -140,7 +223,6 @@ export function tableFor(tab: TabKey, s: DashboardSnapshot): Table {
       return {
         columns: [
           { id: 'name', label: c.project, width: 220 },
-          { id: 'tool', label: c.tool, width: 110 },
           { id: 'branch', label: c.branch, width: 240 },
           { id: 'status', label: c.status, width: 120 },
           { id: 'cpu', label: c.cpu, width: 72, align: 'right' },
@@ -154,8 +236,7 @@ export function tableFor(tab: TabKey, s: DashboardSnapshot): Table {
             key: selectionKey.agent(a),
             id: selectionKey.agent(a),
             cells: {
-              name: { text: folderOf(a.worktree), title: a.worktree?.root },
-              tool: { text: text.ui.agent.toolNames[a.tool] },
+              name: { text: folderOf(a.worktree), title: a.worktree?.root, icon: agentIcon(a) },
               branch: branchOf(a.worktree),
               status: { text: text.ui.agent.states[a.state], dot: AGENT_TONE[a.state] },
               cpu:
@@ -192,7 +273,7 @@ export function tableFor(tab: TabKey, s: DashboardSnapshot): Table {
             key,
             id: key,
             cells: {
-              name: { text: l.label, title: l.commandLine },
+              name: { text: l.label, title: l.commandLine, icon: leftoverIcon(l, s.platform) },
               project: { text: folderOf(l.worktree), title: l.worktree?.root },
               status: l.agentInWorktree
                 ? { text: st.leftoverAgent, dot: 'idle' as const }
@@ -223,7 +304,7 @@ export function tableFor(tab: TabKey, s: DashboardSnapshot): Table {
           key: `heavy:${j.pid}:${j.startedAt ?? ''}`,
           id: `heavy:${j.pid}:${j.startedAt ?? ''}`,
           cells: {
-            name: { text: j.label, title: j.commandLine },
+            name: { text: j.label, title: j.commandLine, icon: heavyIcon(j, s.platform) },
             project: { text: folderOf(j.worktree), title: j.worktree?.root },
             memory: memoryCell(j.memoryBytes),
             runtime: runtimeCell(now, j.startedAt),
@@ -255,7 +336,7 @@ export function tableFor(tab: TabKey, s: DashboardSnapshot): Table {
             key,
             id: key,
             cells: {
-              name: { text: folder, title: r.worktreeRoot },
+              name: { text: folder, title: r.worktreeRoot, icon: DISK_ICON },
               branch: {
                 text: r.branch ?? text.detached,
                 title: r.branch ?? undefined,
@@ -294,7 +375,7 @@ export function tableFor(tab: TabKey, s: DashboardSnapshot): Table {
           key: null,
           id: `app:${a.name}`,
           cells: {
-            name: { text: a.name },
+            name: { text: a.name.replace(/\.exe$/i, ''), title: a.name, icon: appIcon(a) },
             memory: memoryCell(a.memoryBytes),
             processes: {
               text: text.ui.groups.processes(a.processCount),
