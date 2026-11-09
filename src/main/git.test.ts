@@ -166,6 +166,25 @@ describe('실제 git 저장소에서', () => {
     expect(await finishedEvidence(common, entry, 'origin/main')).toBe('merged')
   })
 
+  test('머지된 뒤에도 원격 브랜치에 새 커밋이 있으면(계속 쓰는 릴리스 브랜치 등) 끝난 것이 아니다', async () => {
+    const wt = pushedBranchWorktree('release-x')
+    git(main, 'fetch')
+    commit(main, 'other work on main')
+    git(main, 'merge', '--no-ff', '-m', 'merge release back', 'origin/release-x')
+    git(main, 'push', 'origin', 'main')
+    // 다른 곳(동료)이 같은 릴리스 브랜치에 고친 것을 올렸다. 이 워크트리는 아직 받지 않았다.
+    const other = join(dir, 'hotfix')
+    git(main, 'worktree', 'add', '--detach', other, 'origin/release-x')
+    commit(other, 'hotfix on release')
+    git(other, 'push', 'origin', 'HEAD:release-x')
+    git(main, 'fetch')
+    const common = (await gitCommonDir(main))!
+    const entry = (await listWorktrees(common)).find(
+      (w) => w.path.toLowerCase() === wt.toLowerCase()
+    )!
+    expect(await finishedEvidence(common, entry, 'origin/main')).toBeNull()
+  })
+
   test('막 만든 워크트리(기본 브랜치와 같은 커밋)는 원격에 올렸어도 끝난 것이 아니다', async () => {
     const path = join(dir, 'fresh')
     git(main, 'worktree', 'add', '-b', 'fresh', path, 'main')

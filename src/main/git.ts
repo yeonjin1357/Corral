@@ -97,8 +97,8 @@ export type FinishedEvidence = 'upstreamGone' | 'merged'
 /**
  * 워크트리의 브랜치가 끝났다고 볼 근거(보수적으로).
  * - upstreamGone: 원격에 올렸던 브랜치가 원격에서 지워졌다(머지 후 삭제가 흔하다, 스쿼시 머지 포함).
- * - merged: 원격에 올린 브랜치의 커밋이 기본 브랜치에 들어갔고, 그 커밋이 기본 브랜치의 첫 부모 줄기에 있지 않다
- *   (첫 부모 줄기에 있으면 머지된 것이 아니라 기본 브랜치에서 막 갈라져 나온 것이다).
+ * - merged: 원격에 올린 브랜치의 커밋과 원격 브랜치 끝이 모두 기본 브랜치에 들어갔고, 그 커밋이 기본 브랜치의
+ *   첫 부모 줄기에 있지 않다(첫 부모 줄기에 있으면 머지된 것이 아니라 기본 브랜치에서 막 갈라져 나온 것이다).
  * 원격에 올린 적 없는 브랜치, detached HEAD, 기본 브랜치를 따라가는 브랜치, 기본 브랜치를 모르면 null.
  */
 export async function finishedEvidence(
@@ -112,25 +112,22 @@ export async function finishedEvidence(
     '--git-dir',
     commonDir,
     'for-each-ref',
-    '--format=%(refname)%09%(upstream:short)%09%(upstream:track)',
+    '--format=%(refname)%09%(upstream)%09%(upstream:short)%09%(upstream:track)',
     ref
   ])
   if (r.exitCode !== 0) return null
   // for-each-ref 는 앞부분이 같은 하위 브랜치(feat → feat/x)도 돌려주므로 정확히 같은 줄만 본다.
   const line = r.stdout.split(/\r?\n/).find((l) => l.split('\t')[0] === ref)
-  const [, upstream = '', track = ''] = line?.split('\t') ?? []
+  const [, upstreamRef = '', upstream = '', track = ''] = line?.split('\t') ?? []
   if (!upstream) return null
   if (track.includes('gone')) return 'upstreamGone'
   if (!defaultRef || upstream === defaultRef) return null
-  const ancestor = await git([
-    '--git-dir',
-    commonDir,
-    'merge-base',
-    '--is-ancestor',
-    wt.head,
-    defaultRef
-  ])
-  if (ancestor.exitCode !== 0) return null
+  const isAncestor = async (commit: string): Promise<boolean> =>
+    (await git(['--git-dir', commonDir, 'merge-base', '--is-ancestor', commit, defaultRef]))
+      .exitCode === 0
+  // 이 워크트리의 커밋과 원격 브랜치 끝이 모두 기본 브랜치에 들어가 있어야 한다.
+  // 원격 브랜치에 그 뒤 새 커밋이 있으면(머지 뒤에도 계속 쓰는 릴리스 브랜치 등) 끝난 것이 아니다.
+  if (!(await isAncestor(wt.head)) || !(await isAncestor(upstreamRef))) return null
   const firstParents = await git([
     '--git-dir',
     commonDir,
