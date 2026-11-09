@@ -6,6 +6,7 @@ import type {
   Platform,
   ProcessInfo,
   RawSample,
+  ServerRow,
   WorkspaceInfo,
   WorktreeInfo
 } from '../shared/types'
@@ -35,13 +36,28 @@ export interface CollectOptions {
   idlePortMs: number
   /** 무거운 명령 패턴. */
   heavyPatterns: string[]
+  /** 숨길 서버(`:포트` 또는 프로세스 이름). */
+  hiddenServers?: string[]
+  /** 작업 공간 경로 → 보여 줄 이름. */
+  workspaceAliases?: Record<string, string>
+}
+
+/** 숨김 항목에 맞는 서버: 포트 중 하나가 같거나 프로세스 이름이 같다(대소문자 무시). */
+function isHidden(row: ServerRow, hidden: string[]): boolean {
+  return hidden.some((h) =>
+    h.startsWith(':')
+      ? row.ports.includes(Number(h.slice(1)))
+      : h.toLowerCase() === row.processName.toLowerCase()
+  )
 }
 
 export function collectOptionsFrom(s: Settings): CollectOptions {
   return {
     thresholds: { ramWarnPercent: s.ramWarnPercent, ramDangerPercent: s.ramDangerPercent },
     idlePortMs: s.idlePortMinutes * 60 * 1000,
-    heavyPatterns: s.heavyPatterns
+    heavyPatterns: s.heavyPatterns,
+    hiddenServers: s.hiddenServers,
+    workspaceAliases: s.workspaceAliases
   }
 }
 
@@ -150,8 +166,10 @@ export function createCollector(deps: CollectorDeps): {
 
   /** 행들의 워크트리마다 작업 공간을 한 번씩 판별한다(실패하면 그 워크트리 자체). */
   async function resolveWorkspaces(
-    list: (WorktreeInfo | null)[]
+    list: (WorktreeInfo | null)[],
+    aliases: Record<string, string> = {}
   ): Promise<(w: WorktreeInfo | null) => WorkspaceInfo | null> {
+    const alias = new Map(Object.entries(aliases).map(([root, name]) => [worktreeKey(root), name]))
     const unique = new Map<string, WorktreeInfo>()
     for (const w of list)
       if (w && !unique.has(worktreeKey(w.root))) unique.set(worktreeKey(w.root), w)
@@ -166,6 +184,11 @@ export function createCollector(deps: CollectorDeps): {
         })
       )
     )
+    // 설정의 별칭이 있으면 그 이름으로 보인다.
+    for (const [key, ws] of resolved) {
+      const name = alias.get(worktreeKey(ws.root))
+      if (name) resolved.set(key, { ...ws, name })
+    }
     return (w) => (w ? (resolved.get(worktreeKey(w.root)) ?? null) : null)
   }
 
@@ -235,10 +258,14 @@ export function createCollector(deps: CollectorDeps): {
     agentStates = stated.memo
     const agents = stated.agents
 
-    const traces = activityOf(snapshot.servers, raw.tcp, serverPeers)
+    // 숨긴 서버는 판단·추천·알림·트레이에 넣지 않는다(작업 공간·CPU·메모리 기록은 같이 본다).
+    const hiddenList = options.hiddenServers ?? []
+    const visible = snapshot.servers.filter((r) => !isHidden(r, hiddenList))
+    const hidden = snapshot.servers.filter((r) => isHidden(r, hiddenList))
+    const traces = activityOf(visible, raw.tcp, serverPeers)
     serverPeers = traces.connections
     const judged = judgeServers(
-      snapshot.servers,
+      visible,
       agents,
       serverMemo,
       now,
@@ -249,7 +276,7 @@ export function createCollector(deps: CollectorDeps): {
 
     // 서버 CPU(F5): 서버 트리의 누적 CPU 변화. 에이전트와 같은 계산.
     const serverCpu: CpuMemo = new Map()
-    const servers = judged.rows.map((row) => {
+    const measure = (row: ServerRow): ServerRow => {
       const self = byPid.get(row.pid)
       if (!self) return row
       const members = [self, ...row.descendantPids.flatMap((pid) => byPid.get(pid) ?? [])]
@@ -257,21 +284,28 @@ export function createCollector(deps: CollectorDeps): {
         ...row,
         cpuPercent: measureTreeCpu(self, members, previousServerCpu, sampledAt, serverCpu)
       }
-    })
+    }
+    const servers = judged.rows.map(measure)
+    const hiddenServers = hidden.map(measure)
     previousServerCpu = serverCpu
     // 메모리가 계속 느는 서버(F6): 1분에 한 번 기록해 최근 60분으로 판단한다.
-    serverHistory.record(servers, now)
-    const measured = servers.map((row) => ({
+    serverHistory.record([...servers, ...hiddenServers], now)
+    const grown = (row: ServerRow): ServerRow => ({
       ...row,
       memoryGrowth: serverHistory.growthOf(selectionKey.server(row), now)
-    }))
+    })
+    const measured = servers.map(grown)
+    const measuredHidden = hiddenServers.map(grown)
 
-    const workspaceOf = await resolveWorkspaces([
-      ...measured.map((r) => r.worktree),
-      ...snapshot.leftovers.map((r) => r.worktree),
-      ...snapshot.heavyJobs.map((r) => r.worktree),
-      ...agents.map((a) => a.worktree)
-    ])
+    const workspaceOf = await resolveWorkspaces(
+      [
+        ...snapshot.servers.map((r) => r.worktree),
+        ...snapshot.leftovers.map((r) => r.worktree),
+        ...snapshot.heavyJobs.map((r) => r.worktree),
+        ...agents.map((a) => a.worktree)
+      ],
+      options.workspaceAliases
+    )
     const withWorkspace = <T extends { worktree: WorktreeInfo | null }>(
       row: T
     ): T & { workspace: WorkspaceInfo | null } => ({ ...row, workspace: workspaceOf(row.worktree) })
@@ -279,6 +313,7 @@ export function createCollector(deps: CollectorDeps): {
     return {
       ...snapshot,
       servers: measured.map(withWorkspace),
+      hiddenServers: measuredHidden.map(withWorkspace),
       leftovers: snapshot.leftovers.map(withWorkspace),
       heavyJobs: snapshot.heavyJobs.map(withWorkspace),
       agents: agents.map(withWorkspace),

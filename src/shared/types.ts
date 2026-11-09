@@ -216,6 +216,8 @@ export interface DashboardSnapshot {
   memory: MemorySummary
   /** 개발 서버(포트를 연 프로세스 트리 단위). 첫 포트 순. */
   servers: ServerRow[]
+  /** 설정에서 숨긴 서버(개수·판단·추천·알림·트레이에 넣지 않는다). */
+  hiddenServers: ServerRow[]
   leftovers: LeftoverRow[]
   /** 무거운 작업(설정의 명령 패턴). 메모리 큰 순. */
   heavyJobs: HeavyJobRow[]

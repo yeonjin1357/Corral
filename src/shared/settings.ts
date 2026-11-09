@@ -30,6 +30,13 @@ export interface Settings {
   dependencyDirs: string[]
   /** 디스크 정리에서 살펴볼 저장소(에이전트·개발 서버를 본 저장소는 자동으로 기억한다). */
   extraRepos: string[]
+  /**
+   * 목록에서 숨길 서버: `:3000`(포트) 또는 프로세스 이름(`Docker Desktop.exe`). 숨긴 서버는 개수·정리 판단·추천·
+   * 알림·트레이에서 빠진다.
+   */
+  hiddenServers: string[]
+  /** 작업 공간 경로 → 보여 줄 이름. */
+  workspaceAliases: Record<string, string>
 }
 
 export const REFRESH_INTERVALS: Record<RefreshSpeed, { openMs: number; closedMs: number }> = {
@@ -45,7 +52,11 @@ export const SETTINGS_LIMITS = {
   heavyPatterns: 50,
   patternLength: 100,
   dependencyDirs: 20,
-  extraRepos: 50
+  extraRepos: 50,
+  hiddenServers: 50,
+  hiddenLength: 100,
+  workspaceAliases: 50,
+  aliasLength: 40
 } as const
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -71,7 +82,9 @@ export const DEFAULT_SETTINGS: Settings = {
   ],
   notify: { ramLow: true, claudeWaiting: true, heavyOverlap: true },
   dependencyDirs: ['node_modules'],
-  extraRepos: []
+  extraRepos: [],
+  hiddenServers: [],
+  workspaceAliases: {}
 }
 
 function oneOf<T extends string>(value: unknown, choices: readonly T[], fallback: T): T {
@@ -138,6 +151,31 @@ function cleanRepoPath(s: string): string | null {
   return /^[A-Za-z]:[\\/]/.test(t) || /^\/(?!\/)/.test(t) ? t : null
 }
 
+/** `:포트`(1~65535) 또는 경로가 아닌 프로세스 이름. */
+function cleanHidden(s: string): string | null {
+  const t = s.trim()
+  if (!t || t.length > SETTINGS_LIMITS.hiddenLength) return null
+  const port = /^:(\d{1,5})$/.exec(t)
+  if (port) return Number(port[1]) >= 1 && Number(port[1]) <= 65535 ? t : null
+  if (t.startsWith(':')) return null
+  return /[\\/]/.test(t) ? null : t
+}
+
+/** 별칭: 키는 로컬 절대 경로, 이름은 공백을 정리해 40자까지. 객체가 아니면 빈 값. */
+function aliases(value: unknown): Record<string, string> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  const out: Record<string, string> = {}
+  for (const [key, name] of Object.entries(value)) {
+    if (Object.keys(out).length >= SETTINGS_LIMITS.workspaceAliases) break
+    const path = cleanRepoPath(key)
+    if (!path || typeof name !== 'string') continue
+    const label = name.trim().replace(/\s+/g, ' ')
+    if (!label || label.length > SETTINGS_LIMITS.aliasLength) continue
+    out[path] = label
+  }
+  return out
+}
+
 export function normalizeSettings(value: unknown): Settings {
   const v = (value && typeof value === 'object' && !Array.isArray(value) ? value : {}) as Record<
     string,
@@ -191,6 +229,13 @@ export function normalizeSettings(value: unknown): Settings {
       SETTINGS_LIMITS.dependencyDirs,
       cleanDirName
     ),
-    extraRepos: list(v.extraRepos, d.extraRepos, SETTINGS_LIMITS.extraRepos, cleanRepoPath)
+    extraRepos: list(v.extraRepos, d.extraRepos, SETTINGS_LIMITS.extraRepos, cleanRepoPath),
+    hiddenServers: list(
+      v.hiddenServers,
+      d.hiddenServers,
+      SETTINGS_LIMITS.hiddenServers,
+      cleanHidden
+    ),
+    workspaceAliases: aliases(v.workspaceAliases)
   }
 }

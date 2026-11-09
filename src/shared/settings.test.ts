@@ -16,7 +16,9 @@ test('기본값: 보통 갱신, 자동 테마, 로그인 시 실행·업데이�
     idlePortMinutes: 20,
     notify: { ramLow: true, claudeWaiting: true, heavyOverlap: true },
     dependencyDirs: ['node_modules'],
-    extraRepos: []
+    extraRepos: [],
+    hiddenServers: [],
+    workspaceAliases: {}
   })
   expect(DEFAULT_SETTINGS.heavyPatterns).toEqual([
     'tsc',
@@ -153,4 +155,46 @@ test('추가 저장소는 절대 경로만, 50개까지', () => {
 
 test('모르는 키는 버린다', () => {
   expect(normalizeSettings({ hacker: true })).toEqual(DEFAULT_SETTINGS)
+})
+
+test('숨긴 서버는 :포트(1~65535) 또는 프로세스 이름(경로 없이 100자까지), 중복 없이 50개까지', () => {
+  expect(
+    normalizeSettings({
+      hiddenServers: [
+        ' :3000 ',
+        ':0',
+        ':70000',
+        ':80a',
+        'Docker Desktop.exe',
+        'C:\\bin\\x.exe',
+        '',
+        ':3000',
+        'a'.repeat(101),
+        1
+      ]
+    }).hiddenServers
+  ).toEqual([':3000', 'Docker Desktop.exe'])
+  expect(
+    normalizeSettings({ hiddenServers: Array.from({ length: 60 }, (_, i) => `:${3000 + i}`) })
+      .hiddenServers
+  ).toHaveLength(50)
+})
+
+test('작업 공간 별칭은 절대 경로 → 이름(공백 정리, 40자까지), 50개까지', () => {
+  expect(
+    normalizeSettings({
+      workspaceAliases: {
+        'C:\\work\\ws': '  쇼핑   작업 공간 ',
+        'relative\\path': '안 됨',
+        '/Users/dev/ws': 'x'.repeat(41),
+        '/Users/dev/ok': '',
+        '\\\\server\\share': '네트워크'
+      }
+    }).workspaceAliases
+  ).toEqual({ 'C:\\work\\ws': '쇼핑 작업 공간' })
+  const many = Object.fromEntries(Array.from({ length: 60 }, (_, i) => [`C:\\w${i}`, `w${i}`]))
+  expect(Object.keys(normalizeSettings({ workspaceAliases: many }).workspaceAliases)).toHaveLength(
+    50
+  )
+  expect(normalizeSettings({ workspaceAliases: ['x'] }).workspaceAliases).toEqual({})
 })

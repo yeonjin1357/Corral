@@ -1,4 +1,6 @@
 import { collectOptionsFrom, createCollector, type CollectorDeps } from './collector'
+import { cleanupRecommendation } from '../shared/recommend'
+import { buildTrayMenu } from './tray'
 import { DEFAULT_SETTINGS } from '../shared/settings'
 import type { Sessions } from './sessions'
 import { applyHookEvent } from './sessions'
@@ -295,7 +297,9 @@ test('설정에서 수집 기준값을 만든다(분 → ms)', () => {
   ).toEqual({
     thresholds: { ramWarnPercent: 70, ramDangerPercent: 85 },
     idlePortMs: 45 * MIN,
-    heavyPatterns: DEFAULT_SETTINGS.heavyPatterns
+    heavyPatterns: DEFAULT_SETTINGS.heavyPatterns,
+    hiddenServers: [],
+    workspaceAliases: {}
   })
 })
 
@@ -452,4 +456,47 @@ test('판단 기억 없이(null) 불러오면 처음부터 센다', async () => 
   c.importState({ servers: {}, serverMemo: null, agentStates: null }, clock.now)
   const s = await c.collect()
   expect(s.servers[0]).toMatchObject({ judgement: null, idleSince: 10 * MIN })
+})
+
+describe('숨기기·별칭(F11)', () => {
+  const idle: RawSample = {
+    ...sampleAt(0),
+    processes: [proc(4100, 1, 'node.exe', 0, 'node vite')]
+  }
+  const options =
+    (hiddenServers: string[], workspaceAliases: Record<string, string> = {}) =>
+    () => ({
+      thresholds: { ramWarnPercent: 80, ramDangerPercent: 90 },
+      idlePortMs: 20 * MIN,
+      heavyPatterns: [],
+      hiddenServers,
+      workspaceAliases
+    })
+
+  test('숨긴 서버는 목록·추천·트레이에서 빠지고 숨김 목록에 있다', async () => {
+    for (const hidden of [[':3000'], ['NODE.EXE']]) {
+      const { deps, clock } = setup({ options: options(hidden), sample: async () => idle })
+      const collector = createCollector(deps)
+      await collector.collect()
+      clock.now += 30 * MIN
+      const s = await collector.collect()
+      expect(s.servers).toEqual([])
+      expect(s.hiddenServers.map((r) => r.ports)).toEqual([[3000]])
+      // 숨긴 서버는 판단하지 않는다(추천·알림·트레이 개수에 들어가지 않음).
+      expect(s.hiddenServers[0].judgement).toBeNull()
+      expect(cleanupRecommendation(s).items).toEqual([])
+      expect(
+        buildTrayMenu(s, { open: vi.fn(), settings: vi.fn(), quit: vi.fn() }).map((i) => i.label)
+      ).toContain('개발 서버 0개')
+    }
+  })
+
+  test('별칭이 있으면 작업 공간 이름(경로는 대소문자·끝 구분자 무시)', async () => {
+    const { deps } = setup({
+      options: options([], { 'c:\\WORK\\shop-web\\': '쇼핑' }),
+      sample: async () => idle
+    })
+    const s = await createCollector(deps).collect()
+    expect(s.servers[0].workspace).toMatchObject({ root: W1.root, name: '쇼핑' })
+  })
 })

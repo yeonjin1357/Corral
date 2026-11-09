@@ -347,6 +347,8 @@ export function buildSnapshot(input: {
     takenAt: input.now,
     memory,
     servers,
+    // 숨김은 설정을 아는 수집기가 나눈다.
+    hiddenServers: [],
     leftovers,
     heavyJobs,
     // RAM 이 넉넉하면 겹쳐도 조용하다(스펙 §3-6).
