@@ -11,7 +11,9 @@ function ports(memories: number[]): DashboardSnapshot {
   })
 }
 
-function props(s: DashboardSnapshot, sort: { id: string; dir: 'asc' | 'desc' }) {
+type TableProps = InstanceType<typeof ItemTable>['$props']
+
+function props(s: DashboardSnapshot, sort: { id: string; dir: 'asc' | 'desc' }): TableProps {
   const table = tableFor('ports', s)
   return {
     table,

@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { mount } from '@vue/test-utils'
+import { mount, type VueWrapper } from '@vue/test-utils'
 import ResourceTrend from './ResourceTrend.vue'
 
 const points = [
@@ -7,7 +7,7 @@ const points = [
   { t: 2_000, value: 91 }
 ]
 
-function trend() {
+function trend(): VueWrapper {
   return mount(ResourceTrend, {
     attachTo: document.body,
     props: {

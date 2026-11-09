@@ -8,6 +8,7 @@ import type {
   PortRow,
   ProcessInfo,
   RawSample,
+  ServerRow,
   WorktreeInfo
 } from '../shared/types'
 import { DEFAULT_THRESHOLDS } from '../shared/defaults'
@@ -130,6 +131,57 @@ function topAppsOf(processes: ProcessInfo[], platform: Platform | null): AppUsag
   return [...byName.values()]
     .sort((a, b) => b.memoryBytes - a.memoryBytes || a.name.localeCompare(b.name))
     .slice(0, TOP_APPS)
+}
+
+/**
+ * 포트 행을 서버(포트를 연 프로세스 트리의 맨 위) 단위로 합친다. 포트를 연 프로세스의 조상(깊이 제한 없음)
+ * 가운데 다른 포트 프로세스가 있으면 가장 위 조상의 서버에 포트를 더한다(java 부모·자식이 포트를 나눠 여는 경우).
+ * 메모리·자손은 맨 위 프로세스 기준으로 한 번만 센다. 판별 불가(중계)는 합치지 않고 그 프로세스 하나가 서버다.
+ */
+export function serversOf(ports: PortRow[], tree: ProcessTree): ServerRow[] {
+  const portPids = new Set(ports.filter((r) => !r.unresolvable).map((r) => r.pid))
+  const topOf = (row: PortRow): number => {
+    if (row.unresolvable) return row.pid
+    let top = row.pid
+    // 가까운 조상부터 나오므로 마지막으로 맞는 것이 가장 위.
+    for (const a of tree.ancestors(row.pid, Number.MAX_SAFE_INTEGER))
+      if (portPids.has(a.pid)) top = a.pid
+    return top
+  }
+  const groups = new Map<number, { head: PortRow; ports: Set<number>; clientCount: number }>()
+  for (const row of ports) {
+    const top = topOf(row)
+    let group = groups.get(top)
+    if (!group) {
+      const head = ports.find((r) => r.pid === top) ?? row
+      group = { head, ports: new Set(), clientCount: 0 }
+      groups.set(top, group)
+    }
+    group.ports.add(row.port)
+    // 포트 행은 (포트, pid) 마다 하나라 연결이 겹쳐 세지지 않는다.
+    group.clientCount += row.clientCount
+  }
+  return [...groups.values()]
+    .map(({ head, ports: set, clientCount }) => ({
+      pid: head.pid,
+      ports: [...set].sort((a, b) => a - b),
+      processName: head.processName,
+      commandLine: head.commandLine,
+      worktree: head.worktree,
+      // 작업 공간·CPU·메모리 증가·판단은 이전 샘플과 파일 시스템을 아는 수집기가 채운다.
+      workspace: null,
+      unresolvable: head.unresolvable,
+      memoryBytes: head.memoryBytes,
+      descendantPids: head.descendantPids,
+      clientCount,
+      startedAt: head.startedAt,
+      judgement: null,
+      idleSince: null,
+      agentInWorktree: false,
+      cpuPercent: null,
+      memoryGrowth: null
+    }))
+    .sort((a, b) => a.ports[0] - b.ports[0] || a.pid - b.pid)
 }
 
 export function buildSnapshot(input: {
@@ -285,6 +337,7 @@ export function buildSnapshot(input: {
     takenAt: input.now,
     memory,
     ports,
+    servers: serversOf(ports, tree),
     leftovers,
     heavyJobs,
     // RAM 이 넉넉하면 겹쳐도 조용하다(스펙 §3-6).

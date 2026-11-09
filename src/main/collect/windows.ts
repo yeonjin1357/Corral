@@ -276,7 +276,9 @@ export function parseNetstatLines(lines: string[]): TcpEntry[] {
         ? 'Listen'
         : stateText === 'ESTABLISHED'
           ? 'Established'
-          : 'Other'
+          : stateText === 'TIME_WAIT'
+            ? 'TimeWait'
+            : 'Other'
     result.push({
       pid,
       localAddress: local.host,
@@ -328,6 +330,7 @@ function collectModeOf(helperMode: unknown): CollectMode {
 function toState(value: unknown): TcpState {
   if (value === 'Listen') return 'Listen'
   if (value === 'Established') return 'Established'
+  if (value === 'TimeWait') return 'TimeWait'
   return 'Other'
 }
 

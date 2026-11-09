@@ -160,6 +160,87 @@ describe('포트 행', () => {
   })
 })
 
+describe('서버 행', () => {
+  // java 부모(6176)가 자식 JVM(8081·9091)을 띄운 API 서버, 포트 둘을 연 단일 프로세스 서버.
+  const W5: WorktreeInfo = { root: 'C:\\work\\api-server', branch: 'main', isLinkedWorktree: false }
+  const serverProcesses: ProcessInfo[] = [
+    proc(4000, 1, 'node.exe', 50, 100),
+    proc(4100, 4000, 'node.exe', 1000, 200),
+    proc(4101, 4100, 'esbuild.exe', 200, 300),
+    proc(6100, 1, 'java.exe', 300, 100),
+    proc(6101, 6100, 'java.exe', 2000, 110),
+    proc(6102, 6101, 'conhost.exe', 5, 120)
+  ]
+  const serverInput = {
+    ...input,
+    sample: {
+      processes: serverProcesses,
+      tcp: [
+        listen(4100, 8081),
+        listen(4100, 9091),
+        listen(4100, 9091, '::'),
+        est(4100, 8081, 50001),
+        est(4100, 9091, 50002),
+        est(4100, 9091, 50003),
+        listen(6100, 6176),
+        listen(6101, 8082),
+        listen(6101, 9092),
+        est(6101, 8082, 50010)
+      ]
+    },
+    worktrees: new Map<number, WorktreeInfo>([
+      [4100, W1],
+      [6100, W5]
+    ])
+  }
+
+  test('같은 pid 가 포트 둘을 열면 서버 한 줄에 포트 둘, 메모리는 한 번', () => {
+    const s = buildSnapshot(serverInput)
+    const row = s.servers.find((r) => r.pid === 4100)!
+    expect(s.servers.filter((r) => r.pid === 4100)).toHaveLength(1)
+    expect(row.ports).toEqual([8081, 9091])
+    expect(row.memoryBytes).toBe(1000 * MB + 200 * MB)
+    expect(row.descendantPids).toEqual([4101])
+    expect(row.worktree).toEqual(W1)
+    expect(row.workspace).toBeNull()
+    expect(row.cpuPercent).toBeNull()
+    expect(row.memoryGrowth).toBeNull()
+  })
+
+  test('포트를 연 자식은 포트를 연 부모 서버에 합친다', () => {
+    const s = buildSnapshot(serverInput)
+    expect(s.servers.map((r) => [r.pid, r.ports])).toEqual([
+      [6100, [6176, 8082, 9092]],
+      [4100, [8081, 9091]]
+    ])
+    const api = s.servers.find((r) => r.pid === 6100)!
+    expect(api.memoryBytes).toBe(300 * MB + 2000 * MB + 5 * MB)
+    expect(api.descendantPids.sort()).toEqual([6101, 6102])
+    expect(api.processName).toBe('java.exe')
+    expect(api.startedAt).toBe(100)
+    expect(api.worktree).toEqual(W5)
+  })
+
+  test('연결 수는 서버의 모든 포트 연결 합', () => {
+    const s = buildSnapshot(serverInput)
+    expect(s.servers.find((r) => r.pid === 4100)?.clientCount).toBe(3)
+    expect(s.servers.find((r) => r.pid === 6100)?.clientCount).toBe(1)
+  })
+
+  test('IPv4·IPv6 로 같은 포트를 열어도 포트는 한 번', () => {
+    const s = buildSnapshot(input)
+    expect(s.servers.find((r) => r.pid === 4100)?.ports).toEqual([3000])
+  })
+
+  test('판별 불가(중계)는 그 프로세스 하나가 서버, 다른 서버와 합치지 않는다', () => {
+    const s = buildSnapshot(input)
+    const relay = s.servers.find((r) => r.pid === 6000)!
+    expect(relay.ports).toEqual([8080])
+    expect(relay.unresolvable).toBe(true)
+    expect(relay.worktree).toBeNull()
+  })
+})
+
 describe('묶음과 에이전트', () => {
   test('에이전트 자손인 개발 서버는 devServer 로만 센다', () => {
     const g = Object.fromEntries(buildSnapshot(input).groups.map((x) => [x.group, x]))

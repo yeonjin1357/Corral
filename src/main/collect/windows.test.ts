@@ -85,7 +85,7 @@ test('프로세스·TCP 파싱, 한글 경로 보존, null 명령줄은 빈 문�
   })
   expect(s.processes[1].commandLine).toBe('')
   expect(s.processes[1].startedAt).toBeNull()
-  expect(s.tcp.map((t) => t.state)).toEqual(['Listen', 'Established', 'Other'])
+  expect(s.tcp.map((t) => t.state)).toEqual(['Listen', 'Established', 'TimeWait'])
   expect(s.tcp[1]).toEqual({
     pid: 4100,
     localAddress: '::1',
@@ -184,6 +184,27 @@ test('스크립트는 따옴표 문제 없이 -EncodedCommand(UTF-16LE base64)�
   expect(Buffer.from(args[3], 'base64').toString('utf16le')).toBe('Write-Output "한글 $x"')
 })
 
+test('TIME_WAIT 은 TimeWait 상태로 읽는다', () => {
+  // 최근 닫힌 연결(사용 흔적). Windows 는 소유 pid 가 0 이라 로컬 포트로 서버와 맞춘다.
+  expect(parseWindowsSample(json).tcp[2]).toMatchObject({
+    pid: 0,
+    localPort: 3000,
+    state: 'TimeWait'
+  })
+  expect(
+    parseNetstatLines(['  TCP    [::1]:3000             [::1]:51000            TIME_WAIT       0'])
+  ).toEqual([
+    {
+      pid: 0,
+      localAddress: '::1',
+      localPort: 3000,
+      remoteAddress: '::1',
+      remotePort: 51000,
+      state: 'TimeWait'
+    }
+  ])
+})
+
 describe('보안 정책으로 기본 스크립트가 막힌 PC(ConstrainedLanguage 등)', () => {
   const decode = (argv: string[]): string =>
     Buffer.from(argv[argv.length - 1], 'base64').toString('utf16le')
@@ -259,7 +280,7 @@ describe('보안 정책으로 기본 스크립트가 막힌 PC(ConstrainedLangua
         localPort: 3000,
         remoteAddress: '::1',
         remotePort: 51000,
-        state: 'Other'
+        state: 'TimeWait'
       },
       {
         pid: 6000,

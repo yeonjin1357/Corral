@@ -1,4 +1,4 @@
-import type { AgentRow, LeftoverRow, PortRow } from './types'
+import type { AgentRow, LeftoverRow, PortRow, ServerRow } from './types'
 
 /** 같은 포트를 다른 프로세스가 열면 다른 항목이 되도록 포트와 pid 를 함께 쓴다. */
 export function portKey(row: Pick<PortRow, 'port' | 'pid'>): string {
@@ -16,6 +16,8 @@ export function agentKey(row: Pick<AgentRow, 'pid' | 'startedAt'>): string {
  */
 export const selectionKey = {
   port: (row: Pick<PortRow, 'port' | 'pid'>): string => `port:${portKey(row)}`,
+  server: (row: Pick<ServerRow, 'pid' | 'startedAt'>): string =>
+    `server:${row.pid}:${row.startedAt ?? ''}`,
   agent: (row: Pick<AgentRow, 'pid' | 'startedAt'>): string => `agent:${agentKey(row)}`,
   leftover: (row: Pick<LeftoverRow, 'pid' | 'startedAt'>): string =>
     `leftover:${row.pid}:${row.startedAt ?? ''}`,

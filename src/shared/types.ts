@@ -15,7 +15,8 @@ export interface ProcessInfo {
   cpuMs?: number | null
 }
 
-export type TcpState = 'Listen' | 'Established' | 'Other'
+/** TimeWait: 최근 닫힌 연결(사용 흔적). Windows 는 소유 pid 가 0 이다. */
+export type TcpState = 'Listen' | 'Established' | 'TimeWait' | 'Other'
 
 export interface TcpEntry {
   pid: number
@@ -90,6 +91,53 @@ export interface PortRow {
   idleSince: number | null
   /** 같은 워크트리에 에이전트(Claude·Codex)가 실행 중. */
   agentInWorktree: boolean
+}
+
+/**
+ * 작업 공간: 서버 워크트리를 감싸는 가장 가까운 바깥 git 저장소(여러 저장소를 묶는 작업 공간 저장소 등).
+ * outer=false 면 바깥 저장소가 없거나 같은 저장소라 그 워크트리 자체가 작업 공간이다.
+ */
+export interface WorkspaceInfo {
+  root: string
+  /** 보여 줄 이름(폴더 이름, 설정의 별칭이 있으면 별칭). */
+  name: string
+  branch: string | null
+  outer: boolean
+}
+
+/** 메모리가 계속 는 서버의 근거(처음·지금 메모리와 잰 시간). */
+export interface MemoryGrowth {
+  fromBytes: number
+  toBytes: number
+  minutes: number
+}
+
+/**
+ * 개발 서버 한 줄 = 포트를 연 프로세스 트리의 맨 위 프로세스. 그 트리 안에서 연 포트를 모두 담고
+ * 메모리·자손은 한 번만 센다(같은 서버를 두 번 세거나 두 번 끄지 않도록).
+ */
+export interface ServerRow {
+  pid: number
+  /** 서버 트리가 연 개발용 포트(오름차순, 중복 없음). */
+  ports: number[]
+  processName: string
+  commandLine: string
+  worktree: WorktreeInfo | null
+  workspace: WorkspaceInfo | null
+  unresolvable: boolean
+  /** 맨 위 프로세스 + 모든 자손. */
+  memoryBytes: number
+  descendantPids: number[]
+  /** 서버의 모든 포트에 붙은 연결 수 합. */
+  clientCount: number
+  startedAt: number | null
+  judgement: PortJudgement | null
+  idleSince: number | null
+  agentInWorktree: boolean
+  /** 서버 트리 CPU 사용률(에이전트와 같은 기준). 모르면 null. */
+  cpuPercent: number | null
+  /** 메모리가 계속 늘고 있으면 그 근거. */
+  memoryGrowth: MemoryGrowth | null
 }
 
 /** 주인(실행한 프로세스)이 끝났는데 남은 개발 도구 프로세스(자손 포함 한 행). */
@@ -170,6 +218,8 @@ export interface DashboardSnapshot {
   takenAt: number
   memory: MemorySummary
   ports: PortRow[]
+  /** 개발 서버(포트를 연 프로세스 트리 단위). 첫 포트 순. */
+  servers: ServerRow[]
   leftovers: LeftoverRow[]
   /** 무거운 작업(설정의 명령 패턴). 메모리 큰 순. */
   heavyJobs: HeavyJobRow[]
