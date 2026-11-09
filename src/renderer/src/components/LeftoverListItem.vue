@@ -32,7 +32,12 @@ const tags = computed(() => {
     <div class="row">
       <div class="col-12 small-padding d-flex gap-2 align-items-center">
         <div class="me-1">
-          <span class="badge rounded-pill bg-warning">{{ formatBytes(row.memoryBytes) }}</span>
+          <span
+            class="badge rounded-pill"
+            :class="row.agentInWorktree ? 'bg-secondary' : 'bg-warning'"
+          >
+            {{ formatBytes(row.memoryBytes) }}
+          </span>
         </div>
         <div class="flex-fill text-truncate" style="min-width: 0">
           <div class="name text-truncate">{{ row.label }}</div>

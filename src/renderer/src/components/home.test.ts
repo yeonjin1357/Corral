@@ -110,3 +110,21 @@ describe('메모리 묶음', () => {
     ).toBe(false)
   })
 })
+
+describe('남은 프로세스 개수', () => {
+  test('에이전트가 있는 워크트리의 것은 개수·주황에서 빼고 따로 알린다', () => {
+    const w = home(
+      snapshot({
+        leftovers: [leftoverRow({ pid: 1 }), leftoverRow({ pid: 2, agentInWorktree: true })]
+      })
+    )
+    const col = w.findAll('.stats .col')[3]
+    expect(col.get('.num').text()).toBe('1')
+    expect(col.get('.num').classes()).toContain('text-warning')
+    expect(col.text()).toContain('에이전트 워크트리 1')
+    const onlyAgent = home(snapshot({ leftovers: [leftoverRow({ agentInWorktree: true })] }))
+    const c2 = onlyAgent.findAll('.stats .col')[3]
+    expect(c2.get('.num').text()).toBe('0')
+    expect(c2.get('.num').classes()).toContain('text-secondary')
+  })
+})

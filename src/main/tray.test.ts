@@ -8,7 +8,13 @@ import {
   createTrayController,
   type TrayLike
 } from './tray'
-import type { AgentRow, DashboardSnapshot, HeavyJobRow, UpdateStatus } from '../shared/types'
+import type {
+  AgentRow,
+  DashboardSnapshot,
+  HeavyJobRow,
+  LeftoverRow,
+  UpdateStatus
+} from '../shared/types'
 import { blankSnapshot } from '../shared/snapshot'
 
 const GB = 1024 ** 3
@@ -345,4 +351,24 @@ describe('새 버전', () => {
     for (const state of ['none', 'checking', 'downloading', 'error', 'disabled'] as const)
       expect(labels(buildTrayMenu(snap(), acts, status(state))).join()).not.toContain('새 버전')
   })
+})
+
+test('남은 프로세스 줄은 에이전트 워크트리의 것을 빼고 센다', () => {
+  const left = (pid: number, agentInWorktree: boolean): LeftoverRow => ({
+    pid,
+    processName: 'node',
+    label: 'Vitest',
+    commandLine: 'node',
+    worktree: null,
+    memoryBytes: 1,
+    descendantPids: [],
+    startedAt: 1,
+    agentInWorktree
+  })
+  expect(
+    labels(buildTrayMenu(snap({ leftovers: [left(1, false), left(2, true)] }), actions))
+  ).toContain('남은 프로세스 1개')
+  expect(labels(buildTrayMenu(snap({ leftovers: [left(2, true)] }), actions)).join()).not.toContain(
+    '남은 프로세스'
+  )
 })

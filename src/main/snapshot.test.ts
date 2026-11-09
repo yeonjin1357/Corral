@@ -359,7 +359,9 @@ describe('남은 프로세스', () => {
       ...input,
       sample: { processes: [...processes, ...extra], tcp },
       worktrees: new Map([...worktrees, [9600, W2], [5000, W2]]),
-      selfPid: 9500
+      selfPid: 9500,
+      // 남은 프로세스는 10분 넘게 산 것만(표본 시작 시각은 수백 ms).
+      now: 60 * 60 * 1000
     })
     expect(s.leftovers.map((r) => [r.pid, r.label, r.agentInWorktree])).toEqual([
       [9700, 'Playwright 브라우저', false],

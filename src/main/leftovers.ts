@@ -53,6 +53,12 @@ export function processLabel(p: ProcessInfo): string {
  * - 제외 목록(개발 서버 포트·에이전트·pitwall 트리)과 겹치거나 아래에 에이전트가 있으면 올리지 않는다.
  * 자손을 포함한 한 행이며, 메모리가 큰 순서.
  */
+/**
+ * 이보다 덜 산 프로세스는 아직 남은 것으로 보지 않는다. 에이전트가 백그라운드로 띄운 타입 검사·빌드는
+ * 실행한 셸이 먼저 끝나 부모가 없어 보이지만, 에이전트가 결과를 기다리는 중이다.
+ */
+export const LEFTOVER_MIN_AGE_MS = 10 * 60 * 1000
+
 export function findLeftovers(
   sample: RawSample,
   worktrees: Map<number, WorktreeInfo>,
@@ -61,6 +67,8 @@ export function findLeftovers(
     /** 에이전트가 실행 중인 워크트리(worktreeKey). 그 워크트리의 행에 표시한다. */
     agentRoots?: Set<string>
     platform?: Platform
+    /** 지금 시각. 주면 LEFTOVER_MIN_AGE_MS 보다 덜 산 프로세스를 뺀다(시작 시각을 모르면 빼지 않는다). */
+    now?: number
   }
 ): LeftoverRow[] {
   const tree = buildTree(sample.processes)
@@ -69,6 +77,8 @@ export function findLeftovers(
     const orphan =
       !tree.parentOf(p.pid) || (opts.platform === 'darwin' && p.ppid === 1 && p.pid !== 1)
     if (!orphan || opts.exclude.has(p.pid)) continue
+    if (opts.now != null && p.startedAt != null && opts.now - p.startedAt < LEFTOVER_MIN_AGE_MS)
+      continue
 
     const descendants = tree.descendants(p.pid)
     const members = [p, ...descendants.map((d) => tree.byPid.get(d)!)]

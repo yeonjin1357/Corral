@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { findLeftovers, isLeftoverTool, processLabel } from './leftovers'
+import { findLeftovers, isLeftoverTool, LEFTOVER_MIN_AGE_MS, processLabel } from './leftovers'
 import { createKiller } from './kill'
 import { buildSnapshot } from './snapshot'
 import { sampleWindows } from './collect/windows'
@@ -188,6 +188,26 @@ describe('남은 프로세스 찾기', () => {
     expect(rows[0].agentInWorktree).toBe(true)
   })
 
+  test('막 시작한 프로세스(10분 미만)는 아직 남은 것으로 보지 않는다(에이전트가 띄운 백그라운드 작업 등)', () => {
+    const MIN = 60 * 1000
+    const now = 100 * MIN
+    const rows = (startedAt: number | null): number =>
+      findLeftovers(sample([proc(7100, 6998, 'node.exe', VITEST, { startedAt })]), new Map(), {
+        exclude: new Set(),
+        now
+      }).length
+    expect(rows(now - 5 * MIN)).toBe(0)
+    expect(rows(now - 10 * MIN)).toBe(1)
+    // 시작 시각을 모르면 나이로 거르지 않는다.
+    expect(rows(null)).toBe(1)
+    // 기준 시각을 주지 않으면(워크트리 조회 대상 고르기) 거르지 않는다.
+    expect(
+      findLeftovers(sample([proc(7100, 6998, 'node.exe', VITEST, { startedAt: now })]), new Map(), {
+        exclude: new Set()
+      })
+    ).toHaveLength(1)
+  })
+
   test('메모리가 큰 순서', () => {
     const rows = findLeftovers(
       sample([
@@ -297,7 +317,8 @@ describe.runIf(process.platform === 'win32')('실제 Windows 에서', () => {
         totalBytes: 1,
         freeBytes: 1,
         thresholds: { ramWarnPercent: 80, ramDangerPercent: 90 },
-        now: Date.now(),
+        // 10분 뒤라고 본다(막 띄운 프로세스는 아직 남은 것으로 보지 않으므로).
+        now: Date.now() + LEFTOVER_MIN_AGE_MS,
         selfPid: process.pid,
         platform: 'win32'
       })

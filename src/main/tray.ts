@@ -52,8 +52,10 @@ export function buildTrayMenu(
     // 정리 후보는 바로 확인하러 갈 수 있게 누르면 앱을 연다(끄기는 앱의 확인 창을 거친다).
     if (candidates > 0)
       items.push({ label: text.tray.candidates(candidates), click: () => actions.open() })
-    if (s.leftovers.length > 0)
-      items.push({ label: text.tray.leftovers(s.leftovers.length), click: () => actions.open() })
+    // 에이전트가 있는 워크트리의 남은 프로세스는 그 에이전트가 쓰고 있을 수 있어 세지 않는다.
+    const leftovers = s.leftovers.filter((l) => !l.agentInWorktree).length
+    if (leftovers > 0)
+      items.push({ label: text.tray.leftovers(leftovers), click: () => actions.open() })
     if (s.heavyJobs.length > 0)
       items.push({
         label: text.tray.heavy(s.heavyJobs.length, s.heavyOverlap),

@@ -244,7 +244,8 @@ export function buildSnapshot(input: {
   const leftovers = findLeftovers(sample, worktrees, {
     exclude: new Set([...self, ...devServer, ...agentTree]),
     agentRoots,
-    platform: input.platform
+    platform: input.platform,
+    now: input.now
   })
 
   const memory = summarizeMemory(input.totalBytes, input.freeBytes, input.thresholds)

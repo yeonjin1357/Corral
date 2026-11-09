@@ -338,6 +338,7 @@ export const text = {
       candidates: '정리 후보',
       waiting: (n: number): string => `권한 대기 ${n}`,
       checks: (n: number): string => `확인해볼 것 ${n}`,
+      agentLeftovers: (n: number): string => `에이전트 워크트리 ${n}`,
       current: '(현재)',
       ramTrend: 'RAM 사용 추이',
       groups: '메모리 묶음',

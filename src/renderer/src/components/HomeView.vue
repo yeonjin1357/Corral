@@ -44,6 +44,9 @@ const candidates = computed(
   () => props.snapshot.ports.filter((p) => p.judgement === 'candidate').length
 )
 const checks = computed(() => props.snapshot.ports.filter((p) => p.judgement === 'check').length)
+// 에이전트가 있는 워크트리의 남은 프로세스는 그 에이전트가 쓰고 있을 수 있어 개수·주황에서 뺀다.
+const leftovers = computed(() => props.snapshot.leftovers.filter((l) => !l.agentInWorktree).length)
+const agentLeftovers = computed(() => props.snapshot.leftovers.length - leftovers.value)
 
 const hook = computed(() => props.snapshot.hook)
 const controls = computed(() => hookControls(hook.value))
@@ -111,10 +114,13 @@ const groups = computed(() =>
         </div>
         <div class="col">
           <h3>{{ text.ui.home.leftovers }}</h3>
-          <span class="num" :class="snapshot.leftovers.length ? 'text-warning' : 'text-secondary'">
-            {{ snapshot.leftovers.length }}
+          <span class="num" :class="leftovers ? 'text-warning' : 'text-secondary'">
+            {{ leftovers }}
           </span>
-          <p class="sub">{{ text.ui.home.current }}</p>
+          <p v-if="agentLeftovers > 0" class="sub">
+            {{ text.ui.home.agentLeftovers(agentLeftovers) }}
+          </p>
+          <p v-else class="sub">{{ text.ui.home.current }}</p>
         </div>
         <div class="col">
           <h3>{{ text.ui.home.candidates }}</h3>

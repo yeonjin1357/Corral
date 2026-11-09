@@ -140,3 +140,27 @@ describe('DiskDetail', () => {
     expect(w.get('.folders tbody').text()).toContain('링크라 건너뜀')
   })
 })
+
+describe('남은 프로세스 색', () => {
+  test('에이전트 워크트리의 남은 프로세스는 회색 알약, 그것뿐이면 묶음 알약도 회색', async () => {
+    const { default: LeftoverListItem } = await import('./LeftoverListItem.vue')
+    const { leftoverRow } = await import('../testing/fixtures')
+    const item = mount(LeftoverListItem, {
+      props: { row: leftoverRow({ agentInWorktree: true }), active: false }
+    })
+    expect(item.get('.badge').classes()).toContain('bg-secondary')
+    const w = mount(PortList, {
+      props: {
+        ports: [],
+        agents: [],
+        leftovers: [leftoverRow({ agentInWorktree: true })],
+        history: emptyHistory(),
+        selectedKey: null,
+        hook: null,
+        disk: null
+      }
+    })
+    const pills = w.findAll('.group-item .badge')
+    expect(pills[2].classes()).toContain('bg-secondary')
+  })
+})

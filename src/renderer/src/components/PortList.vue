@@ -126,7 +126,9 @@ const agentsPill = computed(() => {
   if (states.has('working')) return 'bg-primary'
   return 'bg-secondary'
 })
-const leftoversPill = computed(() => (props.leftovers.length ? 'bg-warning' : 'bg-secondary'))
+const leftoversPill = computed(() =>
+  props.leftovers.some((l) => !l.agentInWorktree) ? 'bg-warning' : 'bg-secondary'
+)
 const diskPill = computed(() =>
   diskRows.value.some((r) => !r.inUse) ? 'bg-warning' : 'bg-secondary'
 )
