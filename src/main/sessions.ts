@@ -1,7 +1,7 @@
-import type { AgentState } from '../shared/types'
+import type { AgentState, AgentTool } from '../shared/types'
 
 /**
- * Claude Code 세션 하나. 훅 이벤트로만 알 수 있다. 이벤트에는 프로세스 정보가 없어서, 작업 폴더의 워크트리로
+ * 에이전트 세션 하나(Claude Code·Codex). 훅 이벤트로만 알 수 있다. 이벤트에는 프로세스 정보가 없어서, 작업 폴더의 워크트리로
  * 행에 이어 붙이고, 수집 때 같은 워크트리의 Claude 프로세스와 짝지어(processKey) 끝났는지 판단한다.
  */
 export interface ClaudeSession {
@@ -19,15 +19,21 @@ export interface ClaudeSession {
   stoppedAt?: number | null
   /** 지금 상태가 된 이벤트 시각. 같은 상태 이벤트가 또 와도 그대로다. 없으면 firstSeen. */
   stateSince?: number
+  /** 어느 도구의 세션인지(없으면 claude). */
+  tool?: AgentTool
 }
 
-/** 수집 때 본 최상위 Claude 프로세스. */
+/** 수집 때 본 최상위 에이전트 프로세스(Claude·Codex). */
 export interface LiveClaude {
   key: string
   /** 워크트리 키(worktreeKey). */
   rootKey: string
   startedAt: number | null
+  /** 없으면 claude. */
+  tool?: AgentTool
 }
+
+const toolOf = (x: { tool?: AgentTool }): AgentTool => x.tool ?? 'claude'
 
 export type Sessions = Map<string, ClaudeSession>
 
@@ -64,6 +70,8 @@ function nextState(
       return ev.source === 'compact' && current ? current : 'idle'
     case 'UserPromptSubmit':
       return 'working'
+    // PreToolUse 는 Codex 훅에만 넣는다(도구를 쓰기 시작함 = 작업 중).
+    case 'PreToolUse':
     case 'PostToolUse':
       if (
         (current === 'idle' || current === 'error') &&
@@ -82,7 +90,9 @@ function nextState(
       if (ev.notification_type === 'elicitation_dialog') return 'waiting'
       if (ev.notification_type === 'idle_prompt') return 'idle'
       return null
+    // Interrupt: Codex 에서 사용자가 진행 중인 턴을 멈춤.
     case 'Stop':
+    case 'Interrupt':
       return 'idle'
     case 'StopFailure':
       return 'error'
@@ -102,7 +112,12 @@ function waitingToolOf(
 }
 
 /** 훅 이벤트 하나를 반영한다. 바뀐 것이 있으면 true. 형식이 이상한 입력은 무시한다. */
-export function applyHookEvent(sessions: Sessions, input: unknown, now: number): boolean {
+export function applyHookEvent(
+  sessions: Sessions,
+  input: unknown,
+  now: number,
+  tool: AgentTool = 'claude'
+): boolean {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return false
   const ev = input as Record<string, unknown>
   const id = ev.session_id
@@ -128,11 +143,14 @@ export function applyHookEvent(sessions: Sessions, input: unknown, now: number):
     updatedAt: now,
     firstSeen: existing?.firstSeen ?? now,
     processKey: existing?.processKey ?? null,
+    ...(tool === 'claude' ? {} : { tool }),
     stateSince:
       existing && existing.state === next ? (existing.stateSince ?? existing.firstSeen) : now,
     ...(next === 'waiting' ? { waitingTool: waitingToolOf(ev, existing) } : {}),
     stoppedAt:
-      ev.hook_event_name === 'Stop' || ev.hook_event_name === 'StopFailure'
+      ev.hook_event_name === 'Stop' ||
+      ev.hook_event_name === 'StopFailure' ||
+      ev.hook_event_name === 'Interrupt'
         ? now
         : ev.hook_event_name === 'UserPromptSubmit'
           ? null
@@ -178,7 +196,7 @@ export function reconcileSessions(
   for (const session of unlinked) {
     const root = opts.rootOfCwd(session.cwd)
     if (!root) continue
-    const candidates = opts.live.filter((l) => l.rootKey === root)
+    const candidates = opts.live.filter((l) => l.rootKey === root && toolOf(l) === toolOf(session))
     if (candidates.length === 0) {
       sessions.delete(session.id)
       continue
@@ -216,11 +234,12 @@ function closestBefore(candidates: LiveClaude[], firstSeen: number): LiveClaude 
 export function hookStateForWorktree(
   sessions: Sessions,
   root: string,
-  rootOfCwd: (cwd: string) => string | null
+  rootOfCwd: (cwd: string) => string | null,
+  tool: AgentTool = 'claude'
 ): { state: AgentState; since: number } | null {
   let best: { state: AgentState; since: number } | null = null
   for (const s of sessions.values()) {
-    if (rootOfCwd(s.cwd) !== root) continue
+    if (toolOf(s) !== tool || rootOfCwd(s.cwd) !== root) continue
     const since = s.stateSince ?? s.firstSeen
     if (
       best === null ||
@@ -232,11 +251,12 @@ export function hookStateForWorktree(
   return best
 }
 
-/** 워크트리의 Claude 상태. 그 워크트리 세션이 없으면 null. */
+/** 워크트리의 에이전트 상태(도구별, 기본 Claude). 그 워크트리 세션이 없으면 null. */
 export function stateForWorktree(
   sessions: Sessions,
   root: string,
-  rootOfCwd: (cwd: string) => string | null
+  rootOfCwd: (cwd: string) => string | null,
+  tool: AgentTool = 'claude'
 ): AgentState | null {
-  return hookStateForWorktree(sessions, root, rootOfCwd)?.state ?? null
+  return hookStateForWorktree(sessions, root, rootOfCwd, tool)?.state ?? null
 }

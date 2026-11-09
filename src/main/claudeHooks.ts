@@ -22,10 +22,12 @@ import type { Platform } from '../shared/types'
 import { HOOK_PATH } from './hookServer'
 
 /**
- * pitwall 이 넣은 훅인지 알아보는 표시: 명령 안의 `127.0.0.1:<포트>/pitwall-hook/claude` 주소.
+ * pitwall 이 넣은 훅인지 알아보는 표시: 명령 안의 `127.0.0.1:<포트>/pitwall-hook/<도구>` 주소.
  * 'pitwall-hook' 글자만 보면 다른 도구의 훅(예: 이름이 비슷한 스크립트)을 pitwall 것으로 알고 지울 수 있다.
  */
-const HOOK_URL = new RegExp(`127\\.0\\.0\\.1:\\d{1,5}${HOOK_PATH.replace(/\//g, '\\/')}(?![\\w-])`)
+function hookUrlPattern(path: string): RegExp {
+  return new RegExp(`127\\.0\\.0\\.1:\\d{1,5}${path.replace(/\//g, '\\/')}(?![\\w-])`)
+}
 
 export const CLAUDE_HOOK_EVENTS = [
   'SessionStart',
@@ -41,8 +43,21 @@ export const CLAUDE_HOOK_EVENTS = [
 export interface ClaudeHookEntry {
   type: 'command'
   command: string
+  /** Windows 에서 대신 쓸 명령(Codex). */
+  commandWindows?: string
   async: true
   timeout: number
+}
+
+/**
+ * pitwall 훅을 넣는 설정 파일(Claude `settings.json`, Codex `hooks.json`). 둘 다
+ * `{ "hooks": { "<이벤트>": [ { "hooks": [ { "type": "command", ... } ] } ] } }` 모양이다.
+ */
+export interface HookFileSpec {
+  file: string
+  events: readonly string[]
+  /** 훅 서버 경로(`/pitwall-hook/claude` 등). pitwall 항목을 알아보는 표시. */
+  path: string
 }
 
 /**
@@ -57,6 +72,12 @@ export class ClaudeSettingsError extends Error {
     super(message)
     this.name = 'ClaudeSettingsError'
   }
+}
+
+export const CLAUDE_HOOK_FILE: HookFileSpec = {
+  file: 'settings.json',
+  events: CLAUDE_HOOK_EVENTS,
+  path: HOOK_PATH
 }
 
 export function claudeConfigDir(env: Record<string, string | undefined>, home: string): string {
@@ -98,30 +119,31 @@ export function hookCommand(
   return { type: 'command', command, async: true, timeout: 5 }
 }
 
-function isPitwallHook(hook: unknown): boolean {
+function isPitwallHook(hook: unknown, url: RegExp): boolean {
   if (!hook || typeof hook !== 'object') return false
-  const h = hook as { command?: unknown; args?: unknown }
-  if (typeof h.command === 'string' && HOOK_URL.test(h.command)) return true
-  return Array.isArray(h.args) && h.args.some((a) => typeof a === 'string' && HOOK_URL.test(a))
+  const h = hook as { command?: unknown; commandWindows?: unknown; args?: unknown }
+  if (typeof h.command === 'string' && url.test(h.command)) return true
+  if (typeof h.commandWindows === 'string' && url.test(h.commandWindows)) return true
+  return Array.isArray(h.args) && h.args.some((a) => typeof a === 'string' && url.test(a))
 }
 
 type Json = Record<string, unknown>
 
 /** 주석·후행 쉼표를 허용해 읽는다. 빈 글은 빈 객체. 읽을 수 없으면 거절한다. */
-function readSettings(text: string): Json {
+function readSettings(text: string, file = 'settings.json'): Json {
   if (!text.trim()) return {}
   const errors: ParseError[] = []
   const value: unknown = parse(text, errors, { allowTrailingComma: true, disallowComments: false })
-  if (errors.length) throw new ClaudeSettingsError('parse', 'settings.json 을 읽을 수 없어요')
+  if (errors.length) throw new ClaudeSettingsError('parse', `${file} 을 읽을 수 없어요`)
   if (!value || typeof value !== 'object' || Array.isArray(value))
-    throw new ClaudeSettingsError('shape', 'settings.json 의 최상위가 객체가 아니에요')
+    throw new ClaudeSettingsError('shape', `${file} 의 최상위가 객체가 아니에요`)
   const hooks = (value as Json).hooks
   if (hooks === undefined) return value as Json
   if (!hooks || typeof hooks !== 'object' || Array.isArray(hooks))
-    throw new ClaudeSettingsError('shape', 'settings.json 의 hooks 가 객체가 아니에요')
+    throw new ClaudeSettingsError('shape', `${file} 의 hooks 가 객체가 아니에요`)
   for (const [event, groups] of Object.entries(hooks as Json))
     if (!Array.isArray(groups))
-      throw new ClaudeSettingsError('shape', `settings.json 의 hooks.${event} 가 배열이 아니에요`)
+      throw new ClaudeSettingsError('shape', `${file} 의 hooks.${event} 가 배열이 아니에요`)
   return value as Json
 }
 
@@ -222,7 +244,7 @@ function propertyIndex(object: JsonNode, key: string): number {
 }
 
 /** 처음 보이는 pitwall 훅 하나를 뺀다(그룹에 pitwall 훅만 있으면 그룹째). 없으면 null. */
-function removeOnePitwallHook(text: string): { text: string; event: string } | null {
+function removeOnePitwallHook(text: string, url: RegExp): { text: string; event: string } | null {
   const hooks = findNodeAtLocation(treeOf(text), ['hooks'])
   for (const property of hooks?.children ?? []) {
     const event = property.children?.[0]?.value as string
@@ -231,7 +253,7 @@ function removeOnePitwallHook(text: string): { text: string; event: string } | n
       if (group.type !== 'object') continue
       const list = findNodeAtLocation(group, ['hooks'])
       if (list?.type !== 'array') continue
-      const ours = (list.children ?? []).map((h) => isPitwallHook(getNodeValue(h)))
+      const ours = (list.children ?? []).map((h) => isPitwallHook(getNodeValue(h), url))
       const hi = ours.indexOf(true)
       if (hi < 0) continue
       return {
@@ -244,11 +266,16 @@ function removeOnePitwallHook(text: string): { text: string; event: string } | n
 }
 
 /** pitwall 이 넣은 훅만 뺀다. 그 때문에 빈 이벤트·hooks 가 되면 그것도 지운다. 나머지는 글자 그대로. */
-export function removePitwallHooks(text: string): string {
-  if (!readSettings(text).hooks) return text
+export function removePitwallHooks(text: string, spec: HookFileSpec = CLAUDE_HOOK_FILE): string {
+  if (!readSettings(text, spec.file).hooks) return text
+  const url = hookUrlPattern(spec.path)
   let next = text
   const touched = new Set<string>()
-  for (let removed = removeOnePitwallHook(next); removed; removed = removeOnePitwallHook(next)) {
+  for (
+    let removed = removeOnePitwallHook(next, url);
+    removed;
+    removed = removeOnePitwallHook(next, url)
+  ) {
     next = removed.text
     touched.add(removed.event)
   }
@@ -266,21 +293,25 @@ export function removePitwallHooks(text: string): string {
     if (index >= 0 && hooks?.type === 'object' && !hooks.children?.length)
       next = removeChild(next, root, index)
   }
-  readSettings(next)
+  readSettings(next, spec.file)
   return next
 }
 
 /** 기존 pitwall 훅을 빼고 각 이벤트 끝에 새 그룹을 더한다(두 번 켜도 하나, 포트가 바뀌면 교체). */
-export function addPitwallHooks(text: string, entry: ClaudeHookEntry): string {
-  const base = removePitwallHooks(text)
+export function addPitwallHooks(
+  text: string,
+  entry: ClaudeHookEntry,
+  spec: HookFileSpec = CLAUDE_HOOK_FILE
+): string {
+  const base = removePitwallHooks(text, spec)
   const style = styleOf(text)
   let next = base.trim() ? base : '{}' + style.eol
   const group = { hooks: [entry] }
-  for (const event of CLAUDE_HOOK_EVENTS) {
+  for (const event of spec.events) {
     const root = treeOf(next)
     const hooks = findNodeAtLocation(root, ['hooks'])
     if (!hooks) {
-      const value = Object.fromEntries(CLAUDE_HOOK_EVENTS.map((e) => [e, [group]]))
+      const value = Object.fromEntries(spec.events.map((e) => [e, [group]]))
       next = appendChild(next, root, (i) => `"hooks": ${serialize(value, i, style)}`, style)
       break
     }
@@ -294,7 +325,7 @@ export function addPitwallHooks(text: string, entry: ClaudeHookEntry): string {
           style
         )
   }
-  readSettings(next)
+  readSettings(next, spec.file)
   return next
 }
 
@@ -305,10 +336,15 @@ export interface PitwallHookInspection {
   allHooksDisabled: boolean
 }
 
-export function inspectPitwallHooks(text: string, entry: ClaudeHookEntry): PitwallHookInspection {
+export function inspectPitwallHooks(
+  text: string,
+  entry: ClaudeHookEntry,
+  spec: HookFileSpec = CLAUDE_HOOK_FILE
+): PitwallHookInspection {
+  const url = hookUrlPattern(spec.path)
   let settings: Json
   try {
-    settings = readSettings(text)
+    settings = readSettings(text, spec.file)
   } catch {
     return { state: 'error', allHooksDisabled: false }
   }
@@ -316,20 +352,16 @@ export function inspectPitwallHooks(text: string, entry: ClaudeHookEntry): Pitwa
   const hooks = (settings.hooks ?? {}) as Record<string, unknown[]>
   let found = 0
   let current = 0
-  for (const event of CLAUDE_HOOK_EVENTS) {
+  for (const event of spec.events) {
     const ours = (hooks[event] ?? []).flatMap((group) => {
       const list = (group as { hooks?: unknown } | null)?.hooks
-      return Array.isArray(list) ? list.filter(isPitwallHook) : []
+      return Array.isArray(list) ? list.filter((h) => isPitwallHook(h, url)) : []
     })
     if (ours.length) found++
     if (ours.some((h) => (h as { command?: unknown }).command === entry.command)) current++
   }
   const state =
-    found === 0
-      ? 'off'
-      : current === CLAUDE_HOOK_EVENTS.length && found === current
-        ? 'on'
-        : 'partial'
+    found === 0 ? 'off' : current === spec.events.length && found === current ? 'on' : 'partial'
   return { state, allHooksDisabled }
 }
 
@@ -345,11 +377,11 @@ async function readBytes(path: string): Promise<Buffer | null> {
 }
 
 /** UTF-8 로 읽는다. 해석할 수 없는 바이트가 있으면(다른 인코딩으로 저장됨) 거절한다. */
-function decodeUtf8(bytes: Buffer): string {
+function decodeUtf8(bytes: Buffer, file = 'settings.json'): string {
   try {
     return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes)
   } catch {
-    throw new ClaudeSettingsError('encoding', 'settings.json 에 UTF-8 이 아닌 글자가 있어요')
+    throw new ClaudeSettingsError('encoding', `${file} 에 UTF-8 이 아닌 글자가 있어요`)
   }
 }
 
@@ -368,11 +400,12 @@ function stamp(now: number): string {
  */
 async function writeBackup(
   dir: string,
+  file: string,
   content: Buffer,
   mode: number | null,
   now: number
 ): Promise<string> {
-  const base = join(dir, `settings.json.pitwall-backup-${stamp(now)}`)
+  const base = join(dir, `${file}.pitwall-backup-${stamp(now)}`)
   for (let i = 0; i < 100; i++) {
     const path = i === 0 ? base : `${base}-${i}`
     try {
@@ -413,12 +446,13 @@ export interface HookFileResult {
 async function rewriteSettings(
   dir: string,
   transform: (text: string) => string,
-  now: number
+  now: number,
+  file = 'settings.json'
 ): Promise<HookFileResult> {
-  const path = join(dir, 'settings.json')
+  const path = join(dir, file)
   for (let attempt = 0; attempt < 3; attempt++) {
     const original = await readBytes(path)
-    const text = original === null ? '' : decodeUtf8(original)
+    const text = original === null ? '' : decodeUtf8(original, file)
     const hasBom = text.startsWith(BOM)
     const body = hasBom ? text.slice(1) : text
     const next = transform(body)
@@ -432,7 +466,7 @@ async function rewriteSettings(
       if ((await lstat(path)).isSymbolicLink()) target = await realpath(path)
       mode = (await stat(target)).mode & 0o777
     }
-    const backupPath = original === null ? null : await writeBackup(dir, original, mode, now)
+    const backupPath = original === null ? null : await writeBackup(dir, file, original, mode, now)
 
     const again = await readBytes(path)
     if (again === null ? original !== null : original === null || !again.equals(original)) {
@@ -450,7 +484,48 @@ async function rewriteSettings(
     }
     return { path, backupPath, changed: true }
   }
-  throw new ClaudeSettingsError('busy', 'settings.json 이 계속 바뀌고 있어요')
+  throw new ClaudeSettingsError('busy', `${file} 이 계속 바뀌고 있어요`)
+}
+
+export function installPitwallHooks(opts: {
+  dir: string
+  entry: ClaudeHookEntry
+  now: number
+  spec: HookFileSpec
+}): Promise<HookFileResult> {
+  return rewriteSettings(
+    opts.dir,
+    (text) => addPitwallHooks(text, opts.entry, opts.spec),
+    opts.now,
+    opts.spec.file
+  )
+}
+
+export function uninstallPitwallHooks(opts: {
+  dir: string
+  now: number
+  spec: HookFileSpec
+}): Promise<HookFileResult> {
+  return rewriteSettings(
+    opts.dir,
+    (text) => removePitwallHooks(text, opts.spec),
+    opts.now,
+    opts.spec.file
+  )
+}
+
+export async function readPitwallHookState(
+  dir: string,
+  entry: ClaudeHookEntry,
+  spec: HookFileSpec
+): Promise<PitwallHookInspection> {
+  try {
+    const bytes = await readBytes(join(dir, spec.file))
+    const text = bytes === null ? '' : decodeUtf8(bytes, spec.file)
+    return inspectPitwallHooks(text.startsWith(BOM) ? text.slice(1) : text, entry, spec)
+  } catch {
+    return { state: 'error', allHooksDisabled: false }
+  }
 }
 
 export function installClaudeHooks(opts: {
@@ -458,22 +533,16 @@ export function installClaudeHooks(opts: {
   entry: ClaudeHookEntry
   now: number
 }): Promise<HookFileResult> {
-  return rewriteSettings(opts.dir, (text) => addPitwallHooks(text, opts.entry), opts.now)
+  return installPitwallHooks({ ...opts, spec: CLAUDE_HOOK_FILE })
 }
 
 export function uninstallClaudeHooks(opts: { dir: string; now: number }): Promise<HookFileResult> {
-  return rewriteSettings(opts.dir, removePitwallHooks, opts.now)
+  return uninstallPitwallHooks({ ...opts, spec: CLAUDE_HOOK_FILE })
 }
 
-export async function readClaudeHookState(
+export function readClaudeHookState(
   dir: string,
   entry: ClaudeHookEntry
 ): Promise<PitwallHookInspection> {
-  try {
-    const bytes = await readBytes(join(dir, 'settings.json'))
-    const text = bytes === null ? '' : decodeUtf8(bytes)
-    return inspectPitwallHooks(text.startsWith(BOM) ? text.slice(1) : text, entry)
-  } catch {
-    return { state: 'error', allHooksDisabled: false }
-  }
+  return readPitwallHookState(dir, entry, CLAUDE_HOOK_FILE)
 }

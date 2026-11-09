@@ -1,9 +1,16 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { timingSafeEqual } from 'node:crypto'
+import type { AgentTool } from '../shared/types'
 
 /** 훅 본문 상한. PostToolUse 는 도구 결과를 담아 클 수 있지만, 넘치면 그 이벤트 하나만 놓친다. */
 export const HOOK_BODY_LIMIT = 1024 * 1024
 export const HOOK_PATH = '/pitwall-hook/claude'
+export const CODEX_HOOK_PATH = '/pitwall-hook/codex'
+/** 경로로 어느 도구의 훅인지 안다. */
+const TOOL_OF_PATH: Record<string, AgentTool> = {
+  [HOOK_PATH]: 'claude',
+  [CODEX_HOOK_PATH]: 'codex'
+}
 const HOST = '127.0.0.1'
 
 export interface HookServer {
@@ -26,14 +33,14 @@ function reply(res: ServerResponse, status: number): void {
 }
 
 /**
- * Claude Code 훅이 curl 로 보내는 이벤트를 받는 로컬 서버.
+ * Claude Code·Codex 훅이 curl 로 보내는 이벤트를 받는 로컬 서버(경로로 도구를 구분한다).
  * 127.0.0.1 에만 열고 무작위 토큰이 맞을 때만 받는다. 브라우저가 보낸 요청(Origin 헤더가 있음)은
  * 토큰이 맞아도 거절한다 — 다른 웹페이지가 로컬 포트로 요청을 보내는 것을 막는다.
  */
 export function createHookServer(opts: {
   port: number
   token: string
-  onEvent: (event: Record<string, unknown>) => void
+  onEvent: (event: Record<string, unknown>, tool: AgentTool) => void
 }): Promise<HookServer> {
   if (!opts.token) return Promise.reject(new Error('hook token is empty'))
 
@@ -45,7 +52,8 @@ export function createHookServer(opts: {
     } catch {
       return reply(res, 400)
     }
-    if (req.method !== 'POST' || url.pathname !== HOOK_PATH) return reply(res, 404)
+    const tool = Object.hasOwn(TOOL_OF_PATH, url.pathname) ? TOOL_OF_PATH[url.pathname] : null
+    if (req.method !== 'POST' || !tool) return reply(res, 404)
     if (req.headers.origin !== undefined || !sameToken(url.searchParams.get('t'), opts.token))
       return reply(res, 403)
 
@@ -74,7 +82,7 @@ export function createHookServer(opts: {
       }
       if (!event || typeof event !== 'object' || Array.isArray(event)) return reply(res, 400)
       try {
-        opts.onEvent(event as Record<string, unknown>)
+        opts.onEvent(event as Record<string, unknown>, tool)
       } catch {
         // 받은 쪽 문제는 훅(Claude)에 알릴 필요가 없다.
       }

@@ -572,3 +572,47 @@ describe('Codex 세션 기록(F7)', () => {
     })
   })
 })
+
+describe('Codex 연동 훅(F7)', () => {
+  test('Codex 훅 상태(권한 대기)가 세션 기록보다 먼저이고, 연동 상태를 스냅샷에 담는다', async () => {
+    const status = {
+      state: 'on' as const,
+      problem: null,
+      path: 'C:\\Users\\dev\\.codex\\hooks.json'
+    }
+    const { deps, sessions } = setup({
+      codexState: async () => ({ state: 'working', since: 1 }),
+      codexHookStatus: async () => status,
+      resolveWorktree: async (path) =>
+        path.startsWith(W1.root) ? W1 : path.startsWith(W2.root) ? W2 : null
+    })
+    applyHookEvent(
+      sessions,
+      { session_id: 'c1', cwd: W2.root, hook_event_name: 'PermissionRequest' },
+      MIN,
+      'codex'
+    )
+    const s = await createCollector(deps).collect()
+    expect(s.agents.find((a) => a.pid === 6000)).toMatchObject({
+      state: 'waiting',
+      stateSource: 'hook',
+      stateSince: MIN
+    })
+    expect(sessions.get('c1')?.processKey).toBe('6000:100')
+    expect(s.codexHook).toEqual(status)
+  })
+
+  test('연동 상태를 읽다 실패하면 error(settings), 연동이 없으면 null', async () => {
+    const failing = setup({
+      codexHookStatus: async () => {
+        throw new Error('EACCES')
+      }
+    })
+    expect((await createCollector(failing.deps).collect()).codexHook).toEqual({
+      state: 'error',
+      problem: 'settings',
+      path: ''
+    })
+    expect((await createCollector(setup().deps).collect()).codexHook).toBeNull()
+  })
+})

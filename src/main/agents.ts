@@ -1,4 +1,11 @@
-import type { AgentRow, AgentState, ProcessInfo, RawSample, WorktreeInfo } from '../shared/types'
+import type {
+  AgentRow,
+  AgentState,
+  AgentTool,
+  ProcessInfo,
+  RawSample,
+  WorktreeInfo
+} from '../shared/types'
 import { worktreeFolder } from '../shared/format'
 import { agentKey } from '../shared/keys'
 import { agentToolOf, buildTree, topLevelAgentPids } from './processTree'
@@ -112,8 +119,8 @@ export function buildAgents(input: {
   devServerPids: Set<number>
   previousCpu: CpuMemo
   now: number
-  /** 워크트리의 Claude 훅 상태. 없으면 null. */
-  hookStates?: (worktreeRoot: string) => AgentState | null
+  /** 워크트리의 훅 상태(도구별 — Claude 훅·Codex 훅). 없으면 null. */
+  hookStates?: (worktreeRoot: string, tool: AgentTool) => AgentState | null
 }): { agents: AgentRow[]; cpu: CpuMemo } {
   const { sample, worktrees, devServerPids, previousCpu, now } = input
   const tree = buildTree(sample.processes)
@@ -133,8 +140,7 @@ export function buildAgents(input: {
     const cpuPercent = measureTreeCpu(self, members, previousCpu, now, cpu)
 
     const worktree = worktrees.get(pid) ?? null
-    const hookState =
-      tool === 'claude' && worktree && input.hookStates ? input.hookStates(worktree.root) : null
+    const hookState = worktree && input.hookStates ? input.hookStates(worktree.root, tool) : null
 
     agents.push({
       pid,

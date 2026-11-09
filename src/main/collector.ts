@@ -1,7 +1,9 @@
 import type {
   AgentRow,
   AgentState,
+  AgentTool,
   ClaudeHookStatus,
+  CodexHookStatus,
   DashboardSnapshot,
   Platform,
   ProcessInfo,
@@ -80,9 +82,11 @@ export interface CollectorDeps {
     agent: { cwd: string; startedAt: number | null },
     now: number
   ) => Promise<RolloutState | null>
-  /** 훅 서버가 채우는 Claude 세션들(수집기는 읽고 끝난 것을 버린다). */
+  /** 훅 서버가 채우는 에이전트 세션들(수집기는 읽고 끝난 것을 버린다). */
   sessions: Sessions
   hookStatus: () => Promise<ClaudeHookStatus>
+  /** Codex 훅 연동 상태. 없으면 스냅샷에 null. */
+  codexHookStatus?: () => Promise<CodexHookStatus>
   options: () => CollectOptions
   selfPid: number
   /** 논리 코어 수(CPU 표시 기준). */
@@ -135,13 +139,12 @@ export function createCollector(deps: CollectorDeps): {
 
   const hookFor =
     (roots: Map<string, string | null>) =>
-    (root: string): ReturnType<typeof hookStateForWorktree> =>
-      hookStateForWorktree(deps.sessions, worktreeKey(root), (cwd) => roots.get(cwd) ?? null)
+    (root: string, tool: AgentTool): ReturnType<typeof hookStateForWorktree> =>
+      hookStateForWorktree(deps.sessions, worktreeKey(root), (cwd) => roots.get(cwd) ?? null, tool)
   const hookStateFor =
     (roots: Map<string, string | null>) =>
-    (root: string): AgentState | null =>
-      hookFor(roots)(root)?.state ?? null
-  /** 훅 상태 에이전트의 상태 시작 시각(이벤트 시각). */
+    (root: string, tool: AgentTool): AgentState | null =>
+      hookFor(roots)(root, tool)?.state ?? null
   /** Codex 세션 기록으로 안 상태(pid → 상태). restate 가 덮어쓰지 않도록 기억한다. */
   let rollouts = new Map<number, RolloutState>()
   /** 정확한 상태의 시작 시각: 훅은 이벤트 시각, Codex 세션 기록은 기록의 이벤트 시각. */
@@ -149,9 +152,7 @@ export function createCollector(deps: CollectorDeps): {
     (roots: Map<string, string | null>) =>
     (a: AgentRow): number | null => {
       if (a.stateSource === 'rollout') return rollouts.get(a.pid)?.since ?? null
-      return a.tool === 'claude' && a.worktree
-        ? (hookFor(roots)(a.worktree.root)?.since ?? null)
-        : null
+      return a.worktree ? (hookFor(roots)(a.worktree.root, a.tool)?.since ?? null) : null
     }
 
   /**
@@ -166,7 +167,8 @@ export function createCollector(deps: CollectorDeps): {
     const result = new Map<number, RolloutState>()
     const read = deps.codexState
     if (!read) return result
-    const codex = agents.filter((a) => a.tool === 'codex' && cwds[a.pid])
+    // 훅으로 이미 정확한 상태를 아는 Codex 는 읽지 않는다(훅이 권한 대기까지 알아 더 정확하다).
+    const codex = agents.filter((a) => a.tool === 'codex' && a.stateSource === 'cpu' && cwds[a.pid])
     const count = new Map<string, number>()
     for (const a of codex) count.set(cwdKey(cwds[a.pid]), (count.get(cwdKey(cwds[a.pid])) ?? 0) + 1)
     await Promise.all(
@@ -235,6 +237,15 @@ export function createCollector(deps: CollectorDeps): {
     return (w) => (w ? (resolved.get(worktreeKey(w.root)) ?? null) : null)
   }
 
+  async function readCodexHookStatus(): Promise<CodexHookStatus | null> {
+    if (!deps.codexHookStatus) return null
+    try {
+      return await deps.codexHookStatus()
+    } catch {
+      return { state: 'error', problem: 'settings', path: '' }
+    }
+  }
+
   async function readHookStatus(): Promise<ClaudeHookStatus> {
     try {
       return await deps.hookStatus()
@@ -268,17 +279,27 @@ export function createCollector(deps: CollectorDeps): {
     })
 
     const devServerPids = new Set(snapshot.servers.flatMap((p) => [p.pid, ...p.descendantPids]))
-    const [roots, hook] = await Promise.all([resolveSessionRoots(), readHookStatus()])
+    const [roots, hook, codexHook] = await Promise.all([
+      resolveSessionRoots(),
+      readHookStatus(),
+      readCodexHookStatus()
+    ])
     rootOfCwd = roots
 
-    // 세션을 이번 샘플의 Claude 프로세스와 짝짓고 끝난 세션을 버린 뒤 상태를 정한다(끝난 세션이 한 번도 섞이지 않게).
+    // 세션을 이번 샘플의 에이전트 프로세스(Claude·Codex)와 짝짓고 끝난 세션을 버린 뒤 상태를 정한다(끝난 세션이 한 번도 섞이지 않게).
     const byPid = new Map(raw.processes.map((p) => [p.pid, p]))
     const live: LiveClaude[] = topLevelAgentPids(raw.processes).flatMap((pid) => {
       const p = byPid.get(pid)
       const w = worktrees.get(pid)
-      if (!p || !w || agentToolOf(p) !== 'claude') return []
+      const tool = p ? agentToolOf(p) : null
+      if (!p || !w || !tool) return []
       return [
-        { key: `${pid}:${p.startedAt ?? ''}`, rootKey: worktreeKey(w.root), startedAt: p.startedAt }
+        {
+          key: `${pid}:${p.startedAt ?? ''}`,
+          rootKey: worktreeKey(w.root),
+          startedAt: p.startedAt,
+          tool
+        }
       ]
     })
     reconcileSessions(deps.sessions, {
@@ -365,7 +386,8 @@ export function createCollector(deps: CollectorDeps): {
       leftovers: snapshot.leftovers.map(withWorkspace),
       heavyJobs: snapshot.heavyJobs.map(withWorkspace),
       agents: agents.map(withWorkspace),
-      hook
+      hook,
+      codexHook
     }
   }
 
@@ -373,9 +395,9 @@ export function createCollector(deps: CollectorDeps): {
     rootOfCwd = await resolveSessionRoots(rootOfCwd)
     const hookState = hookStateFor(rootOfCwd)
     const restated = snapshot.agents.map((a): AgentRow => {
-      // Codex 세션 기록 상태는 다음 수집에서 다시 읽는다(훅 이벤트와 상관없음).
-      if (a.stateSource === 'rollout') return a
-      const fromHook = a.tool === 'claude' && a.worktree ? hookState(a.worktree.root) : null
+      const fromHook = a.worktree ? hookState(a.worktree.root, a.tool) : null
+      // 훅이 없으면 Codex 세션 기록 상태는 다음 수집에서 다시 읽는다(훅 이벤트와 상관없음).
+      if (!fromHook && a.stateSource === 'rollout') return a
       return {
         ...a,
         state: fromHook ?? cpuState(a.cpuPercent),

@@ -70,12 +70,17 @@ export function createNotifier(deps: {
     deps.show(
       fresh.length === 1
         ? {
-            title: text.notify.waitingTitle,
+            title: text.notify.waitingTitle(text.ui.agent.tools[fresh[0].tool]),
             body: where[0],
             target: selectionKey.agent(fresh[0])
           }
         : {
-            title: text.notify.waitingManyTitle(fresh.length),
+            title: text.notify.waitingManyTitle(
+              fresh.length,
+              fresh.every((a) => a.tool === fresh[0].tool)
+                ? text.ui.agent.tools[fresh[0].tool]
+                : null
+            ),
             body: where.join(', '),
             target: null
           }

@@ -39,7 +39,7 @@ function run(
     now?: number
     devServerPids?: number[]
     worktrees?: [number, WorktreeInfo][]
-    hookStates?: (root: string) => AgentState | null
+    hookStates?: (root: string, tool: 'claude' | 'codex') => AgentState | null
   } = {}
 ): ReturnType<typeof buildAgents> {
   const sample: RawSample = { processes, tcp: [] }
@@ -267,12 +267,22 @@ describe('훅 상태', () => {
     expect(hookStates).toHaveBeenCalledTimes(1)
   })
 
-  test('Codex 행에는 Claude 훅 상태를 쓰지 않는다', () => {
-    const { agents } = run([proc(8200, 1, 'node.exe', { commandLine: CODEX_JS })], {
-      worktrees: [[8200, W1]],
-      hookStates: () => 'waiting'
+  test('훅 상태는 도구별: Codex 행은 Codex 훅 상태, Claude 행은 Claude 훅 상태', () => {
+    const { agents } = run(
+      [proc(8200, 1, 'node.exe', { commandLine: CODEX_JS }), proc(5000, 1, 'claude.exe')],
+      {
+        worktrees: [
+          [8200, W1],
+          [5000, W1]
+        ],
+        hookStates: (_root, tool) => (tool === 'codex' ? 'waiting' : null)
+      }
+    )
+    expect(agents.find((a) => a.tool === 'codex')).toMatchObject({
+      state: 'waiting',
+      stateSource: 'hook'
     })
-    expect(agents[0]).toMatchObject({ tool: 'codex', state: 'unknown', stateSource: 'cpu' })
+    expect(agents.find((a) => a.tool === 'claude')).toMatchObject({ stateSource: 'cpu' })
   })
 })
 

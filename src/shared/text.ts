@@ -69,8 +69,9 @@ export const text = {
     ramBody: (n: number, size: string): string =>
       `정리 후보 ${n}개를 끄면 약 ${size} 를 확보할 수 있어요.`,
     ramNoCandidates: '정리할 후보가 없어요. 메모리를 많이 쓰는 앱을 확인해 보세요.',
-    waitingTitle: 'Claude 가 권한을 기다려요',
-    waitingManyTitle: (n: number): string => `Claude ${n}개가 권한을 기다려요`,
+    waitingTitle: (tool: string): string => `${tool} 가 권한을 기다려요`,
+    waitingManyTitle: (n: number, tool: string | null): string =>
+      `${tool ?? '에이전트'} ${n}개가 권한을 기다려요`,
     heavyTitle: (percent: number): string => `무거운 작업이 겹쳤어요 (RAM ${percent}%)`,
     heavyBody: (labels: string): string => `${labels} 이(가) 동시에 돌고 있어요.`,
     doneTitle: (folder: string, tool: string): string => `${folder} 의 ${tool} 가 작업을 끝냈어요`,
@@ -115,6 +116,39 @@ export const text = {
       encoding:
         'settings.json 에 UTF-8 이 아닌 글자가 있어 바꾸지 않았어요. UTF-8 로 다시 저장한 뒤 해 주세요.',
       other: (message: string): string => `Claude 연동을 바꾸지 못했어요: ${message}`
+    }
+  },
+  codexHook: {
+    enableTitle: 'Codex 연동 켜기',
+    enableMessage: 'Codex 훅 설정 파일에 pitwall 훅을 더할까요?',
+    enableDetail: (path: string): string =>
+      `${path} 에 세션 시작·프롬프트·도구 사용·권한 요청·응답 끝·멈춤·세션 끝 이벤트를 pitwall 로 보내는 훅을 ` +
+      '더해요. 다른 훅은 그대로 두고, 바꾸기 전에 백업을 남겨요. 켠 뒤 Codex 에서 /hooks 를 열어 한 번 승인해야 ' +
+      '상태가 와요. 이미 실행 중인 Codex 는 다시 시작해야 반영될 수 있어요.',
+    enableConfirm: '켜기',
+    disableTitle: 'Codex 연동 끄기',
+    disableMessage: 'Codex 훅 설정 파일에서 pitwall 훅을 뺄까요?',
+    disableDetail: (path: string): string =>
+      `${path} 에서 pitwall 이 넣은 훅만 빼요. 다른 훅은 그대로 두고, 바꾸기 전에 백업을 남겨요.`,
+    disableConfirm: '끄기',
+    enabled: (backupPath: string | null): string =>
+      (backupPath
+        ? `Codex 연동을 켰어요. 원래 설정은 ${backupPath} 에 백업했어요. `
+        : 'Codex 연동을 켰어요. ') + 'Codex 에서 /hooks 를 열어 pitwall 훅을 한 번 승인해 주세요.',
+    alreadyOn:
+      'Codex 연동이 이미 켜져 있어요. 상태가 안 오면 Codex 의 /hooks 에서 승인했는지 확인해 주세요.',
+    disabled: (backupPath: string | null): string =>
+      backupPath
+        ? `Codex 연동을 껐어요. 바꾸기 전 설정은 ${backupPath} 에 백업했어요.`
+        : 'Codex 연동을 껐어요.',
+    alreadyOff: 'Codex 연동이 이미 꺼져 있어요.',
+    errors: {
+      parse: 'hooks.json 을 읽을 수 없어 바꾸지 않았어요. 주석·쉼표 같은 형식을 확인해 주세요.',
+      shape: 'hooks.json 의 hooks 형식이 예상과 달라 바꾸지 않았어요.',
+      busy: 'hooks.json 이 계속 바뀌고 있어 바꾸지 않았어요. 잠시 뒤 다시 해 주세요.',
+      encoding:
+        'hooks.json 에 UTF-8 이 아닌 글자가 있어 바꾸지 않았어요. UTF-8 로 다시 저장한 뒤 해 주세요.',
+      other: (message: string): string => `Codex 연동을 바꾸지 못했어요: ${message}`
     }
   },
   leftoverLabels: {

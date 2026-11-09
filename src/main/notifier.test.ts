@@ -166,6 +166,21 @@ describe('Claude 권한 대기', () => {
     expect(shown).toHaveLength(2)
   })
 
+  test('Codex(훅 연동)가 기다리면 Codex 로 알리고, 도구가 섞이면 에이전트로 묶는다', () => {
+    const codex = (pid: number, state: AgentRow['state'], root?: string): AgentRow => ({
+      ...agent(pid, state, root),
+      tool: 'codex'
+    })
+    const one = setup()
+    one.update(snap({ agents: [codex(6000, 'working')] }))
+    one.update(snap({ agents: [codex(6000, 'waiting')] }))
+    expect(one.shown[0].title).toBe('Codex 가 권한을 기다려요')
+    const mixed = setup()
+    mixed.update(snap({ agents: [codex(6000, 'working'), agent(5000, 'working')] }))
+    mixed.update(snap({ agents: [codex(6000, 'waiting'), agent(5000, 'waiting')] }))
+    expect(mixed.shown[0].title).toBe('에이전트 2개가 권한을 기다려요')
+  })
+
   test('한꺼번에 여럿이 기다리면 하나로 묶는다', () => {
     const { shown, update } = setup()
     update(snap({ agents: [agent(5000, 'working'), agent(5100, 'idle', 'C:\\work\\wt-a')] }))

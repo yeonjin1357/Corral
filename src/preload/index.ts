@@ -49,6 +49,11 @@ const api: PitwallApi = {
     enable: () => ipcRenderer.invoke(IPC.claudeHookEnable),
     disable: () => ipcRenderer.invoke(IPC.claudeHookDisable)
   },
+  codexHook: {
+    status: () => ipcRenderer.invoke(IPC.codexHookStatus),
+    enable: () => ipcRenderer.invoke(IPC.codexHookEnable),
+    disable: () => ipcRenderer.invoke(IPC.codexHookDisable)
+  },
   settings: {
     get: () => ipcRenderer.invoke(IPC.settingsGet),
     save: (next) => ipcRenderer.invoke(IPC.settingsSave, next),

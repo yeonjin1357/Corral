@@ -64,7 +64,29 @@ describe('훅 서버', () => {
   test('다른 경로·메서드는 404', async () => {
     expect(await send(server.port, { path: `/other?t=${TOKEN}` })).toBe(404)
     expect(await send(server.port, { method: 'GET' })).toBe(404)
-    expect(await send(server.port, { path: `/pitwall-hook/codex?t=${TOKEN}` })).toBe(404)
+    expect(await send(server.port, { path: `/pitwall-hook/other?t=${TOKEN}` })).toBe(404)
+  })
+
+  test('Codex 훅(/pitwall-hook/codex)은 codex 이벤트로 넘기고, 토큰이 틀린 요청은 버린다', async () => {
+    const tools: string[] = []
+    const codex = await createHookServer({
+      port: 0,
+      token: TOKEN,
+      onEvent: (e, tool) => {
+        events.push(e)
+        tools.push(tool)
+      }
+    })
+    try {
+      const body = JSON.stringify({ session_id: 'c1', hook_event_name: 'PreToolUse' })
+      expect(await send(codex.port, { path: `/pitwall-hook/codex?t=${TOKEN}`, body })).toBe(204)
+      expect(await send(codex.port, { path: '/pitwall-hook/codex?t=wrong', body })).toBe(403)
+      expect(await send(codex.port, { body })).toBe(204)
+      expect(tools).toEqual(['codex', 'claude'])
+      expect(events).toHaveLength(2)
+    } finally {
+      await codex.close()
+    }
   })
 
   test('브라우저가 보낸 요청(Origin 헤더)은 토큰이 맞아도 403', async () => {

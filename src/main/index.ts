@@ -35,6 +35,9 @@ import { collectOptionsFrom, createCollector } from './collector'
 import { loadConfig, updateConfig } from './config'
 import { claudeConfigDir } from './claudeHooks'
 import { createClaudeIntegration } from './claudeIntegration'
+import { createCodexIntegration } from './codexIntegration'
+import { createHookHub } from './hookHub'
+import { applyHookEvent } from './sessions'
 import type { Sessions } from './sessions'
 import { createScheduler } from './scheduler'
 import { createKiller, type KillConfirm } from './kill'
@@ -94,6 +97,7 @@ const collector = platform
       codexState: (agent, now) => codexReader.stateFor(agent, now),
       sessions,
       hookStatus: () => claude.status(),
+      codexHookStatus: () => codex.status(),
       options: () => collectOptionsFrom(settings),
       selfPid: process.pid,
       cpuCount: cpus().length,
@@ -300,15 +304,34 @@ function scheduleRestate(): void {
   }, 200)
 }
 
+/** Claude·Codex 연동이 같이 쓰는 훅 서버. 이벤트가 오면 세션 상태를 바꾸고 화면을 바로 갱신한다. */
+const hookHub = createHookHub({
+  onEvent: (event, tool) => {
+    if (applyHookEvent(sessions, event, Date.now(), tool)) scheduleRestate()
+  }
+})
+
 const claude = createClaudeIntegration({
   userData: app.getPath('userData'),
   configDir: claudeConfigDir(process.env, homedir()),
   platform: platform ?? 'win32',
   systemRoot: process.env.SystemRoot,
   sessions,
+  hub: hookHub,
   now: Date.now,
-  confirm: confirmDialog,
-  onEvent: scheduleRestate
+  confirm: confirmDialog
+})
+
+/** Codex 연동: 사용자가 켤 때만 $CODEX_HOME/hooks.json 을 바꾼다. */
+const codex = createCodexIntegration({
+  userData: app.getPath('userData'),
+  codexHome: codexHome(process.env, homedir()),
+  platform: platform ?? 'win32',
+  systemRoot: process.env.SystemRoot,
+  hub: hookHub,
+  sessions,
+  now: Date.now,
+  confirm: confirmDialog
 })
 
 /** 새 버전 확인: 시작 10초 뒤, 6시간마다, 설정에서 켤 때. */
@@ -444,6 +467,21 @@ function registerIpc(): void {
     void scheduler.refreshNow()
     return result
   })
+  ipcMain.handle(IPC.codexHookStatus, async (event) =>
+    fromMainWindow(event.sender) ? codex.status() : null
+  )
+  ipcMain.handle(IPC.codexHookEnable, async (event) => {
+    if (!fromMainWindow(event.sender)) return { status: 'cancelled' }
+    const result = await codex.enable()
+    void scheduler.refreshNow()
+    return result
+  })
+  ipcMain.handle(IPC.codexHookDisable, async (event) => {
+    if (!fromMainWindow(event.sender)) return { status: 'cancelled' }
+    const result = await codex.disable()
+    void scheduler.refreshNow()
+    return result
+  })
   ipcMain.handle(IPC.appInfo, () => ({ version: app.getVersion() }))
   ipcMain.handle(IPC.fileIcon, (event, path: unknown) =>
     fromMainWindow(event.sender) ? icons.get(path) : null
@@ -566,6 +604,7 @@ if (!app.requestSingleInstanceLock()) {
     prepareWindowsHelper()
     registerIpc()
     void claude.start()
+    void codex.start()
     scheduler.start()
     createTray()
     // 로그인할 때 켜졌으면 창 없이 트레이로만 시작한다(트레이에서 열면 그때 만든다).
@@ -588,7 +627,7 @@ if (!app.requestSingleInstanceLock()) {
   app.on('before-quit', (event) => {
     quitting = true
     scheduler.stop()
-    void claude.stop()
+    void hookHub.stop()
     // 기록을 남기고 끝낸다. 오래 걸리면(디스크 문제) 기다리지 않는다.
     if (historySaved) return
     historySaved = true

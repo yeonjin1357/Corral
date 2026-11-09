@@ -206,6 +206,14 @@ export interface ClaudeHookStatus {
   settingsPath: string
 }
 
+/** Codex 훅 연동 상태(F7). on 이어도 Codex 의 /hooks 에서 승인해야 이벤트가 온다. */
+export interface CodexHookStatus {
+  state: ClaudeHookState
+  problem: 'server' | 'settings' | null
+  /** hooks.json 경로. */
+  path: string
+}
+
 export type KillResult = {
   status: 'killed' | 'cancelled' | 'gone' | 'changed' | 'failed'
   message?: string
@@ -226,6 +234,8 @@ export interface DashboardSnapshot {
   agents: AgentRow[]
   /** Claude 훅 연동 상태. 아직 모르면 null. */
   hook: ClaudeHookStatus | null
+  /** Codex 훅 연동 상태. 아직 모르면 null. */
+  codexHook: CodexHookStatus | null
   /** 디스크 정리(끝난 워크트리의 의존성 폴더). 아직 찾지 않았으면 null. */
   disk: DiskReport | null
   groups: GroupUsage[]

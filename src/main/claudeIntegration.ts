@@ -11,7 +11,7 @@ import {
   type ClaudeHookEntry
 } from './claudeHooks'
 import { ensureHookConfig, loadConfig, pickFreePort, updateConfig, type HookConfig } from './config'
-import { createHookServer, type HookServer } from './hookServer'
+import { createHookHub, type HookHub } from './hookHub'
 import type { KillConfirm } from './kill'
 import { applyHookEvent, type Sessions } from './sessions'
 
@@ -26,9 +26,11 @@ export interface ClaudeIntegrationDeps {
   now: () => number
   /** 메인 프로세스의 네이티브 확인 창. 첫 번째 버튼이면 true. */
   confirm: (o: KillConfirm) => Promise<boolean>
-  /** 훅 이벤트로 세션 상태가 바뀌었을 때(화면을 바로 갱신하려고). */
+  /** 훅 이벤트로 세션 상태가 바뀌었을 때(화면을 바로 갱신하려고). hub 를 주면 쓰지 않는다. */
   onEvent?: () => void
   pickPort?: () => Promise<number>
+  /** Codex 연동과 같이 쓰는 훅 서버. 없으면 혼자 쓰는 것을 만든다. */
+  hub?: HookHub
 }
 
 export type HookActionResult = ClaudeHookActionResult
@@ -54,32 +56,20 @@ export function createClaudeIntegration(deps: ClaudeIntegrationDeps): {
 } {
   const settingsPath = join(deps.configDir, 'settings.json')
   const pickPort = deps.pickPort ?? (() => pickFreePort())
-  let server: HookServer | null = null
-  let serverHook: HookConfig | null = null
+  const hub =
+    deps.hub ??
+    createHookHub({
+      onEvent: (event, tool) => {
+        if (applyHookEvent(deps.sessions, event, deps.now(), tool)) deps.onEvent?.()
+      }
+    })
 
   const entryFor = (hook: HookConfig): ClaudeHookEntry =>
     hookCommand(deps.platform, hook.port, hook.token, deps.systemRoot)
 
-  async function closeServer(): Promise<void> {
-    const s = server
-    server = null
-    serverHook = null
-    if (s) await s.close()
-  }
-
+  const closeServer = (): Promise<void> => hub.release('claude')
   /** 이미 같은 포트·토큰으로 열려 있으면 그대로. 실패하면 예외. */
-  async function openServer(hook: HookConfig): Promise<void> {
-    if (server && serverHook?.port === hook.port && serverHook.token === hook.token) return
-    await closeServer()
-    server = await createHookServer({
-      port: hook.port,
-      token: hook.token,
-      onEvent: (event) => {
-        if (applyHookEvent(deps.sessions, event, deps.now())) deps.onEvent?.()
-      }
-    })
-    serverHook = hook
-  }
+  const openServer = (hook: HookConfig): Promise<void> => hub.claim('claude', hook)
 
   async function start(): Promise<void> {
     const { hook } = await loadConfig(deps.userData)
@@ -156,7 +146,9 @@ export function createClaudeIntegration(deps: ClaudeIntegrationDeps): {
     try {
       const result = await uninstallClaudeHooks({ dir: deps.configDir, now: deps.now() })
       await closeServer()
-      deps.sessions.clear()
+      // Claude 세션만 비운다(Codex 연동의 세션은 그대로).
+      for (const [id, s] of deps.sessions)
+        if ((s.tool ?? 'claude') === 'claude') deps.sessions.delete(id)
       if (!result.changed) return { status: 'done', message: text.claudeHook.alreadyOff }
       return { status: 'done', message: text.claudeHook.disabled(result.backupPath) }
     } catch (e) {

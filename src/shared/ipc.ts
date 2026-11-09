@@ -1,5 +1,6 @@
 import type {
   ClaudeHookStatus,
+  CodexHookStatus,
   DashboardSnapshot,
   DiskReport,
   KillResult,
@@ -24,6 +25,9 @@ export const IPC = {
   claudeHookStatus: 'pitwall:claude-hook-status',
   claudeHookEnable: 'pitwall:claude-hook-enable',
   claudeHookDisable: 'pitwall:claude-hook-disable',
+  codexHookStatus: 'pitwall:codex-hook-status',
+  codexHookEnable: 'pitwall:codex-hook-enable',
+  codexHookDisable: 'pitwall:codex-hook-disable',
   settingsGet: 'pitwall:settings-get',
   settingsSave: 'pitwall:settings-save',
   settingsPickFolder: 'pitwall:settings-pick-folder',
@@ -72,6 +76,12 @@ export interface PitwallApi {
   /** Claude 훅 연동. 켜기·끄기는 메인에서 설정 파일 경로와 백업을 알리는 확인 창을 띄운다. */
   claudeHook: {
     status(): Promise<ClaudeHookStatus | null>
+    enable(): Promise<ClaudeHookActionResult>
+    disable(): Promise<ClaudeHookActionResult>
+  }
+  /** Codex 훅 연동(hooks.json). 켠 뒤 Codex 의 /hooks 에서 한 번 승인해야 이벤트가 온다. */
+  codexHook: {
+    status(): Promise<CodexHookStatus | null>
     enable(): Promise<ClaudeHookActionResult>
     disable(): Promise<ClaudeHookActionResult>
   }

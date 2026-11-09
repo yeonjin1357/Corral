@@ -338,3 +338,61 @@ describe('상태 시작 시각(F3)', () => {
     expect(stateForWorktree(sessions, CWD, root)).toBe('working')
   })
 })
+
+describe('Codex 훅 세션(F7)', () => {
+  const root = (cwd: string): string | null => (cwd.startsWith(CWD) ? CWD : null)
+  const codexEv = (name: string, extra: Record<string, unknown> = {}): Record<string, unknown> => ({
+    session_id: 'c1',
+    cwd: CWD,
+    hook_event_name: name,
+    ...extra
+  })
+
+  test('Codex 훅 이벤트로 작업 중·권한 대기·쉬는 중', () => {
+    const sessions: Sessions = new Map()
+    const state = (): AgentState | null => stateForWorktree(sessions, CWD, root, 'codex')
+    applyHookEvent(sessions, codexEv('SessionStart'), 1000, 'codex')
+    expect(state()).toBe('idle')
+    applyHookEvent(sessions, codexEv('UserPromptSubmit'), 2000, 'codex')
+    expect(state()).toBe('working')
+    applyHookEvent(sessions, codexEv('PreToolUse', { tool_name: 'shell' }), 3000, 'codex')
+    expect(state()).toBe('working')
+    applyHookEvent(sessions, codexEv('PermissionRequest', { tool_name: 'shell' }), 4000, 'codex')
+    expect(state()).toBe('waiting')
+    applyHookEvent(sessions, codexEv('PostToolUse', { tool_name: 'shell' }), 5000, 'codex')
+    expect(state()).toBe('working')
+    applyHookEvent(sessions, codexEv('Interrupt'), 6000, 'codex')
+    expect(state()).toBe('idle')
+    applyHookEvent(sessions, codexEv('UserPromptSubmit'), 7000, 'codex')
+    applyHookEvent(sessions, codexEv('Stop'), 8000, 'codex')
+    expect(hookStateForWorktree(sessions, CWD, root, 'codex')).toEqual({
+      state: 'idle',
+      since: 8000
+    })
+  })
+
+  test('Claude 와 Codex 세션은 섞지 않는다', () => {
+    const sessions: Sessions = new Map()
+    applyHookEvent(sessions, codexEv('PermissionRequest'), 1000, 'codex')
+    applyHookEvent(sessions, ev('UserPromptSubmit'), 1000)
+    expect(stateForWorktree(sessions, CWD, root)).toBe('working')
+    expect(stateForWorktree(sessions, CWD, root, 'claude')).toBe('working')
+    expect(stateForWorktree(sessions, CWD, root, 'codex')).toBe('waiting')
+  })
+
+  test('Codex 세션은 같은 워크트리의 Codex 프로세스와만 짝짓는다', () => {
+    const sessions: Sessions = new Map()
+    applyHookEvent(sessions, codexEv('SessionStart'), 1000, 'codex')
+    const live = [
+      { key: 'claude-1', rootKey: CWD, startedAt: 500, tool: 'claude' as const },
+      { key: 'codex-1', rootKey: CWD, startedAt: 600, tool: 'codex' as const }
+    ]
+    reconcileSessions(sessions, { now: 3000, sampledAt: 2000, live, rootOfCwd: root })
+    expect(sessions.get('c1')?.processKey).toBe('codex-1')
+    // 그 워크트리에 Codex 가 없으면(Claude 만 있으면) 버린다.
+    const alone: Sessions = new Map()
+    applyHookEvent(alone, codexEv('SessionStart'), 1000, 'codex')
+    reconcileSessions(alone, { now: 3000, sampledAt: 2000, live: [live[0]], rootOfCwd: root })
+    expect(alone.size).toBe(0)
+  })
+})

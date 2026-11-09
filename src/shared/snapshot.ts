@@ -12,6 +12,7 @@ export function blankSnapshot(takenAt: number): DashboardSnapshot {
     heavyOverlap: false,
     agents: [],
     hook: null,
+    codexHook: null,
     disk: null,
     groups: [],
     topApps: [],
