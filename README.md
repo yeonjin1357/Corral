@@ -3,7 +3,7 @@
 AI 코딩 에이전트(Claude Code, Codex)를 여러 git 워크트리에서 동시에 돌릴 때, 내 PC 에서 돌아가는 개발 작업 전체를 한눈에 보고 그 자리에서 정리하는 트레이 앱입니다. 이름은 F1 피트월(여러 차의 상태를 지켜보다가 필요하면 불러들이는 곳)에서 따왔습니다.
 
 - 지원 OS: Windows 10/11, macOS(Intel·Apple Silicon — **아직 실제 Mac 에서 확인하지 않은 미검증 빌드**)
-- 라이선스: MIT. 화면 디자인은 [Uptime Kuma](https://github.com/louislam/uptime-kuma)(MIT)를 가져와 변형했습니다. → [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
+- 라이선스: MIT. 화면 디자인은 [NeoHtop](https://github.com/Abdenasser/neohtop)(MIT)을 가져와 한국어 앱에 맞게 바꿨습니다. → [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
 
 ## 무엇을 보여 주나요
 
@@ -18,7 +18,7 @@ AI 코딩 에이전트(Claude Code, Codex)를 여러 git 워크트리에서 동�
 | 메모리 부족 경고·정리 추천 | RAM 이 기준을 넘으면 "이것들을 끄면 약 X GB 확보"처럼 정리 후보를 묶어 보여 주고, 확인 창 하나로 한꺼번에 끕니다.                                                                                 |
 | 디스크 정리                | 끝난 워크트리(원격 브랜치가 지워졌거나 기본 브랜치에 머지됨, 실행 중인 것이 없음)의 `node_modules` 같은 의존성 폴더 크기를 보여 주고 지웁니다. 워크트리 자체와 메인 체크아웃은 건드리지 않습니다. |
 
-트레이(메뉴바) 아이콘 색은 RAM 상태(초록·주황·빨강)이고, 메뉴에서 RAM·에이전트(권한 대기 수)·정리 후보·새 버전을 바로 볼 수 있습니다. RAM 부족·Claude 권한 대기·무거운 작업 겹침은 OS 알림으로도 알려 줍니다(설정에서 항목별로 끔).
+트레이(메뉴바) 아이콘은 앱 아이콘과 같은 작은 모니터이고 그래프 선 색이 RAM 상태(초록·노랑·분홍)이며, 메뉴에서 RAM·에이전트(권한 대기 수)·정리 후보·새 버전을 바로 볼 수 있습니다. RAM 부족·Claude 권한 대기·무거운 작업 겹침은 OS 알림으로도 알려 줍니다(설정에서 항목별로 끔).
 
 ## 설치
 
@@ -97,7 +97,7 @@ npm run build:win  # Windows 설치 파일(dist/)
 npm run build:mac  # macOS 설치 파일(macOS 에서만)
 ```
 
-- 앱 아이콘은 `npx electron scripts/make-icon.cjs` 로 다시 만듭니다(`build/icon.png`, `resources/icon.png`).
+- 앱 아이콘은 `npm run icon` 으로 다시 만듭니다(그림은 `src/main/pixelArt.ts`, 결과는 `build/icon.png`·`build/icon.ico`·`resources/icon.png`·`resources/icon-small.png`).
 - 릴리스: `package.json` 의 `version` 을 올리고 같은 버전의 태그(`v0.2.0`)를 올리면 GitHub Actions 가 Windows·macOS 설치 파일을 초안 릴리스에 올립니다. 초안을 확인한 뒤 GitHub 에서 게시합니다.
 - 설계 문서: [docs/superpowers/specs/2026-11-06-pitwall-design.md](docs/superpowers/specs/2026-11-06-pitwall-design.md)
 

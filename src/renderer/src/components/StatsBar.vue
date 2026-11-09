@@ -259,10 +259,7 @@ const diskSub = computed(() =>
           </div>
           <p class="text-xs leading-4 text-muted-foreground">{{ text.ui.cards.portsSub }}</p>
         </div>
-        <div
-          v-if="portLogos.length"
-          class="flex h-4 items-center gap-2.5 whitespace-nowrap"
-        >
+        <div v-if="portLogos.length" class="flex h-4 items-center gap-2.5 whitespace-nowrap">
           <span
             v-for="g in portLogos"
             :key="g.key"
@@ -323,10 +320,7 @@ const diskSub = computed(() =>
           </div>
           <p class="text-xs leading-4 text-muted-foreground">{{ text.ui.cards.agentsSub }}</p>
         </div>
-        <div
-          v-if="agentLogos.length"
-          class="flex h-4 items-center gap-2.5 whitespace-nowrap"
-        >
+        <div v-if="agentLogos.length" class="flex h-4 items-center gap-2.5 whitespace-nowrap">
           <span
             v-for="g in agentLogos"
             :key="g.key"

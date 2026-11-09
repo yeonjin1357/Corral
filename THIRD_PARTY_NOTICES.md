@@ -66,13 +66,6 @@ SOFTWARE.
 - 쓰는 것: 에이전트 표의 Claude Code·Codex 로고(`src/renderer/src/assets/brands/`).
 - 라이선스: MIT, Copyright (c) LobeHub. 로고는 Anthropic·OpenAI 의 상표이며, 어떤 에이전트인지 알려 주는 용도로만 쓴다.
 
-## Uptime Kuma
-
-- 출처: https://github.com/louislam/uptime-kuma
-- 기준 커밋: c4f983a457e4ccb18e0836890b0dd80f11c2739a
-- 쓰는 것: 트레이 아이콘의 상태 점 색(초록·주황·빨강)과 앱 아이콘의 초록색. (0.1 개발 중 쓰던 화면 스타일은 NeoHtop 으로 바꿨다.)
-- 라이선스: MIT, Copyright (c) 2021 Louis Lam (위 NeoHtop 항목과 같은 MIT 허가 문구)
-
 ## jsonc-parser
 
 - 출처: https://github.com/microsoft/node-jsonc-parser (`jsonc-parser` 3.3.1)

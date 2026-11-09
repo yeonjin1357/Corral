@@ -1,14 +1,13 @@
-import { deflateSync } from 'zlib'
 import type { MenuItemConstructorOptions } from 'electron'
 import type { DashboardSnapshot, MemoryLevel, Platform, UpdateStatus } from '../shared/types'
 import { formatBytes } from '../shared/format'
 import { text } from '../shared/text'
 
-/** Uptime Kuma vars.scss 의 $primary / $warning / $danger. */
+/** 트레이 아이콘(작은 모니터) 그래프 선 색: 화면 어두운 테마(NeoHtop Catppuccin)의 초록·노랑·분홍. */
 export const LEVEL_COLORS: Record<MemoryLevel, string> = {
-  normal: '#5cdd8b',
-  warn: '#f8a306',
-  danger: '#dc3545'
+  normal: '#a6e3a1',
+  warn: '#f9e2af',
+  danger: '#f38ba8'
 }
 
 const hasMemory = (s: DashboardSnapshot | null): s is DashboardSnapshot =>
@@ -89,77 +88,6 @@ export function buildTrayMenu(
 
 export function trayTooltip(s: DashboardSnapshot | null): string {
   return hasMemory(s) ? text.tray.tooltip(percentOf(s)) : text.appName
-}
-
-/** 가운데 원 하나를 그린 RGBA 비트맵(가장자리 1px 은 반투명으로 부드럽게). */
-export function createDotIcon(rgbHex: string, size: number): Buffer {
-  const r = parseInt(rgbHex.slice(1, 3), 16)
-  const g = parseInt(rgbHex.slice(3, 5), 16)
-  const b = parseInt(rgbHex.slice(5, 7), 16)
-  const center = size / 2
-  const radius = size / 2 - 1
-  const out = Buffer.alloc(size * size * 4)
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      const distance = Math.hypot(x + 0.5 - center, y + 0.5 - center)
-      const coverage = Math.min(1, Math.max(0, radius + 0.5 - distance))
-      const i = (y * size + x) * 4
-      out[i] = r
-      out[i + 1] = g
-      out[i + 2] = b
-      out[i + 3] = Math.round(coverage * 255)
-    }
-  }
-  return out
-}
-
-const CRC_TABLE = (() => {
-  const table = new Uint32Array(256)
-  for (let n = 0; n < 256; n++) {
-    let c = n
-    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1
-    table[n] = c >>> 0
-  }
-  return table
-})()
-
-function crc32(data: Buffer): number {
-  let c = 0xffffffff
-  for (const byte of data) c = CRC_TABLE[(c ^ byte) & 0xff] ^ (c >>> 8)
-  return (c ^ 0xffffffff) >>> 0
-}
-
-function pngChunk(type: string, data: Buffer): Buffer {
-  const typeAndData = Buffer.concat([Buffer.from(type, 'latin1'), data])
-  const length = Buffer.alloc(4)
-  length.writeUInt32BE(data.length)
-  const crc = Buffer.alloc(4)
-  crc.writeUInt32BE(crc32(typeAndData))
-  return Buffer.concat([length, typeAndData, crc])
-}
-
-/**
- * RGBA 비트맵을 PNG 로 감싼다. nativeImage.createFromBitmap 은 OS 마다 바이트 순서(BGRA)와
- * 미리 곱한 알파를 가정해 색이 틀어질 수 있어, 형식이 정해진 PNG 로 넘긴다.
- */
-export function encodePng(rgba: Buffer, width: number, height: number): Buffer {
-  const header = Buffer.alloc(13)
-  header.writeUInt32BE(width, 0)
-  header.writeUInt32BE(height, 4)
-  header[8] = 8 // 비트 깊이
-  header[9] = 6 // RGBA
-  const stride = width * 4
-  const raw = Buffer.alloc(height * (1 + stride))
-  for (let y = 0; y < height; y++) {
-    raw[y * (1 + stride)] = 0 // 필터 없음
-    rgba.copy(raw, y * (1 + stride) + 1, y * stride, (y + 1) * stride)
-  }
-  return Buffer.concat([
-    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    pngChunk('IHDR', header),
-    pngChunk('IDAT', deflateSync(raw)),
-    pngChunk('IEND', Buffer.alloc(0))
-  ])
 }
 
 /** Electron Tray 중 pitwall 이 쓰는 부분(테스트에서 가짜로 바꿔 끼운다). */

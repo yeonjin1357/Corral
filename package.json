@@ -20,7 +20,8 @@
     "build:unpack": "npm run build && electron-builder --dir",
     "build:win": "npm run build && electron-builder --win",
     "build:mac": "npm run build && electron-builder --mac",
-    "test": "vitest run"
+    "test": "vitest run",
+    "icon": "node --experimental-strip-types scripts/make-icon.mjs"
   },
   "dependencies": {
     "@electron-toolkit/utils": "^4.0.0",

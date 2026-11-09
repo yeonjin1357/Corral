@@ -3,7 +3,7 @@ import { join } from 'path'
 
 /**
  * scoped 스타일에서 `:global(.dark) &` 는 뒤의 선택자가 빠진 채 전역 `.dark { ... }` 로 바뀌어
- * 화면 전체 글자색·배경을 덮었다(실제로 어두운 테마가 깨졌다). 원본(Uptime Kuma)처럼 `.dark &` 를 쓴다.
+ * 화면 전체 글자색·배경을 덮었다(실제로 어두운 테마가 깨졌다). 어두운 테마는 전역 app.css 의 .dark 색 값으로만 바꾼다.
  */
 test('컴포넌트 scoped 스타일에서 :global( 을 쓰지 않는다', () => {
   const rendererSrc = join(__dirname, '../renderer/src')

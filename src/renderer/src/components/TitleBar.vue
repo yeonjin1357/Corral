@@ -17,7 +17,7 @@ import {
 } from '@lucide/vue'
 import type { ThemeChoice } from '../../../shared/settings'
 import { text } from '../../../shared/text'
-import logo from '../../../../resources/icon.png'
+import logo from '../../../../resources/icon-small.png'
 import Button from '../ui/Button.vue'
 import Popover from '../ui/Popover.vue'
 import { MENU_ITEM_CLASS, MENU_SEPARATOR_CLASS, MENU_SHORTCUT_CLASS } from '../ui/variants'

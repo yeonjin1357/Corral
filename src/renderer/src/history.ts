@@ -3,7 +3,7 @@ import { agentKey, portKey } from '../../shared/keys'
 
 /**
  * 하트비트 한 칸. 포트: 연결이 있었으면 up, 열려 있기만 했으면 idle.
- * 에이전트: 작업 중 up, 권한 대기 pending, 오류 down, 쉬는 중·확인 중 idle(Uptime Kuma 의 색과 같은 뜻).
+ * 에이전트: 작업 중 up, 권한 대기 pending, 오류 down, 쉬는 중·확인 중 idle(화면 상태 점 색과 같은 뜻).
  */
 export type Beat = 'up' | 'idle' | 'pending' | 'down'
 

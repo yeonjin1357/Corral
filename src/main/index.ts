@@ -45,7 +45,8 @@ import { createUpdater } from './updates'
 import { localUrlFor } from './open'
 import { backgroundFor, overlayFor, windowChrome } from './windowChrome'
 import { createIconSource } from './icons'
-import { createDotIcon, createTrayController, encodePng, LEVEL_COLORS } from './tray'
+import { createTrayController, LEVEL_COLORS } from './tray'
+import { encodePng, renderSmallIcon } from './pixelArt'
 import type { MemoryLevel } from '../shared/types'
 
 const APP_ID = 'io.github.yeonjin1357.pitwall'
@@ -62,10 +63,11 @@ function trayIcon(level: MemoryLevel): Electron.NativeImage {
   const cached = iconCache.get(level)
   if (cached) return cached
   const color = LEVEL_COLORS[level]
-  const image = nativeImage.createFromBuffer(encodePng(createDotIcon(color, 16), 16, 16), {
+  // 앱 아이콘과 같은 작은 모니터. 그래프 선 색으로 RAM 상태를 보인다(16px 그대로·32px 는 2배).
+  const image = nativeImage.createFromBuffer(encodePng(renderSmallIcon(color, 16), 16, 16), {
     scaleFactor: 1
   })
-  image.addRepresentation({ scaleFactor: 2, buffer: encodePng(createDotIcon(color, 32), 32, 32) })
+  image.addRepresentation({ scaleFactor: 2, buffer: encodePng(renderSmallIcon(color, 32), 32, 32) })
   iconCache.set(level, image)
   return image
 }
