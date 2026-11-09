@@ -37,6 +37,7 @@ import { createScheduler } from './scheduler'
 import { createKiller, type KillConfirm } from './kill'
 import { createDiskManager, createRepoMemory, snapshotWorktrees } from './disk'
 import { createNotifier, type Notice } from './notifier'
+import { loginItemOptions, shouldStartHidden } from './startup'
 import { localUrlFor } from './open'
 import { createDotIcon, createTrayController, encodePng, LEVEL_COLORS } from './tray'
 import type { MemoryLevel } from '../shared/types'
@@ -281,6 +282,8 @@ function applySettings(next: Settings): void {
   scheduler.setIntervals(REFRESH_INTERVALS[next.refresh])
   // 화면(prefers-color-scheme)과 확인 창·메뉴가 같은 테마를 따르도록 OS 테마 설정을 바꾼다.
   nativeTheme.themeSource = next.theme === 'auto' ? 'system' : next.theme
+  const login = loginItemOptions(next, app.isPackaged)
+  if (login) app.setLoginItemSettings(login)
   if (mainWindow && !mainWindow.isDestroyed())
     mainWindow.webContents.send(IPC.settingsChanged, next)
 }
@@ -442,7 +445,14 @@ if (!app.requestSingleInstanceLock()) {
     void claude.start()
     scheduler.start()
     createTray()
-    createWindow()
+    // 로그인할 때 켜졌으면 창 없이 트레이로만 시작한다(트레이에서 열면 그때 만든다).
+    const hidden = shouldStartHidden(
+      process.argv,
+      platform ?? 'win32',
+      process.platform === 'darwin' && app.getLoginItemSettings().wasOpenedAtLogin
+    )
+    if (hidden) app.dock?.hide()
+    else createWindow()
 
     // macOS 독 아이콘을 누르면 창을 다시 보여 준다.
     app.on('activate', () => showWindow())
