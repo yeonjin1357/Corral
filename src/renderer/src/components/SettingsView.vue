@@ -108,19 +108,23 @@ const pending = (): Settings => ({
 })
 const dirty = computed(() => JSON.stringify(pending()) !== JSON.stringify(props.settings))
 
-// 저장된 값이 바뀌면(저장 후 메인이 고친 값, 제목줄에서 테마를 바꿈) 폼을 그 값으로 맞춘다.
-// 고치던 중이면 다른 칸은 그대로 두고 테마만 맞춘다(제목줄 테마는 바로 저장되기 때문).
+const same = (x: unknown, y: unknown): boolean => JSON.stringify(x) === JSON.stringify(y)
+
+// 저장된 값이 바뀌면(저장 후 메인이 고친 값, 제목줄 테마, 대시보드의 숨기기·작업 공간 이름) 폼을 그 값으로 맞춘다.
+// 고치던 중이면 사용자가 고친 항목만 그대로 두고, 고치지 않은 항목은 새 저장값을 따른다
+// (그러지 않으면 나중에 저장할 때 대시보드에서 바로 저장한 숨기기·별칭을 예전 값으로 덮어쓴다).
 watch(
   () => props.settings,
   (next, prev) => {
-    const editing = prev && JSON.stringify(pending()) !== JSON.stringify(prev)
-    if (editing) {
-      draft.value.theme = next.theme
-      return
-    }
-    draft.value = clone(next)
-    heavyText.value = next.heavyPatterns.join('\n')
-    dirsText.value = next.dependencyDirs.join('\n')
+    const cur = pending()
+    const merged = { ...draft.value } as Record<string, unknown>
+    for (const key of Object.keys(next) as (keyof Settings)[])
+      if (!prev || same(cur[key], prev[key])) merged[key] = clone(next)[key]
+    draft.value = merged as unknown as Settings
+    if (!prev || same(lines(heavyText.value), prev.heavyPatterns))
+      heavyText.value = next.heavyPatterns.join('\n')
+    if (!prev || same(lines(dirsText.value), prev.dependencyDirs))
+      dirsText.value = next.dependencyDirs.join('\n')
   }
 )
 

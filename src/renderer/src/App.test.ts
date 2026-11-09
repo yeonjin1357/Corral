@@ -219,3 +219,35 @@ test('작업 공간 이름을 바꾸면 별칭으로 저장하고 다시 수집�
   expect(f.api.refreshNow).toHaveBeenCalled()
   w.unmount()
 })
+
+test('저장 안 한 설정 화면이 대시보드에서 바꾼 숨기기·별칭을 되돌리지 않는다', async () => {
+  const f = fake()
+  const w = await start(f)
+  f.navigate({ page: 'settings' })
+  await flushPromises()
+  await w
+    .findAll('button')
+    .find((b) => b.text().includes('기준값'))!
+    .trigger('click')
+  await w.find('#idle-port').setValue('45')
+  await w
+    .findAll('button')
+    .find((b) => b.text().includes('대시보드로'))!
+    .trigger('click')
+  await flushPromises()
+  // 대시보드에서 작업 공간 이름 바꾸기(바로 저장된다).
+  await w.find('tr[data-group] [data-action="rename"]').trigger('click')
+  await w.find('tr[data-group] input').setValue('쇼핑')
+  await w.find('tr[data-group] input').trigger('keydown', { key: 'Enter' })
+  await flushPromises()
+  // 설정으로 돌아가 저장한다.
+  f.navigate({ page: 'settings' })
+  await flushPromises()
+  await w.find('form').trigger('submit')
+  await flushPromises()
+  expect(f.saved.at(-1)).toMatchObject({
+    idlePortMinutes: 45,
+    workspaceAliases: { 'C:\\work\\ws': '쇼핑' }
+  })
+  w.unmount()
+})
