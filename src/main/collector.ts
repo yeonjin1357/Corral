@@ -11,7 +11,7 @@ import type {
 import { worktreeKey } from '../shared/format'
 import type { Settings } from '../shared/settings'
 import { buildAgents, cpuState, type CpuMemo } from './agents'
-import { judgeServers, type ServerMemo } from './judge'
+import { activityOf, judgeServers, type ServerMemo } from './judge'
 import { agentToolOf, topLevelAgentPids } from './processTree'
 import { reconcileSessions, stateForWorktree, type LiveClaude, type Sessions } from './sessions'
 import { buildSnapshot, pidsForWorktreeLookup } from './snapshot'
@@ -68,6 +68,8 @@ export function createCollector(deps: CollectorDeps): {
 } {
   let previousCpu: CpuMemo = new Map()
   let serverMemo: ServerMemo = new Map()
+  /** 서버별 지난 샘플의 연결 상대(사용 흔적 판단). */
+  let serverPeers = new Map<string, Set<string>>()
   /** 세션 작업 폴더 → 워크트리 키. 수집 때마다 다시 판별하고, 그 사이 새 세션은 restate 가 채운다. */
   let rootOfCwd = new Map<string, string | null>()
 
@@ -183,7 +185,16 @@ export function createCollector(deps: CollectorDeps): {
     })
     previousCpu = cpu
 
-    const judged = judgeServers(snapshot.servers, agents, serverMemo, now, options.idlePortMs)
+    const traces = activityOf(snapshot.servers, raw.tcp, serverPeers)
+    serverPeers = traces.connections
+    const judged = judgeServers(
+      snapshot.servers,
+      agents,
+      serverMemo,
+      now,
+      options.idlePortMs,
+      traces.activity
+    )
     serverMemo = judged.memo
 
     const workspaceOf = await resolveWorkspaces([

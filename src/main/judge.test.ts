@@ -1,5 +1,5 @@
-import { judgeServers, type ServerMemo } from './judge'
-import type { AgentRow, ServerRow, WorktreeInfo } from '../shared/types'
+import { activityOf, judgeServers, type ServerMemo } from './judge'
+import type { AgentRow, ServerRow, TcpEntry, WorktreeInfo } from '../shared/types'
 
 const MIN = 60 * 1000
 const THRESHOLD = 20 * MIN
@@ -156,4 +156,112 @@ test('에이전트가 상위 저장소에서 일하면(하위 저장소를 다�
 test('기억 키는 서버 선택 키(server:<pid>:<시작 시각>)', () => {
   const r = judgeServers([server()], [], new Map(), 0, THRESHOLD)
   expect([...r.memo.keys()]).toEqual(['server:4100:100'])
+})
+
+describe('사용 흔적(F9)', () => {
+  const KEY = 'server:4100:100'
+  function tcp(
+    state: TcpEntry['state'],
+    local: [string, number],
+    remote: [string, number],
+    pid = 4100
+  ): TcpEntry {
+    return {
+      pid,
+      localAddress: local[0],
+      localPort: local[1],
+      remoteAddress: remote[0],
+      remotePort: remote[1],
+      state
+    }
+  }
+  /** 샘플마다 흔적을 계산해 판단에 넘긴다(수집기와 같은 순서). */
+  function run(
+    samples: { t: number; tcp: TcpEntry[]; clients: number }[]
+  ): ReturnType<typeof judgeServers> {
+    let memo: ServerMemo = new Map()
+    let connections = new Map<string, Set<string>>()
+    let result!: ReturnType<typeof judgeServers>
+    for (const sample of samples) {
+      const row = server({ clientCount: sample.clients })
+      const traces = activityOf([row], sample.tcp, connections)
+      connections = traces.connections
+      result = judgeServers([row], [], memo, sample.t, THRESHOLD, traces.activity)
+      memo = result.memo
+    }
+    return result
+  }
+
+  test('연결 0 이어도 TIME_WAIT 흔적이 있으면 정리 후보 시간을 다시 센다', () => {
+    // Windows 는 TIME_WAIT 의 소유 pid 가 0 이라 서버 포트로 맞춘다.
+    const closed = tcp('TimeWait', ['::1', 3000], ['::1', 51000], 0)
+    const r = run([
+      { t: 0, tcp: [], clients: 0 },
+      { t: 15 * MIN, tcp: [closed], clients: 0 },
+      { t: 30 * MIN, tcp: [], clients: 0 }
+    ])
+    expect(r.rows[0]).toMatchObject({ judgement: null, idleSince: 15 * MIN })
+  })
+
+  test('클라이언트 쪽에 남은 TIME_WAIT(같은 PC 에서 연결을 먼저 닫음)도 흔적', () => {
+    const clientSide = tcp('TimeWait', ['127.0.0.1', 51000], ['127.0.0.1', 3000], 0)
+    expect(activityOf([server()], [clientSide], new Map()).activity.get(KEY)).toBe(true)
+    // 다른 PC 의 3000 번 포트로 나간 연결은 이 서버와 상관없다.
+    const outbound = tcp('TimeWait', ['10.0.0.5', 51000], ['10.0.0.9', 3000], 0)
+    expect(activityOf([server()], [outbound], new Map()).activity.get(KEY)).toBe(false)
+  })
+
+  test('새 연결이 생기면 연결 0 시간을 다시 센다', () => {
+    const first = activityOf(
+      [server()],
+      [tcp('Established', ['::1', 3000], ['::1', 51000])],
+      new Map()
+    )
+    const next = activityOf(
+      [server()],
+      [tcp('Established', ['::1', 3000], ['::1', 51001])],
+      first.connections
+    )
+    expect(next.activity.get(KEY)).toBe(true)
+    const same = activityOf(
+      [server()],
+      [tcp('Established', ['::1', 3000], ['::1', 51001])],
+      next.connections
+    )
+    expect(same.activity.get(KEY)).toBe(false)
+
+    // 샘플 사이에 잠깐 붙었다 끊긴 요청(연결 0 으로 보임)도 흔적이면 시간이 다시 시작된다.
+    const r = judgeServers(
+      [server({ clientCount: 0 })],
+      [],
+      new Map([[KEY, { state: 'idle', since: 0 }]]),
+      25 * MIN,
+      THRESHOLD,
+      new Map([[KEY, true]])
+    )
+    expect(r.rows[0]).toMatchObject({ judgement: null, idleSince: 25 * MIN })
+  })
+
+  test('연결이 이어지는 서버(폴링 탭)는 새 연결이 생겨도 확인해볼 것 시간이 이어진다', () => {
+    const poll = (port: number): TcpEntry[] => [tcp('Established', ['::1', 3000], ['::1', port])]
+    const r = run([
+      { t: 0, tcp: poll(51000), clients: 1 },
+      { t: 10 * MIN, tcp: poll(51001), clients: 1 },
+      { t: 20 * MIN, tcp: poll(51002), clients: 1 }
+    ])
+    expect(r.rows[0]).toMatchObject({ judgement: 'check', idleSince: 0 })
+  })
+
+  test('처음 본 연결 목록은 흔적으로 치지 않는다(첫 샘플)', () => {
+    const t = activityOf([server()], [tcp('Established', ['::1', 3000], ['::1', 51000])], new Map())
+    expect(t.activity.get(KEY)).toBe(false)
+    expect([...t.connections.get(KEY)!]).toEqual(['::1:51000'])
+  })
+
+  test('서버 트리의 다른 pid 가 연 포트의 연결도 그 서버 것으로 센다', () => {
+    const api = server({ pid: 6100, ports: [6176, 8081], descendantPids: [6101], startedAt: 100 })
+    const prev = new Map([['server:6100:100', new Set<string>()]])
+    const t = activityOf([api], [tcp('Established', ['::1', 8081], ['::1', 52000], 6101)], prev)
+    expect(t.activity.get('server:6100:100')).toBe(true)
+  })
 })
