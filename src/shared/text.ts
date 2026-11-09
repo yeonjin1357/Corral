@@ -337,6 +337,25 @@ export const text = {
       withTime: (state: string, duration: string): string => `${state} · ${duration}`,
       groupCount: (label: string, n: number): string => `${label} ${n}`
     },
+    trayView: {
+      live: '실시간 요약',
+      stale: '업데이트가 늦어지고 있어요',
+      reading: '확인하는 중…',
+      open: 'pitwall 열기',
+      settings: '설정',
+      quit: 'pitwall 종료',
+      ram: 'RAM',
+      ramDetail: (used: string, total: string): string => `${used} / ${total}`,
+      servers: '개발 서버',
+      ports: (n: number): string => `포트 ${n}개`,
+      agents: '에이전트',
+      agentStates: (working: number, waiting: number): string =>
+        waiting > 0 ? `작업 중 ${working} · 권한 대기 ${waiting}` : `작업 중 ${working}`,
+      recommend: (n: number, size: string): string => `정리 추천 ${n}개 · 약 ${size} 확보`,
+      workspaces: '작업 공간',
+      workspaceColumns: '서버 · 메모리',
+      noServers: '열려 있는 개발 서버가 없어요.'
+    },
     group: {
       expand: (name: string): string => `${name} 펼치기`,
       collapse: (name: string): string => `${name} 접기`,

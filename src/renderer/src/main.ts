@@ -4,5 +4,8 @@ import './styles/app.css'
 
 import { createApp } from 'vue'
 import App from './App.vue'
+import TrayView from './TrayView.vue'
 
-createApp(App).mount('#app')
+// 트레이 요약 창은 같은 화면 파일을 ?view=tray 로 연다(F10).
+const tray = new URLSearchParams(location.search).get('view') === 'tray'
+createApp(tray ? TrayView : App).mount('#app')

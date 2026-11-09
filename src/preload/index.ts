@@ -15,6 +15,9 @@ const api: PitwallApi = {
   },
   getLatest: () => ipcRenderer.invoke(IPC.getLatest),
   historyRam: () => ipcRenderer.invoke(IPC.historyRam),
+  tray: {
+    action: (kind, key) => ipcRenderer.invoke(IPC.trayAction, { kind, key })
+  },
   appInfo: () => ipcRenderer.invoke(IPC.appInfo),
   fileIcon: (path) => ipcRenderer.invoke(IPC.fileIcon, path),
   update: {

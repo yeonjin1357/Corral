@@ -250,7 +250,7 @@ describe('createTrayController', () => {
     const { tray, controller } = setup('win32')
     controller.update(snap())
     controller.update(snap({ takenAt: 2 }))
-    expect(tray.setContextMenu).toHaveBeenCalledTimes(2) // 처음(null) + 첫 스냅샷
+    expect(vi.mocked(tray.setContextMenu)).toHaveBeenCalledTimes(2) // 처음(null) + 첫 스냅샷
     expect(tray.setToolTip).toHaveBeenCalledTimes(2)
     controller.update(
       snap({
@@ -258,7 +258,7 @@ describe('createTrayController', () => {
       })
     )
     expect(tray.setImage).toHaveBeenLastCalledWith('icon:danger')
-    expect(tray.setContextMenu).toHaveBeenCalledTimes(3)
+    expect(vi.mocked(tray.setContextMenu)).toHaveBeenCalledTimes(3)
   })
 
   test('처음엔 normal 아이콘과 확인 중 메뉴', () => {
@@ -270,7 +270,7 @@ describe('createTrayController', () => {
   test('Windows: 왼쪽 클릭에도 메뉴. 더블클릭은 첫 클릭에 뜬 메뉴가 막아 닿지 않으므로 걸지 않는다', () => {
     const { tray } = setup('win32')
     tray.handlers['click']()
-    expect(tray.popUpContextMenu).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(tray.popUpContextMenu)).toHaveBeenCalledTimes(1)
     expect(tray.handlers['double-click']).toBeUndefined()
   })
 
@@ -364,4 +364,55 @@ test('트레이 개발 서버 수는 서버 수', () => {
   })
   const items = buildTrayMenu(s, actions)
   expect(labels(items)).toContain('개발 서버 2개')
+})
+
+describe('트레이 요약 창(F10)', () => {
+  function fakeTray(): TrayLike & {
+    handlers: Record<string, (e?: unknown, b?: unknown) => void>
+  } {
+    const handlers: Record<string, (e?: unknown, b?: unknown) => void> = {}
+    return {
+      handlers,
+      setContextMenu: vi.fn(),
+      setToolTip: vi.fn(),
+      setImage: vi.fn(),
+      popUpContextMenu: vi.fn(),
+      displayBalloon: vi.fn(),
+      on: vi.fn((event: string, h: (e?: unknown, b?: unknown) => void) => {
+        handlers[event] = h
+      }) as unknown as TrayLike['on']
+    }
+  }
+
+  test('왼쪽 클릭은 요약 창, 오른쪽 클릭은 메뉴', () => {
+    for (const platform of ['win32', 'darwin'] as const) {
+      const tray = fakeTray()
+      const popover = vi.fn()
+      createTrayController({
+        tray,
+        makeIcon: () => 'icon',
+        buildMenu: (items) => ({ items }),
+        actions: { open: vi.fn(), settings: vi.fn(), quit: vi.fn() },
+        platform,
+        onPopover: popover
+      })
+      const bounds = { x: 1, y: 2, width: 3, height: 4 }
+      tray.handlers['click']({}, bounds)
+      expect(popover).toHaveBeenCalledWith(bounds)
+      expect(vi.mocked(tray.popUpContextMenu)).not.toHaveBeenCalled()
+      if (platform === 'darwin') {
+        // macOS 는 메뉴를 붙여 두면 OS 가 왼쪽 클릭에도 메뉴를 띄우므로 붙이지 않고 오른쪽 클릭에 직접 띄운다.
+        tray.handlers['right-click']({}, bounds)
+        expect(vi.mocked(tray.popUpContextMenu)).toHaveBeenCalledTimes(1)
+        expect(vi.mocked(tray.setContextMenu)).not.toHaveBeenCalled()
+        expect(vi.mocked(tray.popUpContextMenu).mock.calls[0][0]).toMatchObject({
+          items: expect.any(Array)
+        })
+      } else {
+        // Windows 는 붙여 둔 메뉴를 OS 가 오른쪽 클릭에 띄운다(직접 띄우면 두 번 뜰 수 있다).
+        expect(vi.mocked(tray.setContextMenu)).toHaveBeenCalled()
+        expect(tray.handlers['right-click']).toBeUndefined()
+      }
+    }
+  })
 })

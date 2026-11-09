@@ -1,4 +1,5 @@
 import {
+  screen,
   app,
   shell,
   BrowserWindow,
@@ -51,6 +52,7 @@ import { createIconSource } from './icons'
 import { createRamHistory, loadHistory, saveHistory } from './historyStore'
 import { codexHome, createCodexReader } from './codexRollout'
 import { createTrayController, LEVEL_COLORS } from './tray'
+import { shouldReopen, trayWindowBounds, TRAY_WINDOW_SIZE, type Rect } from './trayWindow'
 import { encodePng, renderSmallIcon } from './pixelArt'
 import type { MemoryLevel } from '../shared/types'
 
@@ -150,6 +152,8 @@ const scheduler = createScheduler({
     if (!snapshot.stale && snapshot.memory.totalBytes > 0)
       ramHistory.record(snapshot.takenAt, snapshot.memory.usedPercent)
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.snapshot, snapshot)
+    if (trayWindow && !trayWindow.isDestroyed() && trayWindow.isVisible())
+      trayWindow.webContents.send(IPC.snapshot, snapshot)
     trayController?.update(snapshot)
     notifier.update(snapshot)
   }
@@ -216,6 +220,78 @@ function hideWindow(): void {
   trayController?.notifyHiddenOnce()
 }
 
+// ── 트레이 요약 창(F10): 왼쪽 클릭에 트레이 옆으로 띄우고, 다른 곳을 누르면(포커스를 잃으면) 숨긴다 ──
+let trayWindow: BrowserWindow | null = null
+let trayHiddenAt: number | null = null
+
+function loadRenderer(window: BrowserWindow, query: Record<string, string> = {}): void {
+  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
+    const url = new URL(process.env['ELECTRON_RENDERER_URL'])
+    for (const [k, v] of Object.entries(query)) url.searchParams.set(k, v)
+    void window.loadURL(url.toString())
+  } else void window.loadFile(join(__dirname, '../renderer/index.html'), { query })
+}
+
+function createTrayWindow(): BrowserWindow {
+  const window = new BrowserWindow({
+    ...TRAY_WINDOW_SIZE,
+    show: false,
+    frame: false,
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    transparent: true,
+    hasShadow: false,
+    backgroundColor: '#00000000',
+    title: text.appName,
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.js'),
+      sandbox: true,
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  })
+  window.on('blur', () => hideTrayWindow())
+  window.on('closed', () => {
+    if (trayWindow === window) trayWindow = null
+  })
+  window.webContents.on('will-navigate', (event) => event.preventDefault())
+  window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  loadRenderer(window, { view: 'tray' })
+  return window
+}
+
+function hideTrayWindow(): void {
+  if (!trayWindow || trayWindow.isDestroyed() || !trayWindow.isVisible()) return
+  trayHiddenAt = Date.now()
+  trayWindow.hide()
+}
+
+function toggleTrayWindow(bounds: Rect): void {
+  if (trayWindow && !trayWindow.isDestroyed() && trayWindow.isVisible()) {
+    hideTrayWindow()
+    return
+  }
+  // 창이 포커스를 잃어 막 숨은 직후의 클릭은 "닫기" 뜻이다.
+  if (!shouldReopen(trayHiddenAt, Date.now())) return
+  const window = trayWindow && !trayWindow.isDestroyed() ? trayWindow : createTrayWindow()
+  trayWindow = window
+  const display = screen.getDisplayNearestPoint({
+    x: Math.round(bounds.x + bounds.width / 2),
+    y: Math.round(bounds.y + bounds.height / 2)
+  })
+  window.setBounds(trayWindowBounds(bounds, display, TRAY_WINDOW_SIZE, platform ?? 'win32'))
+  const latest = scheduler.latest()
+  if (latest && !window.webContents.isLoading()) window.webContents.send(IPC.snapshot, latest)
+  window.show()
+  window.focus()
+  void scheduler.refreshNow()
+}
+
 function createTray(): void {
   tray = new Tray(trayIcon('normal'))
   const t = tray
@@ -224,12 +300,14 @@ function createTray(): void {
       setContextMenu: (menu) => t.setContextMenu(menu as Menu),
       setToolTip: (tooltip) => t.setToolTip(tooltip),
       setImage: (image) => t.setImage(image as Electron.NativeImage),
-      popUpContextMenu: () => t.popUpContextMenu(),
+      popUpContextMenu: (menu) => t.popUpContextMenu((menu as Menu | null) ?? undefined),
       displayBalloon: (options) => t.displayBalloon(options),
-      on: (_event, listener) => {
-        t.on('click', listener)
+      on: (event, listener) => {
+        if (event === 'click') t.on('click', (e, bounds) => listener(e, bounds))
+        else t.on('right-click', (e, bounds) => listener(e, bounds))
       }
     },
+    onPopover: toggleTrayWindow,
     makeIcon: trayIcon,
     buildMenu: (items) => Menu.buildFromTemplate(items),
     actions: {
@@ -412,10 +490,23 @@ async function saveSettings(next: unknown): Promise<Settings> {
 function registerIpc(): void {
   const fromMainWindow = (sender: Electron.WebContents): boolean =>
     !!mainWindow && !mainWindow.isDestroyed() && sender === mainWindow.webContents
+  const fromTrayWindow = (sender: Electron.WebContents): boolean =>
+    !!trayWindow && !trayWindow.isDestroyed() && sender === trayWindow.webContents
 
+  // 트레이 요약 창은 스냅샷 읽기와 아래 동작만 할 수 있다(끄기·설정 바꾸기는 앱 창에서 확인 창을 거친다).
   ipcMain.handle(IPC.getLatest, (event) =>
-    fromMainWindow(event.sender) ? scheduler.latest() : null
+    fromMainWindow(event.sender) || fromTrayWindow(event.sender) ? scheduler.latest() : null
   )
+  ipcMain.handle(IPC.trayAction, (event, arg: unknown) => {
+    if (!fromTrayWindow(event.sender)) return
+    const { kind, key } = (arg ?? {}) as { kind?: unknown; key?: unknown }
+    hideTrayWindow()
+    if (kind === 'open') showWindow()
+    else if (kind === 'settings') navigate({ page: 'settings' })
+    else if (kind === 'quit') app.quit()
+    else if (kind === 'item' && typeof key === 'string' && key.length <= 1000)
+      navigate({ page: 'dashboard', key })
+  })
   ipcMain.handle(IPC.historyRam, (event) =>
     fromMainWindow(event.sender) ? ramHistory.points() : []
   )
@@ -484,7 +575,7 @@ function registerIpc(): void {
   })
   ipcMain.handle(IPC.appInfo, () => ({ version: app.getVersion() }))
   ipcMain.handle(IPC.fileIcon, (event, path: unknown) =>
-    fromMainWindow(event.sender) ? icons.get(path) : null
+    fromMainWindow(event.sender) || fromTrayWindow(event.sender) ? icons.get(path) : null
   )
   ipcMain.handle(IPC.updateGet, (event) => (fromMainWindow(event.sender) ? updater.status() : null))
   ipcMain.handle(IPC.updateCheck, async (event) =>

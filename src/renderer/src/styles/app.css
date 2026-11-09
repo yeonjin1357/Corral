@@ -369,3 +369,11 @@
     scroll-behavior: auto !important;
   }
 }
+
+/* 트레이 요약 창: 둥근 카드 밖은 투명(창 자체가 투명). */
+html.tray-view,
+html.tray-view body,
+html.tray-view #app {
+  background: transparent;
+  overflow: hidden;
+}

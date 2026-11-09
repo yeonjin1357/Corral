@@ -95,9 +95,15 @@ export interface TrayLike {
   setContextMenu(menu: unknown): void
   setToolTip(tooltip: string): void
   setImage(image: unknown): void
-  popUpContextMenu(): void
+  popUpContextMenu(menu?: unknown): void
   displayBalloon(options: { title: string; content: string; noSound?: boolean }): void
-  on(event: 'click', listener: () => void): void
+  on(
+    event: 'click' | 'right-click',
+    listener: (
+      event: unknown,
+      bounds: { x: number; y: number; width: number; height: number }
+    ) => void
+  ): void
 }
 
 export function createTrayController<Icon, Menu>(deps: {
@@ -106,6 +112,11 @@ export function createTrayController<Icon, Menu>(deps: {
   buildMenu: (items: MenuItemConstructorOptions[]) => Menu
   actions: TrayActions
   platform: Platform
+  /**
+   * 왼쪽 클릭에 띄울 요약 창(F10). 있으면 왼쪽 클릭 = 요약 창, 오른쪽 클릭 = 메뉴.
+   * macOS 는 메뉴를 붙여 두면 OS 가 왼쪽 클릭에도 메뉴를 띄우므로, 붙이지 않고 오른쪽 클릭에 직접 띄운다.
+   */
+  onPopover?: (bounds: { x: number; y: number; width: number; height: number }) => void
 }): {
   update(s: DashboardSnapshot | null): void
   setUpdate(status: UpdateStatus): void
@@ -117,6 +128,8 @@ export function createTrayController<Icon, Menu>(deps: {
   let tooltip = ''
   let level: MemoryLevel | null = null
   let notified = false
+  let menu: Menu | null = null
+  const attachMenu = !(deps.onPopover && deps.platform === 'darwin')
 
   function apply(s: DashboardSnapshot | null): void {
     last = s
@@ -124,7 +137,8 @@ export function createTrayController<Icon, Menu>(deps: {
     // 열려 있는 메뉴가 닫히거나 깜빡이지 않도록, 내용이 바뀔 때만 다시 만든다.
     const key = JSON.stringify(items.map((i) => [i.type ?? '', i.label ?? '', i.enabled ?? true]))
     if (key !== menuKey) {
-      deps.tray.setContextMenu(deps.buildMenu(items))
+      menu = deps.buildMenu(items)
+      if (attachMenu) deps.tray.setContextMenu(menu)
       menuKey = key
     }
     const nextTooltip = trayTooltip(s)
@@ -139,9 +153,14 @@ export function createTrayController<Icon, Menu>(deps: {
     }
   }
 
-  // Windows 는 오른쪽 클릭에만 메뉴가 뜬다. 왼쪽 클릭에도 띄운다(더블클릭은 첫 클릭에 뜬 메뉴가 막아 닿지 않는다).
-  // macOS 는 OS 가 클릭에 메뉴를 띄운다.
-  if (deps.platform === 'win32') {
+  if (deps.onPopover) {
+    const popover = deps.onPopover
+    deps.tray.on('click', (_event, bounds) => popover(bounds))
+    // Windows 는 메뉴를 붙여 두면 오른쪽 클릭에 OS 가 띄운다. macOS 는 직접 띄운다.
+    if (!attachMenu) deps.tray.on('right-click', () => deps.tray.popUpContextMenu(menu))
+  } else if (deps.platform === 'win32') {
+    // Windows 는 오른쪽 클릭에만 메뉴가 뜬다. 왼쪽 클릭에도 띄운다(더블클릭은 첫 클릭에 뜬 메뉴가 막아 닿지 않는다).
+    // macOS 는 OS 가 클릭에 메뉴를 띄운다.
     deps.tray.on('click', () => deps.tray.popUpContextMenu())
   }
   apply(null)

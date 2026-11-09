@@ -14,6 +14,7 @@ export const IPC = {
   snapshot: 'pitwall:snapshot',
   getLatest: 'pitwall:get-latest',
   historyRam: 'pitwall:history-ram',
+  trayAction: 'pitwall:tray-action',
   killServer: 'pitwall:kill-server',
   killLeftover: 'pitwall:kill-leftover',
   killMany: 'pitwall:kill-many',
@@ -56,6 +57,10 @@ export interface PitwallApi {
   onSnapshot(callback: (snapshot: DashboardSnapshot) => void): () => void
   /** 창이 늦게 열려 앞선 스냅샷을 놓쳤을 때 마지막 스냅샷을 가져온다. */
   getLatest(): Promise<DashboardSnapshot | null>
+  /** 트레이 요약 창에서: 앱 열기·설정·종료·창 숨기기·항목 열기(item 은 선택 키). */
+  tray: {
+    action(kind: 'open' | 'settings' | 'quit' | 'hide' | 'item', key?: string): Promise<void>
+  }
   /** 앱이 기억한 RAM 사용률 추이(30초 간격·2시간, 다시 켜도 이어짐). */
   historyRam(): Promise<TrendPoint[]>
   killServer(pid: number): Promise<KillResult>

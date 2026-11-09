@@ -563,3 +563,50 @@ export function hiddenServerTable(s: DashboardSnapshot): Table {
     }))
   }
 }
+
+/** 트레이 요약 창의 작업 공간 한 줄(F10). */
+export interface WorkspaceSummary {
+  key: string
+  name: string
+  title: string
+  serverCount: number
+  memoryBytes: number
+  agents: AgentRow[]
+  /** 누르면 열 서버(메모리가 가장 큰 것). */
+  firstKey: string
+  status: Cell
+}
+
+/**
+ * 서버를 작업 공간별로 묶은 요약(혼자인 작업 공간·작업 공간을 모르는 서버도 한 줄). 메모리 큰 순.
+ * 에이전트는 묶음 보기와 같은 규칙으로 붙인다.
+ */
+export function workspaceSummary(s: DashboardSnapshot): WorkspaceSummary[] {
+  const groups = new Map<string, ServerRow[]>()
+  for (const r of s.servers) {
+    const id = r.workspace ? `group:${worktreeKey(r.workspace.root)}` : selectionKey.server(r)
+    groups.set(id, [...(groups.get(id) ?? []), r])
+  }
+  return [...groups]
+    .map(([key, servers]): WorkspaceSummary => {
+      const ws = servers[0].workspace
+      const roots = servers.flatMap((r) => (r.worktree ? [r.worktree.root] : []))
+      const agents = s.agents.filter(
+        (a) =>
+          (ws && a.workspace && worktreeKey(a.workspace.root) === worktreeKey(ws.root)) ||
+          (a.worktree && roots.some((root) => agentCovers([a.worktree!.root], root)))
+      )
+      const largest = servers.reduce((a, b) => (b.memoryBytes > a.memoryBytes ? b : a))
+      return {
+        key,
+        name: ws?.name ?? (largest.worktree ? folderOf(largest.worktree) : portList(largest.ports)),
+        title: ws?.root ?? largest.worktree?.root ?? portList(largest.ports),
+        serverCount: servers.length,
+        memoryBytes: servers.reduce((sum, r) => sum + r.memoryBytes, 0),
+        agents,
+        firstKey: selectionKey.server(largest),
+        status: groupStatus(servers)
+      }
+    })
+    .sort((a, b) => b.memoryBytes - a.memoryBytes || a.name.localeCompare(b.name))
+}
