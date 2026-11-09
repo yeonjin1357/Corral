@@ -1,6 +1,14 @@
 import { createKiller, type KillConfirm, type KillDeps } from './kill'
 import { blankSnapshot } from '../shared/snapshot'
-import type { LeftoverRow, ServerRow, ProcessInfo, RawSample } from '../shared/types'
+import type {
+  AgentRow,
+  HeavyJobRow,
+  LeftoverRow,
+  ServerRow,
+  ProcessInfo,
+  RawSample,
+  WorkspaceInfo
+} from '../shared/types'
 
 const MB = 1024 * 1024
 
@@ -165,4 +173,105 @@ test('같은 pid 를 처리 중이면 그 항목은 건너뛴다', async () => {
   expect(result.message).toContain('1개는 이미 처리 중이라 건너뛰었어요.')
   release(false)
   await single
+})
+
+describe('작업 공간 한 번에 정리(F2)', () => {
+  const WS: WorkspaceInfo = { root: 'C:\\work', name: 'work', branch: 'main', outer: true }
+  const OTHER: WorkspaceInfo = { root: 'C:\\other', name: 'other', branch: null, outer: false }
+  const server = { ...candidate, judgement: null, workspace: WS }
+  const left = { ...daemon, workspace: WS }
+  const elsewhere: ServerRow = { ...candidate, pid: 4200, ports: [5173], workspace: OTHER }
+  const heavy: HeavyJobRow = {
+    pid: 8000,
+    label: 'vue-tsc',
+    processName: 'node.exe',
+    commandLine: 'node vue-tsc',
+    worktree: candidate.worktree,
+    workspace: WS,
+    memoryBytes: 4000 * MB,
+    descendantPids: [],
+    startedAt: 1
+  }
+  const agent: AgentRow = {
+    pid: 5000,
+    tool: 'claude',
+    worktree: { root: 'C:\\work', branch: 'main', isLinkedWorktree: false },
+    workspace: WS,
+    startedAt: 1,
+    memoryBytes: 600 * MB,
+    descendantCount: 2,
+    state: 'idle',
+    stateSource: 'hook',
+    stateSince: 1,
+    cpuPercent: 0
+  }
+  const latest =
+    (over: Partial<ReturnType<typeof blankSnapshot>> = {}) =>
+    (): ReturnType<typeof blankSnapshot> => ({
+      ...blankSnapshot(1),
+      servers: [server, elsewhere],
+      leftovers: [left],
+      heavyJobs: [heavy],
+      ...over
+    })
+  const node = proc(8000, 1, 'node.exe', 'node vue-tsc', 1)
+
+  test('작업 공간의 서버와 남은 프로세스를 확인 창 한 번으로 끈다', async () => {
+    const d = deps({ latest: latest() })
+    const result = await createKiller(d).cleanupWorkspace('c:\\WORK\\')
+    expect(d.confirm).toHaveBeenCalledTimes(1)
+    const box = d.confirm.mock.calls[0][0] as KillConfirm
+    expect(box.title).toBe('작업 공간 정리')
+    expect(box.message).toBe('work 의 2개를 끌까요? 약 1.9 GB 를 확보해요.')
+    expect(box.detail).toContain('• Gradle 데몬 (api · main) — 1.1 GB')
+    expect(box.detail).toContain('• :3000 (shop-web · develop) — 800 MB')
+    expect(box.buttons).toEqual(['모두 끄기', '취소'])
+    expect(d.signal.mock.calls.map((c) => c[0])).toEqual([7100, 4100, 4101])
+    expect(result).toEqual({ status: 'killed', message: '2개를 껐어요. 약 1.9 GB 를 확보했어요.' })
+  })
+
+  test('무거운 작업·에이전트·다른 작업 공간·숨긴 서버는 끄지 않는다', async () => {
+    const hidden = { ...candidate, pid: 4300, ports: [9000], workspace: WS }
+    const d = deps({
+      latest: latest({ agents: [agent], hiddenServers: [hidden] }),
+      resample: async () => ({ processes: [...fresh.processes, node], tcp: [] })
+    })
+    await createKiller(d).cleanupWorkspace('C:\\work')
+    const box = d.confirm.mock.calls[0][0] as KillConfirm
+    expect(box.detail).not.toContain('vue-tsc')
+    expect(box.detail).not.toContain(':5173')
+    expect(box.detail).not.toContain(':9000')
+    const killed = d.signal.mock.calls.map((c) => c[0])
+    expect(killed).not.toContain(8000)
+    expect(killed).not.toContain(5000)
+    expect(killed).not.toContain(4200)
+  })
+
+  test('에이전트가 있으면 확인 창에 경고', async () => {
+    const d = deps({ latest: latest({ agents: [agent] }) })
+    await createKiller(d).cleanupWorkspace('C:\\work')
+    expect((d.confirm.mock.calls[0][0] as KillConfirm).detail).toContain(
+      'Claude 가 이 작업 공간에서 실행 중(쉬는 중)이에요. 서버를 꺼도 에이전트는 그대로예요.'
+    )
+  })
+
+  test('확인 창 사이에 바뀐 항목은 건너뛴다', async () => {
+    const changed: RawSample = {
+      processes: [vite, esbuild, { ...gradle, commandLine: 'java Other' }],
+      tcp: []
+    }
+    const samples = [fresh, changed]
+    const d = deps({ latest: latest(), resample: async () => samples.shift() ?? changed })
+    const result = await createKiller(d).cleanupWorkspace('C:\\work')
+    expect(d.signal.mock.calls.map((c) => c[0])).toEqual([4100, 4101])
+    expect(result.message).toContain('1개는 그 사이 바뀌거나 끝나서 건너뛰었어요.')
+  })
+
+  test('끌 것이 없으면 gone, 잘못된 값은 failed', async () => {
+    const d = deps({ latest: latest() })
+    await expect(createKiller(d).cleanupWorkspace('C:\\none')).resolves.toEqual({ status: 'gone' })
+    expect(d.confirm).not.toHaveBeenCalled()
+    expect((await createKiller(d).cleanupWorkspace(1 as never)).status).toBe('failed')
+    expect((await createKiller(d).cleanupWorkspace('')).status).toBe('failed')
+  })
 })

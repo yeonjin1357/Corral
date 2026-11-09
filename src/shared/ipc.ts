@@ -16,6 +16,7 @@ export const IPC = {
   killServer: 'pitwall:kill-server',
   killLeftover: 'pitwall:kill-leftover',
   killMany: 'pitwall:kill-many',
+  cleanupWorkspace: 'pitwall:cleanup-workspace',
   diskScan: 'pitwall:disk-scan',
   diskRemove: 'pitwall:disk-remove',
   refreshNow: 'pitwall:refresh-now',
@@ -58,6 +59,8 @@ export interface PitwallApi {
   killLeftover(pid: number): Promise<KillResult>
   /** 정리 추천 중 고른 것(선택 키)을 확인 창 하나로 끈다. */
   killMany(keys: string[]): Promise<KillResult>
+  /** 작업 공간의 서버·남은 프로세스를 확인 창 한 번으로 끈다. */
+  cleanupWorkspace(root: string): Promise<KillResult>
   /** 디스크 정리: 끝난 워크트리를 다시 찾고 크기를 잰다(끝날 때까지 기다린다). */
   diskScan(): Promise<DiskReport | null>
   /** 끝난 워크트리의 의존성 폴더를 지운다(메인에서 확인 창). */

@@ -15,6 +15,13 @@ export const text = {
     confirm: '내리기',
     cancel: '취소'
   },
+  cleanupWorkspace: {
+    title: '작업 공간 정리',
+    message: (name: string, n: number, size: string): string =>
+      `${name} 의 ${n}개를 끌까요? 약 ${size} 를 확보해요.`,
+    agent: (tool: string, state: string): string =>
+      `${tool} 가 이 작업 공간에서 실행 중(${state})이에요. 서버를 꺼도 에이전트는 그대로예요.`
+  },
   killMany: {
     title: '메모리 정리',
     message: (n: number, size: string): string => `${n}개를 끌까요? 약 ${size} 를 확보해요.`,

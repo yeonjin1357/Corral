@@ -1,4 +1,5 @@
 import type {
+  AgentRow,
   DashboardSnapshot,
   KillResult,
   LeftoverRow,
@@ -7,9 +8,15 @@ import type {
   ProcessInfo,
   RawSample
 } from '../shared/types'
-import { formatBytes, portList, worktreeLabel } from '../shared/format'
+import { formatBytes, portList, worktreeKey, worktreeLabel } from '../shared/format'
 import { selectionKey } from '../shared/keys'
-import { cleanupRecommendation, type RecommendItem } from '../shared/recommend'
+import {
+  byMemory,
+  cleanupRecommendation,
+  leftoverItem,
+  serverItem,
+  type RecommendItem
+} from '../shared/recommend'
 import { text } from '../shared/text'
 import { classifyAgent, descendantsOf } from './processTree'
 
@@ -17,6 +24,8 @@ import { classifyAgent, descendantsOf } from './processTree'
 const MAX_BATCH = 500
 /** 확인 창에 한 줄씩 보일 최대 항목 수. */
 const CONFIRM_LINES = 10
+/** 작업 공간 경로로 받을 수 있는 최대 길이. */
+const MAX_ROOT_LENGTH = 4096
 
 export type { KillResult }
 
@@ -148,12 +157,41 @@ export function buildManyConfirm(items: RecommendItem[]): KillConfirm {
   }
 }
 
+/**
+ * 작업 공간 한 번에 정리할 때의 확인 창: 그 작업 공간 이름, 항목 목록과 합계,
+ * 그 작업 공간에서 에이전트가 실행 중이면 "에이전트는 그대로" 안내.
+ */
+export function buildWorkspaceConfirm(
+  name: string,
+  items: RecommendItem[],
+  agents: Pick<AgentRow, 'tool' | 'state'>[]
+): KillConfirm {
+  const base = buildManyConfirm(items)
+  const total = items.reduce((sum, i) => sum + i.memoryBytes, 0)
+  const notes = agents
+    .slice(0, 3)
+    .map((a) =>
+      text.cleanupWorkspace.agent(text.ui.agent.tools[a.tool], text.ui.agent.states[a.state])
+    )
+  return {
+    ...base,
+    title: text.cleanupWorkspace.title,
+    message: text.cleanupWorkspace.message(name, items.length, formatBytes(total)),
+    detail: [base.detail, ...(notes.length ? ['', ...notes] : [])].join('\n')
+  }
+}
+
 export function createKiller(deps: KillDeps): {
   /** 서버(포트를 연 프로세스 트리) 하나를 끈다. 맨 위 프로세스의 pid 로 찾는다. */
   killServer(pid: number): Promise<KillResult>
   killLeftover(pid: number): Promise<KillResult>
   /** 정리 추천 중 고른 것들을 확인 창 하나로 끈다. 항목마다 최신 샘플로 다시 확인한다. */
   killMany(keys: string[]): Promise<KillResult>
+  /**
+   * 작업 공간(F2)의 서버와 남은 프로세스를 확인 창 하나로 끈다. 무거운 작업·에이전트·숨긴 서버는 넣지 않는다.
+   * 절차는 killMany 와 같다(확인 창 전후 재샘플링, 에이전트를 자손으로 둔 프로세스는 끄지 않음).
+   */
+  cleanupWorkspace(root: string): Promise<KillResult>
 } {
   const busy = new Set<number>()
 
@@ -269,6 +307,33 @@ export function createKiller(deps: KillDeps): {
           : latest.leftovers.find((r) => selectionKey.leftover(r) === item.key)
       return row ? [{ item, target: row as KillTarget }] : []
     })
+    return killBatch(targets, buildManyConfirm)
+  }
+
+  async function cleanupWorkspace(root: string): Promise<KillResult> {
+    if (typeof root !== 'string' || !root.trim() || root.length > MAX_ROOT_LENGTH)
+      return { status: 'failed', message: text.killResult.invalid }
+    const latest = deps.latest()
+    if (!latest) return { status: 'gone' }
+    const key = worktreeKey(root)
+    const inside = (w: { workspace: { root: string } | null }): boolean =>
+      !!w.workspace && worktreeKey(w.workspace.root) === key
+    const servers = latest.servers.filter((r) => inside(r) && !r.unresolvable)
+    const leftovers = latest.leftovers.filter(inside)
+    const targets = [
+      ...servers.map((row) => ({ item: serverItem(row), target: row as KillTarget })),
+      ...leftovers.map((row) => ({ item: leftoverItem(row), target: row as KillTarget }))
+    ].sort((a, b) => byMemory(a.item, b.item))
+    const name = (servers[0] ?? leftovers[0])?.workspace?.name ?? root
+    const agents = latest.agents.filter(inside)
+    return killBatch(targets, (items) => buildWorkspaceConfirm(name, items, agents))
+  }
+
+  /** 여러 항목을 확인 창 하나로 끈다(확인 창 전후로 다시 샘플링해 바뀐 항목은 건너뛴다). */
+  async function killBatch(
+    targets: { item: RecommendItem; target: KillTarget }[],
+    confirmFor: (items: RecommendItem[]) => KillConfirm
+  ): Promise<KillResult> {
     const busyCount = targets.filter((t) => busy.has(t.item.pid)).length
     const mine = targets.filter((t) => !busy.has(t.item.pid))
     if (mine.length === 0)
@@ -281,7 +346,7 @@ export function createKiller(deps: KillDeps): {
       const before = await deps.resample()
       const ready = mine.filter((t) => planKill(t.target, before).ok)
       if (ready.length === 0) return { status: 'gone' }
-      if (!(await deps.confirm(buildManyConfirm(ready.map((t) => t.item)))))
+      if (!(await deps.confirm(confirmFor(ready.map((t) => t.item)))))
         return { status: 'cancelled' }
 
       // 확인 창을 띄운 동안 시간이 지났으니 항목마다 한 번 더 확인한다.
@@ -322,5 +387,5 @@ export function createKiller(deps: KillDeps): {
     }
   }
 
-  return { killServer, killLeftover, killMany }
+  return { killServer, killLeftover, killMany, cleanupWorkspace }
 }

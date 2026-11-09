@@ -39,6 +39,7 @@ const api: PitwallApi = {
   killServer: (pid) => ipcRenderer.invoke(IPC.killServer, pid),
   killLeftover: (pid) => ipcRenderer.invoke(IPC.killLeftover, pid),
   killMany: (keys) => ipcRenderer.invoke(IPC.killMany, keys),
+  cleanupWorkspace: (root) => ipcRenderer.invoke(IPC.cleanupWorkspace, root),
   diskScan: () => ipcRenderer.invoke(IPC.diskScan),
   diskRemove: (worktreeRoot) => ipcRenderer.invoke(IPC.diskRemove, worktreeRoot),
   refreshNow: () => ipcRenderer.invoke(IPC.refreshNow),

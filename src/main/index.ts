@@ -409,6 +409,12 @@ function registerIpc(): void {
     void scheduler.refreshNow()
     return result
   })
+  ipcMain.handle(IPC.cleanupWorkspace, async (event, root: unknown) => {
+    if (!fromMainWindow(event.sender)) return { status: 'failed', message: text.killResult.invalid }
+    const result = await killer.cleanupWorkspace(root as string)
+    void scheduler.refreshNow()
+    return result
+  })
   ipcMain.handle(IPC.diskScan, async (event) =>
     fromMainWindow(event.sender) ? disk.scan({ manual: true }) : null
   )
