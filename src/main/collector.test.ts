@@ -658,3 +658,76 @@ test('같은 작업 공간에서 에이전트가 일하면 다른 저장소의 �
   expect(s.leftovers.map((l) => [l.pid, l.agentInWorktree])).toEqual([[7100, true]])
   expect(cleanupRecommendation(s).items).toEqual([])
 })
+
+describe('Codex 검토 뒤 보강', () => {
+  test('같은 폴더의 다른 Codex 가 꺼진 뒤에도 그 프로세스가 살아 있던 구간은 기록 찾기에서 뺀다', async () => {
+    const calls: { exclude?: { from: number; to: number }[] }[] = []
+    const codexState = vi.fn<NonNullable<CollectorDeps['codexState']>>(async (agent) => {
+      calls.push(agent)
+      return null
+    })
+    const { deps, clock, samples } = setup({ codexState })
+    const other = { ...proc(6100, 1, 'codex.exe', 0), startedAt: 5 * MIN }
+    const both: RawSample = {
+      ...sampleAt(0),
+      processes: [...sampleAt(0).processes, other],
+      cwds: { 5000: W1.root, 6000: W2.root, 6100: W2.root }
+    }
+    samples.push(both, sampleAt(0))
+    const collector = createCollector({
+      ...deps,
+      resolveProcessWorktrees: async (processes) =>
+        new Map(
+          processes.flatMap((p): [number, WorktreeInfo][] =>
+            p.pid === 5000 || p.pid === 4100 ? [[p.pid, W1]] : p.pid >= 6000 ? [[p.pid, W2]] : []
+          )
+        )
+    })
+    await collector.collect()
+    // 둘이 함께 떠 있으면 어느 쪽 기록인지 몰라 읽지 않는다.
+    expect(codexState).not.toHaveBeenCalled()
+    const seen = clock.now
+    clock.now += 10 * MIN
+    await collector.collect()
+    expect(calls).toHaveLength(1)
+    expect(calls[0].exclude).toEqual([{ from: 5 * MIN, to: seen + MIN }])
+  })
+
+  test('Codex 연동 중 오류로 끝난 턴(Stop 이 오지 않음)은 세션 기록의 끝 이벤트로 바로잡는다', async () => {
+    const after = setup({
+      codexState: async () => ({ state: 'error', since: 3 * MIN }),
+      resolveWorktree: async (path) =>
+        path.startsWith(W1.root) ? W1 : path.startsWith(W2.root) ? W2 : null
+    })
+    applyHookEvent(
+      after.sessions,
+      { session_id: 'c1', cwd: W2.root, hook_event_name: 'UserPromptSubmit' },
+      MIN,
+      'codex'
+    )
+    const s = await createCollector(after.deps).collect()
+    expect(s.agents.find((a) => a.pid === 6000)).toMatchObject({
+      state: 'error',
+      stateSource: 'rollout',
+      stateSince: 3 * MIN
+    })
+
+    // 세션 기록의 끝 이벤트가 훅의 작업 시작보다 이르면(지난 턴) 훅 상태를 그대로 쓴다.
+    const before = setup({
+      codexState: async () => ({ state: 'idle', since: MIN / 2 }),
+      resolveWorktree: async (path) =>
+        path.startsWith(W1.root) ? W1 : path.startsWith(W2.root) ? W2 : null
+    })
+    applyHookEvent(
+      before.sessions,
+      { session_id: 'c1', cwd: W2.root, hook_event_name: 'UserPromptSubmit' },
+      MIN,
+      'codex'
+    )
+    const t = await createCollector(before.deps).collect()
+    expect(t.agents.find((a) => a.pid === 6000)).toMatchObject({
+      state: 'working',
+      stateSource: 'hook'
+    })
+  })
+})

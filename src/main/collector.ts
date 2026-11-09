@@ -29,7 +29,7 @@ import { buildSnapshot, pidsForWorktreeLookup } from './snapshot'
 import { createServerHistory, type ServerHistoryData } from './serverHistory'
 import { cwdKey, type RolloutState } from './codexRollout'
 import type { AgentStateData, ServerMemoData } from './historyStore'
-import { selectionKey } from '../shared/keys'
+import { agentKey, selectionKey } from '../shared/keys'
 import { normalizeCandidate, selfWorkspace } from './collect/worktree'
 
 /** 수집마다 새로 읽는 사용자 기준값(설정 화면에서 바꾸면 다음 수집부터 반영). */
@@ -44,6 +44,10 @@ export interface CollectOptions {
   /** 작업 공간 경로 → 보여 줄 이름. */
   workspaceAliases?: Record<string, string>
 }
+
+/** 다른 Codex 프로세스 생존 구간을 기억하는 시간과, 마지막으로 본 뒤 꺼졌을 수 있는 여유(수집 주기보다 길게). */
+const CODEX_LIFE_KEEP_MS = 24 * 60 * 60 * 1000
+const CODEX_LIFE_SLACK_MS = 60 * 1000
 
 /** 숨김 항목에 맞는 서버: 포트 중 하나가 같거나 프로세스 이름이 같다(대소문자 무시). */
 function isHidden(row: ServerRow, hidden: string[]): boolean {
@@ -79,7 +83,7 @@ export interface CollectorDeps {
   resolveWorkspace: (worktree: WorktreeInfo) => Promise<WorkspaceInfo>
   /** Codex 세션 기록으로 안 상태(F7). 기록이 없으면 null(CPU 추정). 없으면 쓰지 않는다. */
   codexState?: (
-    agent: { cwd: string; startedAt: number | null },
+    agent: { cwd: string; startedAt: number | null; exclude?: { from: number; to: number }[] },
     now: number
   ) => Promise<RolloutState | null>
   /** 훅 서버가 채우는 에이전트 세션들(수집기는 읽고 끝난 것을 버린다). */
@@ -159,6 +163,12 @@ export function createCollector(deps: CollectorDeps): {
    * Codex 에이전트마다 세션 기록 상태를 읽는다. 같은 폴더에서 Codex 가 둘 이상 돌면 어느 쪽 기록인지 알 수 없어
    * 쓰지 않는다(지어내지 않음). 실패하면 그 에이전트는 CPU 추정 그대로.
    */
+  /**
+   * 폴더별로 본 Codex 프로세스의 생존 구간(시작 ~ 마지막으로 본 시각, 하루 보관). 같은 폴더의 다른 프로세스가
+   * 살아 있던 동안 만든 기록 파일은 그 프로세스 것일 수 있어 고르지 않는다(먼저 꺼진 프로세스의 파일을 읽지 않게).
+   */
+  const codexLives = new Map<string, Map<string, { startedAt: number; lastSeen: number }>>()
+
   async function readRollouts(
     agents: AgentRow[],
     cwds: Record<number, string>,
@@ -167,16 +177,39 @@ export function createCollector(deps: CollectorDeps): {
     const result = new Map<number, RolloutState>()
     const read = deps.codexState
     if (!read) return result
-    // 훅으로 이미 정확한 상태를 아는 Codex 는 읽지 않는다(훅이 권한 대기까지 알아 더 정확하다).
-    const codex = agents.filter((a) => a.tool === 'codex' && a.stateSource === 'cpu' && cwds[a.pid])
+    const running = agents.filter((a) => a.tool === 'codex' && cwds[a.pid])
+    for (const a of running) {
+      if (a.startedAt == null) continue
+      const key = cwdKey(cwds[a.pid])
+      const lives = codexLives.get(key) ?? new Map()
+      lives.set(agentKey(a), { startedAt: a.startedAt, lastSeen: now })
+      codexLives.set(key, lives)
+    }
+    for (const [key, lives] of codexLives) {
+      for (const [id, life] of lives) if (now - life.lastSeen > CODEX_LIFE_KEEP_MS) lives.delete(id)
+      if (lives.size === 0) codexLives.delete(key)
+    }
     const count = new Map<string, number>()
-    for (const a of codex) count.set(cwdKey(cwds[a.pid]), (count.get(cwdKey(cwds[a.pid])) ?? 0) + 1)
+    for (const a of running)
+      count.set(cwdKey(cwds[a.pid]), (count.get(cwdKey(cwds[a.pid])) ?? 0) + 1)
+    // CPU 추정인 Codex, 그리고 훅으로 작업 중인 Codex(오류로 끝난 턴은 Stop 이 오지 않아 세션 기록으로 바로잡는다).
+    const wanted = running.filter(
+      (a) => a.stateSource === 'cpu' || (a.stateSource === 'hook' && a.state === 'working')
+    )
     await Promise.all(
-      codex.map(async (a) => {
+      wanted.map(async (a) => {
         const cwd = cwds[a.pid]
         if (count.get(cwdKey(cwd)) !== 1) return
+        const exclude = [...(codexLives.get(cwdKey(cwd)) ?? new Map()).entries()]
+          .filter(([id]) => id !== agentKey(a))
+          .map(([, life]) => ({ from: life.startedAt, to: life.lastSeen + CODEX_LIFE_SLACK_MS }))
         try {
-          const state = await read({ cwd, startedAt: a.startedAt }, now)
+          const state = await read(
+            exclude.length
+              ? { cwd, startedAt: a.startedAt, exclude }
+              : { cwd, startedAt: a.startedAt },
+            now
+          )
           if (state) result.set(a.pid, state)
         } catch {
           // 읽지 못하면 CPU 추정을 쓴다.
@@ -321,7 +354,13 @@ export function createCollector(deps: CollectorDeps): {
     rollouts = await readRollouts(built, raw.cwds ?? {}, now)
     const withRollout = built.map((a): AgentRow => {
       const r = rollouts.get(a.pid)
-      return r ? { ...a, state: r.state, stateSource: 'rollout' } : a
+      if (!r) return a
+      if (a.stateSource === 'cpu') return { ...a, state: r.state, stateSource: 'rollout' }
+      // 훅은 작업 중인데 세션 기록에 그 뒤 끝 이벤트가 있으면(오류로 끝난 턴 등) 세션 기록을 따른다.
+      const since = a.worktree ? hookFor(roots)(a.worktree.root, a.tool)?.since : null
+      return r.state !== 'working' && since != null && r.since >= since
+        ? { ...a, state: r.state, stateSource: 'rollout' }
+        : a
     })
     const stated = withStateSince(withRollout, agentStates, sampledAt, exactSinceFor(roots))
     agentStates = stated.memo
@@ -402,11 +441,14 @@ export function createCollector(deps: CollectorDeps): {
 
   async function restate(snapshot: DashboardSnapshot): Promise<DashboardSnapshot> {
     rootOfCwd = await resolveSessionRoots(rootOfCwd)
-    const hookState = hookStateFor(rootOfCwd)
     const restated = snapshot.agents.map((a): AgentRow => {
-      const fromHook = a.worktree ? hookState(a.worktree.root, a.tool) : null
-      // 훅이 없으면 Codex 세션 기록 상태는 다음 수집에서 다시 읽는다(훅 이벤트와 상관없음).
-      if (!fromHook && a.stateSource === 'rollout') return a
+      const hook = a.worktree ? hookFor(rootOfCwd)(a.worktree.root, a.tool) : null
+      const fromHook = hook?.state ?? null
+      // 세션 기록 상태는 다음 수집에서 다시 읽는다. 그보다 새 훅 이벤트(새 입력 등)가 왔을 때만 훅을 따른다.
+      if (a.stateSource === 'rollout') {
+        const r = rollouts.get(a.pid)
+        if (!hook || (r && hook.since <= r.since)) return a
+      }
       return {
         ...a,
         state: fromHook ?? cpuState(a.cpuPercent),

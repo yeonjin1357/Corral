@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'fs/promises'
+import { appendFile, mkdir, mkdtemp, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import {
@@ -187,4 +187,79 @@ describe('기록 파일 찾기·읽기', () => {
 test('Codex 폴더: CODEX_HOME 이 있으면 그것, 없으면 홈의 .codex', () => {
   expect(codexHome({ CODEX_HOME: 'D:\\codex' }, 'C:\\Users\\dev')).toBe('D:\\codex')
   expect(codexHome({}, '/Users/dev')).toBe(join('/Users/dev', '.codex'))
+})
+
+describe('검토 뒤 보강(긴 턴·다른 프로세스의 기록)', () => {
+  let home: string
+  beforeEach(async () => {
+    home = await mkdtemp(join(tmpdir(), 'pitwall-codex-'))
+  })
+  afterEach(async () => {
+    await rm(home, { recursive: true, force: true })
+  })
+  const pad = (n: number): string => String(n).padStart(2, '0')
+  async function rolloutAt(at: Date, body: string[]): Promise<string> {
+    const dir = join(
+      home,
+      'sessions',
+      String(at.getFullYear()),
+      pad(at.getMonth() + 1),
+      pad(at.getDate())
+    )
+    await mkdir(dir, { recursive: true })
+    const stamp = `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}T${pad(at.getHours())}-${pad(at.getMinutes())}-${pad(at.getSeconds())}`
+    const path = join(dir, `rollout-${stamp}-0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b.jsonl`)
+    const meta = line('session_meta', { id: 'x', cwd: CWD }, at.toISOString())
+    await writeFile(path, [meta, ...body].join('\n') + '\n')
+    return path
+  }
+  const big = (n: number): string[] =>
+    Array.from({ length: n }, (_, i) =>
+      line(
+        'response_item',
+        { type: 'function_call_output', output: 'y'.repeat(1000) + i },
+        '2026-11-09T01:00:01.000Z'
+      )
+    )
+
+  test('긴 턴(64KB 넘는 기록)에서도 작업 중을 잃지 않고, 덧붙은 부분만 이어 읽는다', async () => {
+    const start = new Date(2026, 10, 9, 10, 0, 0)
+    const path = await rolloutAt(new Date(2026, 10, 9, 10, 1, 0), [
+      event('task_started', '2026-11-09T01:00:00.000Z'),
+      ...big(200)
+    ])
+    const reader = createCodexReader(home)
+    const agent = { cwd: CWD, startedAt: start.getTime() }
+    expect(await reader.stateFor(agent, start.getTime() + 5 * MIN)).toEqual({
+      state: 'working',
+      since: Date.parse('2026-11-09T01:00:00.000Z')
+    })
+    await appendFile(
+      path,
+      [...big(100), event('task_complete', '2026-11-09T01:20:00.000Z')].join('\n') + '\n'
+    )
+    expect(await reader.stateFor(agent, start.getTime() + 25 * MIN)).toEqual({
+      state: 'idle',
+      since: Date.parse('2026-11-09T01:20:00.000Z')
+    })
+  })
+
+  test('다른 Codex 프로세스가 살아 있던 동안 만든 기록 파일은 고르지 않는다(그 프로세스 것일 수 있다)', async () => {
+    const start = new Date(2026, 10, 9, 9, 0, 0)
+    const own = await rolloutAt(new Date(2026, 10, 9, 9, 1, 0), [
+      event('task_complete', '2026-11-09T00:02:00.000Z')
+    ])
+    // 09:30~09:40 에 같은 폴더에서 돌다 꺼진 다른 Codex 의 파일(작업 중에 강제 종료).
+    await rolloutAt(new Date(2026, 10, 9, 9, 31, 0), [
+      event('task_started', '2026-11-09T00:31:00.000Z')
+    ])
+    const other = {
+      from: new Date(2026, 10, 9, 9, 30, 0).getTime(),
+      to: new Date(2026, 10, 9, 9, 40, 0).getTime()
+    }
+    const now = new Date(2026, 10, 9, 10, 0, 0).getTime()
+    expect(
+      await findRollout(home, { cwd: CWD, startedAt: start.getTime(), exclude: [other] }, now)
+    ).toBe(own)
+  })
 })

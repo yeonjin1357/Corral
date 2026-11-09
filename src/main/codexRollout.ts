@@ -1,4 +1,4 @@
-import { open, readdir } from 'fs/promises'
+import { open, readdir, stat } from 'fs/promises'
 import { join } from 'path'
 
 /**
@@ -91,7 +91,15 @@ function dayDir(home: string, t: number): string {
  */
 export async function findRollout(
   home: string,
-  agent: { cwd: string; startedAt: number | null },
+  agent: {
+    cwd: string
+    startedAt: number | null
+    /**
+     * 같은 폴더의 다른 Codex 프로세스가 살아 있던 구간. 그 동안 만든 파일은 그 프로세스 것일 수 있어 고르지 않는다
+     * (먼저 꺼진 다른 프로세스의 "작업 중"으로 끝난 파일을 지금 프로세스 것으로 읽지 않게).
+     */
+    exclude?: { from: number; to: number }[]
+  },
   now: number,
   cwdOf: (path: string) => Promise<string | null> = sessionCwd
 ): Promise<string | null> {
@@ -114,7 +122,9 @@ export async function findRollout(
     }
     for (const name of names) {
       const t = rolloutTime(name)
-      if (t != null && t >= earliest) candidates.push({ path: join(dir, name), t })
+      if (t == null || t < earliest) continue
+      if ((agent.exclude ?? []).some((x) => t >= x.from - START_SLACK_MS && t <= x.to)) continue
+      candidates.push({ path: join(dir, name), t })
     }
   }
   candidates.sort((a, b) => b.t - a.t)
@@ -129,8 +139,11 @@ export async function findRollout(
  * 기록 줄에서 지금 상태. 마지막 task_started 뒤에 task_complete·turn_aborted 가 없으면 작업 중,
  * task_complete 에 error 가 있으면 오류, 그 밖은 쉬는 중. since 는 그 이벤트 시각. 근거가 없으면 null.
  */
-export function rolloutState(lines: string[]): RolloutState | null {
-  let state: RolloutState | null = null
+export function rolloutState(
+  lines: string[],
+  initial: RolloutState | null = null
+): RolloutState | null {
+  let state: RolloutState | null = initial
   for (const raw of lines) {
     if (!EVENT_HINT.test(raw)) continue
     let row: { type?: unknown; timestamp?: unknown; payload?: { type?: unknown; error?: unknown } }
@@ -160,13 +173,65 @@ export async function readRolloutState(path: string): Promise<RolloutState | nul
   }
 }
 
-/** 수집기용: 파일 첫 줄의 작업 폴더는 바뀌지 않으므로 기억해 두고, 상태는 매번 끝만 읽는다. */
+/** 한 번에 읽을 크기(처음 읽는 큰 파일도 메모리에 다 올리지 않는다). */
+const READ_CHUNK = 1024 * 1024
+const NEWLINE = 0x0a
+
+/**
+ * 수집기용: 파일 첫 줄의 작업 폴더는 바뀌지 않으므로 기억해 두고, 상태는 파일마다 마지막으로 읽은 위치부터
+ * 덧붙은 부분만 읽어 이어 간다. 긴 턴(도구 출력·추론이 64KB 를 넘음)에서도 task_started 를 잃지 않고,
+ * 큰 파일도 매번 다시 읽지 않는다. 파일이 줄었으면(다시 쓴 경우) 처음부터 읽는다.
+ */
 export function createCodexReader(home: string): {
   stateFor(
-    agent: { cwd: string; startedAt: number | null },
+    agent: { cwd: string; startedAt: number | null; exclude?: { from: number; to: number }[] },
     now: number
   ): Promise<RolloutState | null>
 } {
+  const progress = new Map<string, { offset: number; rest: Buffer; state: RolloutState | null }>()
+
+  async function follow(path: string): Promise<RolloutState | null> {
+    let size: number
+    try {
+      size = (await stat(path)).size
+    } catch {
+      progress.delete(path)
+      return null
+    }
+    let p = progress.get(path)
+    if (!p || size < p.offset) p = { offset: 0, rest: Buffer.alloc(0), state: null }
+    if (size > p.offset) {
+      const file = await open(path, 'r')
+      try {
+        let offset = p.offset
+        let rest = p.rest
+        let state = p.state
+        while (offset < size) {
+          const length = Math.min(READ_CHUNK, size - offset)
+          const chunk = Buffer.alloc(length)
+          const { bytesRead } = await file.read(chunk, 0, length, offset)
+          if (bytesRead <= 0) break
+          offset += bytesRead
+          // 줄 단위로만 해석한다(UTF-8 글자가 덩어리 경계에서 잘리지 않게 바이트로 들고 있다가 줄 끝에서 자른다).
+          const data = Buffer.concat([rest, chunk.subarray(0, bytesRead)])
+          const end = data.lastIndexOf(NEWLINE)
+          if (end < 0) {
+            rest = data
+            continue
+          }
+          state = rolloutState(data.subarray(0, end).toString('utf8').split('\n'), state)
+          rest = Buffer.from(data.subarray(end + 1))
+        }
+        p = { offset, rest, state }
+      } finally {
+        await file.close()
+      }
+    }
+    if (progress.size > 50) progress.clear()
+    progress.set(path, p)
+    return p.state
+  }
+
   const cwdCache = new Map<string, string | null>()
   const cachedCwd = async (path: string): Promise<string | null> => {
     if (cwdCache.has(path)) return cwdCache.get(path)!
@@ -178,7 +243,7 @@ export function createCodexReader(home: string): {
   return {
     async stateFor(agent, now) {
       const path = await findRollout(home, agent, now, cachedCwd)
-      return path ? readRolloutState(path) : null
+      return path ? follow(path).catch(() => null) : null
     }
   }
 }
