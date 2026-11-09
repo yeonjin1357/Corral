@@ -468,6 +468,8 @@ export interface ServerGroup {
   memoryBytes: number
   /** 그 작업 공간에서 실행 중인 에이전트. */
   agents: AgentRow[]
+  /** 머리에 보일 에이전트 로고와 설명(도구 · 상태 · 경과 시간). */
+  agentBadges: { key: string; icon: RowIcon; title: string }[]
   /** 서버 상태 요약. */
   status: Cell
 }
@@ -483,7 +485,12 @@ export interface GroupedRows {
  * 서버가 하나뿐인 작업 공간과 작업 공간을 모르는 서버는 머리 없이 그대로 둔다(NeoHtop 트리 보기의 family 처럼).
  * 에이전트는 작업 공간이 같거나, 묶음 안 서버의 워크트리를 덮는(같거나 상위 폴더) 것을 붙인다.
  */
-export function groupServers(rows: Row[], servers: ServerRow[], agents: AgentRow[]): GroupedRows[] {
+export function groupServers(
+  rows: Row[],
+  servers: ServerRow[],
+  agents: AgentRow[],
+  now: number = Date.now()
+): GroupedRows[] {
   const byKey = new Map(servers.map((r) => [selectionKey.server(r), r]))
   const buckets = new Map<string, { rows: Row[]; servers: ServerRow[] }>()
   const order: string[] = []
@@ -518,6 +525,11 @@ export function groupServers(rows: Row[], servers: ServerRow[], agents: AgentRow
         serverCount: bucket.servers.length,
         memoryBytes: bucket.servers.reduce((sum, r) => sum + r.memoryBytes, 0),
         agents: inside,
+        agentBadges: inside.map((a) => ({
+          key: selectionKey.agent(a),
+          icon: agentIcon(a),
+          title: `${text.ui.agent.toolNames[a.tool]} · ${agentStatus(a, now).text}`
+        })),
         status: groupStatus(bucket.servers)
       },
       rows: bucket.rows

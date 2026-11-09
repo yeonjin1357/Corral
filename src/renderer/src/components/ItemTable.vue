@@ -1,29 +1,39 @@
 <!--
   NeoHtop (MIT) process/ProcessTable.svelte · TableHeader.svelte · ProcessRow.svelte · ActionButtons.svelte.
-  바꾼 점: 프로세스 하나 대신 pitwall 의 항목(포트·에이전트·…) 한 줄, 고정·트리 보기는 없다.
-  동작 칸: 브라우저로 열기 · 자세히 · 내리기(끄기)/지우기. 끄고 지우는 것은 모두 OS 확인 창을 거친다.
+  바꾼 점: 프로세스 하나 대신 pitwall 의 항목(서버·에이전트·…) 한 줄. 고정 줄은 없다.
+  트리 보기는 NeoHtop 의 family 줄(펼치기 화살표·들여쓰기·묶음 합계)을 작업 공간 묶음에 쓴다.
+  동작 칸: 브라우저로 열기 · 자세히 · 내리기(끄기)/지우기 · 숨김 풀기, 묶음 머리는 이름 바꾸기 · 작업 공간 정리.
+  끄고 지우는 것은 모두 OS 확인 창을 거친다.
 -->
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import {
   ArrowDown,
   ArrowDownUp,
   ArrowUp,
+  ChevronDown,
+  ChevronRight,
   CircleCheck,
+  Eraser,
   ExternalLink,
-  Info,
-  Search,
   Eye,
+  FolderGit2,
+  Info,
+  Pencil,
+  Search,
   Trash2,
   X
 } from '@lucide/vue'
-import type { ActionKind, Column, Row, Table, Tone } from '../rows'
+import type { ActionKind, Column, GroupedRows, Row, ServerGroup, Table, Tone } from '../rows'
 import { sortRows } from '../rows'
 import type { SortState } from '../sortState'
+import { formatBytes } from '../../../shared/format'
 import { text } from '../../../shared/text'
 import Button from '../ui/Button.vue'
+import Badge from '../ui/Badge.vue'
 import ItemIcon from './ItemIcon.vue'
-import { TABLE } from '../ui/variants'
+import { INPUT_CLASS, TABLE } from '../ui/variants'
+import { cn } from '../ui/cn'
 
 const props = defineProps<{
   table: Table
@@ -34,11 +44,17 @@ const props = defineProps<{
   emptyText: string
   /** 처리 중인 행(버튼을 막는다). */
   busyKey: string | null
+  /** 묶음 보기: 정렬된 줄을 작업 공간별로 묶는다. 없으면 목록 보기. */
+  group?: ((sorted: Row[]) => GroupedRows[]) | null
 }>()
 const emit = defineEmits<{
   select: [key: string]
   action: [kind: ActionKind, key: string]
   clearSearch: []
+  /** 묶음 머리 동작: 작업 공간 정리. */
+  groupAction: [kind: 'cleanup', root: string]
+  /** 작업 공간 이름 바꾸기(빈 글자면 원래 이름으로). */
+  rename: [root: string, name: string]
 }>()
 
 /**
@@ -46,16 +62,65 @@ const emit = defineEmits<{
  * 여기서 표의 기본 정렬로 되돌리면 사용자가 고른 정렬이 갱신 때마다 풀린다.
  */
 const sort = defineModel<SortState>('sort', { required: true })
+/** 접은 묶음(묶음 키). 화면(App)이 들고 있어 갱신 때도 유지된다. */
+const collapsed = defineModel<string[]>('collapsed', { default: () => [] })
+
 function toggleSort(column: Column): void {
   if (sort.value.id === column.id)
     sort.value = { id: column.id, dir: sort.value.dir === 'asc' ? 'desc' : 'asc' }
   else sort.value = { id: column.id, dir: column.align === 'right' ? 'desc' : 'asc' }
 }
 const sorted = computed(() => sortRows(props.rows, sort.value.id, sort.value.dir))
-const hasActions = computed(() => props.table.rows.some((r) => r.actions.length > 0))
+
+interface Block {
+  key: string
+  group: ServerGroup | null
+  open: boolean
+  rows: Row[]
+}
+const blocks = computed<Block[]>(() => {
+  if (!props.group) return [{ key: 'all', group: null, open: true, rows: sorted.value }]
+  return props.group(sorted.value).map((g, i) => {
+    const open = !g.group || !collapsed.value.includes(g.group.key)
+    return {
+      key: g.group?.key ?? `solo:${g.rows[0]?.id ?? i}`,
+      group: g.group,
+      open,
+      rows: open ? g.rows : []
+    }
+  })
+})
+
+function toggleGroup(key: string): void {
+  collapsed.value = collapsed.value.includes(key)
+    ? collapsed.value.filter((k) => k !== key)
+    : [...collapsed.value, key]
+}
+
+const hasActions = computed(
+  () => props.table.rows.some((r) => r.actions.length > 0) || !!props.group
+)
 const width = computed(
   () => props.table.columns.reduce((sum, col) => sum + col.width, 0) + (hasActions.value ? 120 : 0)
 )
+
+// ── 작업 공간 이름 바꾸기(그 자리에서) ──
+const renaming = ref<string | null>(null)
+const draftName = ref('')
+const nameInput = ref<HTMLInputElement[] | HTMLInputElement | null>(null)
+async function startRename(group: ServerGroup): Promise<void> {
+  renaming.value = group.key
+  draftName.value = group.name
+  await nextTick()
+  const el = Array.isArray(nameInput.value) ? nameInput.value[0] : nameInput.value
+  el?.focus()
+  el?.select()
+}
+function finishRename(group: ServerGroup, save: boolean): void {
+  if (renaming.value !== group.key) return
+  renaming.value = null
+  if (save) emit('rename', group.root, draftName.value.trim())
+}
 
 const TONE: Record<Tone, string> = {
   running: 'var(--status-running)',
@@ -71,6 +136,7 @@ const ICON: Record<ActionKind, unknown> = {
   unhide: Eye
 }
 const DANGER: ActionKind[] = ['kill', 'remove']
+const G = text.ui.group
 </script>
 
 <template>
@@ -126,93 +192,227 @@ const DANGER: ActionKind[] = ['kill', 'remove']
             </tr>
           </thead>
           <tbody data-slot="table-body" :class="TABLE.body">
-            <tr
-              v-for="row in sorted"
-              :key="row.id"
-              data-slot="table-row"
-              :data-selected="row.key != null && row.key === selectedKey"
-              :data-key="row.key ?? undefined"
-              :class="TABLE.row"
-            >
-              <td
-                v-for="col in table.columns"
-                :key="col.id"
-                data-slot="table-cell"
-                :class="[
-                  TABLE.cell,
-                  {
-                    'text-right': col.align === 'right',
-                    'font-mono text-xs': row.cells[col.id]?.mono,
-                    'pl-4': col.id === 'name'
-                  }
-                ]"
+            <template v-for="block in blocks" :key="block.key">
+              <!-- 작업 공간 머리(NeoHtop family 줄): 펼치기 · 이름 · 서버 수 · 에이전트 · 합계 -->
+              <tr
+                v-if="block.group"
+                data-slot="table-row"
+                :data-group="block.group.key"
+                :class="[TABLE.row, 'group-head bg-muted/40']"
               >
-                <div v-if="col.id === 'name'" class="flex min-w-0 items-center gap-2">
+                <td
+                  v-for="col in table.columns"
+                  :key="col.id"
+                  data-slot="table-cell"
+                  :class="[
+                    TABLE.cell,
+                    { 'text-right': col.align === 'right', 'pl-4': col.id === 'name' }
+                  ]"
+                >
+                  <div v-if="col.id === 'name'" class="flex min-w-0 items-center gap-1.5">
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      class="-ml-1 shrink-0 text-muted-foreground"
+                      :aria-expanded="block.open"
+                      :aria-label="
+                        block.open ? G.collapse(block.group.name) : G.expand(block.group.name)
+                      "
+                      :title="
+                        block.open ? G.collapse(block.group.name) : G.expand(block.group.name)
+                      "
+                      @click="toggleGroup(block.group.key)"
+                    >
+                      <ChevronDown v-if="block.open" />
+                      <ChevronRight v-else />
+                    </Button>
+                    <FolderGit2 class="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                    <input
+                      v-if="renaming === block.group.key"
+                      ref="nameInput"
+                      v-model="draftName"
+                      :class="cn(INPUT_CLASS, 'h-7 max-w-48 px-2 py-0 text-[13px]')"
+                      :aria-label="G.renameLabel"
+                      :title="G.renameHint"
+                      maxlength="40"
+                      @keydown.enter.prevent="finishRename(block.group, true)"
+                      @keydown.esc.prevent="finishRename(block.group, false)"
+                      @blur="finishRename(block.group, true)"
+                    />
+                    <span
+                      v-else
+                      class="truncate text-[13px] font-medium"
+                      :title="block.group.root"
+                      >{{ block.group.name }}</span
+                    >
+                    <Badge
+                      variant="secondary"
+                      class="shrink-0 px-1.5 text-[10px] font-normal"
+                      :title="G.servers(block.group.serverCount)"
+                      >{{ block.group.serverCount }}</Badge
+                    >
+                    <span
+                      v-for="agent in block.group.agentBadges.slice(0, 3)"
+                      :key="agent.key"
+                      class="flex shrink-0"
+                      :title="agent.title"
+                    >
+                      <ItemIcon :icon="agent.icon" :size="14" />
+                    </span>
+                  </div>
                   <span
-                    v-if="row.cells.name.icon"
-                    class="flex shrink-0"
-                    :title="row.cells.name.icon.title"
+                    v-else-if="col.id === 'status'"
+                    class="flex items-center gap-1.5 text-xs text-muted-foreground"
+                    :title="block.group.status.text"
                   >
-                    <ItemIcon :icon="row.cells.name.icon" />
+                    <span
+                      class="size-1.5 shrink-0 rounded-full"
+                      :style="{ background: TONE[block.group.status.dot ?? 'idle'] }"
+                    ></span>
+                    <span class="truncate">{{ block.group.status.text }}</span>
                   </span>
-                  <Button
-                    v-if="row.key"
-                    variant="link"
-                    class="h-auto min-w-0 shrink justify-start truncate p-0 text-left text-[13px] font-normal text-foreground"
-                    :title="row.cells.name.title ?? row.cells.name.text"
-                    @click="emit('select', row.key)"
-                  >
-                    <span class="truncate">{{ row.cells.name.text }}</span>
-                  </Button>
-                  <span v-else class="truncate text-[13px]">{{ row.cells.name.text }}</span>
-                </div>
-                <span
-                  v-else-if="row.cells[col.id]?.dot"
-                  class="flex items-center gap-1.5 text-xs text-muted-foreground"
-                  :title="row.cells[col.id].title ?? row.cells[col.id].text"
-                >
                   <span
-                    class="size-1.5 shrink-0 rounded-full"
-                    :style="{ background: TONE[row.cells[col.id].dot!] }"
-                  ></span>
-                  <span class="truncate">{{ row.cells[col.id].text }}</span>
-                </span>
-                <div
-                  v-else
-                  class="truncate"
-                  :class="{ 'text-muted-foreground': row.cells[col.id]?.muted }"
-                  :title="row.cells[col.id]?.title ?? row.cells[col.id]?.text"
-                >
-                  {{ row.cells[col.id]?.text ?? text.ui.none }}
-                </div>
-              </td>
-              <td
-                v-if="hasActions"
-                data-slot="table-cell"
-                :class="[TABLE.cell, 'actions-cell w-28 pr-3']"
-              >
-                <div class="flex items-center justify-end gap-1">
-                  <Button
-                    v-for="action in row.actions"
-                    :key="action.kind"
-                    variant="ghost"
-                    size="icon-xs"
-                    :class="
-                      DANGER.includes(action.kind)
-                        ? 'text-muted-foreground hover:bg-destructive/10 hover:text-destructive'
-                        : 'text-muted-foreground'
-                    "
-                    :aria-label="action.label"
-                    :title="action.label"
-                    :disabled="action.disabled || (busyKey != null && busyKey === row.key)"
-                    :data-action="action.kind"
-                    @click="row.key && emit('action', action.kind, row.key)"
+                    v-else-if="col.id === 'memory'"
+                    class="font-mono text-xs"
+                    :title="G.memoryHint"
+                    >{{ formatBytes(block.group.memoryBytes) }}</span
                   >
-                    <component :is="ICON[action.kind]" />
-                  </Button>
-                </div>
-              </td>
-            </tr>
+                  <span
+                    v-else-if="col.id === 'branch' && block.group.outer"
+                    class="truncate text-muted-foreground"
+                    >{{ G.workspaceRepo }}</span
+                  >
+                </td>
+                <td
+                  v-if="hasActions"
+                  data-slot="table-cell"
+                  :class="[TABLE.cell, 'actions-cell w-28 pr-3']"
+                >
+                  <div class="flex items-center justify-end gap-1">
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      class="text-muted-foreground"
+                      :aria-label="text.ui.actions.rename"
+                      :title="text.ui.actions.rename"
+                      data-action="rename"
+                      @click="startRename(block.group)"
+                    >
+                      <Pencil />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      class="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                      :aria-label="text.ui.actions.cleanup"
+                      :title="text.ui.actions.cleanup"
+                      data-action="cleanup"
+                      @click="emit('groupAction', 'cleanup', block.group.root)"
+                    >
+                      <Eraser />
+                    </Button>
+                  </div>
+                </td>
+              </tr>
+              <tr
+                v-for="row in block.rows"
+                :key="row.id"
+                data-slot="table-row"
+                :data-selected="row.key != null && row.key === selectedKey"
+                :data-key="row.key ?? undefined"
+                :data-depth="block.group ? 1 : undefined"
+                :class="TABLE.row"
+              >
+                <td
+                  v-for="col in table.columns"
+                  :key="col.id"
+                  data-slot="table-cell"
+                  :class="[
+                    TABLE.cell,
+                    {
+                      'text-right': col.align === 'right',
+                      'font-mono text-xs': row.cells[col.id]?.mono,
+                      'pl-4': col.id === 'name'
+                    }
+                  ]"
+                >
+                  <div
+                    v-if="col.id === 'name'"
+                    class="flex min-w-0 items-center gap-2"
+                    :style="block.group ? { paddingLeft: '28px' } : undefined"
+                  >
+                    <span
+                      v-if="row.cells.name.icon"
+                      class="flex shrink-0"
+                      :title="row.cells.name.icon.title"
+                    >
+                      <ItemIcon :icon="row.cells.name.icon" />
+                    </span>
+                    <Button
+                      v-if="row.key"
+                      variant="link"
+                      class="h-auto min-w-0 shrink justify-start truncate p-0 text-left text-[13px] font-normal text-foreground"
+                      :title="row.cells.name.title ?? row.cells.name.text"
+                      @click="emit('select', row.key)"
+                    >
+                      <span class="truncate">{{ row.cells.name.text }}</span>
+                    </Button>
+                    <span v-else class="truncate text-[13px]">{{ row.cells.name.text }}</span>
+                  </div>
+                  <span
+                    v-else-if="row.cells[col.id]?.dot"
+                    class="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground"
+                    :title="row.cells[col.id].title ?? row.cells[col.id].text"
+                  >
+                    <span
+                      class="size-1.5 shrink-0 rounded-full"
+                      :style="{ background: TONE[row.cells[col.id].dot!] }"
+                    ></span>
+                    <span class="truncate">{{ row.cells[col.id].text }}</span>
+                    <Badge
+                      v-if="row.cells[col.id].badge"
+                      variant="outline"
+                      class="shrink-0 border-[color:var(--peach)] px-1.5 text-[10px] font-normal text-[color:var(--peach)]"
+                      >{{ row.cells[col.id].badge }}</Badge
+                    >
+                  </span>
+                  <div
+                    v-else
+                    class="truncate"
+                    :class="{ 'text-muted-foreground': row.cells[col.id]?.muted }"
+                    :title="row.cells[col.id]?.title ?? row.cells[col.id]?.text"
+                  >
+                    {{ row.cells[col.id]?.text ?? text.ui.none }}
+                  </div>
+                </td>
+                <td
+                  v-if="hasActions"
+                  data-slot="table-cell"
+                  :class="[TABLE.cell, 'actions-cell w-28 pr-3']"
+                >
+                  <div class="flex items-center justify-end gap-1">
+                    <Button
+                      v-for="action in row.actions"
+                      :key="action.kind"
+                      variant="ghost"
+                      size="icon-xs"
+                      :class="
+                        DANGER.includes(action.kind)
+                          ? 'text-muted-foreground hover:bg-destructive/10 hover:text-destructive'
+                          : 'text-muted-foreground'
+                      "
+                      :aria-label="action.label"
+                      :title="action.label"
+                      :disabled="action.disabled || (busyKey != null && busyKey === row.key)"
+                      :data-action="action.kind"
+                      @click="row.key && emit('action', action.kind, row.key)"
+                    >
+                      <component :is="ICON[action.kind]" />
+                    </Button>
+                  </div>
+                </td>
+              </tr>
+            </template>
             <tr v-if="sorted.length === 0" data-slot="table-row" :class="TABLE.row">
               <td
                 data-slot="table-cell"

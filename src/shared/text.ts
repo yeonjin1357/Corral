@@ -336,6 +336,20 @@ export const text = {
       withTime: (state: string, duration: string): string => `${state} · ${duration}`,
       groupCount: (label: string, n: number): string => `${label} ${n}`
     },
+    group: {
+      expand: (name: string): string => `${name} 펼치기`,
+      collapse: (name: string): string => `${name} 접기`,
+      servers: (n: number): string => `서버 ${n}개`,
+      renameLabel: '작업 공간 이름',
+      renameHint: 'Enter 로 저장, Esc 로 취소. 비우면 폴더 이름으로 돌아가요.',
+      memoryHint: '묶음 안 서버 메모리 합(서버마다 한 번)',
+      workspaceRepo: '작업 공간 저장소',
+      viewLabel: '개발 서버 보기',
+      list: '목록',
+      grouped: '묶음',
+      hiddenToggle: (n: number): string => `숨김 ${n}개`,
+      hiddenBack: '숨긴 서버 닫기'
+    },
     actions: {
       hide: '숨기기',
       unhide: '숨김 풀기',
