@@ -82,6 +82,7 @@ describe('buildTrayMenu', () => {
       descendantCount: 0,
       state,
       stateSource: 'hook',
+      stateSince: null,
       cpuPercent: 0
     })
     const base = snap()

@@ -1,5 +1,11 @@
-import { buildAgents, WORKING_CPU_PERCENT, type CpuMemo } from './agents'
-import type { AgentState, ProcessInfo, RawSample, WorktreeInfo } from '../shared/types'
+import {
+  buildAgents,
+  measureTreeCpu,
+  withStateSince,
+  WORKING_CPU_PERCENT,
+  type CpuMemo
+} from './agents'
+import type { AgentRow, AgentState, ProcessInfo, RawSample, WorktreeInfo } from '../shared/types'
 
 const MB = 1024 * 1024
 
@@ -267,5 +273,81 @@ describe('훅 상태', () => {
       hookStates: () => 'waiting'
     })
     expect(agents[0]).toMatchObject({ tool: 'codex', state: 'unknown', stateSource: 'cpu' })
+  })
+})
+
+describe('상태 시작 시각(F3)', () => {
+  const row = (over: Partial<AgentRow> = {}): AgentRow => ({
+    pid: 5000,
+    tool: 'codex',
+    worktree: null,
+    workspace: null,
+    startedAt: 100,
+    memoryBytes: 1,
+    descendantCount: 0,
+    state: 'working',
+    stateSource: 'cpu',
+    stateSince: null,
+    cpuPercent: 10,
+    ...over
+  })
+
+  test('CPU 추정 상태의 시작 시각은 처음 본 시각, 상태가 바뀌면 새로', () => {
+    const first = withStateSince([row()], new Map(), 1000, () => null)
+    expect(first.agents[0].stateSince).toBe(1000)
+    const same = withStateSince([row()], first.memo, 6000, () => null)
+    expect(same.agents[0].stateSince).toBe(1000)
+    const idle = withStateSince([row({ state: 'idle' })], same.memo, 11_000, () => null)
+    expect(idle.agents[0].stateSince).toBe(11_000)
+  })
+
+  test('훅 상태면 그 상태가 된 이벤트 시각을 쓴다', () => {
+    const r = withStateSince(
+      [row({ stateSource: 'hook', state: 'waiting' })],
+      new Map(),
+      9000,
+      () => 4000
+    )
+    expect(r.agents[0].stateSince).toBe(4000)
+  })
+
+  test('아직 판단하지 못한 상태(unknown)는 시작 시각이 없고 기억하지 않는다', () => {
+    const r = withStateSince(
+      [row({ state: 'unknown', cpuPercent: null })],
+      new Map(),
+      1000,
+      () => null
+    )
+    expect(r.agents[0].stateSince).toBeNull()
+    expect(r.memo.size).toBe(0)
+  })
+
+  test('사라진 에이전트의 기억은 버린다', () => {
+    const first = withStateSince([row()], new Map(), 1000, () => null)
+    expect(withStateSince([], first.memo, 2000, () => null).memo.size).toBe(0)
+  })
+})
+
+describe('트리 CPU', () => {
+  test('맨 위 프로세스와 자손의 누적 CPU 변화로 잰다(서버에도 같은 계산)', () => {
+    const top: ProcessInfo = {
+      pid: 6100,
+      ppid: 1,
+      name: 'java.exe',
+      commandLine: 'java',
+      memoryBytes: 1,
+      startedAt: 1,
+      cpuMs: 1000
+    }
+    const child: ProcessInfo = { ...top, pid: 6101, ppid: 6100, startedAt: 2, cpuMs: 500 }
+    const first: CpuMemo = new Map()
+    expect(measureTreeCpu(top, [top, child], new Map(), 10_000, first)).toBeNull()
+    const second: CpuMemo = new Map()
+    const later = [
+      { ...top, cpuMs: 1500 },
+      { ...child, cpuMs: 1500 }
+    ]
+    // 10초 동안 0.5초 + 1초 = 1.5초 → 15%.
+    expect(measureTreeCpu(later[0], later, first, 20_000, second)).toBe(15)
   })
 })

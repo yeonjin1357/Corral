@@ -2,6 +2,7 @@ import {
   applyHookEvent,
   reconcileSessions,
   SESSION_EXPIRE_MS,
+  hookStateForWorktree,
   stateForWorktree,
   type LiveClaude,
   type Sessions
@@ -126,6 +127,7 @@ describe('훅 이벤트 → 세션 상태', () => {
       updatedAt: 2000,
       firstSeen: 1000,
       processKey: null,
+      stateSince: 2000,
       stoppedAt: null
     })
   })
@@ -311,5 +313,28 @@ describe('워크트리 상태', () => {
     )
     expect(stateForWorktree(s, CWD, rootOfCwd)).toBe('working')
     expect(stateForWorktree(s, 'C:\\work\\none', rootOfCwd)).toBeNull()
+  })
+})
+
+describe('상태 시작 시각(F3)', () => {
+  test('훅 상태의 시작 시각은 상태가 바뀐 이벤트 시각, 같은 상태 이벤트가 또 와도 그대로', () => {
+    const sessions: Sessions = new Map()
+    const root = (cwd: string): string | null => (cwd.startsWith(CWD) ? CWD : null)
+    applyHookEvent(sessions, ev('UserPromptSubmit'), 1000)
+    applyHookEvent(sessions, ev('PostToolUse', { tool_name: 'Bash' }), 2000)
+    expect(hookStateForWorktree(sessions, CWD, root)).toEqual({ state: 'working', since: 1000 })
+    applyHookEvent(sessions, ev('Stop'), 9000)
+    expect(hookStateForWorktree(sessions, CWD, root)).toEqual({ state: 'idle', since: 9000 })
+    applyHookEvent(sessions, ev('Notification', { notification_type: 'idle_prompt' }), 70_000)
+    expect(hookStateForWorktree(sessions, CWD, root)).toEqual({ state: 'idle', since: 9000 })
+  })
+
+  test('같은 워크트리에 같은 상태 세션이 여럿이면 가장 오래 이어진 시각', () => {
+    const sessions: Sessions = new Map()
+    const root = (cwd: string): string | null => (cwd.startsWith(CWD) ? CWD : null)
+    applyHookEvent(sessions, { ...ev('UserPromptSubmit'), session_id: 'a' }, 5000)
+    applyHookEvent(sessions, { ...ev('UserPromptSubmit'), session_id: 'b' }, 3000)
+    expect(hookStateForWorktree(sessions, CWD, root)).toEqual({ state: 'working', since: 3000 })
+    expect(stateForWorktree(sessions, CWD, root)).toBe('working')
   })
 })

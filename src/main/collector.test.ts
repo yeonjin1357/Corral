@@ -364,3 +364,35 @@ test('작업 공간 판별이 실패하면 그 워크트리 자체를 작업 공
     outer: false
   })
 })
+
+test('서버 CPU 는 서버 트리의 누적 CPU 변화로 잰다', async () => {
+  const { deps, clock, samples } = setup()
+  const withServerCpu = (serverCpu: number): RawSample => {
+    const s = sampleAt(0)
+    return {
+      ...s,
+      processes: s.processes.map((p) => (p.pid === 4100 ? { ...p, cpuMs: serverCpu } : p))
+    }
+  }
+  samples.push(withServerCpu(1000), withServerCpu(3000))
+  const collector = createCollector(deps)
+  const first = await collector.collect()
+  expect(first.servers[0].cpuPercent).toBeNull()
+  clock.now += 10_000
+  const second = await collector.collect()
+  expect(second.servers[0].cpuPercent).toBe(20)
+})
+
+test('에이전트 상태 시작 시각: CPU 추정은 처음 본 시각부터 이어진다', async () => {
+  const { deps, clock, samples } = setup()
+  const collector = createCollector(deps)
+  samples.push(sampleAt(1000), sampleAt(2000), sampleAt(3000))
+  await collector.collect()
+  clock.now += 5000
+  const second = await collector.collect()
+  const since = second.agents.find((a) => a.pid === 5000)!.stateSince
+  expect(since).toBe(clock.now)
+  clock.now += 5000
+  const third = await collector.collect()
+  expect(third.agents.find((a) => a.pid === 5000)!.stateSince).toBe(since)
+})

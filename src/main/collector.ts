@@ -1,5 +1,6 @@
 import type {
   AgentRow,
+  AgentState,
   ClaudeHookStatus,
   DashboardSnapshot,
   Platform,
@@ -10,10 +11,17 @@ import type {
 } from '../shared/types'
 import { worktreeKey } from '../shared/format'
 import type { Settings } from '../shared/settings'
-import { buildAgents, cpuState, type CpuMemo } from './agents'
+import {
+  buildAgents,
+  cpuState,
+  measureTreeCpu,
+  withStateSince,
+  type AgentStateMemo,
+  type CpuMemo
+} from './agents'
 import { activityOf, judgeServers, type ServerMemo } from './judge'
 import { agentToolOf, topLevelAgentPids } from './processTree'
-import { reconcileSessions, stateForWorktree, type LiveClaude, type Sessions } from './sessions'
+import { hookStateForWorktree, reconcileSessions, type LiveClaude, type Sessions } from './sessions'
 import { buildSnapshot, pidsForWorktreeLookup } from './snapshot'
 import { normalizeCandidate, selfWorkspace } from './collect/worktree'
 
@@ -67,16 +75,29 @@ export function createCollector(deps: CollectorDeps): {
   restate(snapshot: DashboardSnapshot): Promise<DashboardSnapshot>
 } {
   let previousCpu: CpuMemo = new Map()
+  /** 서버 트리 CPU(에이전트와 따로 기억 — 같은 프로세스가 둘에 들어가지 않는다). */
+  let previousServerCpu: CpuMemo = new Map()
+  /** 에이전트별 지금 상태를 처음 본 시각(F3). */
+  let agentStates: AgentStateMemo = new Map()
   let serverMemo: ServerMemo = new Map()
   /** 서버별 지난 샘플의 연결 상대(사용 흔적 판단). */
   let serverPeers = new Map<string, Set<string>>()
   /** 세션 작업 폴더 → 워크트리 키. 수집 때마다 다시 판별하고, 그 사이 새 세션은 restate 가 채운다. */
   let rootOfCwd = new Map<string, string | null>()
 
+  const hookFor =
+    (roots: Map<string, string | null>) =>
+    (root: string): ReturnType<typeof hookStateForWorktree> =>
+      hookStateForWorktree(deps.sessions, worktreeKey(root), (cwd) => roots.get(cwd) ?? null)
   const hookStateFor =
     (roots: Map<string, string | null>) =>
-    (root: string): ReturnType<typeof stateForWorktree> =>
-      stateForWorktree(deps.sessions, worktreeKey(root), (cwd) => roots.get(cwd) ?? null)
+    (root: string): AgentState | null =>
+      hookFor(roots)(root)?.state ?? null
+  /** 훅 상태 에이전트의 상태 시작 시각(이벤트 시각). */
+  const hookSinceFor =
+    (roots: Map<string, string | null>) =>
+    (a: AgentRow): number | null =>
+      a.tool === 'claude' && a.worktree ? (hookFor(roots)(a.worktree.root)?.since ?? null) : null
 
   /** known 에 없는 세션 작업 폴더만 판별해 더한 새 표를 돌려준다(known 이 없으면 전부 다시). */
   async function resolveSessionRoots(
@@ -175,7 +196,7 @@ export function createCollector(deps: CollectorDeps): {
       rootOfCwd: (cwd) => roots.get(cwd) ?? null
     })
 
-    const { agents, cpu } = buildAgents({
+    const { agents: built, cpu } = buildAgents({
       sample: raw,
       worktrees,
       devServerPids,
@@ -184,6 +205,9 @@ export function createCollector(deps: CollectorDeps): {
       hookStates: hookStateFor(roots)
     })
     previousCpu = cpu
+    const stated = withStateSince(built, agentStates, sampledAt, hookSinceFor(roots))
+    agentStates = stated.memo
+    const agents = stated.agents
 
     const traces = activityOf(snapshot.servers, raw.tcp, serverPeers)
     serverPeers = traces.connections
@@ -197,8 +221,21 @@ export function createCollector(deps: CollectorDeps): {
     )
     serverMemo = judged.memo
 
+    // 서버 CPU(F5): 서버 트리의 누적 CPU 변화. 에이전트와 같은 계산.
+    const serverCpu: CpuMemo = new Map()
+    const servers = judged.rows.map((row) => {
+      const self = byPid.get(row.pid)
+      if (!self) return row
+      const members = [self, ...row.descendantPids.flatMap((pid) => byPid.get(pid) ?? [])]
+      return {
+        ...row,
+        cpuPercent: measureTreeCpu(self, members, previousServerCpu, sampledAt, serverCpu)
+      }
+    })
+    previousServerCpu = serverCpu
+
     const workspaceOf = await resolveWorkspaces([
-      ...judged.rows.map((r) => r.worktree),
+      ...servers.map((r) => r.worktree),
       ...snapshot.leftovers.map((r) => r.worktree),
       ...snapshot.heavyJobs.map((r) => r.worktree),
       ...agents.map((a) => a.worktree)
@@ -209,7 +246,7 @@ export function createCollector(deps: CollectorDeps): {
 
     return {
       ...snapshot,
-      servers: judged.rows.map(withWorkspace),
+      servers: servers.map(withWorkspace),
       leftovers: snapshot.leftovers.map(withWorkspace),
       heavyJobs: snapshot.heavyJobs.map(withWorkspace),
       agents: agents.map(withWorkspace),
@@ -220,7 +257,7 @@ export function createCollector(deps: CollectorDeps): {
   async function restate(snapshot: DashboardSnapshot): Promise<DashboardSnapshot> {
     rootOfCwd = await resolveSessionRoots(rootOfCwd)
     const hookState = hookStateFor(rootOfCwd)
-    const agents = snapshot.agents.map((a): AgentRow => {
+    const restated = snapshot.agents.map((a): AgentRow => {
       const fromHook = a.tool === 'claude' && a.worktree ? hookState(a.worktree.root) : null
       return {
         ...a,
@@ -228,7 +265,9 @@ export function createCollector(deps: CollectorDeps): {
         stateSource: fromHook ? 'hook' : 'cpu'
       }
     })
-    return { ...snapshot, agents }
+    const stated = withStateSince(restated, agentStates, deps.now(), hookSinceFor(rootOfCwd))
+    agentStates = stated.memo
+    return { ...snapshot, agents: stated.agents }
   }
 
   return { collect, restate }

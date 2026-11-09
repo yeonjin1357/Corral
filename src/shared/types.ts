@@ -178,6 +178,11 @@ export interface AgentRow {
   state: AgentState
   /** hook: Claude 훅 이벤트로 안 상태, cpu: CPU 변화로 짐작한 상태. */
   stateSource: 'hook' | 'cpu'
+  /**
+   * 지금 상태가 시작된 시각. 훅 상태는 그 상태가 된 이벤트 시각, CPU 추정은 pitwall 이 그 상태를 처음 본 시각.
+   * 아직 판단하지 못했으면(unknown) null.
+   */
+  stateSince: number | null
   /** 지난 샘플 이후 하위 트리 CPU 사용률(코어 1개 = 100). 모르면 null. */
   cpuPercent: number | null
 }

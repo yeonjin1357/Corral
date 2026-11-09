@@ -17,6 +17,8 @@ export interface ClaudeSession {
   waitingTool?: string | null
   /** 마지막으로 응답이 끝난(Stop·StopFailure) 시각. 새 입력이 오면 지운다. */
   stoppedAt?: number | null
+  /** 지금 상태가 된 이벤트 시각. 같은 상태 이벤트가 또 와도 그대로다. 없으면 firstSeen. */
+  stateSince?: number
 }
 
 /** 수집 때 본 최상위 Claude 프로세스. */
@@ -126,6 +128,8 @@ export function applyHookEvent(sessions: Sessions, input: unknown, now: number):
     updatedAt: now,
     firstSeen: existing?.firstSeen ?? now,
     processKey: existing?.processKey ?? null,
+    stateSince:
+      existing && existing.state === next ? (existing.stateSince ?? existing.firstSeen) : now,
     ...(next === 'waiting' ? { waitingTool: waitingToolOf(ev, existing) } : {}),
     stoppedAt:
       ev.hook_event_name === 'Stop' || ev.hook_event_name === 'StopFailure'
@@ -205,16 +209,34 @@ function closestBefore(candidates: LiveClaude[], firstSeen: number): LiveClaude 
   return pool.reduce((best, c) => (started(c) > started(best) ? c : best))
 }
 
+/**
+ * 워크트리의 Claude 상태와 그 상태가 시작된 시각. 그 워크트리 세션이 없으면 null.
+ * 같은 상태 세션이 여럿이면 가장 오래 이어진 시각(가장 오래 기다린 권한 대기 등)을 쓴다.
+ */
+export function hookStateForWorktree(
+  sessions: Sessions,
+  root: string,
+  rootOfCwd: (cwd: string) => string | null
+): { state: AgentState; since: number } | null {
+  let best: { state: AgentState; since: number } | null = null
+  for (const s of sessions.values()) {
+    if (rootOfCwd(s.cwd) !== root) continue
+    const since = s.stateSince ?? s.firstSeen
+    if (
+      best === null ||
+      rank(s.state) < rank(best.state) ||
+      (s.state === best.state && since < best.since)
+    )
+      best = { state: s.state, since }
+  }
+  return best
+}
+
 /** 워크트리의 Claude 상태. 그 워크트리 세션이 없으면 null. */
 export function stateForWorktree(
   sessions: Sessions,
   root: string,
   rootOfCwd: (cwd: string) => string | null
 ): AgentState | null {
-  let best: AgentState | null = null
-  for (const s of sessions.values()) {
-    if (rootOfCwd(s.cwd) !== root) continue
-    if (best === null || rank(s.state) < rank(best)) best = s.state
-  }
-  return best
+  return hookStateForWorktree(sessions, root, rootOfCwd)?.state ?? null
 }

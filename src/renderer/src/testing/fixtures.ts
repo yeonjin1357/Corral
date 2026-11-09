@@ -45,6 +45,7 @@ export function agentRow(over: Partial<AgentRow> = {}): AgentRow {
     descendantCount: 3,
     state: 'working',
     stateSource: 'hook',
+    stateSince: null,
     cpuPercent: 12.5,
     ...over
   }

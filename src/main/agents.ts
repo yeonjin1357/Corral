@@ -1,5 +1,6 @@
 import type { AgentRow, AgentState, ProcessInfo, RawSample, WorktreeInfo } from '../shared/types'
 import { worktreeFolder } from '../shared/format'
+import { agentKey } from '../shared/keys'
 import { agentToolOf, buildTree, topLevelAgentPids } from './processTree'
 
 /** 하위 트리 CPU 사용률이 코어 1개 기준 이 값(%) 이상이면 작업 중으로 본다. */
@@ -37,6 +38,67 @@ function cpuDelta(members: ProcessInfo[], previous: CpuMemo, since: number): num
   return delta
 }
 
+/**
+ * 맨 위 프로세스(self)와 그 트리(members, self 포함)의 CPU 사용률(코어 1개 = 100, 소수 1자리 내림).
+ * 지난 기록(previous)과 비교하고 이번 기록을 next 에 쓴다. 지난 기록이 없으면 null.
+ * 짧은 간격(MIN_CPU_WINDOW_MS 미만)으로 다시 재면 지난 값을 그대로 쓰고, 기준(지난 샘플)을 넘겨
+ * 다음 샘플이 충분히 긴 구간으로 재게 한다. 에이전트와 서버가 같은 계산을 쓴다.
+ */
+export function measureTreeCpu(
+  self: ProcessInfo,
+  members: ProcessInfo[],
+  previous: CpuMemo,
+  now: number,
+  next: CpuMemo
+): number | null {
+  const prevSelf = previous.get(cpuKey(self))
+  if (prevSelf && now - prevSelf.at < MIN_CPU_WINDOW_MS) {
+    for (const m of members) {
+      const prev = previous.get(cpuKey(m))
+      if (prev) next.set(cpuKey(m), prev)
+      else if (m.cpuMs != null) next.set(cpuKey(m), { cpuMs: m.cpuMs, at: now })
+    }
+    return prevSelf.percent ?? null
+  }
+  let cpuPercent: number | null = null
+  if (prevSelf && self.cpuMs != null && now > prevSelf.at) {
+    const delta = cpuDelta(members, previous, prevSelf.at)
+    // 표시값과 판단이 어긋나지 않게(1.98% 를 2.0% 로 보이며 쉬는 중이라 하지 않게) 내려서 쓴다.
+    cpuPercent = Math.floor((delta * 1000) / (now - prevSelf.at)) / 10
+  }
+  for (const m of members) if (m.cpuMs != null) next.set(cpuKey(m), { cpuMs: m.cpuMs, at: now })
+  if (self.cpuMs != null)
+    next.set(cpuKey(self), { cpuMs: self.cpuMs, at: now, percent: cpuPercent })
+  return cpuPercent
+}
+
+/** 에이전트별 지금 상태와 그 상태를 처음 본 시각. 키는 agentKey. */
+export type AgentStateMemo = Map<string, { state: AgentState; since: number }>
+
+/**
+ * 에이전트 상태가 시작된 시각(F3)을 채운다. 훅 상태는 그 상태가 된 이벤트 시각(hookSince),
+ * CPU 추정은 pitwall 이 그 상태를 처음 본 시각(memo). 아직 모르는 상태(unknown)는 시각 없음.
+ * memo 에는 지금 있는 에이전트만 남긴다.
+ */
+export function withStateSince(
+  agents: AgentRow[],
+  previous: AgentStateMemo,
+  now: number,
+  hookSince: (agent: AgentRow) => number | null
+): { agents: AgentRow[]; memo: AgentStateMemo } {
+  const memo: AgentStateMemo = new Map()
+  const rows = agents.map((a): AgentRow => {
+    if (a.state === 'unknown') return { ...a, stateSince: null }
+    const key = agentKey(a)
+    const prev = previous.get(key)
+    const fromHook = a.stateSource === 'hook' ? hookSince(a) : null
+    const since = fromHook ?? (prev && prev.state === a.state ? prev.since : now)
+    memo.set(key, { state: a.state, since })
+    return { ...a, stateSince: since }
+  })
+  return { agents: rows, memo }
+}
+
 /** CPU 사용률로 짐작한 상태. 모르면 unknown. */
 export function cpuState(cpuPercent: number | null): AgentState {
   if (cpuPercent == null) return 'unknown'
@@ -68,26 +130,7 @@ export function buildAgents(input: {
       .map((d) => tree.byPid.get(d))
       .filter((p): p is ProcessInfo => p !== undefined)
     const members = [self, ...descendants]
-    const prevSelf = previousCpu.get(cpuKey(self))
-    let cpuPercent: number | null = null
-    if (prevSelf && now - prevSelf.at < MIN_CPU_WINDOW_MS) {
-      // 짧은 간격: 지난 값을 그대로 쓰고, 기준(지난 샘플)을 넘겨 다음 샘플이 충분히 긴 구간으로 재게 한다.
-      cpuPercent = prevSelf.percent ?? null
-      for (const m of members) {
-        const prev = previousCpu.get(cpuKey(m))
-        if (prev) cpu.set(cpuKey(m), prev)
-        else if (m.cpuMs != null) cpu.set(cpuKey(m), { cpuMs: m.cpuMs, at: now })
-      }
-    } else {
-      if (prevSelf && self.cpuMs != null && now > prevSelf.at) {
-        const delta = cpuDelta(members, previousCpu, prevSelf.at)
-        // 표시값과 판단이 어긋나지 않게(1.98% 를 2.0% 로 보이며 쉬는 중이라 하지 않게) 내려서 쓴다.
-        cpuPercent = Math.floor((delta * 1000) / (now - prevSelf.at)) / 10
-      }
-      for (const m of members) if (m.cpuMs != null) cpu.set(cpuKey(m), { cpuMs: m.cpuMs, at: now })
-      if (self.cpuMs != null)
-        cpu.set(cpuKey(self), { cpuMs: self.cpuMs, at: now, percent: cpuPercent })
-    }
+    const cpuPercent = measureTreeCpu(self, members, previousCpu, now, cpu)
 
     const worktree = worktrees.get(pid) ?? null
     const hookState =
@@ -103,6 +146,8 @@ export function buildAgents(input: {
       descendantCount: descendants.length,
       state: hookState ?? cpuState(cpuPercent),
       stateSource: hookState ? 'hook' : 'cpu',
+      // 상태 시작 시각은 이전 상태를 기억하는 수집기(withStateSince)가 채운다.
+      stateSince: null,
       cpuPercent
     })
   }
