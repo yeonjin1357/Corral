@@ -184,11 +184,11 @@ export function windowsSampleScript(helperDllPath: string | null): string {
     '$t = @([PitwallTcp]::Read())',
     '} catch {}',
     "if ($t -eq $null) { $t = @(Get-NetTCPConnection -State Listen,Established,TimeWait -ErrorAction SilentlyContinue | Select-Object OwningProcess, LocalAddress, LocalPort, RemoteAddress, RemotePort, @{ Name = 'State'; Expression = { $_.State.ToString() } }) }",
+    // 모든 프로세스의 작업 폴더를 읽는다(이 PC 에서 560여 개에 약 35ms). 포트를 연 서버·에이전트뿐 아니라
+    // 상대 경로로 실행한 타입 검사·빌드·남은 프로세스의 워크트리, 지우기 직전 그 워크트리를 쓰는 프로세스를 알아낸다.
+    // 다른 사용자·보호된 프로세스는 열 수 없어 건너뛴다.
     "if ('PitwallCwd' -as [type]) {",
-    "$listening = @($t | Where-Object { $_.State -eq 'Listen' -and $_.LocalPort -ge 1024 } | ForEach-Object { $_.OwningProcess } | Sort-Object -Unique)",
-    // 에이전트(Claude Code·Codex)의 작업 폴더도 읽어 어느 워크트리의 세션인지 안다.
-    "$agentPids = @($p | Where-Object { $_.Name -match '^(claude|codex)' -or ($_.CommandLine -and $_.CommandLine -match '@anthropic-ai[\\\\/]claude-code|@openai[\\\\/]codex') } | ForEach-Object { $_.ProcessId })",
-    'foreach ($id in @(@($listening) + $agentPids | Sort-Object -Unique)) { try { $d = [PitwallCwd]::Get([int]$id); if ($d) { $cwds["$id"] = $d } } catch {} }',
+    'foreach ($id in @($p | ForEach-Object { $_.ProcessId })) { if ($id -le 4) { continue }; try { $d = [PitwallCwd]::Get([int]$id); if ($d) { $cwds["$id"] = $d } } catch {} }',
     '}',
     '$privateWs = @{}',
     'if (\'PitwallMem\' -as [type]) { try { foreach ($m in [PitwallMem]::Read()) { $privateWs["$($m.Pid)"] = $m.PrivateWs } } catch {} }',

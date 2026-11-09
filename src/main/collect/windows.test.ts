@@ -150,12 +150,13 @@ test('누적 CPU 시간(CpuMs)을 읽고, 없으면 null', () => {
   expect(s.processes.map((p) => p.cpuMs)).toEqual([1530, null])
 })
 
-test('두 스크립트 모두 CPU 시간을 내고, 기본 스크립트는 에이전트 후보의 작업 폴더도 읽는다', () => {
+test('두 스크립트 모두 CPU 시간을 내고, 기본 스크립트는 모든 프로세스의 작업 폴더를 읽는다', () => {
   for (const script of [WINDOWS_SAMPLE_SCRIPT, windowsSafeScript('C:\\t\\o.json')]) {
     expect(script).toContain('KernelModeTime + $_.UserModeTime')
   }
-  expect(WINDOWS_SAMPLE_SCRIPT).toContain('$agentPids')
-  expect(WINDOWS_SAMPLE_SCRIPT).toMatch(/claude\|codex/)
+  expect(WINDOWS_SAMPLE_SCRIPT).toContain(
+    'foreach ($id in @($p | ForEach-Object { $_.ProcessId }))'
+  )
 })
 
 test('스크립트는 프로세스 시작 시각을 유닉스 ms 로 낸다(부모 pid 재사용 판별용)', () => {
@@ -457,7 +458,7 @@ test('읽는 사이 목록이 커지면(오류 122) 다시 읽고, IPv4·IPv6 �
   expect(WINDOWS_SAMPLE_SCRIPT).toContain('if (!v4 && !v6) throw new InvalidOperationException')
 })
 
-test('스크립트는 포트를 연 프로세스만 골라 작업 폴더를 읽고, 실패해도 나머지는 낸다', () => {
+test('스크립트는 프로세스마다 작업 폴더를 읽고, 실패해도 나머지는 낸다', () => {
   expect(WINDOWS_SAMPLE_SCRIPT).toContain('ReadProcessMemory')
   expect(WINDOWS_SAMPLE_SCRIPT).toContain('[PitwallCwd]::Get(')
   expect(WINDOWS_SAMPLE_SCRIPT).toMatch(/try\s*\{[\s\S]*Add-Type[\s\S]*\}\s*catch/)
@@ -510,6 +511,24 @@ describe.runIf(process.platform === 'win32')('실제 Windows 에서', () => {
       child.kill()
       await exited
       await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
+    }
+  }, 30000)
+
+  test('포트도 없고 에이전트도 아닌 프로세스(타입 검사·빌드 등)의 작업 폴더도 읽는다', async () => {
+    const work = await mkdtemp(join(tmpdir(), 'pitwall-plain-cwd-'))
+    const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 20000)'], {
+      cwd: work,
+      windowsHide: true
+    })
+    const exited = new Promise<void>((r) => child.once('exit', () => r()))
+    try {
+      await new Promise((r) => setTimeout(r, 300))
+      const s = await sampleWindows()
+      expect(s.cwds?.[child.pid!]?.replace(/\\$/, '').toLowerCase()).toBe(work.toLowerCase())
+    } finally {
+      child.kill()
+      await exited
+      await rm(work, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
     }
   }, 30000)
 
@@ -609,17 +628,4 @@ describe.runIf(process.platform === 'win32')('실제 Windows 에서', () => {
       await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
     }
   }, 30000)
-})
-
-test('에이전트 후보 정규식이 npm 설치 경로(역슬래시)에도 맞는다', () => {
-  // PowerShell(.NET)과 JS 는 [\/] 를 '/' 하나로, [\/] 를 '\' 또는 '/' 로 똑같이 읽는다.
-  const pattern = /CommandLine -match '([^']+)'/.exec(WINDOWS_SAMPLE_SCRIPT)?.[1]
-  expect(pattern).toBeDefined()
-  const re = new RegExp(pattern!)
-  const claude = String.raw`"C:\Program Files\nodejs\node.exe" C:\Users\김개발\AppData\Roaming\npm\node_modules\@anthropic-ai\claude-code\cli.js`
-  const codex = String.raw`node C:\Users\김개발\AppData\Roaming\npm\node_modules\@openai\codex\bin\codex.js`
-  expect(re.test(claude)).toBe(true)
-  expect(re.test(codex)).toBe(true)
-  expect(re.test('/usr/local/lib/node_modules/@anthropic-ai/claude-code/cli.js')).toBe(true)
-  expect(re.test(String.raw`C:\work\shop-web\node_modules\.bin\vite`)).toBe(false)
 })
