@@ -17,6 +17,7 @@ import { describeKillResult, formatBytes } from '../../shared/format'
 import { cleanupRecommendation } from '../../shared/recommend'
 import { text } from '../../shared/text'
 import { watchColorScheme } from './theme'
+import { toIpc } from './ipc'
 import {
   POINT_LIMIT,
   agentKey,
@@ -189,7 +190,8 @@ function openSettings(next: SettingsPage): void {
 }
 
 async function saveSettings(next: Settings): Promise<Settings> {
-  const saved = await window.pitwall.settings.save(next)
+  // 설정 화면의 draft·제목줄의 settings 는 Vue 반응형이라 그대로 보내면 IPC 복제에 실패한다.
+  const saved = await window.pitwall.settings.save(toIpc(next))
   settings.value = saved
   return saved
 }
@@ -356,14 +358,27 @@ const emptyText = computed(() => {
 const hookButton = computed(() => hookControls(snapshot.value?.hook ?? null).button)
 
 // ── 알림 카드 ──
+const recommendation = computed(() =>
+  snapshot.value ? cleanupRecommendation(snapshot.value) : { items: [], totalBytes: 0 }
+)
+/**
+ * 정리 추천 카드를 닫으면(NeoHtop 알림 카드의 X) 그때의 상태를 기억해 둔다.
+ * RAM 단계가 바뀌거나 끌 거리가 달라지면 다시 보인다(RAM 이 늘 높은 PC 에서 같은 카드가 자리를 차지하지 않게).
+ */
+const recommendState = computed(
+  () =>
+    `${snapshot.value?.memory.level}|${recommendation.value.items
+      .map((i) => i.key)
+      .sort()
+      .join(',')}`
+)
+const recommendDismissed = ref<string | null>(null)
 const showRecommend = computed(
   () =>
     !!snapshot.value &&
     snapshot.value.memory.totalBytes > 0 &&
-    snapshot.value.memory.level !== 'normal'
-)
-const recommendation = computed(() =>
-  snapshot.value ? cleanupRecommendation(snapshot.value) : { items: [], totalBytes: 0 }
+    snapshot.value.memory.level !== 'normal' &&
+    recommendDismissed.value !== recommendState.value
 )
 const RECOMMEND_SHOWN = 4
 
@@ -464,9 +479,11 @@ const takenAt = computed(() =>
         <NoticeCard
           v-if="showRecommend"
           class="recommend-box"
+          dismissible
           :title="text.ui.home.recommendTitle"
           :icon="Lightbulb"
           :color="snapshot.memory.level === 'danger' ? 'var(--destructive)' : 'var(--peach)'"
+          @dismiss="recommendDismissed = recommendState"
         >
           {{
             recommendation.items.length
