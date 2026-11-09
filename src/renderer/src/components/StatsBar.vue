@@ -93,7 +93,13 @@ const portLogos = computed(() =>
 )
 const agentLogos = computed(() => groupLogos(s.value.agents.map(agentIcon)))
 
-const portMemory = computed(() => s.value.ports.reduce((sum, p) => sum + p.memoryBytes, 0))
+/**
+ * 카드의 메모리는 메모리 카드 묶음과 같은 값을 쓴다. 표의 행을 더하면 한 프로세스가 포트를 둘 열 때 두 번 세고,
+ * 에이전트 행에는 그 아래에서 도는 무거운 작업이 들어 있어 묶음 값과 어긋난다.
+ */
+const groupBytes = (group: ProcessGroup): number =>
+  s.value.groups.find((g) => g.group === group)?.memoryBytes ?? 0
+const portMemory = computed(() => groupBytes('devServer'))
 
 // 세 칸 합이 전체와 같도록 셋째 칸은 나머지 전부. 모두 쉬는 중일 때만 "쉬는 중", 확인 중·오류가 섞이면 "그 외".
 const agentCounts = computed(() => {
@@ -109,10 +115,10 @@ const agentCounts = computed(() => {
       : text.ui.cards.agentOthers
   }
 })
-const agentMemory = computed(() => s.value.agents.reduce((sum, a) => sum + a.memoryBytes, 0))
+const agentMemory = computed(() => groupBytes('agent'))
 const hookOn = computed(() => s.value.hook?.state === 'on')
 
-const heavyMemory = computed(() => s.value.heavyJobs.reduce((sum, j) => sum + j.memoryBytes, 0))
+const heavyMemory = computed(() => groupBytes('heavy'))
 
 // 에이전트가 있는 워크트리의 남은 프로세스는 그 에이전트가 쓰고 있을 수 있어 개수에서 뺀다.
 const freeLeftovers = computed(() => s.value.leftovers.filter((l) => !l.agentInWorktree))
