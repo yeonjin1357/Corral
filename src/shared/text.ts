@@ -328,9 +328,19 @@ export const text = {
       leftoverAgent: '에이전트 워크트리',
       leftoverFree: '끌 수 있음',
       diskInUse: '사용 중',
-      diskFree: '지울 수 있음'
+      diskFree: '지울 수 있음',
+      hidden: '숨김',
+      memoryGrowth: '메모리 증가',
+      memoryGrowthTitle: (minutes: number, from: string, to: string): string =>
+        `${minutes}분 동안 ${from} → ${to}`,
+      withTime: (state: string, duration: string): string => `${state} · ${duration}`,
+      groupCount: (label: string, n: number): string => `${label} ${n}`
     },
     actions: {
+      hide: '숨기기',
+      unhide: '숨김 풀기',
+      cleanup: '작업 공간 정리',
+      rename: '이름 바꾸기',
       details: '자세히',
       open: '브라우저로 열기',
       kill: '내리기',

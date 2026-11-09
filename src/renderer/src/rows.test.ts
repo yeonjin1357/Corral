@@ -1,4 +1,4 @@
-import { filterRows, sortRows, tableFor, TABS } from './rows'
+import { filterRows, groupServers, hiddenServerTable, sortRows, tableFor, TABS } from './rows'
 import {
   GB,
   MB,
@@ -254,5 +254,125 @@ describe('행 아이콘(NeoHtop 처럼 첫 칸에 무엇이 도는지)', () => {
     expect(tableFor('leftovers', s).rows[0].cells.name.icon?.brand?.title).toBe('Gradle')
     expect(tableFor('heavy', s).rows[0].cells.name.icon?.brand?.title).toBe('TypeScript')
     expect(tableFor('disk', s).rows[0].cells.name.icon?.fallback).toBe('folder')
+  })
+})
+
+describe('작업 공간 묶음(F1)', () => {
+  const MINUTE = 60_000
+  const WS = { root: 'C:\\work\\ws', name: 'ws', branch: 'main', outer: true }
+  const SOLO = { root: 'C:\\work\\shop-web', name: 'shop-web', branch: 'develop', outer: false }
+  const front = serverRow({
+    pid: 1,
+    ports: [5173],
+    memoryBytes: 300 * MB,
+    clientCount: 1,
+    worktree: { root: 'C:\\work\\ws\\repos\\front', branch: 'main', isLinkedWorktree: false },
+    workspace: WS
+  })
+  const api = serverRow({
+    pid: 2,
+    ports: [6176, 8081, 9091],
+    memoryBytes: 2 * GB,
+    clientCount: 0,
+    judgement: 'candidate',
+    idleSince: 0,
+    worktree: { root: 'C:\\work\\ws\\repos\\api', branch: 'main', isLinkedWorktree: false },
+    workspace: WS
+  })
+  const solo = serverRow({ pid: 3, ports: [3000], memoryBytes: 900 * MB, workspace: SOLO })
+  const claude = agentRow({
+    worktree: { root: 'C:\\work\\ws', branch: 'main', isLinkedWorktree: false },
+    workspace: WS,
+    state: 'working',
+    stateSince: 0
+  })
+  const s = snapshot({ takenAt: 12 * MINUTE, servers: [solo, front, api], agents: [claude] })
+  const rows = sortRows(tableFor('ports', s).rows, 'port', 'asc')
+
+  test('작업 공간별로 묶고 머리에 서버 수·메모리 합·에이전트·상태 요약', () => {
+    const groups = groupServers(rows, s.servers, s.agents)
+    expect(groups.map((g) => [g.group?.name ?? null, g.rows.map((r) => r.key)])).toEqual([
+      [null, ['server:3:200']],
+      ['ws', ['server:1:200', 'server:2:200']]
+    ])
+    const ws = groups[1].group!
+    expect(ws).toMatchObject({
+      key: 'group:c:\\work\\ws',
+      root: 'C:\\work\\ws',
+      serverCount: 2,
+      memoryBytes: 300 * MB + 2 * GB
+    })
+    expect(ws.agents.map((a) => a.pid)).toEqual([claude.pid])
+    expect(ws.status).toEqual({ text: '정리 후보 1 · 사용 중 1', dot: 'stopped' })
+  })
+
+  test('혼자인 작업 공간은 머리 없이, 작업 공간을 모르는 서버(판별 불가)도 머리 없이', () => {
+    const unknown = serverRow({
+      pid: 4,
+      ports: [8080],
+      workspace: null,
+      worktree: null,
+      unresolvable: true
+    })
+    const t = snapshot({ servers: [solo, unknown] })
+    const groups = groupServers(tableFor('ports', t).rows, t.servers, [])
+    expect(groups.every((g) => g.group === null)).toBe(true)
+    expect(groups.map((g) => g.rows.length)).toEqual([1, 1])
+  })
+
+  test('묶음 순서는 정렬된 줄에서 처음 나온 순서(정렬을 따른다)', () => {
+    const byMemory = sortRows(tableFor('ports', s).rows, 'memory', 'desc')
+    const groups = groupServers(byMemory, s.servers, s.agents)
+    expect(groups.map((g) => g.group?.name ?? null)).toEqual(['ws', null])
+    expect(groups[0].rows.map((r) => r.key)).toEqual(['server:2:200', 'server:1:200'])
+  })
+})
+
+describe('새 정보 표시(F3·F5·F6)', () => {
+  test('에이전트 상태 칸에 경과 시간', () => {
+    const now = 60 * 60_000
+    const s = snapshot({
+      takenAt: now,
+      agents: [
+        agentRow({ pid: 1, state: 'working', stateSince: now - 12 * 60_000 }),
+        agentRow({ pid: 2, state: 'waiting', stateSince: now - 3 * 60_000, startedAt: 2 }),
+        agentRow({ pid: 3, state: 'unknown', stateSince: null, startedAt: 3 })
+      ]
+    })
+    expect(tableFor('agents', s).rows.map((r) => r.cells.status.text)).toEqual([
+      '작업 중 · 12분',
+      '권한 대기 · 3분',
+      '확인 중'
+    ])
+  })
+
+  test('개발 서버 표에 CPU 칸(OS 기준)과 메모리 증가 배지', () => {
+    const s = snapshot({
+      platform: 'win32',
+      cpuCount: 8,
+      servers: [
+        serverRow({
+          cpuPercent: 40,
+          memoryGrowth: { fromBytes: 2 * GB, toBytes: 3.6 * GB, minutes: 30 }
+        }),
+        serverRow({ pid: 9, cpuPercent: null })
+      ]
+    })
+    const [grown, plain] = tableFor('ports', s).rows
+    expect(grown.cells.cpu).toMatchObject({ text: '5.0%', sort: 5 })
+    expect(grown.cells.status.badge).toBe('메모리 증가')
+    expect(grown.cells.status.title).toContain('30분 동안 2.0 GB → 3.6 GB')
+    expect(plain.cells.cpu).toMatchObject({ text: '—', muted: true })
+    expect(plain.cells.status.badge).toBeUndefined()
+  })
+
+  test('숨긴 서버 표: 숨김 풀기 버튼만 있고 상태는 숨김', () => {
+    const s = snapshot({
+      servers: [],
+      hiddenServers: [serverRow({ ports: [2375], processName: 'docker.exe' })]
+    })
+    const t = hiddenServerTable(s)
+    expect(t.rows.map((r) => [r.cells.port.text, r.cells.status.text])).toEqual([[':2375', '숨김']])
+    expect(t.rows[0].actions.map((a) => a.kind)).toEqual(['unhide'])
   })
 })

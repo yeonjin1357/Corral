@@ -13,6 +13,7 @@ import {
   ExternalLink,
   Info,
   Search,
+  Eye,
   Trash2,
   X
 } from '@lucide/vue'
@@ -66,7 +67,8 @@ const ICON: Record<ActionKind, unknown> = {
   open: ExternalLink,
   details: Info,
   kill: X,
-  remove: Trash2
+  remove: Trash2,
+  unhide: Eye
 }
 const DANGER: ActionKind[] = ['kill', 'remove']
 </script>

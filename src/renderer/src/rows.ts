@@ -11,15 +11,18 @@ import type {
   LeftoverRow,
   Platform,
   ServerRow,
+  AgentState,
   WorktreeInfo
 } from '../../shared/types'
 import { selectionKey } from '../../shared/keys'
 import {
+  agentCovers,
   displayCpuPercent,
   formatBytes,
   formatDuration,
   portList,
-  worktreeFolder
+  worktreeFolder,
+  worktreeKey
 } from '../../shared/format'
 import { exePathOf } from '../../shared/exePath'
 import { text } from '../../shared/text'
@@ -56,9 +59,11 @@ export interface Cell {
   mono?: boolean
   muted?: boolean
   dot?: Tone
+  /** 글자 옆 작은 표시(메모리 증가 등). */
+  badge?: string
 }
 
-export type ActionKind = 'open' | 'details' | 'kill' | 'remove'
+export type ActionKind = 'open' | 'details' | 'kill' | 'remove' | 'unhide'
 export interface RowAction {
   kind: ActionKind
   label: string
@@ -112,7 +117,7 @@ const searchOf = (...parts: (string | number | null | undefined)[]): string =>
     .join(' ')
     .toLowerCase()
 
-function serverStatus(row: ServerRow, now: number): Cell {
+function judgedStatus(row: ServerRow, now: number): Cell {
   const idle = row.idleSince != null ? ` · ${formatDuration(now - row.idleSince)}` : ''
   if (row.unresolvable) return { text: st.unresolvable, dot: 'idle' }
   if (row.judgement === 'candidate') return { text: `${st.candidate}${idle}`, dot: 'stopped' }
@@ -120,6 +125,38 @@ function serverStatus(row: ServerRow, now: number): Cell {
   if (row.clientCount > 0) return { text: st.inUse, dot: 'running' }
   if (row.agentInWorktree) return { text: st.agent, dot: 'idle' }
   return { text: `${st.idle}${idle}`, dot: 'idle' }
+}
+
+/** 서버 상태 칸. 메모리가 계속 늘면 배지와 근거(F6). */
+function serverStatus(row: ServerRow, now: number): Cell {
+  const cell = judgedStatus(row, now)
+  const g = row.memoryGrowth
+  if (!g) return cell
+  return {
+    ...cell,
+    badge: st.memoryGrowth,
+    title: `${cell.text} · ${st.memoryGrowthTitle(g.minutes, formatBytes(g.fromBytes), formatBytes(g.toBytes))}`
+  }
+}
+
+/** CPU 칸(OS 도구와 같은 기준). 모르면 '-'. */
+function cpuCell(cpuPercent: number | null, s: DashboardSnapshot): Cell {
+  const cpu = displayCpuPercent(cpuPercent, s.platform, s.cpuCount)
+  return cpu == null
+    ? { text: text.ui.none, sort: -1, muted: true }
+    : { text: `${cpu.toFixed(1)}%`, sort: cpu, mono: true }
+}
+
+/** 에이전트 상태 칸: "작업 중 · 12분"(F3). 아직 모르는 상태는 시간 없이. */
+function agentStatus(a: AgentRow, now: number): Cell {
+  const label = text.ui.agent.states[a.state]
+  return {
+    text:
+      a.stateSince != null && a.state !== 'unknown'
+        ? st.withTime(label, formatDuration(Math.max(0, now - a.stateSince)))
+        : label,
+    dot: AGENT_TONE[a.state]
+  }
 }
 
 const TOOL_LOGO: Record<AgentTool, string> = { claude: claudeCodeLogo, codex: codexLogo }
@@ -172,7 +209,7 @@ export function appIcon(app: AppUsage): RowIcon {
   }
 }
 
-const AGENT_TONE: Record<DashboardSnapshot['agents'][number]['state'], Tone> = {
+const AGENT_TONE: Record<AgentState, Tone> = {
   working: 'running',
   waiting: 'warn',
   idle: 'idle',
@@ -189,8 +226,9 @@ export function tableFor(tab: TabKey, s: DashboardSnapshot): Table {
           { id: 'name', label: c.project, width: 220 },
           { id: 'port', label: c.port, width: 124 },
           { id: 'branch', label: c.branch, width: 240 },
-          { id: 'status', label: c.status, width: 180 },
+          { id: 'status', label: c.status, width: 200 },
           { id: 'clients', label: c.clients, width: 64, align: 'right' },
+          { id: 'cpu', label: c.cpu, width: 72, align: 'right' },
           { id: 'memory', label: c.memory, width: 96, align: 'right' },
           { id: 'process', label: c.process, width: 160 }
         ],
@@ -209,6 +247,7 @@ export function tableFor(tab: TabKey, s: DashboardSnapshot): Table {
             branch: branchOf(p.worktree),
             status: serverStatus(p, now),
             clients: { text: String(p.clientCount), sort: p.clientCount, mono: true },
+            cpu: cpuCell(p.cpuPercent, s),
             memory: memoryCell(p.memoryBytes),
             process: { text: p.processName, mono: true, muted: true }
           },
@@ -245,7 +284,7 @@ export function tableFor(tab: TabKey, s: DashboardSnapshot): Table {
             cells: {
               name: { text: folderOf(a.worktree), title: a.worktree?.root, icon: agentIcon(a) },
               branch: branchOf(a.worktree),
-              status: { text: text.ui.agent.states[a.state], dot: AGENT_TONE[a.state] },
+              status: agentStatus(a, now),
               cpu:
                 cpu == null
                   ? { text: text.ui.none, sort: -1, muted: true }
@@ -415,4 +454,100 @@ export function sortRows(rows: Row[], id: string, dir: 'asc' | 'desc'): Row[] {
     if (typeof x === 'number' && typeof y === 'number') return (x - y) * sign
     return String(x).localeCompare(String(y), 'ko') * sign
   })
+}
+
+/** 작업 공간 묶음 머리(F1). */
+export interface ServerGroup {
+  /** 화면 키(`group:<작업 공간 키>`). */
+  key: string
+  root: string
+  name: string
+  outer: boolean
+  serverCount: number
+  /** 서버 메모리 합(서버마다 한 번). */
+  memoryBytes: number
+  /** 그 작업 공간에서 실행 중인 에이전트. */
+  agents: AgentRow[]
+  /** 서버 상태 요약. */
+  status: Cell
+}
+
+export interface GroupedRows {
+  /** null 이면 머리 없이 서버 줄만(혼자인 작업 공간·작업 공간을 모르는 서버). */
+  group: ServerGroup | null
+  rows: Row[]
+}
+
+/**
+ * 정렬·검색을 거친 서버 줄을 작업 공간별로 묶는다. 묶음 순서는 그 묶음의 줄이 처음 나온 순서라 정렬을 따른다.
+ * 서버가 하나뿐인 작업 공간과 작업 공간을 모르는 서버는 머리 없이 그대로 둔다(NeoHtop 트리 보기의 family 처럼).
+ * 에이전트는 작업 공간이 같거나, 묶음 안 서버의 워크트리를 덮는(같거나 상위 폴더) 것을 붙인다.
+ */
+export function groupServers(rows: Row[], servers: ServerRow[], agents: AgentRow[]): GroupedRows[] {
+  const byKey = new Map(servers.map((r) => [selectionKey.server(r), r]))
+  const buckets = new Map<string, { rows: Row[]; servers: ServerRow[] }>()
+  const order: string[] = []
+  rows.forEach((row, i) => {
+    const server = row.key ? byKey.get(row.key) : undefined
+    const id = server?.workspace ? `group:${worktreeKey(server.workspace.root)}` : `solo:${i}`
+    let bucket = buckets.get(id)
+    if (!bucket) {
+      bucket = { rows: [], servers: [] }
+      buckets.set(id, bucket)
+      order.push(id)
+    }
+    bucket.rows.push(row)
+    if (server) bucket.servers.push(server)
+  })
+  return order.map((id) => {
+    const bucket = buckets.get(id)!
+    const ws = bucket.servers[0]?.workspace
+    if (!ws || bucket.rows.length < 2) return { group: null, rows: bucket.rows }
+    const roots = bucket.servers.flatMap((r) => (r.worktree ? [r.worktree.root] : []))
+    const inside = agents.filter(
+      (a) =>
+        (a.workspace && worktreeKey(a.workspace.root) === worktreeKey(ws.root)) ||
+        (a.worktree && roots.some((root) => agentCovers([a.worktree!.root], root)))
+    )
+    return {
+      group: {
+        key: id,
+        root: ws.root,
+        name: ws.name,
+        outer: ws.outer,
+        serverCount: bucket.servers.length,
+        memoryBytes: bucket.servers.reduce((sum, r) => sum + r.memoryBytes, 0),
+        agents: inside,
+        status: groupStatus(bucket.servers)
+      },
+      rows: bucket.rows
+    }
+  })
+}
+
+/** 묶음 상태 요약: 정리 후보·확인해볼 것·사용 중 수, 점 색은 가장 급한 것. */
+function groupStatus(servers: ServerRow[]): Cell {
+  const candidate = servers.filter((r) => r.judgement === 'candidate').length
+  const check = servers.filter((r) => r.judgement === 'check').length
+  const inUse = servers.filter((r) => r.clientCount > 0 && r.judgement !== 'check').length
+  const parts = [
+    candidate ? st.groupCount(st.candidate, candidate) : null,
+    check ? st.groupCount(st.check, check) : null,
+    inUse ? st.groupCount(st.inUse, inUse) : null
+  ].filter((p): p is string => p != null)
+  const dot: Tone = candidate ? 'stopped' : check ? 'warn' : inUse ? 'running' : 'idle'
+  return { text: parts.length ? parts.join(' · ') : st.idle, dot }
+}
+
+/** 설정에서 숨긴 서버(표 바닥 "숨김 n개"를 누르면 보인다). 숨김 풀기만 할 수 있다. */
+export function hiddenServerTable(s: DashboardSnapshot): Table {
+  const base = tableFor('ports', { ...s, servers: s.hiddenServers })
+  return {
+    ...base,
+    rows: base.rows.map((row) => ({
+      ...row,
+      cells: { ...row.cells, status: { text: st.hidden, dot: 'idle' as const } },
+      actions: [{ kind: 'unhide' as const, label: ACTIONS.unhide }]
+    }))
+  }
 }
