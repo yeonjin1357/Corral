@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import { IPC, type NavigateTarget, type PitwallApi } from '../shared/ipc'
-import type { DashboardSnapshot } from '../shared/types'
+import type { DashboardSnapshot, UpdateStatus } from '../shared/types'
 import type { Settings } from '../shared/settings'
 
 /** 렌더러에는 pitwall 이 쓰는 동작만 노출한다(ipcRenderer 전체를 넘기지 않음). */
@@ -15,6 +15,18 @@ const api: PitwallApi = {
   },
   getLatest: () => ipcRenderer.invoke(IPC.getLatest),
   appInfo: () => ipcRenderer.invoke(IPC.appInfo),
+  update: {
+    get: () => ipcRenderer.invoke(IPC.updateGet),
+    check: () => ipcRenderer.invoke(IPC.updateCheck),
+    install: () => ipcRenderer.invoke(IPC.updateInstall),
+    onChange(callback) {
+      const handler = (_event: IpcRendererEvent, status: UpdateStatus): void => callback(status)
+      ipcRenderer.on(IPC.updateChanged, handler)
+      return () => {
+        ipcRenderer.removeListener(IPC.updateChanged, handler)
+      }
+    }
+  },
   onNavigate(callback) {
     const handler = (_event: IpcRendererEvent, target: NavigateTarget): void => callback(target)
     ipcRenderer.on(IPC.navigate, handler)

@@ -1,4 +1,10 @@
-import type { ClaudeHookStatus, DashboardSnapshot, DiskReport, KillResult } from './types'
+import type {
+  ClaudeHookStatus,
+  DashboardSnapshot,
+  DiskReport,
+  KillResult,
+  UpdateStatus
+} from './types'
 import type { Settings } from './settings'
 
 /** 메인 ↔ 렌더러 IPC 채널 이름. */
@@ -20,7 +26,11 @@ export const IPC = {
   settingsPickFolder: 'pitwall:settings-pick-folder',
   settingsChanged: 'pitwall:settings-changed',
   navigate: 'pitwall:navigate',
-  appInfo: 'pitwall:app-info'
+  appInfo: 'pitwall:app-info',
+  updateGet: 'pitwall:update-get',
+  updateCheck: 'pitwall:update-check',
+  updateInstall: 'pitwall:update-install',
+  updateChanged: 'pitwall:update-changed'
 } as const
 
 /** 알림·트레이에서 창을 열며 보여 줄 곳. key 는 목록 선택 키(null 이면 한눈에 보기). */
@@ -59,6 +69,14 @@ export interface PitwallApi {
   }
   /** 앱 버전 등(설정 > 정보). */
   appInfo(): Promise<{ version: string }>
+  /** 새 버전 확인(설정 > 정보). */
+  update: {
+    get(): Promise<UpdateStatus | null>
+    check(): Promise<UpdateStatus | null>
+    /** Windows: 받아 둔 새 버전을 설치하려고 다시 시작한다. */
+    install(): Promise<void>
+    onChange(callback: (status: UpdateStatus) => void): () => void
+  }
   /** 알림·트레이에서 특정 화면으로 가라고 할 때 호출된다. 반환 함수로 구독을 끊는다. */
   onNavigate(callback: (target: NavigateTarget) => void): () => void
   /** 사용자 설정. 저장하면 메인이 범위를 고쳐 저장·반영한 값을 돌려준다. */

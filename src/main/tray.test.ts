@@ -8,7 +8,7 @@ import {
   createTrayController,
   type TrayLike
 } from './tray'
-import type { AgentRow, DashboardSnapshot, HeavyJobRow } from '../shared/types'
+import type { AgentRow, DashboardSnapshot, HeavyJobRow, UpdateStatus } from '../shared/types'
 import { blankSnapshot } from '../shared/snapshot'
 
 const GB = 1024 ** 3
@@ -307,5 +307,42 @@ describe('createTrayController', () => {
     const mac = setup('darwin')
     mac.controller.notifyHiddenOnce()
     expect(mac.tray.displayBalloon).not.toHaveBeenCalled()
+  })
+})
+
+describe('새 버전', () => {
+  const status = (
+    state: UpdateStatus['state'],
+    version: string | null = '0.2.0'
+  ): UpdateStatus => ({
+    state,
+    version,
+    url: 'https://github.com/yeonjin1357/pitwall/releases/tag/v0.2.0',
+    error: null,
+    checkedAt: 1
+  })
+
+  test('Windows 에서 다 받았으면 다시 시작해 설치, macOS 새 버전이면 내려받기 줄(누르면 각 동작)', () => {
+    const install = vi.fn()
+    const openRelease = vi.fn()
+    const acts = { ...actions, installUpdate: install, openRelease }
+    const ready = buildTrayMenu(snap(), acts, status('ready'))
+    ready.find((i) => i.label === '새 버전 0.2.0 — 다시 시작해 설치')!.click!(
+      {} as never,
+      undefined,
+      {} as never
+    )
+    expect(install).toHaveBeenCalled()
+    const available = buildTrayMenu(snap(), acts, status('available'))
+    available.find((i) => i.label === '새 버전 0.2.0 내려받기')!.click!(
+      {} as never,
+      undefined,
+      {} as never
+    )
+    expect(openRelease).toHaveBeenCalledWith(
+      'https://github.com/yeonjin1357/pitwall/releases/tag/v0.2.0'
+    )
+    for (const state of ['none', 'checking', 'downloading', 'error', 'disabled'] as const)
+      expect(labels(buildTrayMenu(snap(), acts, status(state))).join()).not.toContain('새 버전')
   })
 })

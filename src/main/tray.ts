@@ -1,6 +1,6 @@
 import { deflateSync } from 'zlib'
 import type { MenuItemConstructorOptions } from 'electron'
-import type { DashboardSnapshot, MemoryLevel, Platform } from '../shared/types'
+import type { DashboardSnapshot, MemoryLevel, Platform, UpdateStatus } from '../shared/types'
 import { formatBytes } from '../shared/format'
 import { text } from '../shared/text'
 
@@ -20,11 +20,16 @@ export interface TrayActions {
   open(): void
   settings(): void
   quit(): void
+  /** Windows: 받아 둔 새 버전을 설치(다시 시작). */
+  installUpdate?(): void
+  /** macOS: 새 버전 릴리스 페이지 열기. */
+  openRelease?(url: string): void
 }
 
 export function buildTrayMenu(
   s: DashboardSnapshot | null,
-  actions: TrayActions
+  actions: TrayActions,
+  update: UpdateStatus | null = null
 ): MenuItemConstructorOptions[] {
   const items: MenuItemConstructorOptions[] = []
   if (!s) {
@@ -57,6 +62,18 @@ export function buildTrayMenu(
     const diskBytes = (s.disk?.rows ?? []).reduce((sum, r) => sum + (r.totalBytes ?? 0), 0)
     if (diskBytes > 0)
       items.push({ label: text.tray.disk(formatBytes(diskBytes)), click: () => actions.open() })
+  }
+  if (update?.state === 'ready' && update.version)
+    items.push({
+      label: text.tray.updateReady(update.version),
+      click: () => actions.installUpdate?.()
+    })
+  if (update?.state === 'available' && update.version && update.url) {
+    const url = update.url
+    items.push({
+      label: text.tray.updateAvailable(update.version),
+      click: () => actions.openRelease?.(url)
+    })
   }
   items.push(
     { type: 'separator' },
@@ -159,14 +176,21 @@ export function createTrayController<Icon, Menu>(deps: {
   buildMenu: (items: MenuItemConstructorOptions[]) => Menu
   actions: TrayActions
   platform: Platform
-}): { update(s: DashboardSnapshot | null): void; notifyHiddenOnce(): void } {
+}): {
+  update(s: DashboardSnapshot | null): void
+  setUpdate(status: UpdateStatus): void
+  notifyHiddenOnce(): void
+} {
   let menuKey = ''
+  let last: DashboardSnapshot | null = null
+  let updateStatus: UpdateStatus | null = null
   let tooltip = ''
   let level: MemoryLevel | null = null
   let notified = false
 
   function apply(s: DashboardSnapshot | null): void {
-    const items = buildTrayMenu(s, deps.actions)
+    last = s
+    const items = buildTrayMenu(s, deps.actions, updateStatus)
     // 열려 있는 메뉴가 닫히거나 깜빡이지 않도록, 내용이 바뀔 때만 다시 만든다.
     const key = JSON.stringify(items.map((i) => [i.type ?? '', i.label ?? '', i.enabled ?? true]))
     if (key !== menuKey) {
@@ -194,6 +218,10 @@ export function createTrayController<Icon, Menu>(deps: {
 
   return {
     update: apply,
+    setUpdate(status) {
+      updateStatus = status
+      apply(last)
+    },
     notifyHiddenOnce() {
       if (notified || deps.platform !== 'win32') return
       notified = true

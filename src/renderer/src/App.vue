@@ -11,7 +11,7 @@ import {
   faGear,
   faRotateRight
 } from '@fortawesome/free-solid-svg-icons'
-import type { DashboardSnapshot, KillResult } from '../../shared/types'
+import type { DashboardSnapshot, KillResult, UpdateStatus } from '../../shared/types'
 import { DEFAULT_SETTINGS, REFRESH_INTERVALS, type Settings } from '../../shared/settings'
 import { describeKillResult } from '../../shared/format'
 import { text } from '../../shared/text'
@@ -42,6 +42,7 @@ const recommendNotice = ref<string | null>(null)
 const settings = ref<Settings>(DEFAULT_SETTINGS)
 const page = ref<'dashboard' | 'settings'>('dashboard')
 const version = ref<string | null>(null)
+const update = ref<UpdateStatus | null>(null)
 const intervals = computed(() => REFRESH_INTERVALS[settings.value.refresh])
 
 function receive(s: DashboardSnapshot): void {
@@ -52,6 +53,7 @@ function receive(s: DashboardSnapshot): void {
 let unsubscribe: () => void = () => {}
 let unsubscribeSettings: () => void = () => {}
 let unsubscribeNavigate: () => void = () => {}
+let unsubscribeUpdate: () => void = () => {}
 let stopTheme: () => void = () => {}
 
 onMounted(async () => {
@@ -70,6 +72,8 @@ onMounted(async () => {
   })
   void window.pitwall.settings.get().then((s) => (settings.value = s))
   void window.pitwall.appInfo().then((info) => (version.value = info.version))
+  unsubscribeUpdate = window.pitwall.update.onChange((s) => (update.value = s))
+  void window.pitwall.update.get().then((s) => (update.value = s))
   const latest = await window.pitwall.getLatest()
   // 창이 늦게 열려 놓친 스냅샷만 채운다. 그 사이 받은 더 새 스냅샷은 덮어쓰지 않는다.
   if (!snapshot.value && latest) receive(latest)
@@ -79,6 +83,7 @@ onUnmounted(() => {
   unsubscribe()
   unsubscribeSettings()
   unsubscribeNavigate()
+  unsubscribeUpdate()
   stopTheme()
 })
 
@@ -125,6 +130,8 @@ async function saveSettings(next: Settings): Promise<Settings> {
 }
 
 const pickFolder = (): Promise<string | null> => window.pitwall.settings.pickFolder()
+const checkUpdate = (): void => void window.pitwall.update.check()
+const installUpdate = (): void => void window.pitwall.update.install()
 
 function select(key: string): void {
   if (key !== selectedKey.value) notice.value = null
@@ -288,7 +295,10 @@ async function hookAction(action: 'enable' | 'disable'): Promise<void> {
       :version="version"
       :save="saveSettings"
       :pick-folder="pickFolder"
+      :update="update"
       @hook="hookAction"
+      @update-check="checkUpdate"
+      @update-install="installUpdate"
     />
     <p v-else-if="!snapshot" class="text-secondary">{{ text.ui.loading }}</p>
     <div v-else class="row">

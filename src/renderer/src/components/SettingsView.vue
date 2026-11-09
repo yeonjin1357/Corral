@@ -6,7 +6,7 @@
 -->
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import type { ClaudeHookStatus } from '../../../shared/types'
+import type { ClaudeHookStatus, UpdateStatus } from '../../../shared/types'
 import {
   DEFAULT_SETTINGS,
   REFRESH_INTERVALS,
@@ -26,8 +26,14 @@ const props = defineProps<{
   /** 저장하고 메인이 고친(범위 안으로) 값을 돌려준다. */
   save: (next: Settings) => Promise<Settings>
   pickFolder: () => Promise<string | null>
+  /** 새 버전 확인 상태(설정 > 정보). */
+  update?: UpdateStatus | null
 }>()
-const emit = defineEmits<{ hook: [action: 'enable' | 'disable'] }>()
+const emit = defineEmits<{
+  hook: [action: 'enable' | 'disable']
+  updateCheck: []
+  updateInstall: []
+}>()
 
 type Page = 'general' | 'thresholds' | 'heavy' | 'notifications' | 'disk' | 'claude' | 'about'
 const PAGES: Page[] = ['general', 'thresholds', 'heavy', 'notifications', 'disk', 'claude', 'about']
@@ -105,6 +111,31 @@ function removeRepo(path: string): void {
 }
 
 const controls = computed(() => hookControls(props.hook))
+
+const updateText = computed(() => {
+  const u = props.update
+  const t = text.ui.settings.updates
+  if (!u) return t.idle
+  switch (u.state) {
+    case 'disabled':
+      return props.settings.updateCheck ? t.disabledDev : t.disabledOff
+    case 'idle':
+      return t.idle
+    case 'checking':
+      return t.checking
+    case 'none':
+      return t.none
+    case 'available':
+      return t.available(u.version ?? '')
+    case 'downloading':
+      return t.downloading(u.version ?? '')
+    case 'ready':
+      return t.ready(u.version ?? '')
+    case 'error':
+      return t.error(u.error ?? '')
+  }
+  return t.idle
+})
 
 const REPO_URL = 'https://github.com/yeonjin1357/pitwall'
 const NOTICES_URL = `${REPO_URL}/blob/main/THIRD_PARTY_NOTICES.md`
@@ -410,6 +441,42 @@ const NOTICES_URL = `${REPO_URL}/blob/main/THIRD_PARTY_NOTICES.md`
                       text.ui.settings.notices
                     }}</a>
                   </p>
+                </div>
+                <div class="mb-4">
+                  <label class="form-label">{{ text.ui.settings.updates.title }}</label>
+                  <p
+                    class="update-state mb-2"
+                    :class="{ 'text-danger': update?.state === 'error' }"
+                  >
+                    {{ updateText }}
+                  </p>
+                  <div class="d-flex gap-2 flex-wrap">
+                    <button
+                      v-if="update?.state === 'ready'"
+                      type="button"
+                      class="btn btn-primary btn-update-install"
+                      @click="emit('updateInstall')"
+                    >
+                      {{ text.ui.settings.updates.install }}
+                    </button>
+                    <a
+                      v-if="update?.state === 'available' && update.url"
+                      class="btn btn-primary update-download"
+                      :href="update.url"
+                      target="_blank"
+                      rel="noopener"
+                    >
+                      {{ text.ui.settings.updates.download }}
+                    </a>
+                    <button
+                      type="button"
+                      class="btn btn-normal btn-update-check"
+                      :disabled="update?.state === 'checking' || update?.state === 'downloading'"
+                      @click="emit('updateCheck')"
+                    >
+                      {{ text.ui.settings.updates.check }}
+                    </button>
+                  </div>
                 </div>
               </template>
 

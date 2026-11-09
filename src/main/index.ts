@@ -8,8 +8,10 @@ import {
   Menu,
   nativeImage,
   nativeTheme,
+  net,
   Notification
 } from 'electron'
+import { autoUpdater } from 'electron-updater'
 import { join } from 'path'
 import { cpus, homedir } from 'os'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
@@ -38,6 +40,7 @@ import { createKiller, type KillConfirm } from './kill'
 import { createDiskManager, createRepoMemory, snapshotWorktrees } from './disk'
 import { createNotifier, type Notice } from './notifier'
 import { loginItemOptions, shouldStartHidden } from './startup'
+import { createUpdater } from './updates'
 import { localUrlFor } from './open'
 import { createDotIcon, createTrayController, encodePng, LEVEL_COLORS } from './tray'
 import type { MemoryLevel } from '../shared/types'
@@ -180,7 +183,12 @@ function createTray(): void {
     actions: {
       open: showWindow,
       settings: () => navigate({ page: 'settings' }),
-      quit: () => app.quit()
+      quit: () => app.quit(),
+      installUpdate: () => {
+        quitting = true
+        updater.install()
+      },
+      openRelease: (url) => void shell.openExternal(url)
     },
     platform: platform ?? 'win32'
   })
@@ -253,6 +261,32 @@ const claude = createClaudeIntegration({
   onEvent: scheduleRestate
 })
 
+/** 새 버전 확인: 시작 10초 뒤, 6시간마다, 설정에서 켤 때. */
+const UPDATE_FIRST_CHECK_MS = 10 * 1000
+const UPDATE_CHECK_EVERY_MS = 6 * 60 * 60 * 1000
+const updater = createUpdater({
+  platform: platform ?? 'win32',
+  packaged: app.isPackaged,
+  currentVersion: app.getVersion(),
+  enabled: () => settings.updateCheck,
+  fetchJson: async (url) => {
+    // 사용자 정보는 보내지 않는다(일반 이름의 User-Agent 만).
+    const response = await net.fetch(url, {
+      headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'pitwall' }
+    })
+    if (!response.ok) throw new Error(`GitHub ${response.status}`)
+    return response.json()
+  },
+  // 설치한 Windows 앱만 자동 업데이트(macOS 는 서명이 없어 설치할 수 없다).
+  autoUpdater: process.platform === 'win32' && app.isPackaged ? autoUpdater : null,
+  now: Date.now,
+  onChange: (status) => {
+    if (mainWindow && !mainWindow.isDestroyed())
+      mainWindow.webContents.send(IPC.updateChanged, status)
+    trayController?.setUpdate(status)
+  }
+})
+
 /** Windows 수집 보조 코드(C#)를 앱 데이터 폴더에 한 번만 컴파일해 두고, 예전 버전 DLL 은 지운다. */
 function prepareWindowsHelper(): void {
   if (platform !== 'win32') return
@@ -294,6 +328,7 @@ async function saveSettings(next: unknown): Promise<Settings> {
   const saved = await updateConfig(app.getPath('userData'), (c) => ({ ...c, settings: normalized }))
   applySettings(saved.settings)
   void scheduler.refreshNow()
+  if (saved.settings.updateCheck && !before.updateCheck) void updater.check()
   const diskChanged =
     JSON.stringify([before.dependencyDirs, before.extraRepos]) !==
     JSON.stringify([saved.settings.dependencyDirs, saved.settings.extraRepos])
@@ -350,6 +385,15 @@ function registerIpc(): void {
     return result
   })
   ipcMain.handle(IPC.appInfo, () => ({ version: app.getVersion() }))
+  ipcMain.handle(IPC.updateGet, (event) => (fromMainWindow(event.sender) ? updater.status() : null))
+  ipcMain.handle(IPC.updateCheck, async (event) =>
+    fromMainWindow(event.sender) ? updater.check() : null
+  )
+  ipcMain.handle(IPC.updateInstall, (event) => {
+    if (!fromMainWindow(event.sender)) return
+    quitting = true
+    updater.install()
+  })
   ipcMain.handle(IPC.settingsGet, (event) =>
     fromMainWindow(event.sender) ? settings : DEFAULT_SETTINGS
   )
@@ -435,6 +479,8 @@ if (!app.requestSingleInstanceLock()) {
     await repoMemory.load()
     setTimeout(() => void disk.scan(), DISK_FIRST_SCAN_MS)
     setInterval(() => void disk.scan(), DISK_SCAN_EVERY_MS)
+    setTimeout(() => void updater.check(), UPDATE_FIRST_CHECK_MS)
+    setInterval(() => void updater.check(), UPDATE_CHECK_EVERY_MS)
 
     app.on('browser-window-created', (_, window) => {
       optimizer.watchWindowShortcuts(window)

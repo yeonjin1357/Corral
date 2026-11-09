@@ -2,7 +2,7 @@
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import SettingsView from './SettingsView.vue'
 import { DEFAULT_SETTINGS, type Settings } from '../../../shared/settings'
-import type { ClaudeHookStatus } from '../../../shared/types'
+import type { ClaudeHookStatus, UpdateStatus } from '../../../shared/types'
 
 const HOOK: ClaudeHookStatus = {
   state: 'off',
@@ -159,4 +159,67 @@ test('저장이 실패하면 이유를 빨간 글씨로 보인다', async () => 
   await flushPromises()
   expect(w.get('.save-notice').text()).toBe('저장하지 못했어요: 디스크가 가득 찼어요')
   expect(w.get('.save-notice').classes()).toContain('text-danger')
+})
+
+describe('정보: 새 버전', () => {
+  function withUpdate(update: UpdateStatus | null, settings = DEFAULT_SETTINGS): VueWrapper {
+    return mount(SettingsView, {
+      props: {
+        settings,
+        hook: HOOK,
+        hookBusy: false,
+        version: '0.1.0',
+        save: async (s: Settings) => s,
+        pickFolder: async () => null,
+        update
+      }
+    })
+  }
+  const status = (
+    state: UpdateStatus['state'],
+    over: Partial<UpdateStatus> = {}
+  ): UpdateStatus => ({
+    state,
+    version: null,
+    url: null,
+    error: null,
+    checkedAt: null,
+    ...over
+  })
+
+  test('상태 문구와 지금 확인 버튼', async () => {
+    const w = withUpdate(status('none'))
+    await open(w, '정보')
+    expect(w.get('.update-state').text()).toBe('최신 버전이에요.')
+    await w.get('.btn-update-check').trigger('click')
+    expect(w.emitted('updateCheck')).toHaveLength(1)
+  })
+
+  test('Windows 에서 다 받았으면 다시 시작해 설치, macOS 새 버전이면 내려받기 링크', async () => {
+    const ready = withUpdate(status('ready', { version: '0.2.0' }))
+    await open(ready, '정보')
+    expect(ready.get('.update-state').text()).toBe(
+      '새 버전 0.2.0 을 받았어요. 다시 시작하면 설치돼요.'
+    )
+    await ready.get('.btn-update-install').trigger('click')
+    expect(ready.emitted('updateInstall')).toHaveLength(1)
+
+    const url = 'https://github.com/yeonjin1357/pitwall/releases/tag/v0.2.0'
+    const available = withUpdate(status('available', { version: '0.2.0', url }))
+    await open(available, '정보')
+    expect(available.get('.update-state').text()).toBe('새 버전 0.2.0 이 있어요.')
+    expect(available.get('.update-download').attributes('href')).toBe(url)
+  })
+
+  test('꺼짐·개발 실행·오류를 구분해 알린다', async () => {
+    const off = withUpdate(status('disabled'), { ...DEFAULT_SETTINGS, updateCheck: false })
+    await open(off, '정보')
+    expect(off.get('.update-state').text()).toBe('새 버전 확인이 꺼져 있어요(설정 > 일반).')
+    const dev = withUpdate(status('disabled'))
+    await open(dev, '정보')
+    expect(dev.get('.update-state').text()).toBe('개발 실행에서는 새 버전을 확인하지 않아요.')
+    const error = withUpdate(status('error', { error: 'offline' }))
+    await open(error, '정보')
+    expect(error.get('.update-state').text()).toBe('새 버전을 확인하지 못했어요: offline')
+  })
 })

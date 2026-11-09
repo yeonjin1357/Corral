@@ -147,6 +147,8 @@ export const text = {
     heavy: (n: number, overlap: boolean): string =>
       overlap ? `무거운 작업 ${n}개 · 겹침(RAM 부족)` : `무거운 작업 ${n}개`,
     disk: (size: string): string => `디스크 정리 가능 ${size}`,
+    updateReady: (v: string): string => `새 버전 ${v} — 다시 시작해 설치`,
+    updateAvailable: (v: string): string => `새 버전 ${v} 내려받기`,
     open: '앱 열기',
     settings: '설정',
     quit: '종료',
@@ -219,6 +221,21 @@ export const text = {
       repo: 'GitHub 저장소',
       license: '라이선스: MIT',
       notices: '가져온 오픈소스와 라이선스',
+      updates: {
+        title: '새 버전',
+        idle: '아직 확인하지 않았어요.',
+        disabledOff: '새 버전 확인이 꺼져 있어요(설정 > 일반).',
+        disabledDev: '개발 실행에서는 새 버전을 확인하지 않아요.',
+        checking: '확인하는 중…',
+        none: '최신 버전이에요.',
+        available: (v: string): string => `새 버전 ${v} 이 있어요.`,
+        downloading: (v: string): string => `새 버전 ${v} 을 내려받는 중이에요.`,
+        ready: (v: string): string => `새 버전 ${v} 을 받았어요. 다시 시작하면 설치돼요.`,
+        error: (e: string): string => `새 버전을 확인하지 못했어요: ${e}`,
+        check: '지금 확인',
+        install: '다시 시작해 설치',
+        download: '내려받기 페이지'
+      },
       description:
         '로컬 AI 코딩 에이전트·개발 서버 포트·RAM·디스크를 한눈에 보고 정리하는 트레이 앱이에요.'
     },

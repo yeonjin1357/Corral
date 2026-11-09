@@ -191,6 +191,18 @@ export interface DashboardSnapshot {
   collectMode?: CollectMode | null
 }
 
+/**
+ * 새 버전 확인 상태. disabled: 개발 실행·설정에서 끔, available: 새 버전 있음(macOS — 내려받기 페이지),
+ * downloading·ready: Windows 자동 업데이트가 받는 중·다 받음(다시 시작하면 설치).
+ */
+export interface UpdateStatus {
+  state: 'disabled' | 'idle' | 'checking' | 'none' | 'available' | 'downloading' | 'ready' | 'error'
+  version: string | null
+  url: string | null
+  error: string | null
+  checkedAt: number | null
+}
+
 /** 끝난 워크트리의 의존성 폴더 하나. */
 export interface DiskFolder {
   name: string

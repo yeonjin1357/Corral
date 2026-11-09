@@ -35,6 +35,12 @@ function installApi(
       return off
     }),
     appInfo: vi.fn(async () => ({ version: '0.1.0' })),
+    update: {
+      get: vi.fn(async () => null),
+      check: vi.fn(async () => null),
+      install: vi.fn(async () => {}),
+      onChange: vi.fn(() => () => {})
+    },
     onNavigate: vi.fn((c: (t: NavigateTarget) => void) => {
       nav = c
       return () => {}
@@ -430,4 +436,16 @@ test('디스크 정리: 이미 없어졌으면 디스크에 맞는 문구, 다�
   await w.get('.btn-remove').trigger('click')
   await flushPromises()
   expect(w.get('.remove-notice').text()).toBe('이미 정리됐거나 더는 끝난 워크트리가 아니에요.')
+})
+
+test('설정 > 정보에서 지금 확인을 누르면 메인에 새 버전 확인을 요청한다', async () => {
+  const fake = installApi()
+  const w = await mountWith(fake)
+  await w.get('header .nav-settings').trigger('click')
+  await w
+    .findAll('.settings-menu a')
+    .find((a) => a.text() === '정보')!
+    .trigger('click')
+  await w.get('.btn-update-check').trigger('click')
+  expect(fake.api.update.check).toHaveBeenCalled()
 })
