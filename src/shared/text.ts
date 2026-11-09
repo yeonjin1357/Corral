@@ -368,6 +368,8 @@ export const text = {
       heavy: '무거운 작업',
       otherApps: '다른 앱',
       system: '시스템·공유 메모리',
+      systemNote:
+        '시스템·공유 메모리: 커널·드라이버, 여러 앱이 같이 쓰는 메모리, pitwall 이 읽을 수 없는 프로세스(보안 프로그램·관리자 권한 등)를 합친 값이에요.',
       processes: (n: number): string => `${n}개`
     },
     detail: {

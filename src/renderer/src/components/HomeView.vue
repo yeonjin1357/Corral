@@ -259,6 +259,7 @@ const groups = computed(() =>
           </tr>
         </tbody>
       </table>
+      <p class="group-note mb-0 mt-2">{{ text.ui.groups.systemNote }}</p>
     </div>
 
     <div v-if="snapshot.topApps.length" class="shadow-box table-shadow-box top-apps-box">
@@ -302,6 +303,12 @@ table {
   font-size: 13px;
   color: $secondary-text;
   margin: 4px 0 0;
+}
+
+.group-note {
+  font-size: 12px;
+  color: $secondary-text;
+  padding: 0 8px;
 }
 
 .collect-mode {

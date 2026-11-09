@@ -341,16 +341,18 @@ export function parseWindowsSample(raw: string): RawSample {
     throw new Error(`invalid JSON: ${text.slice(0, 120)}`)
   }
 
-  // 전용 작업 세트(작업 관리자 "메모리" 열)가 있으면 그것을, 없으면(보조 코드 없음·오래된 Windows) 작업 세트를 쓴다.
+  // 전용 작업 세트(작업 관리자 "메모리" 열)를 쓴다. 보조 코드가 돌았는데 값이 없는 프로세스는 열 수 없었던 것
+  // (보안 프로그램·다른 사용자·보호된 프로세스)이라 0 으로 두어 "시스템·공유" 몫에 들어가게 한다 — 작업 세트로 채우면
+  // 공유 메모리까지 세어 실제보다 몇 배 크게 보인다. 보조 코드가 아예 없으면(막힘·오래된 Windows) 작업 세트를 쓴다.
   const privateWs =
     data?.privateWs && typeof data.privateWs === 'object' && !Array.isArray(data.privateWs)
       ? (data.privateWs as Record<string, unknown>)
       : {}
+  const helperRead = Object.keys(privateWs).length > 0
   const memoryOf = (p: Json): number => {
     const own = privateWs[String(toNumber(p.ProcessId))]
-    return typeof own === 'number' && Number.isFinite(own) && own >= 0
-      ? own
-      : toNumber(p.WorkingSetSize)
+    if (typeof own === 'number' && Number.isFinite(own) && own >= 0) return own
+    return helperRead ? 0 : toNumber(p.WorkingSetSize)
   }
 
   const processes: ProcessInfo[] = toArray(data?.processes).map((p) => ({

@@ -134,3 +134,9 @@ test('숫자 칸은 좁은 창에서 한 줄에 3개, 넓은 창에서 한 줄�
   expect(cols).toHaveLength(5)
   for (const c of cols) expect(c.classes()).toEqual(expect.arrayContaining(['col-4', 'col-lg']))
 })
+
+test('시스템·공유 메모리가 무엇인지 표 아래에 설명한다', () => {
+  expect(home(snapshot()).get('.groups-box .group-note').text()).toContain(
+    'pitwall 이 읽을 수 없는 프로세스'
+  )
+})

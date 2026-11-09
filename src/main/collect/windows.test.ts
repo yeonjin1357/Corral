@@ -427,18 +427,18 @@ describe('수집 방식(collectMode)', () => {
   })
 })
 
-test('메모리는 작업 관리자와 같은 전용 작업 세트(privateWs)가 있으면 그것을 쓰고, 없으면 작업 세트', () => {
-  const s = parseWindowsSample(
-    JSON.stringify({
-      processes: [
-        { ProcessId: 1, ParentProcessId: 0, Name: 'a', CommandLine: 'a', WorkingSetSize: 900 },
-        { ProcessId: 2, ParentProcessId: 0, Name: 'b', CommandLine: 'b', WorkingSetSize: 800 }
-      ],
-      tcp: [],
-      privateWs: { '1': 300, '9': 5 }
-    })
+test('메모리는 작업 관리자와 같은 전용 작업 세트(privateWs), 열 수 없는 프로세스는 0(시스템 몫으로), 보조 코드가 없으면 작업 세트', () => {
+  const processes = [
+    { ProcessId: 1, ParentProcessId: 0, Name: 'a', CommandLine: 'a', WorkingSetSize: 900 },
+    { ProcessId: 2, ParentProcessId: 0, Name: 'b', CommandLine: 'b', WorkingSetSize: 800 }
+  ]
+  // 2 는 보안 프로그램·다른 사용자 프로세스처럼 열 수 없었다. 작업 세트(공유 메모리 포함)로 채우면 부풀려진다.
+  const helper = parseWindowsSample(
+    JSON.stringify({ processes, tcp: [], privateWs: { '1': 300, '9': 5 } })
   )
-  expect(s.processes.map((p) => p.memoryBytes)).toEqual([300, 800])
+  expect(helper.processes.map((p) => p.memoryBytes)).toEqual([300, 0])
+  const basic = parseWindowsSample(JSON.stringify({ processes, tcp: [], privateWs: {} }))
+  expect(basic.processes.map((p) => p.memoryBytes)).toEqual([900, 800])
 })
 
 test('스크립트는 GetProcessMemoryInfo(PROCESS_MEMORY_COUNTERS_EX2)로 전용 작업 세트를 읽는다', () => {
