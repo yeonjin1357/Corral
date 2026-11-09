@@ -66,6 +66,27 @@ describe('훅 이벤트 → 세션 상태', () => {
     )
   })
 
+  test('응답이 끝난(Stop) 직후 늦게 도착한 도구 사용 이벤트는 무시한다(훅은 따로따로 비동기로 온다)', () => {
+    const sessions: Sessions = new Map()
+    applyHookEvent(sessions, ev('UserPromptSubmit'), 1000)
+    applyHookEvent(sessions, ev('Stop'), 2000)
+    applyHookEvent(sessions, ev('PostToolUse', { tool_name: 'Bash' }), 2500)
+    expect(sessions.get('s1')?.state).toBe('idle')
+    applyHookEvent(sessions, ev('StopFailure'), 3000)
+    applyHookEvent(sessions, ev('PostToolUse', { tool_name: 'Bash' }), 4000)
+    expect(sessions.get('s1')?.state).toBe('error')
+    // 새 입력이 오면 다시 센다.
+    applyHookEvent(sessions, ev('UserPromptSubmit'), 4500)
+    applyHookEvent(sessions, ev('Stop'), 5000)
+    applyHookEvent(sessions, ev('UserPromptSubmit'), 5100)
+    applyHookEvent(sessions, ev('PostToolUse', { tool_name: 'Read' }), 5200)
+    expect(sessions.get('s1')?.state).toBe('working')
+    // 한참 지난 도구 이벤트는 그대로 반영한다.
+    applyHookEvent(sessions, ev('Stop'), 6000)
+    applyHookEvent(sessions, ev('PostToolUse', { tool_name: 'Read' }), 12_000)
+    expect(sessions.get('s1')?.state).toBe('working')
+  })
+
   test('지나치게 긴 cwd(4096자 초과)는 받지 않는다(새 세션은 만들지 않고, 있던 세션은 이전 cwd 유지)', () => {
     const sessions: Sessions = new Map()
     const long = 'C:\\' + 'a'.repeat(5000)
@@ -104,7 +125,8 @@ describe('훅 이벤트 → 세션 상태', () => {
       state: 'working',
       updatedAt: 2000,
       firstSeen: 1000,
-      processKey: null
+      processKey: null,
+      stoppedAt: null
     })
   })
 

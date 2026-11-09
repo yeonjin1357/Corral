@@ -15,6 +15,8 @@ export interface ClaudeSession {
   processKey: string | null
   /** 권한 대기 중이면 권한을 요청한 도구 이름(모르면 null). 다른 도구가 끝나도 대기를 유지하는 데 쓴다. */
   waitingTool?: string | null
+  /** 마지막으로 응답이 끝난(Stop·StopFailure) 시각. 새 입력이 오면 지운다. */
+  stoppedAt?: number | null
 }
 
 /** 수집 때 본 최상위 Claude 프로세스. */
@@ -34,6 +36,12 @@ const MAX_ID_LENGTH = 200
 /** 이보다 긴 작업 폴더 값은 받지 않는다(세션 500개 × 큰 문자열로 메모리를 쓰지 않게). */
 const MAX_CWD_LENGTH = 4096
 
+/**
+ * 응답이 끝난 뒤 이 시간 안에 온 도구 사용 이벤트(PostToolUse)는 늦게 도착한 것으로 보고 무시한다.
+ * 훅은 따로따로 비동기로 보내져 Stop 보다 늦게 도착할 수 있다. 그대로 반영하면 다음 알림(약 60초 뒤)까지 작업 중으로 남는다.
+ */
+const LATE_TOOL_EVENT_MS = 5000
+
 /** 같은 워크트리에 세션이 여럿이면 앞쪽 상태를 보인다. 사용자가 봐야 할 것이 먼저. */
 const PRIORITY: AgentState[] = ['waiting', 'working', 'error', 'idle']
 function rank(state: AgentState): number {
@@ -44,7 +52,8 @@ function rank(state: AgentState): number {
 /** 이벤트가 정하는 다음 상태. null 은 "상태는 그대로(세션이 없으면 만들지 않음)". */
 function nextState(
   ev: Record<string, unknown>,
-  session: ClaudeSession | undefined
+  session: ClaudeSession | undefined,
+  now: number
 ): AgentState | null {
   const current = session?.state
   switch (ev.hook_event_name) {
@@ -54,6 +63,12 @@ function nextState(
     case 'UserPromptSubmit':
       return 'working'
     case 'PostToolUse':
+      if (
+        (current === 'idle' || current === 'error') &&
+        session?.stoppedAt != null &&
+        now - session.stoppedAt < LATE_TOOL_EVENT_MS
+      )
+        return null
       // 권한을 기다리는 동안 병렬로 돌던 다른 도구가 끝나도 대기는 그대로다. 요청한 그 도구가 끝나야 승인된 것.
       if (current === 'waiting' && session?.waitingTool && ev.tool_name !== session.waitingTool)
         return 'waiting'
@@ -98,7 +113,7 @@ export function applyHookEvent(sessions: Sessions, input: unknown, now: number):
   const given =
     typeof ev.cwd === 'string' && ev.cwd && ev.cwd.length <= MAX_CWD_LENGTH ? ev.cwd : null
   const cwd = given ?? existing?.cwd
-  const state = nextState(ev, existing)
+  const state = nextState(ev, existing, now)
   if (!cwd || (!existing && !state)) return false
 
   const next = state ?? existing!.state
@@ -111,7 +126,13 @@ export function applyHookEvent(sessions: Sessions, input: unknown, now: number):
     updatedAt: now,
     firstSeen: existing?.firstSeen ?? now,
     processKey: existing?.processKey ?? null,
-    ...(next === 'waiting' ? { waitingTool: waitingToolOf(ev, existing) } : {})
+    ...(next === 'waiting' ? { waitingTool: waitingToolOf(ev, existing) } : {}),
+    stoppedAt:
+      ev.hook_event_name === 'Stop' || ev.hook_event_name === 'StopFailure'
+        ? now
+        : ev.hook_event_name === 'UserPromptSubmit'
+          ? null
+          : (existing?.stoppedAt ?? null)
   })
   while (sessions.size > MAX_SESSIONS) {
     const oldest = sessions.keys().next().value
