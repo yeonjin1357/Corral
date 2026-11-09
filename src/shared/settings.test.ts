@@ -5,7 +5,7 @@ test('값이 없거나 객체가 아니면 기본값', () => {
     expect(normalizeSettings(value)).toEqual(DEFAULT_SETTINGS)
 })
 
-test('기본값: 보통 갱신, 자동 테마, 로그인 시 실행·업데이트 확인 켬, RAM 80/90%, 20분, 알림 모두 켬, node_modules', () => {
+test('기본값: 보통 갱신, 자동 테마, 로그인 시 실행·업데이트 확인 켬, RAM 80/90%, 20분, 알림 모두 켬, 의존성·빌드 결과 폴더', () => {
   expect(DEFAULT_SETTINGS).toMatchObject({
     refresh: 'normal',
     theme: 'auto',
@@ -15,7 +15,18 @@ test('기본값: 보통 갱신, 자동 테마, 로그인 시 실행·업데이�
     ramDangerPercent: 90,
     idlePortMinutes: 20,
     notify: { ramLow: true, claudeWaiting: true, heavyOverlap: true, agentDone: true },
-    dependencyDirs: ['node_modules'],
+    dependencyDirs: [
+      'node_modules',
+      '.next',
+      '.nuxt',
+      '.turbo',
+      '.vite',
+      'dist',
+      'build',
+      'out',
+      'target',
+      '.gradle'
+    ],
     extraRepos: [],
     hiddenServers: [],
     workspaceAliases: {}

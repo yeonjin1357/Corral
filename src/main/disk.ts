@@ -12,7 +12,7 @@ import type {
 import { agentCovers, formatBytes } from '../shared/format'
 import { isDependencyDirName } from '../shared/settings'
 import { text } from '../shared/text'
-import { defaultBranch, finishedEvidence, gitCommonDir, listWorktrees } from './git'
+import { defaultBranch, finishedEvidence, gitCommonDir, ignoredFolders, listWorktrees } from './git'
 import type { KillConfirm } from './kill'
 
 /* 디스크 정리(스펙 §3-8): 끝난 연결된 워크트리의 의존성 폴더 크기를 보여 주고, 확인 후 지운다. */
@@ -237,6 +237,10 @@ export function createDiskManager(deps: DiskDeps): {
     return bytes
   }
 
+  /**
+   * 워크트리 바로 아래의 지울 수 있는 폴더. 링크는 건너뛰고, git 이 무시하는 폴더만 지울 대상으로 둔다
+   * (저장소에 올라간 build/ 같은 소스 폴더는 이름이 같아도 지우지 않는다). git 확인이 안 되면 모두 건너뛴다.
+   */
   async function dependencyFolders(root: string): Promise<DiskFolder[]> {
     const folders: DiskFolder[] = []
     for (const name of deps.settings().dependencyDirs.filter(isDependencyDirName)) {
@@ -245,6 +249,14 @@ export function createDiskManager(deps: DiskDeps): {
       if (!st) continue
       if (st.isSymbolicLink()) folders.push({ name, path, bytes: null, skipped: 'link' })
       else if (st.isDirectory()) folders.push({ name, path, bytes: null })
+    }
+    const candidates = folders.filter((f) => !f.skipped).map((f) => f.name)
+    if (candidates.length === 0) return folders
+    const ignored = await ignoredFolders(root, candidates).catch(() => null)
+    for (const folder of folders) {
+      if (folder.skipped) continue
+      if (!ignored) folder.skipped = 'unreadable'
+      else if (!ignored.has(folder.name)) folder.skipped = 'tracked'
     }
     return folders
   }

@@ -1,11 +1,12 @@
 import { execFileSync } from 'child_process'
-import { mkdtemp, realpath, rm } from 'fs/promises'
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join, normalize } from 'path'
 import {
   defaultBranch,
   finishedEvidence,
   gitCommonDir,
+  ignoredFolders,
   listWorktrees,
   parseWorktreeList
 } from './git'
@@ -232,6 +233,33 @@ describe('실제 git 저장소에서', () => {
     expect(await finishedEvidence(common, find(local), 'origin/main')).toBeNull()
     expect(await finishedEvidence(common, find(detached), 'origin/main')).toBeNull()
     expect(await finishedEvidence(common, find(merged), null)).toBeNull()
+  })
+
+  test('git 이 무시하는 폴더만 고르고, 추적하는 파일이 든 폴더는 빼며, 저장소가 아니면 null', async () => {
+    await writeFile(join(main, '.gitignore'), 'node_modules/\nbuild/\ndist\n')
+    for (const name of ['node_modules', 'build', 'dist', 'out', 'target'])
+      await mkdir(join(main, name), { recursive: true })
+    await writeFile(join(main, 'node_modules', 'a.js'), 'x')
+    await writeFile(join(main, 'out', 'b.js'), 'x')
+    // build 는 무시 목록에 있지만 이미 저장소에 올라간 파일이 있다(소스 폴더).
+    await writeFile(join(main, 'build', 'script.sh'), 'echo')
+    git(main, 'add', '-f', 'build/script.sh')
+    commit(main, 'build script')
+    // target 은 .git/info/exclude 로 무시(.gitignore 가 아니어도 git 이 무시하면 같다).
+    await writeFile(join(main, '.git', 'info', 'exclude'), 'target/\n')
+    const ignored = await ignoredFolders(main, [
+      'node_modules',
+      'build',
+      'dist',
+      'out',
+      'target',
+      'gone'
+    ])
+    expect([...(ignored ?? [])].sort()).toEqual(['dist', 'node_modules', 'target'])
+    const plain = join(dir, 'plain')
+    await mkdir(plain)
+    expect(await ignoredFolders(plain, ['node_modules'])).toBeNull()
+    expect(await ignoredFolders(main, [])).toEqual(new Set())
   })
 
   test('origin/HEAD 가 없으면 origin/main → origin/master 순으로, 둘 다 없으면 null', async () => {

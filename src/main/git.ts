@@ -61,6 +61,32 @@ export async function gitCommonDir(path: string): Promise<string | null> {
   return out ? normalize(resolve(path, out)) : null
 }
 
+/**
+ * 워크트리 바로 아래 폴더(names) 가운데 git 이 무시하는 것(.gitignore·info/exclude·전역 설정 모두).
+ * 무시 목록에 있어도 이미 저장소에 올라간(추적하는) 파일이 든 폴더는 뺀다 — 지우면 소스가 사라진다.
+ * 저장소가 아니거나 git 을 쓸 수 없으면 null(아무것도 지우지 않게).
+ */
+export async function ignoredFolders(root: string, names: string[]): Promise<Set<string> | null> {
+  if (names.length === 0) return new Set()
+  // check-ignore 는 글자 그대로 비교(--literal-pathspecs)를 받지 않아, 패턴 글자([ ])가 든 이름은 지우지 않는다.
+  const plain = names.filter((n) => !/[[\]]/.test(n))
+  if (plain.length === 0) return new Set()
+  const check = await git(['-C', root, 'check-ignore', '--', ...plain.map((n) => `${n}/`)])
+  // 0: 하나 이상 무시, 1: 하나도 무시하지 않음, 그 밖: 오류(저장소 아님 등).
+  if (check.exitCode !== 0 && check.exitCode !== 1) return null
+  const ignored = new Set(
+    check.stdout
+      .split(/\r?\n/)
+      .map((line) => line.trim().replace(/[\\/]+$/, ''))
+      .filter((name) => plain.includes(name))
+  )
+  if (ignored.size === 0) return ignored
+  const tracked = await git(['--literal-pathspecs', '-C', root, 'ls-files', '-z', '--', ...ignored])
+  if (tracked.exitCode !== 0) return null
+  for (const file of tracked.stdout.split('\0').filter(Boolean)) ignored.delete(file.split('/')[0])
+  return ignored
+}
+
 export async function listWorktrees(commonDir: string): Promise<GitWorktree[]> {
   const r = await git(['--git-dir', commonDir, 'worktree', 'list', '--porcelain'])
   if (r.exitCode !== 0) throw new Error(r.stderr.trim() || `git worktree list (${r.exitCode})`)

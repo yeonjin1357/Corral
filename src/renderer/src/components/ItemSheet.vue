@@ -301,7 +301,9 @@ const folderSize = (f: DiskRow['folders'][number]): string =>
     ? t.disk.link
     : f.skipped === 'unreadable'
       ? t.disk.unreadable
-      : f.bytes == null
+      : f.skipped === 'tracked'
+        ? t.disk.tracked
+        : f.bytes == null
         ? t.disk.measuring
         : formatBytes(f.bytes)
 </script>

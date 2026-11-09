@@ -536,6 +536,7 @@ export const text = {
       measuring: '재는 중…',
       link: '링크라 건너뜀',
       unreadable: '읽을 수 없어 건너뜀',
+      tracked: 'git 이 관리해 건너뜀',
       folders: '의존성 폴더',
       size: '크기',
       sizeSub: '(지울 수 있는 합계)',

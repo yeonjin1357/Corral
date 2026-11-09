@@ -93,6 +93,8 @@ describe('createDiskManager (실제 git)', () => {
       await mkdir(join(root, 'src'), { recursive: true })
       await writeFile(join(root, 'src', 'index.js'), 'keep me')
     }
+    // 의존성 폴더는 git 이 무시해야 지울 대상이다(저장소 공용 폴더의 exclude 는 모든 워크트리에 적용).
+    await writeFile(join(fx.main, '.git', 'info', 'exclude'), 'node_modules/\ndist/\n.venv/\n')
     // pnpm 처럼 node_modules 안에서 바깥 저장소를 가리키는 링크.
     store = join(fx.dir, 'store')
     await mkdir(store)
@@ -248,6 +250,30 @@ describe('createDiskManager (실제 git)', () => {
     await m2.scan()
     expect((await m2.remove(gone)).status).toBe('failed')
     expect(await exists(join(gone, 'node_modules'))).toBe(true)
+  }, 60000)
+
+  test('git 이 무시하는 폴더만 지울 대상, 무시하지 않는 폴더(저장소에 올라간 build 등)는 건너뛴다(tracked)', async () => {
+    await mkdir(join(gone, 'dist'), { recursive: true })
+    await writeFile(join(gone, 'dist', 'app.js'), Buffer.alloc(500))
+    // build 는 무시 목록에 없다(저장소에 올라간 소스 폴더일 수 있음).
+    await mkdir(join(gone, 'build'), { recursive: true })
+    await writeFile(join(gone, 'build', 'gen.sh'), 'echo')
+    const manager = createDiskManager(
+      deps({
+        settings: () => ({ dependencyDirs: ['node_modules', 'dist', 'build'], extraRepos: [] })
+      })
+    )
+    const report = await manager.scan()
+    const folders = report.rows.find((r) => r.worktreeRoot === gone)!.folders
+    expect(folders.map((f) => [f.name, f.skipped ?? null])).toEqual([
+      ['node_modules', null],
+      ['dist', null],
+      ['build', 'tracked']
+    ])
+    expect((await manager.remove(gone)).status).toBe('killed')
+    expect(await exists(join(gone, 'node_modules'))).toBe(false)
+    expect(await exists(join(gone, 'dist'))).toBe(false)
+    expect(await exists(join(gone, 'build', 'gen.sh'))).toBe(true)
   }, 60000)
 
   test('최신 스냅샷에 그 워크트리의 포트·에이전트가 있으면 사용 중으로 표시하고 지우지 않는다', async () => {

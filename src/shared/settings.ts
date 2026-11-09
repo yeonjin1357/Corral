@@ -28,7 +28,7 @@ export interface Settings {
   /** "명령 이름 [인자…]" — 예: `vue-tsc`, `vite build`. */
   heavyPatterns: string[]
   notify: NotifySettings
-  /** 끝난 워크트리에서 지울 의존성 폴더 이름(워크트리 바로 아래). */
+  /** 끝난 워크트리에서 지울 의존성·빌드 결과 폴더 이름(워크트리 바로 아래, git 이 무시하는 것만 지운다). */
   dependencyDirs: string[]
   /** 디스크 정리에서 살펴볼 저장소(에이전트·개발 서버를 본 저장소는 자동으로 기억한다). */
   extraRepos: string[]
@@ -83,7 +83,18 @@ export const DEFAULT_SETTINGS: Settings = {
     'cargo build'
   ],
   notify: { ramLow: true, claudeWaiting: true, heavyOverlap: true, agentDone: true },
-  dependencyDirs: ['node_modules'],
+  dependencyDirs: [
+    'node_modules',
+    '.next',
+    '.nuxt',
+    '.turbo',
+    '.vite',
+    'dist',
+    'build',
+    'out',
+    'target',
+    '.gradle'
+  ],
   extraRepos: [],
   hiddenServers: [],
   workspaceAliases: {}
