@@ -1,38 +1,53 @@
 appId: io.github.yeonjin1357.pitwall
 productName: pitwall
+copyright: Copyright © 2026 yeonjin1357
 directories:
   buildResources: build
 files:
   - '!**/.vscode/*'
   - '!src/*'
+  - '!docs/*'
+  - '!scripts/*'
+  - '!build/*'
+  - '!.superpowers/*'
+  - '!.github/*'
   - '!electron.vite.config.{js,ts,mjs,cjs}'
-  - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}'
+  - '!vitest.config.{js,ts,mjs,cjs,mts}'
+  - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,.editorconfig,.gitattributes,dev-app-update.yml,CHANGELOG.md,README.md}'
   - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
   - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
 asarUnpack:
   - resources/**
 win:
   executableName: pitwall
+  target:
+    - target: nsis
+      arch:
+        - x64
 nsis:
   artifactName: ${name}-${version}-setup.${ext}
   shortcutName: ${productName}
   uninstallDisplayName: ${productName}
   createDesktopShortcut: always
+  # 관리자 권한 없이 사용자 폴더에 설치한다(서명 없는 앱이라 설치를 단순하게).
+  oneClick: true
+  perMachine: false
 mac:
+  category: public.app-category.developer-tools
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+  # Apple 개발자 서명이 없어 임시(ad-hoc) 서명만 한다. Apple Silicon 은 서명이 아예 없으면 실행되지 않는다.
+  identity: '-'
   entitlementsInherit: build/entitlements.mac.plist
   notarize: false
 dmg:
-  artifactName: ${name}-${version}.${ext}
-linux:
-  target:
-    - AppImage
-    - snap
-    - deb
-  maintainer: electronjs.org
-  category: Utility
-appImage:
-  artifactName: ${name}-${version}.${ext}
+  artifactName: ${name}-${version}-${arch}.${ext}
 npmRebuild: false
 publish:
-  provider: generic
-  url: https://example.com/auto-updates
+  provider: github
+  owner: yeonjin1357
+  repo: pitwall
+  releaseType: draft

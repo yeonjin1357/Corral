@@ -36,5 +36,13 @@ export default defineConfig(
       ]
     }
   },
+  {
+    // 빌드 보조 스크립트(아이콘 만들기 등)는 Electron·Node 로 바로 실행하는 CommonJS 다.
+    files: ['scripts/**/*.{js,cjs,mjs}'],
+    rules: {
+      '@typescript-eslint/no-require-imports': 'off',
+      '@typescript-eslint/explicit-function-return-type': 'off'
+    }
+  },
   eslintConfigPrettier
 )
