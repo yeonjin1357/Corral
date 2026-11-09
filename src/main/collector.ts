@@ -21,12 +21,15 @@ export interface CollectOptions {
   thresholds: { ramWarnPercent: number; ramDangerPercent: number }
   /** 에이전트 없는 워크트리의 포트가 이 시간 이상 안 쓰이면 정리 후보. */
   idlePortMs: number
+  /** 무거운 명령 패턴. */
+  heavyPatterns: string[]
 }
 
 export function collectOptionsFrom(s: Settings): CollectOptions {
   return {
     thresholds: { ramWarnPercent: s.ramWarnPercent, ramDangerPercent: s.ramDangerPercent },
-    idlePortMs: s.idlePortMinutes * 60 * 1000
+    idlePortMs: s.idlePortMinutes * 60 * 1000,
+    heavyPatterns: s.heavyPatterns
   }
 }
 
@@ -105,7 +108,7 @@ export function createCollector(deps: CollectorDeps): {
     const sampledAt = deps.now()
     const options = deps.options()
     const [raw, memory] = await Promise.all([deps.sample(), deps.readMemory()])
-    const needed = pidsForWorktreeLookup(raw, deps.platform)
+    const needed = pidsForWorktreeLookup(raw, deps.platform, options.heavyPatterns)
     const worktrees = await deps.resolveProcessWorktrees(
       raw.processes.filter((p) => needed.has(p.pid)),
       raw.cwds ?? {},
@@ -121,7 +124,8 @@ export function createCollector(deps: CollectorDeps): {
       now,
       selfPid: deps.selfPid,
       platform: deps.platform,
-      cpuCount: deps.cpuCount
+      cpuCount: deps.cpuCount,
+      heavyPatterns: options.heavyPatterns
     })
 
     const devServerPids = new Set(snapshot.ports.flatMap((p) => [p.pid, ...p.descendantPids]))

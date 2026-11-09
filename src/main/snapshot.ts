@@ -13,6 +13,7 @@ import type {
 import { DEFAULT_THRESHOLDS } from '../shared/defaults'
 import { worktreeKey } from '../shared/format'
 import { findLeftovers } from './leftovers'
+import { findHeavyJobs } from './heavy'
 import { buildTree, classifyAgent, topLevelAgentPids, type ProcessTree } from './processTree'
 
 /** WSL·Docker·Podman 처럼 다른 환경의 포트를 대신 열어 주는 프로세스. 어느 worktree 것인지 알 수 없다. */
@@ -52,10 +53,14 @@ function agentTreePids(sample: RawSample, tree: ProcessTree): Set<number> {
 
 /**
  * worktree 를 찾아보는 pid: 개발용 포트(1024 이상)를 연 프로세스와 그 위 3단계 조상, 최상위 에이전트,
- * 남은 프로세스 후보와 그 자손.
+ * 남은 프로세스 후보와 그 자손, 무거운 작업과 그 위 3단계 조상.
  * 모든 프로세스의 경로를 확인하면 파일 시스템 조회가 수백 배 늘고, 응답 없는 네트워크 드라이브에 막힐 수 있다.
  */
-export function pidsForWorktreeLookup(sample: RawSample, platform?: Platform): Set<number> {
+export function pidsForWorktreeLookup(
+  sample: RawSample,
+  platform?: Platform,
+  heavyPatterns: string[] = []
+): Set<number> {
   const tree = buildTree(sample.processes)
   const pids = new Set<number>()
   for (const t of sample.tcp) {
@@ -74,6 +79,14 @@ export function pidsForWorktreeLookup(sample: RawSample, platform?: Platform): S
   const exclude = agentTreePids(sample, tree)
   for (const row of findLeftovers(sample, new Map(), { exclude, platform }))
     for (const pid of [row.pid, ...row.descendantPids]) pids.add(pid)
+  const agents = new Set(sample.processes.filter(classifyAgent).map((p) => p.pid))
+  for (const row of findHeavyJobs(sample, new Map(), {
+    patterns: heavyPatterns,
+    exclude: agents
+  })) {
+    pids.add(row.pid)
+    for (const ancestor of tree.ancestors(row.pid, MAX_ANCESTOR_DEPTH)) pids.add(ancestor.pid)
+  }
   return pids
 }
 
@@ -124,6 +137,8 @@ export function buildSnapshot(input: {
   platform?: Platform
   /** 논리 코어 수(CPU 표시 기준). */
   cpuCount?: number
+  /** 무거운 명령 패턴(설정). 없으면 무거운 작업을 찾지 않는다. */
+  heavyPatterns?: string[]
 }): DashboardSnapshot {
   const { sample, worktrees } = input
   const tree = buildTree(sample.processes)
@@ -203,11 +218,20 @@ export function buildSnapshot(input: {
   }
 
   const agentPids = sample.processes.filter(classifyAgent).map((p) => p.pid)
-  const agent = new Set<number>()
+  const agentTree = new Set<number>()
   for (const pid of agentPids) {
     for (const member of [pid, ...tree.descendants(pid)])
-      if (!devServer.has(member)) agent.add(member)
+      if (!devServer.has(member)) agentTree.add(member)
   }
+
+  // 에이전트가 띄운 타입 검사·빌드도 무거운 작업이다(에이전트 자체·개발 서버·pitwall 은 아님).
+  const heavyJobs = findHeavyJobs(sample, worktrees, {
+    patterns: input.heavyPatterns ?? [],
+    exclude: new Set([...self, ...devServer, ...agentPids])
+  })
+  const heavy = new Set<number>()
+  for (const job of heavyJobs) for (const pid of [job.pid, ...job.descendantPids]) heavy.add(pid)
+  const agent = new Set([...agentTree].filter((pid) => !heavy.has(pid)))
   const topAgents = topLevelAgentPids(sample.processes, tree)
   const agentProcessCount = topAgents.length
 
@@ -218,13 +242,12 @@ export function buildSnapshot(input: {
     })
   )
   const leftovers = findLeftovers(sample, worktrees, {
-    exclude: new Set([...self, ...devServer, ...agent]),
+    exclude: new Set([...self, ...devServer, ...agentTree]),
     agentRoots,
     platform: input.platform
   })
 
   const memory = summarizeMemory(input.totalBytes, input.freeBytes, input.thresholds)
-  const heavy = new Set<number>()
   const devBytes = memoryOf(devServer)
   const agentBytes = memoryOf(agent)
   const heavyBytes = memoryOf(heavy)
@@ -254,6 +277,9 @@ export function buildSnapshot(input: {
     memory,
     ports,
     leftovers,
+    heavyJobs,
+    // RAM 이 넉넉하면 겹쳐도 조용하다(스펙 §3-6).
+    heavyOverlap: heavyJobs.length >= 2 && memory.level !== 'normal',
     agents: [],
     hook: null,
     groups,

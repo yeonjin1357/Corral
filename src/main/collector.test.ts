@@ -74,7 +74,8 @@ function setup(over: Partial<CollectorDeps> = {}): {
     hookStatus: async () => HOOK,
     options: () => ({
       thresholds: { ramWarnPercent: 80, ramDangerPercent: 90 },
-      idlePortMs: 20 * MIN
+      idlePortMs: 20 * MIN,
+      heavyPatterns: ['tsc']
     }),
     selfPid: 999,
     cpuCount: 8,
@@ -254,7 +255,8 @@ test('네트워크 경로(UNC·WSL)에서 연 세션은 워크트리를 찾아�
 test('설정(기준값)을 바꾸면 다음 수집부터 반영된다', async () => {
   const options = {
     thresholds: { ramWarnPercent: 80, ramDangerPercent: 90 },
-    idlePortMs: 20 * MIN
+    idlePortMs: 20 * MIN,
+    heavyPatterns: []
   }
   const { deps, clock } = setup({ options: () => options })
   const noAgents: RawSample = {
@@ -281,5 +283,23 @@ test('설정에서 수집 기준값을 만든다(분 → ms)', () => {
       ramDangerPercent: 85,
       idlePortMinutes: 45
     })
-  ).toEqual({ thresholds: { ramWarnPercent: 70, ramDangerPercent: 85 }, idlePortMs: 45 * MIN })
+  ).toEqual({
+    thresholds: { ramWarnPercent: 70, ramDangerPercent: 85 },
+    idlePortMs: 45 * MIN,
+    heavyPatterns: DEFAULT_SETTINGS.heavyPatterns
+  })
+})
+
+test('무거운 명령 패턴을 넘겨 무거운 작업을 찾고, 그 워크트리도 찾아본다', async () => {
+  const resolveProcessWorktrees = vi.fn<CollectorDeps['resolveProcessWorktrees']>(
+    async () => new Map()
+  )
+  const { deps } = setup({ resolveProcessWorktrees })
+  const withTsc: RawSample = {
+    ...sampleAt(0),
+    processes: [...sampleAt(0).processes, proc(7000, 1, 'node.exe', 0, 'node tsc --noEmit')]
+  }
+  const s = await createCollector({ ...deps, sample: async () => withTsc }).collect()
+  expect(s.heavyJobs.map((j) => [j.pid, j.label])).toEqual([[7000, 'tsc']])
+  expect(resolveProcessWorktrees.mock.calls[0][0].map((p) => p.pid)).toContain(7000)
 })

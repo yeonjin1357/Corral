@@ -1,5 +1,6 @@
 // 렌더러 테스트용 데이터(앱 코드에서는 import 하지 않는다).
 import type { AgentRow, DashboardSnapshot, LeftoverRow, PortRow } from '../../../shared/types'
+import { blankSnapshot } from '../../../shared/snapshot'
 
 export const MB = 1024 * 1024
 export const GB = 1024 * MB
@@ -73,7 +74,7 @@ export const threePorts: PortRow[] = [
 
 export function snapshot(over: Partial<DashboardSnapshot> = {}): DashboardSnapshot {
   return {
-    takenAt: 1,
+    ...blankSnapshot(1),
     memory: {
       totalBytes: 32 * GB,
       usedBytes: Math.round(26.3 * GB),

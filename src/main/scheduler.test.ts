@@ -1,21 +1,11 @@
 import { createScheduler } from './scheduler'
 import type { DashboardSnapshot } from '../shared/types'
+import { blankSnapshot } from '../shared/snapshot'
 
 function snap(takenAt: number): DashboardSnapshot {
   return {
-    takenAt,
-    memory: { totalBytes: 100, usedBytes: 50, usedPercent: 50, level: 'normal' },
-    ports: [],
-    leftovers: [],
-    agents: [],
-    hook: null,
-    groups: [],
-    topApps: [],
-    agentProcessCount: 0,
-    platform: null,
-    cpuCount: 1,
-    stale: false,
-    error: null
+    ...blankSnapshot(takenAt),
+    memory: { totalBytes: 100, usedBytes: 50, usedPercent: 50, level: 'normal' }
   }
 }
 

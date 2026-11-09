@@ -7,6 +7,8 @@ export function blankSnapshot(takenAt: number): DashboardSnapshot {
     memory: { totalBytes: 0, usedBytes: 0, usedPercent: 0, level: 'normal' },
     ports: [],
     leftovers: [],
+    heavyJobs: [],
+    heavyOverlap: false,
     agents: [],
     hook: null,
     groups: [],

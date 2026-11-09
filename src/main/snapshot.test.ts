@@ -379,3 +379,63 @@ describe('남은 프로세스', () => {
     expect([9500, 9600, 9601, 9700].every((pid) => pids.has(pid))).toBe(true)
   })
 })
+
+describe('무거운 작업', () => {
+  const tscUnderAgent = proc(
+    5200,
+    5000,
+    'node.exe',
+    3000,
+    130,
+    'node C:\\work\\wt-a\\node_modules\\typescript\\bin\\tsc --noEmit'
+  )
+  const viteBuild = proc(
+    7300,
+    1,
+    'node.exe',
+    2000,
+    100,
+    'node C:\\work\\api\\node_modules\\vite\\bin\\vite.js build'
+  )
+  const patterns = ['tsc', 'vite build']
+  const heavyInput = {
+    ...input,
+    sample: { processes: [...processes, tscUnderAgent, viteBuild], tcp },
+    worktrees: new Map([...worktrees, [5000, W2], [7300, W3]]),
+    heavyPatterns: patterns
+  }
+
+  test('에이전트가 띄운 작업도 찾고, 묶음은 무거운 작업으로 옮긴다(에이전트 묶음에서 빠짐)', () => {
+    const s = buildSnapshot(heavyInput)
+    expect(s.heavyJobs.map((j) => [j.pid, j.label, j.worktree?.root])).toEqual([
+      [5200, 'tsc', W2.root],
+      [7300, 'vite build', W3.root]
+    ])
+    const g = Object.fromEntries(s.groups.map((x) => [x.group, x]))
+    expect(g.heavy).toMatchObject({ memoryBytes: 5000 * MB, processCount: 2 })
+    expect(g.agent.memoryBytes).toBe((400 + 10 + 30 + 60) * MB)
+  })
+
+  test('겹침 경고: 2개 이상이고 RAM 이 경고 기준 이상일 때만', () => {
+    expect(buildSnapshot(heavyInput).heavyOverlap).toBe(true)
+    expect(buildSnapshot({ ...heavyInput, freeBytes: 20 * GB }).heavyOverlap).toBe(false)
+    const one = buildSnapshot({
+      ...heavyInput,
+      sample: { processes: [...processes, viteBuild], tcp },
+      freeBytes: 1 * GB
+    })
+    expect(one.heavyJobs).toHaveLength(1)
+    expect(one.heavyOverlap).toBe(false)
+  })
+
+  test('패턴이 없으면 무거운 작업도 없다', () => {
+    expect(buildSnapshot({ ...heavyInput, heavyPatterns: [] }).heavyJobs).toEqual([])
+    expect(buildSnapshot(input).heavyJobs).toEqual([])
+  })
+
+  test('워크트리 판별 대상에 무거운 작업과 그 조상을 더한다', () => {
+    const pids = pidsForWorktreeLookup(heavyInput.sample, 'win32', patterns)
+    expect(pids.has(5200)).toBe(true)
+    expect(pids.has(7300)).toBe(true)
+  })
+})

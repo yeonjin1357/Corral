@@ -167,6 +167,10 @@ export interface DashboardSnapshot {
   memory: MemorySummary
   ports: PortRow[]
   leftovers: LeftoverRow[]
+  /** 무거운 작업(설정의 명령 패턴). 메모리 큰 순. */
+  heavyJobs: HeavyJobRow[]
+  /** 무거운 작업이 2개 이상 겹치고 RAM 이 경고 기준 이상. */
+  heavyOverlap: boolean
   agents: AgentRow[]
   /** Claude 훅 연동 상태. 아직 모르면 null. */
   hook: ClaudeHookStatus | null
@@ -181,4 +185,18 @@ export interface DashboardSnapshot {
   stale: boolean
   error: string | null
   collectMode?: CollectMode | null
+}
+
+/** 무거운 작업(설정의 명령 패턴에 맞는 프로세스 트리 하나). 경고만 하고 끄지 않는다. */
+export interface HeavyJobRow {
+  pid: number
+  /** 맞은 패턴(설정에 쓴 그대로). */
+  label: string
+  processName: string
+  commandLine: string
+  worktree: WorktreeInfo | null
+  /** 자기 + 자손. */
+  memoryBytes: number
+  descendantPids: number[]
+  startedAt: number | null
 }

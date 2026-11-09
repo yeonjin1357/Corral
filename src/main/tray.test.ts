@@ -9,12 +9,13 @@ import {
   type TrayLike
 } from './tray'
 import type { AgentRow, DashboardSnapshot } from '../shared/types'
+import { blankSnapshot } from '../shared/snapshot'
 
 const GB = 1024 ** 3
 
 function snap(over: Partial<DashboardSnapshot> = {}): DashboardSnapshot {
   return {
-    takenAt: 1,
+    ...blankSnapshot(1),
     memory: {
       totalBytes: 32 * GB,
       usedBytes: Math.round(26.3 * GB),
@@ -36,16 +37,8 @@ function snap(over: Partial<DashboardSnapshot> = {}): DashboardSnapshot {
       idleSince: null,
       agentInWorktree: false
     })),
-    leftovers: [],
-    agents: [],
-    hook: null,
-    groups: [],
-    topApps: [],
-    agentProcessCount: 0,
     platform: 'win32',
     cpuCount: 8,
-    stale: false,
-    error: null,
     ...over
   }
 }
