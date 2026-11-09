@@ -418,3 +418,38 @@ test('메모리가 계속 느는 서버에 근거를 붙인다(1분마다 기록
   }
   expect(last.servers[0].memoryGrowth).toMatchObject({ fromBytes: 2 * GB, minutes: 30 })
 })
+
+test('내보낸 정리 판단 기억·서버 메모리 기록·에이전트 상태 시각을 새 수집기가 이어 쓴다(다시 켜기)', async () => {
+  const { deps, clock } = setup()
+  const noAgents: RawSample = {
+    ...sampleAt(0),
+    processes: [proc(4100, 1, 'node.exe', 0, 'node vite')]
+  }
+  const before = createCollector({ ...deps, sample: async () => noAgents })
+  await before.collect()
+  const state = before.exportState()
+  expect(state.serverMemo).toEqual({ 'server:4100:100': { state: 'idle', since: 10 * MIN } })
+  expect(Object.keys(state.servers)).toEqual(['server:4100:100'])
+
+  clock.now += 20 * MIN
+  const after = createCollector({ ...deps, sample: async () => noAgents })
+  after.importState(
+    { ...state, agentStates: { '5000:100': { state: 'working', since: 9 * MIN } } },
+    clock.now
+  )
+  const later = await after.collect()
+  expect(later.servers[0]).toMatchObject({ judgement: 'candidate', idleSince: 10 * MIN })
+  expect(after.exportState().servers['server:4100:100']).toHaveLength(2)
+})
+
+test('판단 기억 없이(null) 불러오면 처음부터 센다', async () => {
+  const { deps, clock } = setup()
+  const noAgents: RawSample = {
+    ...sampleAt(0),
+    processes: [proc(4100, 1, 'node.exe', 0, 'node vite')]
+  }
+  const c = createCollector({ ...deps, sample: async () => noAgents })
+  c.importState({ servers: {}, serverMemo: null, agentStates: null }, clock.now)
+  const s = await c.collect()
+  expect(s.servers[0]).toMatchObject({ judgement: null, idleSince: 10 * MIN })
+})

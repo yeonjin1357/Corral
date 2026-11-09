@@ -1,4 +1,4 @@
-import type { AgentState, DashboardSnapshot } from '../../shared/types'
+import type { AgentState, DashboardSnapshot, TrendPoint } from '../../shared/types'
 import { agentKey, selectionKey } from '../../shared/keys'
 
 /**
@@ -7,10 +7,7 @@ import { agentKey, selectionKey } from '../../shared/keys'
  */
 export type Beat = 'up' | 'idle' | 'pending' | 'down'
 
-export interface Point {
-  t: number
-  value: number
-}
+export type Point = TrendPoint
 
 export interface ItemHistory {
   beats: Beat[]
@@ -43,6 +40,19 @@ const AGENT_BEAT: Record<AgentState, Beat> = {
 
 export function emptyHistory(): History {
   return { lastTakenAt: null, ram: [], servers: {}, agents: {} }
+}
+
+/**
+ * 앱(메인)이 기억한 RAM 기록으로 추이를 채운다. 창을 다시 열거나 앱을 다시 켰을 때 그래프가 빈 채로 시작하지 않게.
+ * 같은 시각은 이미 있는 점(방금 받은 스냅샷)을 쓰고, 시간 순으로 최근 POINT_LIMIT 개만 둔다.
+ */
+export function seedRam(history: History, points: Point[]): History {
+  if (points.length === 0) return history
+  const byTime = new Map<number, Point>()
+  for (const p of points) byTime.set(p.t, { t: p.t, value: p.value })
+  for (const p of history.ram) byTime.set(p.t, p)
+  const ram = [...byTime.values()].sort((a, b) => a.t - b.t).slice(-POINT_LIMIT)
+  return { ...history, ram }
 }
 
 function keep<T>(list: T[], item: T, limit: number): T[] {

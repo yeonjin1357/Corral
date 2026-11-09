@@ -45,6 +45,7 @@ import { createUpdater } from './updates'
 import { localUrlFor } from './open'
 import { backgroundFor, overlayFor, windowChrome } from './windowChrome'
 import { createIconSource } from './icons'
+import { createRamHistory, loadHistory, saveHistory } from './historyStore'
 import { createTrayController, LEVEL_COLORS } from './tray'
 import { encodePng, renderSmallIcon } from './pixelArt'
 import type { MemoryLevel } from '../shared/types'
@@ -105,10 +106,40 @@ async function collect(): Promise<DashboardSnapshot> {
   return { ...snapshot, disk: disk.report() }
 }
 
+/** RAM 추이(30초·2시간)와 수집기 기억을 userData/history.json 에 이어 쓴다(F8). */
+const HISTORY_SAVE_EVERY_MS = 5 * 60 * 1000
+const HISTORY_SAVE_TIMEOUT_MS = 2000
+const historyPath = join(app.getPath('userData'), 'history.json')
+const ramHistory = createRamHistory()
+
+async function restoreHistory(): Promise<void> {
+  const now = Date.now()
+  const loaded = await loadHistory(historyPath, now)
+  if (!loaded) return
+  ramHistory.import(loaded.ram, now)
+  collector?.importState(loaded, now)
+}
+
+async function persistHistory(): Promise<void> {
+  if (!collector) return
+  try {
+    await saveHistory(historyPath, {
+      version: 1,
+      savedAt: Date.now(),
+      ram: ramHistory.points(),
+      ...collector.exportState()
+    })
+  } catch {
+    // 기록을 못 남겨도 앱 동작에는 지장이 없다(다음에 처음부터 센다).
+  }
+}
+
 const scheduler = createScheduler({
   collect,
   intervals: REFRESH_INTERVALS[settings.refresh],
   onSnapshot: (snapshot) => {
+    if (!snapshot.stale && snapshot.memory.totalBytes > 0)
+      ramHistory.record(snapshot.takenAt, snapshot.memory.usedPercent)
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.snapshot, snapshot)
     trayController?.update(snapshot)
     notifier.update(snapshot)
@@ -357,6 +388,9 @@ function registerIpc(): void {
   ipcMain.handle(IPC.getLatest, (event) =>
     fromMainWindow(event.sender) ? scheduler.latest() : null
   )
+  ipcMain.handle(IPC.historyRam, (event) =>
+    fromMainWindow(event.sender) ? ramHistory.points() : []
+  )
   ipcMain.handle(IPC.killServer, async (event, pid: unknown) => {
     if (!fromMainWindow(event.sender)) return { status: 'failed', message: text.killResult.invalid }
     const result = await killer.killServer(Number(pid))
@@ -506,6 +540,9 @@ if (!app.requestSingleInstanceLock()) {
     // 설정을 먼저 읽어 첫 수집부터 사용자 기준값·주기를 쓴다.
     applySettings((await loadConfig(app.getPath('userData'))).settings)
     await repoMemory.load()
+    // 첫 수집 전에 불러와야 판단 기억이 이어진다.
+    await restoreHistory()
+    setInterval(() => void persistHistory(), HISTORY_SAVE_EVERY_MS).unref()
     setTimeout(() => void disk.scan(), DISK_FIRST_SCAN_MS)
     setInterval(() => void disk.scan(), DISK_SCAN_EVERY_MS)
     setTimeout(() => void updater.check(), UPDATE_FIRST_CHECK_MS)
@@ -536,9 +573,18 @@ if (!app.requestSingleInstanceLock()) {
   // 창이 모두 닫혀도 트레이에서 계속 돈다.
   app.on('window-all-closed', () => {})
 
-  app.on('before-quit', () => {
+  let historySaved = false
+  app.on('before-quit', (event) => {
     quitting = true
     scheduler.stop()
     void claude.stop()
+    // 기록을 남기고 끝낸다. 오래 걸리면(디스크 문제) 기다리지 않는다.
+    if (historySaved) return
+    historySaved = true
+    event.preventDefault()
+    void Promise.race([
+      persistHistory(),
+      new Promise((resolve) => setTimeout(resolve, HISTORY_SAVE_TIMEOUT_MS))
+    ]).finally(() => app.quit())
   })
 }

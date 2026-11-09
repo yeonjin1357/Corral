@@ -1,4 +1,4 @@
-import { agentKey, appendSnapshot, emptyHistory, selectionKey } from './history'
+import { agentKey, appendSnapshot, emptyHistory, seedRam, selectionKey } from './history'
 import { agentRow, leftoverRow, serverRow, snapshot } from './testing/fixtures'
 
 test('서버별 하트비트: 연결 있으면 up, 없으면 idle, 최신이 맨 뒤', () => {
@@ -79,4 +79,21 @@ test('고른 항목 키는 종류를 앞에 붙여 서로 겹치지 않는다', 
   expect(selectionKey.server(serverRow())).toBe('server:4100:200')
   expect(selectionKey.agent(agentRow())).toBe('agent:5000:100')
   expect(selectionKey.leftover(leftoverRow())).toBe('leftover:7000:300')
+})
+
+test('앱이 기억한 RAM 기록으로 처음 추이를 채운다(겹치는 시각은 한 번, 시간 순)', () => {
+  let h = emptyHistory()
+  h = appendSnapshot(h, snapshot({ takenAt: 100 }))
+  h = seedRam(h, [
+    { t: 40, value: 60 },
+    { t: 100, value: 99 },
+    { t: 70, value: 65 }
+  ])
+  expect(h.ram).toEqual([
+    { t: 40, value: 60 },
+    { t: 70, value: 65 },
+    { t: 100, value: 82.2 }
+  ])
+  // 기록이 없으면 그대로.
+  expect(seedRam(h, [])).toBe(h)
 })

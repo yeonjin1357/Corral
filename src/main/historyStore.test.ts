@@ -1,0 +1,118 @@
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'fs/promises'
+import { tmpdir } from 'os'
+import { join } from 'path'
+import { createRamHistory, loadHistory, saveHistory, type HistoryFile } from './historyStore'
+
+const MIN = 60_000
+
+let dir: string
+let path: string
+beforeEach(async () => {
+  dir = await mkdtemp(join(tmpdir(), 'pitwall-history-'))
+  path = join(dir, 'history.json')
+})
+afterEach(async () => {
+  await rm(dir, { recursive: true, force: true })
+})
+
+function file(savedAt: number): HistoryFile {
+  return {
+    version: 1,
+    savedAt,
+    ram: [{ t: savedAt - MIN, value: 71.5 }],
+    servers: { 'server:4100:200': [{ t: savedAt - MIN, bytes: 1024 }] },
+    serverMemo: { 'server:4100:200': { state: 'idle', since: savedAt - 15 * MIN } },
+    agentStates: { '5000:100': { state: 'working', since: savedAt - 3 * MIN } }
+  }
+}
+
+test('10분 안에 다시 켜면 정리 판단 기억을 이어 쓴다', async () => {
+  const saved = file(100 * MIN)
+  await saveHistory(path, saved)
+  const loaded = await loadHistory(path, 109 * MIN)
+  expect(loaded).toEqual({
+    ram: saved.ram,
+    servers: saved.servers,
+    serverMemo: saved.serverMemo,
+    agentStates: saved.agentStates
+  })
+})
+
+test('10분이 넘으면 판단 기억은 버리고 RAM·서버 메모리 기록만', async () => {
+  const saved = file(100 * MIN)
+  await saveHistory(path, saved)
+  const loaded = await loadHistory(path, 111 * MIN)
+  expect(loaded).toEqual({
+    ram: saved.ram,
+    servers: saved.servers,
+    serverMemo: null,
+    agentStates: null
+  })
+})
+
+test('저장 시각이 지금보다 뒤면(시계가 바뀜) 판단 기억을 버린다', async () => {
+  await saveHistory(path, file(100 * MIN))
+  expect((await loadHistory(path, 90 * MIN))?.serverMemo).toBeNull()
+})
+
+test('깨진 파일·다른 버전·없는 파일은 무시', async () => {
+  expect(await loadHistory(path, 0)).toBeNull()
+  await writeFile(path, '{ "version": 1, "savedAt": ')
+  expect(await loadHistory(path, 0)).toBeNull()
+  await writeFile(path, JSON.stringify({ ...file(0), version: 2 }))
+  expect(await loadHistory(path, 0)).toBeNull()
+  await writeFile(path, JSON.stringify({ ...file(0), savedAt: 'x' }))
+  expect(await loadHistory(path, 0)).toBeNull()
+})
+
+test('항목 모양이 틀린 부분은 버리고 나머지는 쓴다', async () => {
+  await writeFile(
+    path,
+    JSON.stringify({
+      ...file(100 * MIN),
+      ram: [{ t: 1, value: 50 }, { t: 'x' }, null],
+      serverMemo: {
+        'server:1:1': { state: 'idle', since: 99 * MIN },
+        'server:2:2': { state: 'gone', since: 1 },
+        'server:3:3': { state: 'tabs', since: 'x' }
+      },
+      agentStates: { 'a:1': { state: 'nope', since: 1 } }
+    })
+  )
+  const loaded = await loadHistory(path, 101 * MIN)
+  expect(loaded?.ram).toEqual([{ t: 1, value: 50 }])
+  expect(loaded?.serverMemo).toEqual({ 'server:1:1': { state: 'idle', since: 99 * MIN } })
+  expect(loaded?.agentStates).toEqual({})
+})
+
+test('저장은 임시 파일에 쓰고 바꿔 넣는다(임시 파일이 남지 않는다)', async () => {
+  await saveHistory(path, file(1))
+  expect(await readdir(dir)).toEqual(['history.json'])
+  expect(JSON.parse(await readFile(path, 'utf8')).version).toBe(1)
+})
+
+test('RAM 기록은 30초 간격·2시간만', () => {
+  const ram = createRamHistory()
+  for (let t = 0; t <= 150 * MIN; t += 5000) ram.record(t, 50)
+  const points = ram.points()
+  expect(points[0].t).toBeGreaterThanOrEqual(30 * MIN)
+  expect(points[points.length - 1].t).toBe(150 * MIN)
+  expect(points.every((p, i) => i === 0 || p.t - points[i - 1].t >= 30_000)).toBe(true)
+  expect(points.length).toBe(241)
+})
+
+test('RAM 기록 불러오기는 2시간 안의 것만, 시간 순으로', () => {
+  const ram = createRamHistory()
+  ram.import(
+    [
+      { t: 10 * MIN, value: 3 },
+      { t: 200 * MIN, value: 2 },
+      { t: 190 * MIN, value: 1 }
+    ],
+    200 * MIN
+  )
+  expect(ram.points()).toEqual([
+    { t: 190 * MIN, value: 1 },
+    { t: 200 * MIN, value: 2 }
+  ])
+})

@@ -23,7 +23,8 @@ import { activityOf, judgeServers, type ServerMemo } from './judge'
 import { agentToolOf, topLevelAgentPids } from './processTree'
 import { hookStateForWorktree, reconcileSessions, type LiveClaude, type Sessions } from './sessions'
 import { buildSnapshot, pidsForWorktreeLookup } from './snapshot'
-import { createServerHistory } from './serverHistory'
+import { createServerHistory, type ServerHistoryData } from './serverHistory'
+import type { AgentStateData, ServerMemoData } from './historyStore'
 import { selectionKey } from '../shared/keys'
 import { normalizeCandidate, selfWorkspace } from './collect/worktree'
 
@@ -71,8 +72,29 @@ export interface CollectorDeps {
  * 한 번의 수집: 샘플 → 메모리 → 워크트리 → 스냅샷(서버·남은 프로세스) → 에이전트 → 서버 판단 → 작업 공간.
  * 이전 샘플의 CPU 와 서버별 "안 쓰인 시각"을 기억한다. 스냅샷을 만들 때마다 Claude 세션의 워크트리를 다시 판별한다.
  */
+/** 다시 켜도 이어 쓸 수집기 기억(history.json, F8). */
+export interface CollectorState {
+  servers: ServerHistoryData
+  serverMemo: ServerMemoData
+  agentStates: AgentStateData
+}
+
 export function createCollector(deps: CollectorDeps): {
   collect(): Promise<DashboardSnapshot>
+  /** 저장할 기억: 서버 메모리 기록, 서버별 정리 판단 시작 시각, 에이전트 상태 시작 시각. */
+  exportState(): CollectorState
+  /**
+   * 저장했던 기억을 불러온다(첫 수집 전). 판단 기억이 null 이면(꺼진 지 오래) 처음부터 센다.
+   * 지금보다 뒤의 시각은 버린다.
+   */
+  importState(
+    state: {
+      servers: ServerHistoryData
+      serverMemo: ServerMemoData | null
+      agentStates: AgentStateData | null
+    },
+    now: number
+  ): void
   /** 다시 샘플링하지 않고 훅 세션 상태만 새로 반영한다(훅 이벤트가 왔을 때). */
   restate(snapshot: DashboardSnapshot): Promise<DashboardSnapshot>
 } {
@@ -280,5 +302,24 @@ export function createCollector(deps: CollectorDeps): {
     return { ...snapshot, agents: stated.agents }
   }
 
-  return { collect, restate }
+  function exportState(): CollectorState {
+    return {
+      servers: serverHistory.export(),
+      serverMemo: Object.fromEntries(serverMemo),
+      agentStates: Object.fromEntries(agentStates)
+    }
+  }
+
+  function importState(
+    state: Parameters<ReturnType<typeof createCollector>['importState']>[0],
+    now: number
+  ): void {
+    serverHistory.import(state.servers, now)
+    const past = <T extends { since: number }>(entries: Record<string, T> | null): [string, T][] =>
+      Object.entries(entries ?? {}).filter(([, v]) => v.since <= now)
+    serverMemo = new Map(past(state.serverMemo))
+    agentStates = new Map(past(state.agentStates))
+  }
+
+  return { collect, restate, exportState, importState }
 }

@@ -63,6 +63,12 @@ export type ProcessGroup = 'devServer' | 'agent' | 'heavy' | 'otherApps' | 'syst
 
 export type MemoryLevel = 'normal' | 'warn' | 'danger'
 
+/** 시간 추이 그래프의 점(RAM 사용률 등). */
+export interface TrendPoint {
+  t: number
+  value: number
+}
+
 export interface MemorySummary {
   totalBytes: number
   usedBytes: number

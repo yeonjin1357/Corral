@@ -19,7 +19,14 @@ import { text } from '../../shared/text'
 import { watchColorScheme } from './theme'
 import { toIpc } from './ipc'
 import { readSorts, resolveSort, writeSorts, type SortState, type Sorts } from './sortState'
-import { POINT_LIMIT, agentKey, appendSnapshot, emptyHistory, selectionKey } from './history'
+import {
+  POINT_LIMIT,
+  agentKey,
+  appendSnapshot,
+  emptyHistory,
+  seedRam,
+  selectionKey
+} from './history'
 import { hookControls } from './hook'
 import {
   TABS,
@@ -112,6 +119,11 @@ onMounted(async () => {
   void window.pitwall.appInfo().then((info) => (version.value = info.version))
   unsubscribeUpdate = window.pitwall.update.onChange((s) => (update.value = s))
   void window.pitwall.update.get().then((s) => (update.value = s))
+  // 앱이 기억한 RAM 추이로 그래프를 채운다(창을 다시 열거나 앱을 다시 켜도 이어짐).
+  void window.pitwall
+    .historyRam()
+    .then((points) => (history.value = seedRam(history.value, points)))
+    .catch(() => {})
   const latest = await window.pitwall.getLatest()
   // 창이 늦게 열려 놓친 스냅샷만 채운다. 그 사이 받은 더 새 스냅샷은 덮어쓰지 않는다.
   if (!snapshot.value && latest) receive(latest)
