@@ -18,6 +18,7 @@ import { cleanupRecommendation } from '../../shared/recommend'
 import { text } from '../../shared/text'
 import { watchColorScheme } from './theme'
 import { toIpc } from './ipc'
+import { readSorts, resolveSort, writeSorts, type SortState, type Sorts } from './sortState'
 import {
   POINT_LIMIT,
   agentKey,
@@ -328,6 +329,23 @@ async function hookAction(action: 'enable' | 'disable'): Promise<void> {
 // ── 표 ──
 const table = computed(() => (snapshot.value ? tableFor(tab.value, snapshot.value) : null))
 const rows = computed(() => (table.value ? filterRows(table.value.rows, query.value) : []))
+/** 탭별 정렬. 데이터가 새로 와도·탭을 오가도·다시 켜도 유지한다. */
+const storage = ((): Storage | null => {
+  try {
+    return window.localStorage
+  } catch {
+    return null
+  }
+})()
+const sorts = ref<Sorts>(readSorts(storage))
+const NO_SORT: SortState = { id: 'name', dir: 'asc' }
+const sort = computed<SortState>({
+  get: () => (table.value ? resolveSort(sorts.value[tab.value], table.value) : NO_SORT),
+  set: (next) => {
+    sorts.value = { ...sorts.value, [tab.value]: next }
+    writeSorts(storage, sorts.value)
+  }
+})
 const counts = computed<Record<TabKey, number>>(() => {
   const s = snapshot.value
   const zero = Object.fromEntries(TABS.map((t) => [t, 0])) as Record<TabKey, number>
@@ -413,7 +431,7 @@ const recommendChips = computed(() => {
 const takenAt = computed(() =>
   snapshot.value
     ? new Date(snapshot.value.takenAt).toLocaleTimeString('ko-KR', {
-        hour: '2-digit',
+        hour: 'numeric',
         minute: '2-digit',
         second: '2-digit'
       })
@@ -601,6 +619,7 @@ const takenAt = computed(() =>
 
         <ItemTable
           v-if="table"
+          v-model:sort="sort"
           :table="table"
           :rows="rows"
           :selected-key="selectedKey"

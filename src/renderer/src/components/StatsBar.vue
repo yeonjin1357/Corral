@@ -169,7 +169,7 @@ const diskInUse = computed(() => (disk.value?.rows.length ?? 0) - diskFree.value
 const scannedTime = computed(() =>
   disk.value?.scannedAt
     ? new Date(disk.value.scannedAt).toLocaleTimeString('ko-KR', {
-        hour: '2-digit',
+        hour: 'numeric',
         minute: '2-digit'
       })
     : null

@@ -84,16 +84,36 @@ const selected = computed(() =>
 function point(event: PointerEvent): void {
   if (!box.value || !visible.value.length) return
   const rect = box.value.getBoundingClientRect()
-  const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width))
+  const ratio =
+    rect.width > 0 ? Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)) : 1
   hovered.value = start.value + ratio * props.windowMs
 }
 
+/**
+ * 툴팁 위치(화면 기준). 카드 밖으로 잘리지 않게 body 에 띄우고, 점 바로 위에 둔다.
+ * 창 가장자리에서는 안쪽으로 밀고, 위가 좁으면 점 아래로 내린다.
+ */
+const TIP_HALF = 80
+const tip = computed(() => {
+  if (hovered.value == null || !selected.value || !box.value) return null
+  const rect = box.value.getBoundingClientRect()
+  const px = rect.left + (width.value > 0 ? x(selected.value.t) : rect.width)
+  const py = rect.top + (width.value > 0 ? y(selected.value.value) : 0)
+  const left = Math.max(TIP_HALF + 8, Math.min(window.innerWidth - TIP_HALF - 8, px))
+  const below = py < 72
+  return {
+    left,
+    top: below ? py + 12 : py - 12,
+    below,
+    time: time(selected.value.t),
+    value: props.format(selected.value.value)
+  }
+})
+
 const time = (t: number): string =>
-  new Date(t).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  new Date(t).toLocaleTimeString('ko-KR', { hour: 'numeric', minute: '2-digit', second: '2-digit' })
 const windowText = computed(() => text.ui.trend.window(props.windowMs))
 const caption = computed(() => {
-  if (hovered.value != null && selected.value)
-    return `${time(selected.value.t)} · ${props.label} ${props.format(selected.value.value)}`
   if (visible.value.length < 2) return text.ui.trend.collecting
   return `${windowText.value} · ${props.range ?? `0–${props.format(ceiling.value)}`}`
 })
@@ -112,7 +132,6 @@ const describe = computed(() =>
       :style="{ height: `${height}px` }"
       role="img"
       :aria-label="describe"
-      :title="describe"
       @pointermove="point"
       @pointerleave="hovered = null"
     >
@@ -137,13 +156,23 @@ const describe = computed(() =>
           stroke-linecap="round"
           stroke-linejoin="round"
         />
+        <line
+          v-if="selected && hovered != null"
+          :x1="x(selected.t)"
+          :x2="x(selected.t)"
+          :y1="PAD.top"
+          :y2="height - PAD.bottom"
+          :style="{ stroke: 'var(--border)' }"
+          stroke-width="1"
+          stroke-dasharray="3 3"
+        />
         <circle
           v-if="selected"
           :cx="x(selected.t)"
           :cy="y(selected.value)"
-          r="2"
+          :r="hovered != null ? 3 : 2"
           :style="{ fill: color, stroke: 'var(--card)' }"
-          stroke-width="1"
+          stroke-width="1.5"
         />
       </svg>
       <div v-else class="flex h-full w-full items-end">
@@ -153,5 +182,28 @@ const describe = computed(() =>
     <div class="min-h-3 truncate text-[10px] leading-3 text-muted-foreground tabular-nums">
       {{ caption }}
     </div>
+    <!-- NeoHtop (MIT) ui/chart/chart-tooltip.svelte 모양(색 점 + 이름 + 값). -->
+    <Teleport to="body">
+      <div
+        v-if="tip"
+        data-slot="chart-tooltip"
+        role="tooltip"
+        class="pointer-events-none fixed z-50 grid min-w-32 items-start gap-1.5 rounded-lg border border-border/50 bg-background px-2.5 py-1.5 text-xs shadow-xl"
+        :style="{
+          left: `${tip.left}px`,
+          top: `${tip.top}px`,
+          transform: tip.below ? 'translateX(-50%)' : 'translate(-50%, -100%)'
+        }"
+      >
+        <div class="font-medium tabular-nums">{{ tip.time }}</div>
+        <div class="flex w-full items-center gap-2">
+          <div class="h-2.5 w-2.5 shrink-0 rounded-[2px]" :style="{ background: color }"></div>
+          <div class="flex flex-1 shrink-0 items-center justify-between gap-4 leading-none">
+            <span class="text-muted-foreground">{{ label }}</span>
+            <span class="font-mono font-medium text-foreground tabular-nums">{{ tip.value }}</span>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>

@@ -4,7 +4,7 @@
   동작 칸: 브라우저로 열기 · 자세히 · 내리기(끄기)/지우기. 끄고 지우는 것은 모두 OS 확인 창을 거친다.
 -->
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed } from 'vue'
 import {
   ArrowDown,
   ArrowDownUp,
@@ -18,6 +18,7 @@ import {
 } from '@lucide/vue'
 import type { ActionKind, Column, Row, Table, Tone } from '../rows'
 import { sortRows } from '../rows'
+import type { SortState } from '../sortState'
 import { text } from '../../../shared/text'
 import Button from '../ui/Button.vue'
 import ItemIcon from './ItemIcon.vue'
@@ -39,11 +40,11 @@ const emit = defineEmits<{
   clearSearch: []
 }>()
 
-const sort = ref({ ...props.table.sort })
-watch(
-  () => props.table.sort,
-  (next) => (sort.value = { ...next })
-)
+/**
+ * 정렬은 화면(App)이 탭별로 들고 있다. 표 객체는 스냅샷마다 새로 만들어지므로
+ * 여기서 표의 기본 정렬로 되돌리면 사용자가 고른 정렬이 갱신 때마다 풀린다.
+ */
+const sort = defineModel<SortState>('sort', { required: true })
 function toggleSort(column: Column): void {
   if (sort.value.id === column.id)
     sort.value = { id: column.id, dir: sort.value.dir === 'asc' ? 'desc' : 'asc' }

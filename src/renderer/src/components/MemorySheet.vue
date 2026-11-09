@@ -37,7 +37,7 @@ const hasMemory = computed(() => m.value.totalBytes > 0)
 const percent = computed(() => Math.floor(m.value.usedPercent))
 const reading = computed(() =>
   new Date(props.snapshot.takenAt).toLocaleTimeString('ko-KR', {
-    hour: '2-digit',
+    hour: 'numeric',
     minute: '2-digit',
     second: '2-digit'
   })
