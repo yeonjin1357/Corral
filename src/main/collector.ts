@@ -325,12 +325,37 @@ export function createCollector(deps: CollectorDeps): {
     })
     const stated = withStateSince(withRollout, agentStates, sampledAt, exactSinceFor(roots))
     agentStates = stated.memo
-    const agents = stated.agents
+
+    // 작업 공간은 판단 전에 정한다: 같은 작업 공간에서 에이전트가 일하면 그 작업 공간의 서버·남은 프로세스는
+    // 정리 후보로 올리지 않는다(스펙 §4 — 다른 저장소에서 일하는 에이전트가 이 서버를 쓰고 있을 수 있다).
+    const workspaceOf = await resolveWorkspaces(
+      [
+        ...snapshot.servers.map((r) => r.worktree),
+        ...snapshot.leftovers.map((r) => r.worktree),
+        ...snapshot.heavyJobs.map((r) => r.worktree),
+        ...stated.agents.map((a) => a.worktree)
+      ],
+      options.workspaceAliases
+    )
+    const withWorkspace = <T extends { worktree: WorktreeInfo | null }>(
+      row: T
+    ): T & { workspace: WorkspaceInfo | null } => ({ ...row, workspace: workspaceOf(row.worktree) })
+    const agents = stated.agents.map(withWorkspace)
+    const agentWorkspaces = new Set(
+      agents.flatMap((a) => (a.workspace ? [worktreeKey(a.workspace.root)] : []))
+    )
+    const agentInWorkspace = (row: { workspace: WorkspaceInfo | null }): boolean =>
+      !!row.workspace && agentWorkspaces.has(worktreeKey(row.workspace.root))
+    const allServers = snapshot.servers.map(withWorkspace)
+    const leftovers = snapshot.leftovers.map((row) => {
+      const r = withWorkspace(row)
+      return agentInWorkspace(r) ? { ...r, agentInWorktree: true } : r
+    })
 
     // 숨긴 서버는 판단·추천·알림·트레이에 넣지 않는다(작업 공간·CPU·메모리 기록은 같이 본다).
     const hiddenList = options.hiddenServers ?? []
-    const visible = snapshot.servers.filter((r) => !isHidden(r, hiddenList))
-    const hidden = snapshot.servers.filter((r) => isHidden(r, hiddenList))
+    const visible = allServers.filter((r) => !isHidden(r, hiddenList))
+    const hidden = allServers.filter((r) => isHidden(r, hiddenList))
     const traces = activityOf(visible, raw.tcp, serverPeers)
     serverPeers = traces.connections
     const judged = judgeServers(
@@ -363,29 +388,13 @@ export function createCollector(deps: CollectorDeps): {
       ...row,
       memoryGrowth: serverHistory.growthOf(selectionKey.server(row), now)
     })
-    const measured = servers.map(grown)
-    const measuredHidden = hiddenServers.map(grown)
-
-    const workspaceOf = await resolveWorkspaces(
-      [
-        ...snapshot.servers.map((r) => r.worktree),
-        ...snapshot.leftovers.map((r) => r.worktree),
-        ...snapshot.heavyJobs.map((r) => r.worktree),
-        ...agents.map((a) => a.worktree)
-      ],
-      options.workspaceAliases
-    )
-    const withWorkspace = <T extends { worktree: WorktreeInfo | null }>(
-      row: T
-    ): T & { workspace: WorkspaceInfo | null } => ({ ...row, workspace: workspaceOf(row.worktree) })
-
     return {
       ...snapshot,
-      servers: measured.map(withWorkspace),
-      hiddenServers: measuredHidden.map(withWorkspace),
-      leftovers: snapshot.leftovers.map(withWorkspace),
+      servers: servers.map(grown),
+      hiddenServers: hiddenServers.map(grown),
+      leftovers,
       heavyJobs: snapshot.heavyJobs.map(withWorkspace),
-      agents: agents.map(withWorkspace),
+      agents,
       hook,
       codexHook
     }

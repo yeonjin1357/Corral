@@ -616,3 +616,45 @@ describe('Codex 연동 훅(F7)', () => {
     expect((await createCollector(setup().deps).collect()).codexHook).toBeNull()
   })
 })
+
+test('같은 작업 공간에서 에이전트가 일하면 다른 저장소의 서버·남은 프로세스도 정리 후보로 올리지 않는다', async () => {
+  const WS: WorkspaceInfo = { root: 'C:\\work\\ws', name: 'ws', branch: 'main', outer: true }
+  const FRONT: WorktreeInfo = {
+    root: 'C:\\work\\ws\\repos\\front',
+    branch: 'main',
+    isLinkedWorktree: false
+  }
+  const API: WorktreeInfo = {
+    root: 'C:\\work\\ws\\repos\\api',
+    branch: 'main',
+    isLinkedWorktree: false
+  }
+  const sample: RawSample = {
+    processes: [
+      proc(4100, 1, 'node.exe', 0, 'node vite'),
+      proc(5000, 1, 'claude.exe', 0),
+      proc(7100, 1, 'java.exe', 0, 'java org.gradle.launcher.daemon.bootstrap.GradleDaemon')
+    ],
+    tcp: sampleAt(0).tcp,
+    cwds: { 5000: API.root },
+    collectMode: 'helper-dll'
+  }
+  const { deps, clock } = setup({
+    sample: async () => sample,
+    resolveProcessWorktrees: async (processes) =>
+      new Map(
+        processes.flatMap((p): [number, WorktreeInfo][] =>
+          p.pid === 5000 ? [[p.pid, API]] : p.pid === 4100 || p.pid === 7100 ? [[p.pid, FRONT]] : []
+        )
+      ),
+    resolveWorktree: async () => null,
+    resolveWorkspace: async () => WS
+  })
+  const collector = createCollector(deps)
+  await collector.collect()
+  clock.now += 30 * MIN
+  const s = await collector.collect()
+  expect(s.servers[0]).toMatchObject({ judgement: null, agentInWorktree: true })
+  expect(s.leftovers.map((l) => [l.pid, l.agentInWorktree])).toEqual([[7100, true]])
+  expect(cleanupRecommendation(s).items).toEqual([])
+})
