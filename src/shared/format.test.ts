@@ -32,6 +32,8 @@ test('수집 오류를 한국어로: 시간 초과·결과 해석 실패·macOS 
 
 test('내리기 결과 문구: 성공·취소는 없음, 실패는 메시지 우선', () => {
   expect(describeKillResult({ status: 'killed' })).toBeNull()
+  // 한꺼번에 끄기는 몇 개를 껐는지 알려 준다.
+  expect(describeKillResult({ status: 'killed', message: '2개를 껐어요.' })).toBe('2개를 껐어요.')
   expect(describeKillResult({ status: 'cancelled' })).toBeNull()
   expect(describeKillResult({ status: 'gone' })).toBe('이미 종료된 프로세스예요.')
   expect(describeKillResult({ status: 'changed' })).toBe(

@@ -16,6 +16,7 @@ const api: PitwallApi = {
   getLatest: () => ipcRenderer.invoke(IPC.getLatest),
   killPort: (port, pid) => ipcRenderer.invoke(IPC.killPort, { port, pid }),
   killLeftover: (pid) => ipcRenderer.invoke(IPC.killLeftover, pid),
+  killMany: (keys) => ipcRenderer.invoke(IPC.killMany, keys),
   refreshNow: () => ipcRenderer.invoke(IPC.refreshNow),
   openPort: (port) => ipcRenderer.invoke(IPC.openPort, port),
   claudeHook: {

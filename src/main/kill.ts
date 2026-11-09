@@ -7,9 +7,16 @@ import type {
   ProcessInfo,
   RawSample
 } from '../shared/types'
-import { worktreeLabel } from '../shared/format'
+import { formatBytes, worktreeLabel } from '../shared/format'
+import { selectionKey } from '../shared/keys'
+import { cleanupRecommendation, type RecommendItem } from '../shared/recommend'
 import { text } from '../shared/text'
 import { classifyAgent, descendantsOf } from './processTree'
+
+/** 한 번에 끌 수 있는 최대 항목 수(정리 추천 한꺼번에 끄기). */
+const MAX_BATCH = 50
+/** 확인 창에 한 줄씩 보일 최대 항목 수. */
+const CONFIRM_LINES = 10
 
 export type { KillResult }
 
@@ -124,9 +131,28 @@ function validId(n: number): boolean {
  * 최신 샘플로 같은 프로세스인지·하위에 에이전트가 없는지 확인 → 네이티브 확인 창 → 한 번 더 확인 → 루트와 자손 종료.
  * 같은 pid 를 동시에 처리하지 않는다(포트와 남은 프로세스 사이에서도).
  */
+/** 정리 추천을 한꺼번에 끌 때의 확인 창: 항목 목록(최대 10줄)과 합계. */
+export function buildManyConfirm(items: RecommendItem[]): KillConfirm {
+  const total = items.reduce((sum, i) => sum + i.memoryBytes, 0)
+  const lines = items
+    .slice(0, CONFIRM_LINES)
+    .map((i) => text.killMany.item(i.title, i.where, formatBytes(i.memoryBytes)))
+  if (items.length > CONFIRM_LINES) lines.push(text.killMany.more(items.length - CONFIRM_LINES))
+  return {
+    title: text.killMany.title,
+    message: text.killMany.message(items.length, formatBytes(total)),
+    detail: [...lines, '', text.killMany.note].join('\n'),
+    buttons: [text.killMany.confirm, text.kill.cancel],
+    defaultId: 1,
+    cancelId: 1
+  }
+}
+
 export function createKiller(deps: KillDeps): {
   killPort(port: number, pid: number): Promise<KillResult>
   killLeftover(pid: number): Promise<KillResult>
+  /** 정리 추천 중 고른 것들을 확인 창 하나로 끈다. 항목마다 최신 샘플로 다시 확인한다. */
+  killMany(keys: string[]): Promise<KillResult>
 } {
   const busy = new Set<number>()
 
@@ -157,6 +183,27 @@ export function createKiller(deps: KillDeps): {
     }
   }
 
+  /** 루트에 종료를 보내고 자손에도 보낸다(자손 실패는 결과에 영향 없음). */
+  function terminate(pids: number[]): KillResult {
+    const [root, ...rest] = pids
+    try {
+      deps.signal(root, 'SIGTERM')
+    } catch (e) {
+      const code = errorCode(e)
+      if (code === 'ESRCH') return { status: 'gone' }
+      if (code === 'EPERM') return { status: 'failed', message: text.killResult.permission }
+      return { status: 'failed', message: errorMessage(e) }
+    }
+    for (const child of rest) {
+      try {
+        deps.signal(child, 'SIGTERM')
+      } catch {
+        // 자손이 이미 끝났거나 못 끄는 것은 루트 결과에 영향이 없다.
+      }
+    }
+    return { status: 'killed' }
+  }
+
   /** find 가 최신 스냅샷에서 대상을 찾아 돌려준다(없으면 gone, 문자열이면 그 이유로 실패). */
   async function run(
     pid: number,
@@ -176,25 +223,10 @@ export function createKiller(deps: KillDeps): {
       // 확인 창을 띄운 동안 시간이 지났으니 한 번 더 확인한다.
       const after = await freshPlan(found.target)
       if (!after.plan.ok) return planFailure(after.plan.reason)
-      const [root, ...rest] = after.plan.pids
-
-      try {
-        deps.signal(root, 'SIGTERM')
-      } catch (e) {
-        const code = errorCode(e)
-        if (code === 'ESRCH') return { status: 'gone' }
-        if (code === 'EPERM') return { status: 'failed', message: text.killResult.permission }
-        return { status: 'failed', message: errorMessage(e) }
-      }
-      for (const child of rest) {
-        try {
-          deps.signal(child, 'SIGTERM')
-        } catch {
-          // 자손이 이미 끝났거나 못 끄는 것은 루트 결과에 영향이 없다.
-        }
-      }
-      if (deps.platform === 'darwin') await escalateOnDarwin(after.plan.pids, after.sample)
-      return { status: 'killed' }
+      const result = terminate(after.plan.pids)
+      if (result.status === 'killed' && deps.platform === 'darwin')
+        await escalateOnDarwin(after.plan.pids, after.sample)
+      return result
     } catch (e) {
       return { status: 'failed', message: errorMessage(e) }
     } finally {
@@ -222,5 +254,72 @@ export function createKiller(deps: KillDeps): {
     })
   }
 
-  return { killPort, killLeftover }
+  async function killMany(keys: string[]): Promise<KillResult> {
+    if (!Array.isArray(keys) || keys.length > MAX_BATCH || keys.some((k) => typeof k !== 'string'))
+      return { status: 'failed', message: text.killResult.invalid }
+    const latest = deps.latest()
+    if (!latest) return { status: 'gone' }
+    const wanted = new Set(keys)
+    const targets = cleanupRecommendation(latest).items.flatMap((item) => {
+      if (!wanted.has(item.key)) return []
+      const row =
+        item.kind === 'port'
+          ? latest.ports.find((r) => selectionKey.port(r) === item.key)
+          : latest.leftovers.find((r) => selectionKey.leftover(r) === item.key)
+      return row ? [{ item, target: row as KillTarget }] : []
+    })
+    const busyCount = targets.filter((t) => busy.has(t.item.pid)).length
+    const mine = targets.filter((t) => !busy.has(t.item.pid))
+    if (mine.length === 0)
+      return busyCount > 0
+        ? { status: 'failed', message: text.killResult.busy }
+        : { status: 'gone' }
+
+    for (const t of mine) busy.add(t.item.pid)
+    try {
+      const before = await deps.resample()
+      const ready = mine.filter((t) => planKill(t.target, before).ok)
+      if (ready.length === 0) return { status: 'gone' }
+      if (!(await deps.confirm(buildManyConfirm(ready.map((t) => t.item)))))
+        return { status: 'cancelled' }
+
+      // 확인 창을 띄운 동안 시간이 지났으니 항목마다 한 번 더 확인한다.
+      const after = await deps.resample()
+      let killed = 0
+      let killedBytes = 0
+      let failed = 0
+      let skipped = mine.length - ready.length
+      const killedPids: number[] = []
+      for (const t of ready) {
+        const plan = planKill(t.target, after)
+        if (!plan.ok) {
+          skipped++
+          continue
+        }
+        if (terminate(plan.pids).status === 'killed') {
+          killed++
+          killedBytes += t.item.memoryBytes
+          killedPids.push(...plan.pids)
+        } else failed++
+      }
+      if (killedPids.length > 0 && deps.platform === 'darwin')
+        await escalateOnDarwin(killedPids, after)
+
+      const parts: string[] = []
+      if (killed > 0) parts.push(text.killMany.killed(killed, formatBytes(killedBytes)))
+      if (skipped > 0) parts.push(text.killMany.skipped(skipped))
+      if (busyCount > 0) parts.push(text.killMany.busy(busyCount))
+      if (failed > 0) parts.push(text.killMany.failed(failed))
+      const message = parts.join(' ')
+      if (killed > 0) return { status: 'killed', message }
+      if (failed > 0) return { status: 'failed', message }
+      return { status: 'changed' }
+    } catch (e) {
+      return { status: 'failed', message: errorMessage(e) }
+    } finally {
+      for (const t of mine) busy.delete(t.item.pid)
+    }
+  }
+
+  return { killPort, killLeftover, killMany }
 }

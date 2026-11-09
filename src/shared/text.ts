@@ -15,6 +15,18 @@ export const text = {
     confirm: '내리기',
     cancel: '취소'
   },
+  killMany: {
+    title: '메모리 정리',
+    message: (n: number, size: string): string => `${n}개를 끌까요? 약 ${size} 를 확보해요.`,
+    item: (title: string, where: string, size: string): string => `• ${title} (${where}) — ${size}`,
+    more: (n: number): string => `외 ${n}개`,
+    note: '끄기 직전에 하나씩 최신 상태를 다시 확인하고, 그 사이 바뀐 것은 건너뛰어요.',
+    confirm: '모두 끄기',
+    killed: (n: number, size: string): string => `${n}개를 껐어요. 약 ${size} 를 확보했어요.`,
+    skipped: (n: number): string => `${n}개는 그 사이 바뀌거나 끝나서 건너뛰었어요.`,
+    busy: (n: number): string => `${n}개는 이미 처리 중이라 건너뛰었어요.`,
+    failed: (n: number): string => `${n}개는 끄지 못했어요(권한이 없거나 이미 끝남).`
+  },
   leftoverKill: {
     title: '남은 프로세스 끄기',
     message: (label: string, where: string): string => `${label} (${where}) 을(를) 끌까요?`,

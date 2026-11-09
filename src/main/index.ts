@@ -234,6 +234,12 @@ function registerIpc(): void {
     void scheduler.refreshNow()
     return result
   })
+  ipcMain.handle(IPC.killMany, async (event, keys: unknown) => {
+    if (!fromMainWindow(event.sender)) return { status: 'failed', message: text.killResult.invalid }
+    const result = await killer.killMany(keys as string[])
+    void scheduler.refreshNow()
+    return result
+  })
   ipcMain.handle(IPC.claudeHookStatus, async (event) =>
     fromMainWindow(event.sender) ? claude.status() : null
   )

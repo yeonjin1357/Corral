@@ -1,10 +1,5 @@
-import type {
-  AgentRow,
-  AgentState,
-  DashboardSnapshot,
-  LeftoverRow,
-  PortRow
-} from '../../shared/types'
+import type { AgentState, DashboardSnapshot } from '../../shared/types'
+import { agentKey, portKey } from '../../shared/keys'
 
 /**
  * 하트비트 한 칸. 포트: 연결이 있었으면 up, 열려 있기만 했으면 idle.
@@ -35,23 +30,7 @@ export interface History {
 export const BEAT_LIMIT = 60
 export const POINT_LIMIT = 120
 
-/** 같은 포트를 다른 프로세스가 열면 다른 항목이 되도록 포트와 pid 를 함께 쓴다. */
-export function portKey(row: Pick<PortRow, 'port' | 'pid'>): string {
-  return `${row.port}:${row.pid}`
-}
-
-/** 같은 pid 가 다른 프로세스에 다시 쓰여도 섞이지 않게 시작 시각을 함께 쓴다. */
-export function agentKey(row: Pick<AgentRow, 'pid' | 'startedAt'>): string {
-  return `${row.pid}:${row.startedAt ?? ''}`
-}
-
-/** 목록에서 고른 항목 키. 종류를 앞에 붙여 포트·에이전트·남은 프로세스가 서로 겹치지 않는다. */
-export const selectionKey = {
-  port: (row: Pick<PortRow, 'port' | 'pid'>): string => `port:${portKey(row)}`,
-  agent: (row: Pick<AgentRow, 'pid' | 'startedAt'>): string => `agent:${agentKey(row)}`,
-  leftover: (row: Pick<LeftoverRow, 'pid' | 'startedAt'>): string =>
-    `leftover:${row.pid}:${row.startedAt ?? ''}`
-}
+export { agentKey, portKey, selectionKey } from '../../shared/keys'
 
 const AGENT_BEAT: Record<AgentState, Beat> = {
   working: 'up',

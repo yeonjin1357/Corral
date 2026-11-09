@@ -17,6 +17,8 @@ export function describeCollectError(message: string): string {
 export function describeKillResult(result: KillResult): string | null {
   switch (result.status) {
     case 'killed':
+      // 하나를 끈 것은 목록에서 사라지는 것으로 충분하다. 한꺼번에 끄기는 몇 개를 껐는지 알린다.
+      return result.message ?? null
     case 'cancelled':
       return null
     case 'gone':

@@ -38,6 +38,7 @@ function installApi(
     ),
     killPort: vi.fn(async (): Promise<KillResult> => opts.kill ?? { status: 'killed' }),
     killLeftover: vi.fn(async (): Promise<KillResult> => opts.kill ?? { status: 'killed' }),
+    killMany: vi.fn(async (): Promise<KillResult> => opts.kill ?? { status: 'killed' }),
     refreshNow: vi.fn(async (): Promise<void> => {}),
     openPort: vi.fn(async (): Promise<boolean> => true),
     claudeHook: {

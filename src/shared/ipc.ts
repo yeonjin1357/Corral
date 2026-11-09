@@ -7,6 +7,7 @@ export const IPC = {
   getLatest: 'pitwall:get-latest',
   killPort: 'pitwall:kill-port',
   killLeftover: 'pitwall:kill-leftover',
+  killMany: 'pitwall:kill-many',
   refreshNow: 'pitwall:refresh-now',
   openPort: 'pitwall:open-port',
   claudeHookStatus: 'pitwall:claude-hook-status',
@@ -33,6 +34,8 @@ export interface PitwallApi {
   killPort(port: number, pid: number): Promise<KillResult>
   /** 주인 없이 남은 프로세스를 끈다(메인에서 확인 창). */
   killLeftover(pid: number): Promise<KillResult>
+  /** 정리 추천 중 고른 것(선택 키)을 확인 창 하나로 끈다. */
+  killMany(keys: string[]): Promise<KillResult>
   /** 다음 주기를 기다리지 않고 지금 수집한다(끝날 때까지 기다린다). */
   refreshNow(): Promise<void>
   /** 목록에 있는 개발 서버 포트를 기본 브라우저로 연다. 열었으면 true. */
