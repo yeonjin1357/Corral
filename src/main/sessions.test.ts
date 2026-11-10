@@ -8,6 +8,7 @@ import {
   pairBySessionFile,
   reconcileSessions,
   SESSION_EXPIRE_MS,
+  settleWaiting,
   toolSummary,
   type ClaudeSession,
   type HookView,
@@ -762,6 +763,67 @@ describe('상태 시작 시각(F3)', () => {
       sessionId: 'b',
       activity: null
     })
+  })
+})
+
+describe('응답 대기 정리(settleWaiting)', () => {
+  const bash = (command: string): Record<string, unknown> => ({
+    tool_name: 'Bash',
+    tool_input: { command }
+  })
+
+  test('세션 파일의 더 늦은 busy 가 이긴 응답 대기를 작업 중으로 정리하고, 그 뒤 새 권한 요청은 새 대기다', () => {
+    const sessions: Sessions = new Map()
+    applyHookEvent(sessions, ev('UserPromptSubmit', { prompt: '빌드 고쳐 줘' }), 1000)
+    applyHookEvent(sessions, ev('PreToolUse', bash('npm run build')), 60_000)
+    applyHookEvent(sessions, ev('PermissionRequest', bash('npm run build')), 60_100)
+    // 사용자가 답해 세션 파일이 90초에 busy 가 됐다.
+    expect(settleWaiting(sessions, 's1', 90_000)).toBe(true)
+    expect(sessions.get('s1')).toMatchObject({
+      state: 'working',
+      stateSince: 90_000,
+      waitingTool: null,
+      // 훅 이벤트가 온 것이 아니라 마지막 소식·활동 시각은 그대로다.
+      updatedAt: 60_100,
+      lastActivityAt: 60_100
+    })
+    expect(sessions.get('s1')?.activity).toEqual({
+      title: null,
+      prompt: '빌드 고쳐 줘',
+      tool: null,
+      waiting: null
+    })
+    // 그 뒤 다른 도구의 이벤트는 작업 중을 이어 간다.
+    applyHookEvent(
+      sessions,
+      ev('PreToolUse', { tool_name: 'Read', tool_input: { file_path: 'a.ts' } }),
+      93_000
+    )
+    expect(sessions.get('s1')).toMatchObject({ state: 'working', stateSince: 90_000 })
+    // 새 권한 요청은 새 대기다(새 시작 시각).
+    applyHookEvent(sessions, ev('PermissionRequest', bash('npm test')), 120_000)
+    expect(sessions.get('s1')).toMatchObject({
+      state: 'waiting',
+      stateSince: 120_000,
+      waitingTool: 'Bash'
+    })
+  })
+
+  test('아는 것이 기다리던 도구뿐이면 하는 일을 비운다', () => {
+    const sessions: Sessions = new Map()
+    applyHookEvent(sessions, ev('PermissionRequest', bash('npm run build')), 1000)
+    expect(settleWaiting(sessions, 's1', 9000)).toBe(true)
+    expect(sessions.get('s1')).not.toHaveProperty('activity')
+  })
+
+  test('응답 대기가 아니거나 없는 세션은 그대로(false)', () => {
+    const sessions: Sessions = new Map()
+    applyHookEvent(sessions, ev('UserPromptSubmit'), 1000)
+    const before = structuredClone(sessions.get('s1'))
+    expect(settleWaiting(sessions, 's1', 5000)).toBe(false)
+    expect(sessions.get('s1')).toEqual(before)
+    expect(settleWaiting(sessions, 'none', 5000)).toBe(false)
+    expect(sessions.size).toBe(1)
   })
 })
 

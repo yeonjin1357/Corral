@@ -354,6 +354,26 @@ export function applyHookEvent(
   return true
 }
 
+/**
+ * 세션 파일의 더 늦은 busy(사용자가 답하고 다시 일함)가 이긴 응답 대기를 작업 중으로 정리한다(수집 때, G3a — fileStateOver).
+ * 상태는 작업 중, 그 시작 시각은 at(파일의 상태 시각), 기다리던 도구와 하는 일의 기다리는 도구는 비운다(아는 것이 더
+ * 없으면 하는 일도 없다). 대기로 남겨 두면 대기를 풀지 않는 다른 도구의 이벤트가 그 대기를 다시 보이게 하고, 그 뒤의 새
+ * 권한 요청이 새 대기(새 시작 시각)로 시작하지 못한다. 훅 이벤트가 온 것이 아니라 마지막 소식·활동 시각은 그대로다.
+ * 그 세션이 없거나 응답 대기가 아니면 false.
+ */
+export function settleWaiting(sessions: Sessions, sessionId: string, at: number): boolean {
+  const session = sessions.get(sessionId)
+  if (!session || session.state !== 'waiting') return false
+  session.state = 'working'
+  session.stateSince = at
+  session.waitingTool = null
+  // 지난 스냅샷이 들고 있는 하는 일을 바꾸지 않게 새로 만든다.
+  const prev = session.activity
+  if (prev?.title || prev?.prompt || prev?.tool) session.activity = { ...prev, waiting: null }
+  else delete session.activity
+  return true
+}
+
 /** 들고 있던 하는 일(G3b)을 모두 지운다(설정 showAgentActivity 를 끌 때). 상태는 그대로다. */
 export function clearActivity(sessions: Sessions): void {
   for (const s of sessions.values()) delete s.activity

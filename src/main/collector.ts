@@ -44,6 +44,7 @@ import {
   oneLine,
   pairBySessionFile,
   reconcileSessions,
+  settleWaiting,
   type HookView,
   type LiveClaude,
   type Sessions
@@ -643,9 +644,22 @@ export function createCollector(deps: CollectorDeps): {
     })
     previousCpu = cpu
     // 훅 상태가 없거나 파일이 더 늦은 근거인 Claude 에이전트는 세션 파일의 상태를 쓴다.
-    const built = hooked.map((a) =>
-      a.tool === 'claude' && sessionFiles.has(a.pid) ? stateFrom(a, hookOfRow(roots)(a)) : a
-    )
+    const built = hooked.map((a) => {
+      const file = a.tool === 'claude' ? sessionFiles.get(a.pid) : undefined
+      if (!file) return a
+      const hook = hookOfRow(roots)(a)
+      const row = stateFrom(a, hook)
+      // 파일의 더 늦은 busy(답하고 다시 일함)가 훅의 응답 대기를 이겼으면 그 훅 세션도 작업 중으로 정리한다: 대기를
+      // 풀지 않는 다른 도구의 이벤트가 대기를 되살리지 않고, 그 뒤의 새 권한 요청은 새 대기로 시작하게.
+      if (
+        hook?.state === 'waiting' &&
+        row.stateSource === 'file' &&
+        row.state === 'working' &&
+        file.statusUpdatedAt !== null
+      )
+        settleWaiting(deps.sessions, hook.sessionId, file.statusUpdatedAt)
+      return row
+    })
     const codexInfos = await readRollouts(built, raw.cwds ?? {}, now, options.readUsage)
     // 상태는 세션 기록이 정하는 Codex 에만 쓴다(숫자만 읽은 훅 상태의 Codex 는 훅 상태 그대로).
     rollouts = new Map(
@@ -796,7 +810,7 @@ export function createCollector(deps: CollectorDeps): {
         if (!hook || (r && hook.since <= r.since)) return a
       }
       // 세션 파일은 다음 수집에서 다시 읽는다. 마지막으로 읽은 파일과 훅 가운데 더 늦은 근거를 따른다
-      // (훅 상태가 생기지 않은 파일 행은 그대로).
+      // (훅 상태가 생기지 않은 파일 행은 그대로). 훅 세션은 고치지 않는다(응답 대기 정리는 수집만 한다).
       return stateFrom(a, hook)
     })
     const now = deps.now()

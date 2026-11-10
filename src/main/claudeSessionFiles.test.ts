@@ -262,7 +262,7 @@ describe('fileStateOver', () => {
     ...over
   })
 
-  test('fileStateOver: waiting(permission prompt) 은 입력 대기, waiting(dialog open) 은 쉬는 중', () => {
+  test('fileStateOver: waiting(permission prompt) 은 입력 대기, waiting(dialog open) 은 따르지 않는다', () => {
     const waiting = (waitingFor: string | null): ClaudeSessionFile =>
       fileOf({ status: 'waiting', waitingFor })
     expect(fileStateOver(waiting('permission prompt'), null)).toBe('waiting')
@@ -270,31 +270,63 @@ describe('fileStateOver', () => {
     // 모르는 이유도 기다림이다(이유만 모른다).
     expect(fileStateOver(waiting('something new'), null)).toBe('waiting')
     expect(fileStateOver(waiting(null), null)).toBe('waiting')
-    // 사용자가 직접 연 창(슬래시 명령 등)일 수 있어 기다림으로 알리지 않는다.
-    expect(fileStateOver(waiting('dialog open'), null)).toBe('idle')
+    // 사용자가 직접 연 창(슬래시 명령 등)일 수 있어 기다림으로 알리지 않고, 턴이 도는 중에도 열리므로 쉬는 중으로도
+    // 보지 않는다: 따르지 않는다(훅이 있으면 훅, 없으면 CPU 추정).
+    expect(fileStateOver(waiting('dialog open'), null)).toBeNull()
+    expect(
+      fileStateOver(waiting('dialog open'), { state: 'working', since: 0, lastActivityAt: 0 })
+    ).toBeNull()
     // 지금까지처럼: busy 는 작업 중, idle 은 쉬는 중, 상태를 모르면 따르지 않는다.
     expect(fileStateOver(fileOf({ status: 'busy' }), null)).toBe('working')
     expect(fileStateOver(fileOf({ status: 'idle' }), null)).toBe('idle')
     expect(fileStateOver(fileOf({ status: null }), null)).toBeNull()
   })
 
-  test('fileStateOver: 훅이 더 늦으면 파일의 waiting 을 따르지 않는다', () => {
+  test('fileStateOver: 파일의 waiting 은 훅이 그 뒤에 상태를 바꿨을 때만 지고, 상태를 바꾸지 않는 도구 이벤트로는 덮이지 않는다', () => {
     const file = fileOf({ status: 'waiting', waitingFor: 'input needed', statusUpdatedAt: NOW })
-    // 훅이 더 늦거나 5초 안이면 훅(같은 때 권한 대기를 알렸으면 도구 이름을 아는 훅이 이긴다).
-    expect(fileStateOver(file, { state: 'working', lastActivityAt: NOW + 1000 })).toBeNull()
-    expect(fileStateOver(file, { state: 'waiting', lastActivityAt: NOW - 5000 })).toBeNull()
-    // 파일이 5초를 넘게 늦으면 파일.
-    expect(fileStateOver(file, { state: 'working', lastActivityAt: NOW - 5001 })).toBe('waiting')
-    expect(fileStateOver(file, { state: 'idle', lastActivityAt: NOW - 5001 })).toBe('waiting')
+    const working = { state: 'working' as const, since: NOW - 60_000 }
+    // 질문 도구의 PreToolUse 0.1초 뒤 파일이 응답 대기가 됐다: 훅(작업 중)은 이 대기를 모른다.
+    expect(fileStateOver(file, { ...working, lastActivityAt: NOW - 100 })).toBe('waiting')
+    // 그 뒤 다른 도구의 이벤트(마지막 활동만 늦어짐)가 와도 대기다.
+    expect(fileStateOver(file, { ...working, lastActivityAt: NOW + 30_000 })).toBe('waiting')
+    expect(fileStateOver(file, { state: 'idle', since: NOW, lastActivityAt: NOW })).toBe('waiting')
+    // 훅이 그 뒤에 상태를 바꿨으면(Stop·새 프롬프트) 훅.
+    expect(
+      fileStateOver(file, { state: 'idle', since: NOW + 1, lastActivityAt: NOW + 1 })
+    ).toBeNull()
+    expect(
+      fileStateOver(file, { state: 'working', since: NOW + 1000, lastActivityAt: NOW + 1000 })
+    ).toBeNull()
+    // 훅도 응답 대기면 지금 규칙 그대로: 5초 안이면 도구 이름을 아는 훅, 5초를 넘게 늦으면 파일.
+    expect(
+      fileStateOver(file, { state: 'waiting', since: NOW - 5000, lastActivityAt: NOW - 5000 })
+    ).toBeNull()
+    expect(
+      fileStateOver(file, { state: 'waiting', since: NOW - 60_000, lastActivityAt: NOW - 5001 })
+    ).toBe('waiting')
     // 상태 시각을 모르는 파일은 훅보다 늦은지 알 수 없다.
     expect(
-      fileStateOver({ ...file, statusUpdatedAt: null }, { state: 'idle', lastActivityAt: 0 })
+      fileStateOver(
+        { ...file, statusUpdatedAt: null },
+        { state: 'idle', since: 0, lastActivityAt: 0 }
+      )
     ).toBeNull()
   })
 
+  test('fileStateOver: 훅이 응답 대기면 파일의 busy 는 마지막 활동이 아니라 그 대기가 시작된 시각과 견준다', () => {
+    // 권한 요청(30초 전) 뒤 사용자가 답해 파일이 busy 가 됐다. 그 뒤 다른 도구의 이벤트로 마지막 활동만 늦어져도
+    // (훅 세션은 여전히 대기) 답한 것은 그대로다.
+    const hook = { state: 'waiting' as const, since: NOW - 30_000, lastActivityAt: NOW + 3000 }
+    expect(fileStateOver(fileOf({ status: 'busy' }), hook)).toBe('working')
+    // 대기가 시작된 뒤 5초 안의 busy 는 같은 일(권한을 묻던 때)이다.
+    expect(fileStateOver(fileOf({ status: 'busy' }), { ...hook, since: NOW - 5000 })).toBeNull()
+    // 대기보다 이른 busy 는 따르지 않는다(새 권한 요청).
+    expect(fileStateOver(fileOf({ status: 'busy' }), { ...hook, since: NOW + 1000 })).toBeNull()
+  })
+
   test('fileStateOver: 훅이 권한 대기면 파일의 shell 도 따르지 않는다', () => {
-    const hook = { state: 'waiting' as const, lastActivityAt: NOW - 60_000 }
-    // 쉬는 중으로 읽는 것(idle·shell·dialog open)은 아무리 늦어도 따르지 않는다.
+    const hook = { state: 'waiting' as const, since: NOW - 60_000, lastActivityAt: NOW - 60_000 }
+    // 쉬는 중으로 읽는 것(idle·shell)은 아무리 늦어도 따르지 않는다(dialog open 은 언제나 따르지 않는다).
     expect(fileStateOver(fileOf({ status: 'shell' }), hook)).toBeNull()
     expect(fileStateOver(fileOf({ status: 'idle' }), hook)).toBeNull()
     expect(fileStateOver(fileOf({ status: 'waiting', waitingFor: 'dialog open' }), hook)).toBeNull()
