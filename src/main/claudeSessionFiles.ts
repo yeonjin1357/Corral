@@ -52,9 +52,9 @@ const shortText = (v: unknown, max: number): string | null =>
   typeof v === 'string' && v && v.length <= max ? v : null
 
 /**
- * 훅과 파일이 둘 다 있을 때, 파일의 상태 시각이 훅의 시각(마지막 활동, 훅이 응답 대기이고 파일이 busy 면 그 대기가
- * 시작된 시각)보다 이 시간을 넘게 늦어야 더 늦은 근거로 본다(fileStateOver). 같은 일(입력·응답 끝·권한 요청)로 둘이
- * 거의 같은 때 바뀌므로 그 차이는 훅을 따른다(어떤 도구가 권한을 기다리는지는 훅만 안다).
+ * 훅과 파일이 둘 다 있을 때, 파일의 상태 시각이 훅 세션의 마지막 활동보다 이 시간을 넘게 늦어야 파일을 따르는 경우의
+ * 여유(fileStateOver — 둘 다 응답 대기, 또는 훅이 응답 대기가 아니고 파일이 busy·쉬는 중). 같은 일(입력·응답 끝·권한
+ * 요청)로 둘이 거의 같은 때 바뀌므로 그 차이는 훅을 따른다(어떤 도구가 권한을 기다리는지는 훅만 안다).
  */
 export const FILE_NEWER_SLACK_MS = 5000
 
@@ -163,28 +163,35 @@ export function waitReasonOf(waitingFor: string | null): WaitReason | 'dialog' {
 
 /**
  * 세션 파일의 상태를 따를 때 그 에이전트 상태. 따르지 않으면 null(훅이 있으면 훅, 없으면 CPU 추정).
- * - busy → 작업 중, idle·shell → 쉬는 중(shell 은 턴이 끝났고 백그라운드 셸만 돈다), waiting → 응답 대기.
- * - 따르지 않는 것: 상태를 모르는 파일, 이유가 dialog 인 waiting(사용자가 연 창일 수 있고 턴이 도는 중에도 열린다 —
- *   쉬는 중으로 보면 틀린 "작업 끝남"이 난다).
- * 훅 상태가 있으면 더 늦은 근거를 따른다(훅 전달이 끊겼거나 끝 이벤트를 놓친 세션이 옛 상태로 굳지 않게). 상태 시각을
- * 모르는 파일은 늦은지 알 수 없어 따르지 않는다. "늦다"는 FILE_NEWER_SLACK_MS 를 넘게 늦은 것이다.
- * - 훅이 응답 대기일 때
- *   - 파일의 쉬는 중(idle·shell)은 아무리 늦어도 따르지 않는다: 권한 창이 떠 있는 동안 파일에 무엇이 쓰이는지 모르고,
- *     훅이 살아 있으니 턴의 끝은 Stop 으로 온다.
- *   - 파일의 busy 는 그 대기가 시작된 시각(since)보다 늦으면 따른다(답하고 다시 일함). 마지막 활동과 견주지 않는다:
- *     대기를 풀지 않는 다른 도구의 이벤트로 마지막 활동만 늦어져 다시 응답 대기로 돌아가지 않게. 수집은 이렇게 이긴
- *     대기를 훅 세션에서도 작업 중으로 정리한다(settleWaiting).
- *   - 파일의 waiting 은 마지막 활동보다 늦을 때만 따른다(같은 때 알렸으면 도구 이름을 아는 훅).
- * - 훅이 응답 대기가 아닐 때
- *   - 파일의 waiting 은 따른다(훅이 알리지 않는 질문 등의 대기도 놓치지 않게). 훅을 따르는 것은 훅이 작업 중이고 그
- *     대기가 시작된 뒤에 작업 중이 됐을 때(since 가 파일의 상태 시각보다 늦음 — 새 턴)뿐이다. 훅의 쉬는 중·오류(60초 뒤의
- *     idle_prompt 알림·Stop)와 상태를 바꾸지 않는 이벤트(다른 도구의 사용 등 — 마지막 활동만 늦어짐)는 대기를 끝내지
- *     않는다: 대기는 파일이 끝낸다(다음 수집에서 busy·idle 로 읽힘). 그래서 Stop 뒤에도 한 수집 주기까지는 응답 대기다.
- *   - 파일의 busy·쉬는 중은 마지막 활동보다 늦을 때만 따른다.
+ * 파일 상태의 뜻: busy → 작업 중, idle·shell → 쉬는 중(shell 은 턴이 끝났고 백그라운드 셸만 돈다), waiting → 응답 대기.
+ * 언제나 따르지 않는 것: 상태를 모르는 파일, 이유가 dialog 인 waiting(사용자가 연 창일 수 있고 턴이 도는 중에도
+ * 열린다 — 쉬는 중으로 보면 틀린 "작업 끝남"이 난다).
+ * 훅이 없으면 파일을 따른다. 훅이 있으면(상태 시각을 모르는 파일은 따르지 않는다) 아래 규칙으로 정한다. 시각은 모두 이
+ * PC 의 시계다(훅의 시각은 이벤트가 도착한 때).
+ * 1. 훅이 응답 대기일 때
+ *    - 파일의 busy: 그 대기가 시작된 시각(hook.since)보다 늦게 쓰였으면 파일(답하고 다시 일함 — 여유 없음, 바로 답한
+ *      권한 요청도). 권한을 묻기 전의 busy 는 언제나 그보다 이르다. 마지막 활동과 견주지 않는다(대기를 풀지 않는 다른
+ *      도구의 이벤트로 다시 응답 대기가 되지 않게). 수집은 이렇게 이긴 대기를 훅 세션에서도 정리한다(settleWaiting).
+ *    - 파일의 waiting: 훅의 마지막 활동보다 FILE_NEWER_SLACK_MS 넘게 늦을 때만 파일(같은 때면 도구 이름을 아는 훅).
+ *    - 파일의 쉬는 중(idle·shell): 따르지 않는다(권한 창이 떠 있는 동안 파일에 무엇이 쓰이는지 모르고, 턴의 끝은 Stop
+ *      으로 온다).
+ * 2. 훅이 응답 대기가 아닐 때
+ *    - 파일의 waiting: 훅이 그 대기가 시작된 뒤에 다시 작업 중이 됐으면(hook.workingSince 가 파일의 상태 시각보다 늦음
+ *      — 답하고 일함·새 턴, 여유 없음) 그 대기는 끝났다: 지금 상태가 무엇이든 훅(마지막으로 읽은 파일이 옛 대기여도
+ *      수집 사이에 되살아나지 않게). 아니면 파일(훅이 알리지 않는 질문 등의 대기도 놓치지 않게). 그래서 훅의 쉬는 중·
+ *      오류(60초 뒤의 idle_prompt 알림, 다시 작업하지 않은 세션의 Stop)와 다른 도구의 이벤트는 대기를 끝내지 않는다 —
+ *      파일이 끝낸다(다음 수집에서 busy·idle 로 읽힘). Stop 뒤에는 한 수집 주기까지 응답 대기일 수 있다.
+ *    - 파일의 busy·쉬는 중: 훅의 마지막 활동보다 FILE_NEWER_SLACK_MS 넘게 늦을 때만 파일(훅 전달이 끊겼거나 끝 이벤트를
+ *      놓친 세션이 옛 상태로 굳지 않게).
  */
 export function fileStateOver(
   file: ClaudeSessionFile,
-  hook: { state: AgentState; since: number; lastActivityAt: number } | null
+  hook: {
+    state: AgentState
+    since: number
+    lastActivityAt: number
+    workingSince: number | null
+  } | null
 ): 'working' | 'idle' | 'waiting' | null {
   if (file.status === null) return null
   if (file.status === 'waiting' && waitReasonOf(file.waitingFor) === 'dialog') return null
@@ -192,11 +199,12 @@ export function fileStateOver(
   if (!hook) return state
   const at = file.statusUpdatedAt
   if (at === null) return null
-  const newerThan = (t: number): boolean => at - t > FILE_NEWER_SLACK_MS
+  const newerThanActivity = at - hook.lastActivityAt > FILE_NEWER_SLACK_MS
   if (hook.state === 'waiting') {
-    if (state === 'idle') return null
-    return newerThan(state === 'working' ? hook.since : hook.lastActivityAt) ? state : null
+    if (state === 'working') return at > hook.since ? state : null
+    return state === 'waiting' && newerThanActivity ? state : null
   }
-  if (state === 'waiting') return hook.state === 'working' && hook.since > at ? null : state
-  return newerThan(hook.lastActivityAt) ? state : null
+  if (state === 'waiting')
+    return hook.workingSince !== null && hook.workingSince > at ? null : state
+  return newerThanActivity ? state : null
 }

@@ -22,6 +22,12 @@ export interface ClaudeSession {
   /** 지금 상태가 된 이벤트 시각. 같은 상태 이벤트가 또 와도 그대로다. 없으면 firstSeen. */
   stateSince?: number
   /**
+   * 마지막으로 작업 중이 된(다른 상태에서 작업 중으로 넘어온) 시각. 작업 중을 벗어나도 남는다. 응답 대기 정리
+   * (settleWaiting)도 작업 중이 된 것으로 센다. 세션 파일의 응답 대기가 그 뒤에 끝났는지 아는 데 쓴다(fileStateOver).
+   * 작업 중이 된 적이 없으면 null.
+   */
+  workingSince?: number | null
+  /**
    * 마지막 활동 이벤트 시각(G2): SessionStart·UserPromptSubmit·PreToolUse·PostToolUse·PermissionRequest·Stop·
    * StopFailure·Interrupt, 권한·질문 알림. 응답이 끝나고 60초 뒤에 오는 idle 알림 같은 다른 알림은 활동이 아니다.
    */
@@ -333,6 +339,8 @@ export function applyHookEvent(
     transcriptPath: transcript ?? existing?.transcriptPath ?? null,
     stateSince:
       existing && existing.state === next ? (existing.stateSince ?? existing.firstSeen) : now,
+    workingSince:
+      next === 'working' && existing?.state !== 'working' ? now : (existing?.workingSince ?? null),
     // 처음 소식이 활동이 아닌 알림이어도 그 전은 모르므로 지금으로 둔다(오래 쉰다고 단정하지 않게).
     lastActivityAt: existing && !isActivity(ev) ? existing.lastActivityAt : now,
     ...(next === 'waiting' ? { waitingTool: waitingToolOf(ev, existing) } : {}),
@@ -356,16 +364,17 @@ export function applyHookEvent(
 
 /**
  * 세션 파일의 더 늦은 busy(사용자가 답하고 다시 일함)가 이긴 응답 대기를 작업 중으로 정리한다(수집 때, G3a — fileStateOver).
- * 상태는 작업 중, 그 시작 시각은 at(파일의 상태 시각), 기다리던 도구와 하는 일의 기다리는 도구는 비운다(아는 것이 더
- * 없으면 하는 일도 없다). 대기로 남겨 두면 대기를 풀지 않는 다른 도구의 이벤트가 그 대기를 다시 보이게 하고, 그 뒤의 새
- * 권한 요청이 새 대기(새 시작 시각)로 시작하지 못한다. 훅 이벤트가 온 것이 아니라 마지막 소식·활동 시각은 그대로다.
- * 그 세션이 없거나 응답 대기가 아니면 false.
+ * 상태는 작업 중, 그 시작 시각과 작업 중이 된 시각은 at(파일의 상태 시각), 기다리던 도구와 하는 일의 기다리는 도구는
+ * 비운다(아는 것이 더 없으면 하는 일도 없다). 대기로 남겨 두면 대기를 풀지 않는 다른 도구의 이벤트가 그 대기를 다시
+ * 보이게 하고, 그 뒤의 새 권한 요청이 새 대기(새 시작 시각)로 시작하지 못한다. 훅 이벤트가 온 것이 아니라 마지막
+ * 소식·활동 시각은 그대로다. 그 세션이 없거나 응답 대기가 아니면 false.
  */
 export function settleWaiting(sessions: Sessions, sessionId: string, at: number): boolean {
   const session = sessions.get(sessionId)
   if (!session || session.state !== 'waiting') return false
   session.state = 'working'
   session.stateSince = at
+  session.workingSince = at
   session.waitingTool = null
   // 지난 스냅샷이 들고 있는 하는 일을 바꾸지 않게 새로 만든다.
   const prev = session.activity
@@ -484,6 +493,8 @@ export interface HookView {
   since: number
   /** 그 에이전트에 붙은 세션들의 마지막 활동 시각 가운데 가장 최근. */
   lastActivityAt: number
+  /** 그 에이전트에 붙은 세션들이 마지막으로 작업 중이 된 시각 가운데 가장 최근. 작업 중이 된 적이 없으면 null. */
+  workingSince: number | null
   /** 상태를 보인 세션. */
   sessionId: string
   /** 상태를 보인 세션의 하는 일(G3b). 모르면 null. */
@@ -520,8 +531,11 @@ export function hookViewForAgent(
   const sinceOf = (s: ClaudeSession): number => s.stateSince ?? s.firstSeen
   let best: ClaudeSession | null = null
   let lastActivityAt = Number.NEGATIVE_INFINITY
+  let workingSince: number | null = null
   for (const s of pool) {
     lastActivityAt = Math.max(lastActivityAt, s.lastActivityAt)
+    if (s.workingSince != null && (workingSince === null || s.workingSince > workingSince))
+      workingSince = s.workingSince
     if (
       best === null ||
       rank(s.state) < rank(best.state) ||
@@ -534,6 +548,7 @@ export function hookViewForAgent(
       state: best.state,
       since: sinceOf(best),
       lastActivityAt,
+      workingSince,
       sessionId: best.id,
       activity: best.activity ?? null
     }

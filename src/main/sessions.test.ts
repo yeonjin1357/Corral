@@ -167,6 +167,7 @@ describe('훅 이벤트 → 세션 상태', () => {
       processKey: null,
       transcriptPath: null,
       stateSince: 2000,
+      workingSince: 2000,
       lastActivityAt: 2000,
       stoppedAt: null
     })
@@ -451,6 +452,7 @@ describe('프로세스 단위 상태(G3a)', () => {
       state: 'waiting',
       since: 1000,
       lastActivityAt: 1000,
+      workingSince: null,
       sessionId: 'a',
       activity: null
     })
@@ -458,6 +460,7 @@ describe('프로세스 단위 상태(G3a)', () => {
       state: 'idle',
       since: 1100,
       lastActivityAt: 1100,
+      workingSince: null,
       sessionId: 'b',
       activity: null
     })
@@ -571,6 +574,7 @@ describe('프로세스 단위 상태(G3a)', () => {
       state: 'waiting',
       since: 300,
       lastActivityAt: 9000,
+      workingSince: null,
       sessionId: 'waiting-old',
       activity: null
     })
@@ -751,6 +755,35 @@ describe('상태 시작 시각(F3)', () => {
     expect(freeView(sessions, CWD, root)).toMatchObject({ state: 'idle', since: 9000 })
   })
 
+  test('작업 중이 된 시각(workingSince)은 다른 상태에서 작업 중으로 넘어올 때만 새로 하고, 작업 중을 벗어나도 남는다', () => {
+    const sessions: Sessions = new Map()
+    const root = (cwd: string): string | null => (cwd.startsWith(CWD) ? CWD : null)
+    const workingSince = (): number | null | undefined => sessions.get('s1')?.workingSince
+    applyHookEvent(sessions, ev('SessionStart'), 500)
+    expect(workingSince()).toBeNull()
+    applyHookEvent(sessions, ev('UserPromptSubmit'), 1000)
+    expect(workingSince()).toBe(1000)
+    // 작업 중에 온 작업 중 이벤트·권한 요청은 바꾸지 않는다.
+    applyHookEvent(sessions, ev('PostToolUse', { tool_name: 'Read' }), 2000)
+    applyHookEvent(sessions, ev('PermissionRequest', { tool_name: 'Bash' }), 3000)
+    expect(workingSince()).toBe(1000)
+    // 권한 대기에서 작업 중으로 넘어오면 새로 한다.
+    applyHookEvent(sessions, ev('PostToolUse', { tool_name: 'Bash' }), 4000)
+    expect(workingSince()).toBe(4000)
+    applyHookEvent(sessions, ev('Stop'), 5000)
+    applyHookEvent(sessions, ev('Notification', { notification_type: 'idle_prompt' }), 65_000)
+    expect(workingSince()).toBe(4000)
+    expect(freeView(sessions, CWD, root)).toMatchObject({
+      state: 'idle',
+      since: 5000,
+      workingSince: 4000
+    })
+    // 붙는 세션이 여럿이면 가장 최근.
+    applyHookEvent(sessions, { ...ev('UserPromptSubmit'), session_id: 's2' }, 6000)
+    applyHookEvent(sessions, { ...ev('Stop'), session_id: 's2' }, 7000)
+    expect(freeView(sessions, CWD, root)?.workingSince).toBe(6000)
+  })
+
   test('같은 워크트리에 같은 상태 세션이 여럿이면 가장 오래 이어진 시각', () => {
     const sessions: Sessions = new Map()
     const root = (cwd: string): string | null => (cwd.startsWith(CWD) ? CWD : null)
@@ -760,6 +793,7 @@ describe('상태 시작 시각(F3)', () => {
       state: 'working',
       since: 3000,
       lastActivityAt: 5000,
+      workingSince: 5000,
       sessionId: 'b',
       activity: null
     })
@@ -782,6 +816,8 @@ describe('응답 대기 정리(settleWaiting)', () => {
     expect(sessions.get('s1')).toMatchObject({
       state: 'working',
       stateSince: 90_000,
+      // 다시 작업 중이 된 것으로 센다(파일의 옛 응답 대기가 되살아나지 않게).
+      workingSince: 90_000,
       waitingTool: null,
       // 훅 이벤트가 온 것이 아니라 마지막 소식·활동 시각은 그대로다.
       updatedAt: 60_100,
@@ -857,6 +893,7 @@ describe('Codex 훅 세션(F7)', () => {
       state: 'idle',
       since: 8000,
       lastActivityAt: 8000,
+      workingSince: 7000,
       sessionId: 'c1',
       activity: null
     })

@@ -1204,6 +1204,148 @@ describe('Claude 세션 파일(G3a)', () => {
       expect(app.events('agent-waiting')).toHaveLength(2)
     })
 
+    test('마지막 수집에서 읽은 옛 응답 대기는 그 뒤 답하고 끝낸 세션에서 되살아나지 않는다(알림·기록 한 번)', async () => {
+      const { sessions, clock, current, app, collector } = start()
+      hookEvent(sessions, 'UserPromptSubmit', T0)
+      current.file = fileOf({ status: 'busy', statusUpdatedAt: T0 })
+      clock.now = T0 + 1000
+      expect(row(app.feed(await collector.collect())).state).toBe('working')
+      // (1) 수집이 파일을 권한 창으로 읽는다: 응답 대기(훅), 알림 한 번.
+      hookEvent(sessions, 'PreToolUse', T0 + 60_000, bash('npm run build'))
+      hookEvent(sessions, 'PermissionRequest', T0 + 60_100, bash('npm run build'))
+      current.file = fileOf({
+        status: 'waiting',
+        waitingFor: 'permission prompt',
+        statusUpdatedAt: T0 + 60_050
+      })
+      clock.now = T0 + 61_000
+      let s = app.feed(await collector.collect())
+      expect(row(s)).toMatchObject({ state: 'waiting', stateSource: 'hook' })
+      // (2) 승인되어 그 도구가 끝났다: 작업 중(훅).
+      hookEvent(sessions, 'PostToolUse', T0 + 70_000, bash('npm run build'))
+      clock.now = T0 + 70_200
+      s = app.feed(await collector.restate(s))
+      expect(row(s)).toMatchObject({ state: 'working', stateSource: 'hook' })
+      // (3) 다음 수집 전에 응답이 끝났다: (4) 마지막으로 읽은 파일은 아직 권한 창이어도 쉬는 중(훅).
+      hookEvent(sessions, 'Stop', T0 + 90_000)
+      clock.now = T0 + 90_200
+      s = app.feed(await collector.restate(s))
+      expect(row(s)).toMatchObject({ state: 'idle', stateSource: 'hook', waitReason: null })
+      current.file = fileOf({ status: 'idle', statusUpdatedAt: T0 + 90_050 })
+      clock.now = T0 + 91_000
+      s = app.feed(await collector.collect())
+      expect(row(s)).toMatchObject({ state: 'idle' })
+      expect(app.shown.map((n) => n.title)).toEqual([text.notify.waitingTitle('Claude')])
+      expect(app.events('agent-waiting')).toHaveLength(1)
+    })
+
+    test('세션 파일만 아는 대기 → Stop → 새 프롬프트 → Stop 이 한 수집 주기 안에 와도 대기가 되살아나지 않는다', async () => {
+      const { sessions, clock, current, app, collector } = start()
+      hookEvent(sessions, 'UserPromptSubmit', T0)
+      current.file = fileOf({ status: 'busy', statusUpdatedAt: T0 })
+      clock.now = T0 + 1000
+      expect(row(app.feed(await collector.collect())).state).toBe('working')
+      hookEvent(sessions, 'PreToolUse', T0 + 20_000, { tool_name: 'AskUserQuestion' })
+      current.file = fileOf({
+        status: 'waiting',
+        waitingFor: 'input needed',
+        statusUpdatedAt: T0 + 20_100
+      })
+      clock.now = T0 + 21_000
+      let s = app.feed(await collector.collect())
+      expect(row(s)).toMatchObject({ state: 'waiting', stateSource: 'file' })
+      // 다음 수집 전에: Stop(대기는 그대로), 새 프롬프트(작업 중), 다시 Stop(쉬는 중 — 옛 대기가 아니다).
+      const steps: [string, number, string][] = [
+        ['Stop', 60_000, 'waiting'],
+        ['UserPromptSubmit', 62_000, 'working'],
+        ['Stop', 70_000, 'idle']
+      ]
+      for (const [name, at, state] of steps) {
+        hookEvent(sessions, name, T0 + at)
+        clock.now = T0 + at + 200
+        s = app.feed(await collector.restate(s))
+        expect(row(s).state, name).toBe(state)
+      }
+      current.file = fileOf({ status: 'idle', statusUpdatedAt: T0 + 70_050 })
+      clock.now = T0 + 71_000
+      s = app.feed(await collector.collect())
+      expect(row(s)).toMatchObject({ state: 'idle', waitReason: null })
+      expect(app.shown.map((n) => n.title)).toEqual([text.notify.waitingInputTitle('Claude')])
+      expect(app.events('agent-waiting')).toHaveLength(1)
+    })
+
+    test('2초 만에 답한 권한 요청도 작업 중이고(세션도 정리), 긴 명령이 도는 동안 다시 알리지 않는다', async () => {
+      const { sessions, clock, current, app, collector } = start()
+      hookEvent(sessions, 'UserPromptSubmit', T0)
+      current.file = fileOf({ status: 'busy', statusUpdatedAt: T0 })
+      clock.now = T0 + 1000
+      expect(row(app.feed(await collector.collect())).state).toBe('working')
+      hookEvent(sessions, 'PreToolUse', T0 + 60_000, bash('npm run build'))
+      hookEvent(sessions, 'PermissionRequest', T0 + 60_100, bash('npm run build'))
+      // 권한을 묻기 전에 쓴 busy 는 대기보다 이르다: 응답 대기(훅).
+      clock.now = T0 + 61_000
+      let s = app.feed(await collector.collect())
+      expect(row(s)).toMatchObject({ state: 'waiting', stateSource: 'hook' })
+      // 2초 만에 승인: 파일이 대기 뒤에 busy.
+      current.file = fileOf({ status: 'busy', statusUpdatedAt: T0 + 62_100 })
+      clock.now = T0 + 63_000
+      s = app.feed(await collector.collect())
+      expect(row(s)).toMatchObject({ state: 'working', waitReason: null })
+      expect(sessions.get('f1')).toMatchObject({
+        state: 'working',
+        stateSince: T0 + 62_100,
+        waitingTool: null
+      })
+      // 15분짜리 빌드가 도는 동안(이벤트 없음) 다시 알릴 때(10분)가 지나도 응답 대기가 아니다.
+      for (const minutes of [5, 11]) {
+        clock.now = T0 + 63_000 + minutes * MIN
+        s = app.feed(await collector.collect())
+        expect(row(s).state, `${minutes}분`).toBe('working')
+      }
+      expect(app.shown.map((n) => n.title)).toEqual([text.notify.waitingTitle('Claude')])
+      expect(app.events('agent-waiting')).toHaveLength(1)
+    })
+
+    test('수집 도중에 새 권한 요청이 오면 그 수집은 훅 세션의 대기를 정리하지 않는다(다음 수집이 정한다)', async () => {
+      const current = { file: null as ClaudeSessionFile | null }
+      /** 수집이 세션 파일을 읽는 그때(수집이 시작된 뒤) 한 번 올 훅 이벤트. */
+      let midCollect: (() => void) | null = null
+      const { deps, sessions, clock } = setup({
+        claudeSessionFiles: async () => {
+          midCollect?.()
+          midCollect = null
+          return current.file ? new Map([[current.file.pid, current.file]]) : new Map()
+        }
+      })
+      const collector = createCollector(deps)
+      hookEvent(sessions, 'UserPromptSubmit', T0)
+      hookEvent(sessions, 'PermissionRequest', T0 + 60_100, bash('npm run build'))
+      current.file = fileOf({ status: 'busy', statusUpdatedAt: T0 })
+      clock.now = T0 + 61_000
+      expect(row(await collector.collect())).toMatchObject({ state: 'waiting' })
+      // 빌드를 승인해 파일이 busy 가 됐고, 수집이 도는 사이 다른 도구의 권한 요청이 왔다.
+      current.file = fileOf({ status: 'busy', statusUpdatedAt: T0 + 68_000 })
+      clock.now = T0 + 70_000
+      midCollect = () =>
+        hookEvent(sessions, 'PermissionRequest', clock.now, {
+          tool_name: 'Read',
+          tool_input: { file_path: 'secret.env' }
+        })
+      await collector.collect()
+      expect(sessions.get('f1')).toMatchObject({ state: 'waiting', waitingTool: 'Read' })
+      expect(sessions.get('f1')?.activity?.waiting?.tool).toBe('Read')
+      // 다음 수집: 파일도 새 권한 창을 적었다 — 응답 대기(훅), 기다리는 도구는 Read.
+      current.file = fileOf({
+        status: 'waiting',
+        waitingFor: 'permission prompt',
+        statusUpdatedAt: T0 + 70_050
+      })
+      clock.now = T0 + 75_000
+      const next = row(await collector.collect())
+      expect(next).toMatchObject({ state: 'waiting', stateSource: 'hook' })
+      expect(next.activity?.waiting?.tool).toBe('Read')
+    })
+
     test('dialog open 은 따르지 않는다: 훅이 작업 중이면 작업 중(작업 끝남 알림 없음), 훅이 없으면 CPU 추정', async () => {
       const { sessions, clock, current, app, collector } = start()
       hookEvent(sessions, 'UserPromptSubmit', T0)

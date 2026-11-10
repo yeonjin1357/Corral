@@ -72,6 +72,7 @@ const hookView = (state: AgentState): HookView => ({
   state,
   since: 1,
   lastActivityAt: 1,
+  workingSince: state === 'working' ? 1 : null,
   sessionId: 's1',
   activity: null
 })

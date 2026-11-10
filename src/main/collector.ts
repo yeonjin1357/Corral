@@ -651,11 +651,14 @@ export function createCollector(deps: CollectorDeps): {
       const row = stateFrom(a, hook)
       // 파일의 더 늦은 busy(답하고 다시 일함)가 훅의 응답 대기를 이겼으면 그 훅 세션도 작업 중으로 정리한다: 대기를
       // 풀지 않는 다른 도구의 이벤트가 대기를 되살리지 않고, 그 뒤의 새 권한 요청은 새 대기로 시작하게.
+      // 이 수집이 시작된 뒤에 그 세션에 훅 활동이 있었으면 정리하지 않는다(기다리는 사이 다른 도구의 권한 요청이 왔을 수
+      // 있다 — 그 대기와 도구 이름을 지우지 않게). 다음 수집이 정한다.
       if (
         hook?.state === 'waiting' &&
         row.stateSource === 'file' &&
         row.state === 'working' &&
-        file.statusUpdatedAt !== null
+        file.statusUpdatedAt !== null &&
+        hook.lastActivityAt < sampledAt
       )
         settleWaiting(deps.sessions, hook.sessionId, file.statusUpdatedAt)
       return row
