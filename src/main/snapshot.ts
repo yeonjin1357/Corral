@@ -6,7 +6,6 @@ import type {
   MemorySummary,
   Platform,
   ProcessInfo,
-  ProcessSummary,
   RawSample,
   ServerRow,
   WorktreeInfo

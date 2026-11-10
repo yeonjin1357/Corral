@@ -212,3 +212,19 @@ test('작업 공간 별칭은 절대 경로 → 이름(공백 정리, 40자까�
   )
   expect(normalizeSettings({ workspaceAliases: ['x'] }).workspaceAliases).toEqual({})
 })
+
+test('예전에 저장한 지울 폴더가 예전 기본값(node_modules 하나)이면 새 기본값으로 옮긴다', () => {
+  expect(normalizeSettings({ dependencyDirs: ['node_modules'] }).dependencyDirs).toEqual(
+    DEFAULT_SETTINGS.dependencyDirs
+  )
+  // 직접 고친 목록은 그대로.
+  expect(normalizeSettings({ dependencyDirs: ['node_modules', 'vendor'] }).dependencyDirs).toEqual([
+    'node_modules',
+    'vendor'
+  ])
+  // 옮긴 뒤(새 형식) 사용자가 node_modules 하나로 줄였으면 그대로 둔다.
+  expect(
+    normalizeSettings({ settingsVersion: 2, dependencyDirs: ['node_modules'] }).dependencyDirs
+  ).toEqual(['node_modules'])
+  expect(normalizeSettings({}).settingsVersion).toBe(2)
+})

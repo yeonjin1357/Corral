@@ -30,6 +30,11 @@ export interface Settings {
   notify: NotifySettings
   /** 끝난 워크트리에서 지울 의존성·빌드 결과 폴더 이름(워크트리 바로 아래, git 이 무시하는 것만 지운다). */
   dependencyDirs: string[]
+  /**
+   * 저장 형식 버전. 2: 지울 폴더 기본값에 빌드 결과 폴더를 더함(그 전에 저장한 기본값 node_modules 하나는
+   * 새 기본값으로 옮긴다). 없으면 그 전 형식.
+   */
+  settingsVersion: number
   /** 디스크 정리에서 살펴볼 저장소(에이전트·개발 서버를 본 저장소는 자동으로 기억한다). */
   extraRepos: string[]
   /**
@@ -40,6 +45,8 @@ export interface Settings {
   /** 작업 공간 경로 → 보여 줄 이름. */
   workspaceAliases: Record<string, string>
 }
+
+export const SETTINGS_VERSION = 2
 
 export const REFRESH_INTERVALS: Record<RefreshSpeed, { openMs: number; closedMs: number }> = {
   fast: { openMs: 2000, closedMs: 10000 },
@@ -95,6 +102,7 @@ export const DEFAULT_SETTINGS: Settings = {
     'target',
     '.gradle'
   ],
+  settingsVersion: SETTINGS_VERSION,
   extraRepos: [],
   hiddenServers: [],
   workspaceAliases: {}
@@ -208,6 +216,14 @@ export function normalizeSettings(value: unknown): Settings {
     SETTINGS_LIMITS.ramDangerMax,
     Math.min(SETTINGS_LIMITS.ramDangerMax, Math.max(d.ramDangerPercent, warn + 1))
   )
+  // 버전 2 전에 저장한 지울 폴더가 그때 기본값(node_modules 하나)이면 새 기본값으로 옮긴다. git 이 무시하고
+  // 추적하는 파일이 없는 폴더만 지우므로 빌드 결과 폴더가 더해져도 소스를 지우지 않는다.
+  const oldDefaultDirs =
+    !(typeof v.settingsVersion === 'number' && v.settingsVersion >= SETTINGS_VERSION) &&
+    Array.isArray(v.dependencyDirs) &&
+    v.dependencyDirs.length === 1 &&
+    typeof v.dependencyDirs[0] === 'string' &&
+    v.dependencyDirs[0].trim().toLowerCase() === 'node_modules'
   const notify = (v.notify && typeof v.notify === 'object' ? v.notify : {}) as Record<
     string,
     unknown
@@ -237,12 +253,10 @@ export function normalizeSettings(value: unknown): Settings {
       heavyOverlap: bool(notify.heavyOverlap, d.notify.heavyOverlap),
       agentDone: bool(notify.agentDone, d.notify.agentDone)
     },
-    dependencyDirs: list(
-      v.dependencyDirs,
-      d.dependencyDirs,
-      SETTINGS_LIMITS.dependencyDirs,
-      cleanDirName
-    ),
+    dependencyDirs: oldDefaultDirs
+      ? [...d.dependencyDirs]
+      : list(v.dependencyDirs, d.dependencyDirs, SETTINGS_LIMITS.dependencyDirs, cleanDirName),
+    settingsVersion: SETTINGS_VERSION,
     extraRepos: list(v.extraRepos, d.extraRepos, SETTINGS_LIMITS.extraRepos, cleanRepoPath),
     hiddenServers: list(
       v.hiddenServers,
