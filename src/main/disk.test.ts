@@ -10,7 +10,7 @@ import {
   writeFile
 } from 'fs/promises'
 import { tmpdir } from 'os'
-import { join, sep } from 'path'
+import { join, parse, sep } from 'path'
 import {
   createDiskManager,
   createRepoMemory,
@@ -146,6 +146,68 @@ describe('createRepoMemory', () => {
     expect(await pathExists(join(dir, 'nope', '.git'))).toBe(false)
     expect(await pathExists(join(file, 'child'))).toBe(false)
     expect(await pathExists('\\\\nas\\share\\repo\\.git')).toBeNull()
+  })
+
+  test('드라이브·볼륨이 없는 경로는 없어졌다고 보지 않는다(외장 드라이브를 뺀 경우)', async () => {
+    const fail = (code: string): Error => Object.assign(new Error(code), { code })
+    /** present 에 든 경로만 있다고 답하는 stat. 나머지는 ENOENT(또는 broken 이면 그 오류). */
+    const probe =
+      (present: string[], broken: Record<string, string> = {}) =>
+      async (p: string): Promise<void> => {
+        if (p in broken) throw fail(broken[p])
+        if (!present.includes(p)) throw fail('ENOENT')
+      }
+
+    // Windows: 드라이브 문자가 없으면(빼 둔 외장 드라이브·끊긴 연결 드라이브) 모름, 드라이브가 있으면 없어진 것.
+    expect(await pathExists('Q:\\repo\\.git', probe(['C:\\']), 'win32')).toBeNull()
+    expect(await pathExists('C:\\work\\gone\\.git', probe(['C:\\']), 'win32')).toBe(false)
+    expect(
+      await pathExists('C:\\work\\a\\.git', probe(['C:\\', 'C:\\work\\a\\.git']), 'win32')
+    ).toBe(true)
+    // 드라이브를 확인하다 다른 오류가 나도 모름.
+    expect(await pathExists('D:\\repo\\.git', probe([], { 'D:\\': 'EACCES' }), 'win32')).toBeNull()
+
+    // macOS: /Volumes/<이름> 이 없으면(꺼낸 외장 디스크) 모름, 있으면 없어진 것. 그 밖의 경로는 그대로.
+    expect(await pathExists('/Volumes/ext/repo/.git', probe([]), 'darwin')).toBeNull()
+    expect(await pathExists('/Volumes/ext/repo/.git', probe(['/Volumes/ext']), 'darwin')).toBe(
+      false
+    )
+    expect(await pathExists('/Users/dev/gone/.git', probe([]), 'darwin')).toBe(false)
+
+    // prune 도 그 저장소를 잊지 않는다.
+    const memory = createRepoMemory(join(dir, 'state.json'), 200, { tempDir: null })
+    memory.add(['Q:\\repo\\.git', 'C:\\work\\gone\\.git'])
+    await memory.prune((d) => pathExists(d, probe(['C:\\']), 'win32'))
+    await memory.flush()
+    expect(memory.list()).toEqual(['Q:\\repo\\.git'])
+  })
+
+  test('임시 폴더의 실제 경로(다른 표기) 아래 저장소도 기억하지 않는다', async () => {
+    // macOS 의 /var/folders → /private/var/folders, Windows 의 8.3 짧은 이름처럼 같은 폴더를 다르게 쓴다.
+    const real = join(dir, 'real-temp')
+    await mkdir(real)
+    const alias = join(dir, 'temp-alias')
+    await symlink(real, alias, LINK_TYPE)
+    const memory = createRepoMemory(join(dir, 'a.json'), 200, { tempDir: alias })
+    memory.add([
+      join(real, 'pitwall-git-1', 'main', '.git'),
+      join(alias, 'pitwall-git-2', 'main', '.git'),
+      join(dir, 'work', '.git')
+    ])
+    expect(memory.list()).toEqual([join(dir, 'work', '.git')])
+    // 실제 경로를 알 수 없는(없는) 임시 폴더는 주어진 그대로만 비교한다.
+    const missing = createRepoMemory(join(dir, 'b.json'), 200, { tempDir: join(dir, 'no-temp') })
+    missing.add([join(dir, 'no-temp', 'x', '.git'), join(dir, 'work', '.git')])
+    expect(missing.list()).toEqual([join(dir, 'work', '.git')])
+    await Promise.all([memory.flush(), missing.flush()])
+  })
+
+  test('임시 폴더가 드라이브 루트면 그 규칙을 쓰지 않는다', async () => {
+    const root = parse(dir).root
+    const memory = createRepoMemory(join(dir, 'a.json'), 200, { tempDir: root })
+    memory.add([join(dir, 'work', '.git')])
+    expect(memory.list()).toEqual([join(dir, 'work', '.git')])
+    await memory.flush()
   })
 })
 
@@ -689,6 +751,65 @@ describe('createDiskManager (실제 git)', () => {
       })
       expect(d.confirm).toHaveBeenCalledTimes(1)
       expect(await exists(join(old, 'node_modules'))).toBe(true)
+    }, 60000)
+
+    test('잠긴 워크트리는 잠겼다고 알리고 지우지 않는다', async () => {
+      const old = await oldWorktree('old-work')
+      const d = deps({ now: Date.now })
+      const manager = createDiskManager(d)
+      const rows = (await manager.scan()).rows
+      expect(rows.map((r) => [r.worktreeRoot, r.evidence])).toEqual(
+        expect.arrayContaining([
+          [gone, 'upstreamGone'],
+          [old, 'stale']
+        ])
+      )
+      // 목록에 오른 뒤 다른 도구가 잠갔다(끝난 행·오래 안 쓴 행 모두).
+      fx.git(fx.main, 'worktree', 'lock', gone)
+      fx.git(fx.main, 'worktree', 'lock', old)
+      const locked = {
+        status: 'failed',
+        message: '이 워크트리가 잠겨 있어(다른 도구가 쓰는 중) 지우지 않았어요.'
+      }
+      expect(await manager.remove(gone)).toEqual(locked)
+      expect(await manager.remove(old)).toEqual(locked)
+      expect(d.confirm).not.toHaveBeenCalled()
+      expect(await exists(join(gone, 'node_modules'))).toBe(true)
+      expect(await exists(join(old, 'node_modules'))).toBe(true)
+    }, 60000)
+
+    test('목록에 오른 뒤 기준을 0 으로 바꾸면 오래 안 쓴 워크트리는 지우지 않는다', async () => {
+      const old = await oldWorktree('old-work')
+      let days = 14
+      const d = deps({ now: Date.now, settings: () => ({ ...SETTINGS, staleWorktreeDays: days }) })
+      const manager = createDiskManager(d)
+      expect((await manager.scan()).rows.find((r) => r.worktreeRoot === old)?.evidence).toBe(
+        'stale'
+      )
+      days = 0
+      expect(await manager.remove(old)).toEqual({
+        status: 'failed',
+        message: '이 워크트리를 다시 쓰기 시작해 지우지 않았어요.'
+      })
+      expect(d.confirm).not.toHaveBeenCalled()
+      expect(await exists(join(old, 'node_modules'))).toBe(true)
+    }, 60000)
+
+    test('detached 인 오래 안 쓴 워크트리도 사용 중이면 지우지 않는다', async () => {
+      const loose = await oldWorktree('loose', true)
+      const server = {
+        worktree: { root: loose, branch: null, isLinkedWorktree: true }
+      } as ServerRow
+      const d = deps({ now: Date.now, latest: () => ({ ...blankSnapshot(1), servers: [server] }) })
+      const manager = createDiskManager(d)
+      const row = (await manager.scan()).rows.find((r) => r.worktreeRoot === loose)
+      expect(row).toMatchObject({ branch: null, evidence: 'stale', inUse: true })
+      expect(await manager.remove(loose)).toEqual({
+        status: 'failed',
+        message: '이 워크트리에서 개발 서버·에이전트 등이 실행 중이라 지우지 않았어요.'
+      })
+      expect(d.confirm).not.toHaveBeenCalled()
+      expect(await exists(join(loose, 'node_modules'))).toBe(true)
     }, 60000)
   })
 })

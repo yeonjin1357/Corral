@@ -73,6 +73,7 @@ export const text = {
       `이 워크트리를 쓰는 프로세스가 있어 지우지 않았어요: ${name} (PID ${pid})`,
     notFinished: '이 워크트리의 브랜치가 더는 끝난 상태가 아니라 지우지 않았어요.',
     notStale: '이 워크트리를 다시 쓰기 시작해 지우지 않았어요.',
+    locked: '이 워크트리가 잠겨 있어(다른 도구가 쓰는 중) 지우지 않았어요.',
     partial: (names: string): string =>
       `지우지 못한 폴더가 있어요(파일을 쓰는 프로그램이 있을 수 있어요): ${names}. 일부만 지워졌을 수 있으니 이 워크트리를 다시 쓰려면 의존성을 다시 설치해 주세요.`,
     unknownAgent:
@@ -819,6 +820,8 @@ export const text = {
       sizeSub: '(지울 수 있는 합계)',
       branch: '브랜치',
       evidenceTitle: '끝났다고 본 근거',
+      /** 오래 안 쓴 워크트리의 근거 카드 제목(끝났다는 근거가 없으므로). */
+      staleEvidenceTitle: '목록에 올린 근거',
       evidenceSub: '(이 PC 의 git 정보)'
     },
     leftover: {

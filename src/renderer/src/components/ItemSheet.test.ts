@@ -471,4 +471,15 @@ describe('상세 패널: 디스크 정리', () => {
       '끝났다는 근거는 없지만 21일 동안 커밋도 변경도 없었어요. 의존성 폴더만 지우고 워크트리와 소스는 그대로 둬요.'
     )
   })
+
+  test('오래 안 쓴 워크트리의 근거 카드 제목은 목록에 올린 근거', () => {
+    sheet({ kind: 'disk', row: diskRow({ evidence: 'stale', staleDays: 21 }) })
+    expect(bodyText()).toContain('목록에 올린 근거')
+    expect(bodyText()).not.toContain('끝났다고 본 근거')
+    wrapper?.unmount()
+    // 끝난 행은 그대로.
+    sheet({ kind: 'disk', row: diskRow() })
+    expect(bodyText()).toContain('끝났다고 본 근거')
+    expect(bodyText()).not.toContain('목록에 올린 근거')
+  })
 })

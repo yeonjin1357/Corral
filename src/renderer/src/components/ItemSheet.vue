@@ -423,7 +423,7 @@ const view = computed<View | null>(() => {
           },
           {
             icon: FolderGit2,
-            label: t.disk.evidenceTitle,
+            label: r.evidence === 'stale' ? t.disk.staleEvidenceTitle : t.disk.evidenceTitle,
             value: diskEvidenceText(r),
             sub: t.disk.evidenceSub
           }

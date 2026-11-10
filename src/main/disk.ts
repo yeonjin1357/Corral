@@ -1,6 +1,7 @@
+import { realpathSync } from 'fs'
 import { lstat, opendir, readFile, realpath, rename, rm, stat, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
-import { basename, join } from 'path'
+import { basename, dirname, join, normalize, win32 } from 'path'
 import type {
   DashboardSnapshot,
   DiskFolder,
@@ -97,25 +98,69 @@ function isInside(path: string, dir: string): boolean {
   return !!d && (p === d || p.startsWith(`${d}/`))
 }
 
+/** 드라이브·파일 시스템 루트(`C:\`, `/`)인지. */
+function isFsRoot(dir: string): boolean {
+  const n = normalize(dir)
+  return dirname(n) === n
+}
+
+/**
+ * 임시 폴더를 주어진 표기와 실제 경로 둘 다로(macOS 의 /var/folders → /private/var/folders, Windows 의 8.3 짧은 이름).
+ * 실제 경로를 모르면 주어진 그대로. 드라이브·루트는 쓰지 않는다(드라이브 전체를 가리게 되므로).
+ */
+function tempRoots(dir: string | null): string[] {
+  if (!dir) return []
+  let real = dir
+  try {
+    real = realpathSync.native(dir)
+  } catch {
+    // 없는 폴더 등: 주어진 표기만 쓴다.
+  }
+  return [...new Set([dir, real])].filter((d) => !isFsRoot(d))
+}
+
+/**
+ * 그 경로가 든 볼륨의 뿌리: Windows 는 드라이브(`Q:\`), macOS 는 `/Volumes/<이름>`. 따로 볼 볼륨이 없으면 null.
+ */
+function volumeOf(path: string, platform: NodeJS.Platform): string | null {
+  if (platform === 'win32') return win32.parse(path).root
+  if (platform === 'darwin') return /^\/Volumes\/[^/]+/.exec(path)?.[0] ?? null
+  return null
+}
+
 /**
  * 저장소가 아직 있는지(G5a): 있으면 true, 없으면(ENOENT·ENOTDIR) false, 그 밖의 오류는 모름(null).
- * 네트워크 공유는 응답이 없으면 멈출 수 있어 열지 않고 null.
+ * 경로가 없어도 그 드라이브·볼륨이 없으면(빼 둔 외장 드라이브, 끊긴 드라이브 문자, 꺼낸 /Volumes 디스크) 모름이다 —
+ * 드라이브가 돌아오면 저장소도 돌아온다. 네트워크 공유는 응답이 없으면 멈출 수 있어 열지 않고 null.
+ * probe·platform 은 테스트에서 바꿔 끼운다.
  */
-export async function pathExists(path: string): Promise<boolean | null> {
+export async function pathExists(
+  path: string,
+  probe: (p: string) => Promise<unknown> = stat,
+  platform: NodeJS.Platform = process.platform
+): Promise<boolean | null> {
   if (/^[\\/]{2}/.test(path)) return null
   try {
-    await stat(path)
+    await probe(path)
     return true
   } catch (e) {
     const code = errorCode(e)
-    return code === 'ENOENT' || code === 'ENOTDIR' ? false : null
+    if (code !== 'ENOENT' && code !== 'ENOTDIR') return null
+  }
+  const volume = volumeOf(path, platform)
+  if (volume === null) return false
+  try {
+    await probe(volume)
+    return false
+  } catch {
+    return null
   }
 }
 
 /**
  * 디스크 정리에서 살펴볼 저장소(git 공용 폴더)를 기억한다. 에이전트·개발 서버가 한 번이라도 관찰된 저장소.
- * OS 임시 폴더(tempDir, 기본 os.tmpdir(), null 이면 가리지 않음) 아래 저장소는 기억하지 않는다(테스트가 만들고
- * 지우는 저장소). 없어진 저장소는 prune 으로 뺀다(G5a).
+ * OS 임시 폴더(tempDir, 기본 os.tmpdir(), null 이면 가리지 않음 — 실제 경로로도 비교하고, 드라이브 루트면 쓰지 않음)
+ * 아래 저장소는 기억하지 않는다(테스트가 만들고 지우는 저장소). 없어진 저장소는 prune 으로 뺀다(G5a).
  */
 export function createRepoMemory(
   file: string,
@@ -132,7 +177,7 @@ export function createRepoMemory(
   let repos: string[] = []
   let writing: Promise<void> = Promise.resolve()
   const key = (p: string): string => p.replace(/[\\/]+$/, '').toLowerCase()
-  const tempDir = opts.tempDir === undefined ? tmpdir() : opts.tempDir
+  const temps = tempRoots(opts.tempDir === undefined ? tmpdir() : opts.tempDir)
 
   async function save(): Promise<void> {
     const tmp = `${file}.tmp-${process.pid}`
@@ -158,7 +203,7 @@ export function createRepoMemory(
       let changed = false
       for (const dir of dirs) {
         if (!dir) continue
-        if (tempDir && isInside(dir, tempDir)) continue
+        if (temps.some((t) => isInside(dir, t))) continue
         if (repos.some((r) => key(r) === key(dir))) continue
         repos.push(dir)
         changed = true
@@ -473,14 +518,13 @@ export function createDiskManager(deps: DiskDeps): {
     const index = list.findIndex((w) => samePath(w.path, row.worktreeRoot))
     if (index <= 0) return { problem: { status: 'gone' } }
     const wt = list[index]
+    // 잠긴 워크트리는 다른 도구가 쓰는 중이라는 표시다.
+    if (wt.locked) return { problem: { status: 'failed', message: text.disk.locked } }
     if (row.evidence === 'stale') {
-      if (wt.locked || (await staleDaysOf(row.commonDir, wt)) == null)
+      if ((await staleDaysOf(row.commonDir, wt)) == null)
         return { problem: { status: 'failed', message: text.disk.notStale } }
-    } else {
-      const evidence = await finishedEvidence(row.commonDir, wt, await defaultBranch(row.commonDir))
-      if (!evidence || wt.locked)
-        return { problem: { status: 'failed', message: text.disk.notFinished } }
-    }
+    } else if (!(await finishedEvidence(row.commonDir, wt, await defaultBranch(row.commonDir))))
+      return { problem: { status: 'failed', message: text.disk.notFinished } }
 
     if (inUse(row)) return { problem: { status: 'failed', message: text.disk.inUse } }
     // 작업 폴더를 모르는 에이전트는 이 워크트리에서 일하고 있을 수 있다(불확실하면 지우지 않는다).
