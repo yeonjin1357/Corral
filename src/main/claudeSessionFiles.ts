@@ -176,9 +176,10 @@ export function waitReasonOf(waitingFor: string | null): WaitReason | 'dialog' {
  *     대기를 훅 세션에서도 작업 중으로 정리한다(settleWaiting).
  *   - 파일의 waiting 은 마지막 활동보다 늦을 때만 따른다(같은 때 알렸으면 도구 이름을 아는 훅).
  * - 훅이 응답 대기가 아닐 때
- *   - 파일의 waiting 은 따른다(훅이 알리지 않는 질문 등의 대기도 놓치지 않게). 단 훅이 그 뒤에 상태를 바꿨으면(since 가
- *     파일의 상태 시각보다 늦음 — Stop, 쉬던 세션의 새 프롬프트) 훅. 상태를 바꾸지 않는 이벤트(다른 도구의 사용 등 —
- *     마지막 활동만 늦어짐)는 대기를 덮지 않는다.
+ *   - 파일의 waiting 은 따른다(훅이 알리지 않는 질문 등의 대기도 놓치지 않게). 훅을 따르는 것은 훅이 작업 중이고 그
+ *     대기가 시작된 뒤에 작업 중이 됐을 때(since 가 파일의 상태 시각보다 늦음 — 새 턴)뿐이다. 훅의 쉬는 중·오류(60초 뒤의
+ *     idle_prompt 알림·Stop)와 상태를 바꾸지 않는 이벤트(다른 도구의 사용 등 — 마지막 활동만 늦어짐)는 대기를 끝내지
+ *     않는다: 대기는 파일이 끝낸다(다음 수집에서 busy·idle 로 읽힘). 그래서 Stop 뒤에도 한 수집 주기까지는 응답 대기다.
  *   - 파일의 busy·쉬는 중은 마지막 활동보다 늦을 때만 따른다.
  */
 export function fileStateOver(
@@ -196,6 +197,6 @@ export function fileStateOver(
     if (state === 'idle') return null
     return newerThan(state === 'working' ? hook.since : hook.lastActivityAt) ? state : null
   }
-  if (state === 'waiting') return hook.since > at ? null : state
+  if (state === 'waiting') return hook.state === 'working' && hook.since > at ? null : state
   return newerThan(hook.lastActivityAt) ? state : null
 }

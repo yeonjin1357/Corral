@@ -282,21 +282,31 @@ describe('fileStateOver', () => {
     expect(fileStateOver(fileOf({ status: null }), null)).toBeNull()
   })
 
-  test('fileStateOver: 파일의 waiting 은 훅이 그 뒤에 상태를 바꿨을 때만 지고, 상태를 바꾸지 않는 도구 이벤트로는 덮이지 않는다', () => {
+  test('fileStateOver: 파일의 waiting 은 그 뒤에 새 턴을 시작한 훅(작업 중)에게만 지고, 훅의 쉬는 중·다른 도구 이벤트로는 끝나지 않는다', () => {
     const file = fileOf({ status: 'waiting', waitingFor: 'input needed', statusUpdatedAt: NOW })
     const working = { state: 'working' as const, since: NOW - 60_000 }
     // 질문 도구의 PreToolUse 0.1초 뒤 파일이 응답 대기가 됐다: 훅(작업 중)은 이 대기를 모른다.
     expect(fileStateOver(file, { ...working, lastActivityAt: NOW - 100 })).toBe('waiting')
     // 그 뒤 다른 도구의 이벤트(마지막 활동만 늦어짐)가 와도 대기다.
     expect(fileStateOver(file, { ...working, lastActivityAt: NOW + 30_000 })).toBe('waiting')
+    // 훅의 쉬는 중·오류는 그 뒤에 됐어도(60초 뒤의 idle_prompt 알림·Stop) 대기를 끝내지 않는다 — 파일이 끝낸다.
     expect(fileStateOver(file, { state: 'idle', since: NOW, lastActivityAt: NOW })).toBe('waiting')
-    // 훅이 그 뒤에 상태를 바꿨으면(Stop·새 프롬프트) 훅.
     expect(
-      fileStateOver(file, { state: 'idle', since: NOW + 1, lastActivityAt: NOW + 1 })
-    ).toBeNull()
+      fileStateOver(file, { state: 'idle', since: NOW + 60_000, lastActivityAt: NOW - 100 })
+    ).toBe('waiting')
+    expect(fileStateOver(file, { state: 'idle', since: NOW + 1, lastActivityAt: NOW + 1 })).toBe(
+      'waiting'
+    )
+    expect(fileStateOver(file, { state: 'error', since: NOW + 1, lastActivityAt: NOW + 1 })).toBe(
+      'waiting'
+    )
+    // 그 대기가 시작된 뒤에 새 턴이 시작됐으면(작업 중이 된 시각이 늦음) 훅. 같은 시각이면 파일.
     expect(
       fileStateOver(file, { state: 'working', since: NOW + 1000, lastActivityAt: NOW + 1000 })
     ).toBeNull()
+    expect(fileStateOver(file, { state: 'working', since: NOW, lastActivityAt: NOW })).toBe(
+      'waiting'
+    )
     // 훅도 응답 대기면 지금 규칙 그대로: 5초 안이면 도구 이름을 아는 훅, 5초를 넘게 늦으면 파일.
     expect(
       fileStateOver(file, { state: 'waiting', since: NOW - 5000, lastActivityAt: NOW - 5000 })

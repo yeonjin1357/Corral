@@ -721,7 +721,7 @@ describe('Claude 세션 파일(G3a)', () => {
       stateSince: clock.now - 30_000
     })
     expect(s.agents[0].activity?.waiting?.tool).toBe('Bash')
-    // 파일이 더 늦은 근거로 기다림을 알리면 파일을 따르고, 그 뒤 훅이 상태를 바꾸면(응답 끝) 다시 훅(이유 없음).
+    // 파일이 더 늦은 근거로 기다림을 알리면 파일을 따르고, 그 뒤 훅이 새 턴을 시작하면 다시 훅(이유 없음).
     current.file = fileOf({
       status: 'waiting',
       waitingFor: 'input needed',
@@ -736,8 +736,9 @@ describe('Claude 세션 파일(G3a)', () => {
     })
     clock.now += 10_000
     hookEvent(sessions, 'Stop', clock.now)
+    hookEvent(sessions, 'UserPromptSubmit', clock.now + 1000)
     expect((await collector.restate(fromFile)).agents[0]).toMatchObject({
-      state: 'idle',
+      state: 'working',
       stateSource: 'hook',
       waitReason: null
     })
@@ -1094,7 +1095,7 @@ describe('Claude 세션 파일(G3a)', () => {
       expect(app.events('agent-done')).toHaveLength(1)
     })
 
-    test('훅이 알리지 않는 응답 대기(질문)는 세션 파일을 따른다: 다른 도구 이벤트로는 풀리지 않고 Stop 에 풀린다(알림·기록 한 번)', async () => {
+    test('훅이 알리지 않는 응답 대기(질문)는 세션 파일을 따른다: 다른 도구 이벤트·idle_prompt 알림으로는 풀리지 않고 파일이 busy 가 되면 풀린다(알림·기록 한 번)', async () => {
       const { sessions, clock, current, app, collector } = start()
       hookEvent(sessions, 'UserPromptSubmit', T0)
       current.file = fileOf({ status: 'busy', statusUpdatedAt: T0 })
@@ -1130,17 +1131,77 @@ describe('Claude 세션 파일(G3a)', () => {
       expect(app.shown.map((n) => n.title)).toEqual([text.notify.waitingInputTitle('Claude')])
       expect(app.events('agent-waiting')).toHaveLength(1)
 
-      // 응답이 끝나면(Stop — 파일보다 늦게 상태가 바뀜) 훅의 쉬는 중이다.
+      // 60초 뒤의 idle_prompt 알림(훅 세션은 쉬는 중이 된다)도 파일의 대기를 끝내지 않는다.
+      hookEvent(sessions, 'Notification', T0 + 80_000, { notification_type: 'idle_prompt' })
+      clock.now = T0 + 80_200
+      s = app.feed(await collector.restate(s))
+      expect(row(s)).toMatchObject({ state: 'waiting', stateSource: 'file', waitReason: 'input' })
+      clock.now = T0 + 81_000
+      s = app.feed(await collector.collect())
+      expect(row(s)).toMatchObject({ state: 'waiting', stateSource: 'file', waitReason: 'input' })
+      expect(app.shown.map((n) => n.title)).toEqual([text.notify.waitingInputTitle('Claude')])
+      expect(app.events('agent-waiting')).toHaveLength(1)
+      expect(app.events('agent-done')).toEqual([])
+
+      // 답해서 다음 수집에 파일이 busy 로 읽히면 작업 중이다.
+      current.file = fileOf({ status: 'busy', statusUpdatedAt: T0 + 90_000 })
+      clock.now = T0 + 91_000
+      s = app.feed(await collector.collect())
+      expect(row(s)).toMatchObject({ state: 'working', stateSource: 'file', waitReason: null })
+      expect(app.shown).toHaveLength(1)
+      expect(app.events('agent-waiting')).toHaveLength(1)
+    })
+
+    test('훅의 Stop 만으로는 세션 파일의 응답 대기가 끝나지 않고 파일이 idle 로 읽히면 끝난다, 대기 뒤에 새 턴을 시작한 훅은 따른다', async () => {
+      const { sessions, clock, current, app, collector } = start()
+      const ask = (at: number): void => {
+        hookEvent(sessions, 'PreToolUse', at, { tool_name: 'AskUserQuestion' })
+        current.file = fileOf({
+          status: 'waiting',
+          waitingFor: 'input needed',
+          statusUpdatedAt: at + 100
+        })
+      }
+      const title = text.notify.waitingInputTitle('Claude')
+      hookEvent(sessions, 'UserPromptSubmit', T0)
+      current.file = fileOf({ status: 'busy', statusUpdatedAt: T0 })
+      clock.now = T0 + 1000
+      expect(row(app.feed(await collector.collect())).state).toBe('working')
+      ask(T0 + 20_000)
+      clock.now = T0 + 21_000
+      let s = app.feed(await collector.collect())
+      expect(row(s)).toMatchObject({ state: 'waiting', stateSource: 'file' })
+
+      // Stop(훅 세션은 대기보다 늦게 쉬는 중)이 와도 다음 수집이 파일을 다시 읽기 전까지는 응답 대기다.
       hookEvent(sessions, 'Stop', T0 + 60_000)
       clock.now = T0 + 60_200
       s = app.feed(await collector.restate(s))
-      expect(row(s)).toMatchObject({ state: 'idle', stateSource: 'hook', waitReason: null })
+      expect(row(s)).toMatchObject({ state: 'waiting', stateSource: 'file', waitReason: 'input' })
       current.file = fileOf({ status: 'idle', statusUpdatedAt: T0 + 60_050 })
       clock.now = T0 + 61_000
       s = app.feed(await collector.collect())
-      expect(row(s)).toMatchObject({ state: 'idle', stateSource: 'hook', waitReason: null })
-      expect(app.shown).toHaveLength(1)
+      expect(row(s)).toMatchObject({ state: 'idle', waitReason: null })
+      expect(app.shown.map((n) => n.title)).toEqual([title])
       expect(app.events('agent-waiting')).toHaveLength(1)
+
+      // 새 턴의 질문은 새 대기다. 그 대기 뒤에 Stop 과 새 프롬프트가 오면(파일을 다시 읽기 전에도) 작업 중(훅).
+      hookEvent(sessions, 'UserPromptSubmit', T0 + 120_000)
+      ask(T0 + 140_000)
+      clock.now = T0 + 141_000
+      s = app.feed(await collector.collect())
+      expect(row(s)).toMatchObject({ state: 'waiting', stateSource: 'file' })
+      hookEvent(sessions, 'Stop', T0 + 170_000)
+      hookEvent(sessions, 'UserPromptSubmit', T0 + 171_000)
+      clock.now = T0 + 171_200
+      s = app.feed(await collector.restate(s))
+      expect(row(s)).toMatchObject({
+        state: 'working',
+        stateSource: 'hook',
+        waitReason: null,
+        stateSince: T0 + 171_000
+      })
+      expect(app.shown.map((n) => n.title)).toEqual([title, title])
+      expect(app.events('agent-waiting')).toHaveLength(2)
     })
 
     test('dialog open 은 따르지 않는다: 훅이 작업 중이면 작업 중(작업 끝남 알림 없음), 훅이 없으면 CPU 추정', async () => {
