@@ -478,3 +478,17 @@ describe('커밋 칸', () => {
     ).toBeNull()
   })
 })
+
+test('커밋 칸이 있어도 표의 칸 너비 합은 기본 창 너비(1280px)에 들어간다', () => {
+  const s = snapshot({
+    servers: [serverRow({ commitBytes: GB })],
+    agents: [agentRow({ commitBytes: GB })],
+    leftovers: [leftoverRow({ commitBytes: GB })],
+    heavyJobs: [heavyJob({ commitBytes: GB })]
+  })
+  for (const tab of ['ports', 'agents', 'leftovers', 'heavy'] as const) {
+    const sum = tableFor(tab, s).columns.reduce((n, col) => n + col.width, 0)
+    // 120 은 ItemTable 이 더하는 동작 칸 너비, 1240 은 세로 스크롤바·테두리 여유.
+    expect(sum + 120, tab).toBeLessThanOrEqual(1240)
+  }
+})

@@ -181,7 +181,7 @@ describe('buildTrayMenu', () => {
       snap({ heavyJobs: [job(1), job(2)], heavyOverlap: true }),
       actions
     )
-    expect(labels(overlap)).toContain('무거운 작업 2개 · 겹침(RAM 부족)')
+    expect(labels(overlap)).toContain('무거운 작업 2개 · 겹침(메모리 부족)')
     const disk = buildTrayMenu(
       snap({
         disk: {

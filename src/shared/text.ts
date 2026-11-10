@@ -213,7 +213,7 @@ export const text = {
     candidates: (n: number): string => `정리 후보 ${n}개`,
     leftovers: (n: number): string => `남은 프로세스 ${n}개`,
     heavy: (n: number, overlap: boolean): string =>
-      overlap ? `무거운 작업 ${n}개 · 겹침(RAM 부족)` : `무거운 작업 ${n}개`,
+      overlap ? `무거운 작업 ${n}개 · 겹침(메모리 부족)` : `무거운 작업 ${n}개`,
     disk: (size: string): string => `디스크 정리 가능 ${size}`,
     updateReady: (v: string): string => `새 버전 ${v} — 다시 시작해 설치`,
     updateAvailable: (v: string): string => `새 버전 ${v} 내려받기`,
@@ -516,9 +516,11 @@ export const text = {
       updateCheckHelp:
         'GitHub 에서 새 버전이 있는지 확인해요. pitwall 이 하는 유일한 인터넷 접속이에요.',
       ramWarn: 'RAM 경고 기준',
-      ramWarnHelp: '이 이상이면 RAM 이 주황색이 되고, 무거운 작업이 겹칠 때 알려요.',
+      ramWarnHelp:
+        'RAM 사용률이나 커밋 사용률이 이 이상이면 주황색이 되고, 무거운 작업이 겹칠 때 알려요.',
       ramDanger: 'RAM 위험 기준',
-      ramDangerHelp: '이 이상이면 빨간색이 되고 RAM 부족 알림을 보내요. 경고 기준보다 커야 해요.',
+      ramDangerHelp:
+        'RAM 사용률이나 커밋 사용률이 이 이상이면 빨간색이 되고 메모리 부족 알림을 보내요. 경고 기준보다 커야 해요.',
       idlePort: '안 쓰는 포트 기준',
       idlePortHelp:
         '에이전트가 없는 워크트리의 포트가 이 시간 동안 연결이 없으면 정리 후보, 브라우저 탭만 연결돼 있으면 확인해볼 것으로 표시해요.',
