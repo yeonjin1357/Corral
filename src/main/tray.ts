@@ -10,7 +10,7 @@ export const LEVEL_COLORS: Record<MemoryLevel, string> = {
   danger: '#f38ba8'
 }
 
-/** 트레이 아이콘 오른쪽 위 점 색(Catppuccin peach, 화면의 권한 대기·조용함 색과 같다). */
+/** 트레이 아이콘 오른쪽 위 점 색(Catppuccin peach, 화면의 응답 대기·조용함 색과 같다). */
 export const BADGE_COLOR = '#fab387'
 
 const hasMemory = (s: DashboardSnapshot | null): s is DashboardSnapshot =>

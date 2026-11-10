@@ -86,6 +86,8 @@ let tray: Tray | null = null
 let trayController: ReturnType<typeof createTrayController> | null = null
 /** 트레이 '종료'·Cmd+Q 로 끝낼 때만 창을 실제로 닫는다. 그 외 닫기는 숨김. */
 let quitting = false
+/** 앱이 시작된 시각(화면의 자리 비운 사이 기준 — 트레이로만 시작한 뒤 창을 처음 열 때). */
+const appStartedAt = Date.now()
 
 const iconCache = new Map<string, Electron.NativeImage>()
 function trayIcon(level: MemoryLevel, badge = false): Electron.NativeImage {
@@ -767,7 +769,7 @@ function registerIpc(): void {
     void scheduler.refreshNow()
     return result
   })
-  ipcMain.handle(IPC.appInfo, () => ({ version: app.getVersion() }))
+  ipcMain.handle(IPC.appInfo, () => ({ version: app.getVersion(), startedAt: appStartedAt }))
   ipcMain.handle(IPC.fileIcon, (event, path: unknown) =>
     fromMainWindow(event.sender) || fromTrayWindow(event.sender) ? icons.get(path) : null
   )

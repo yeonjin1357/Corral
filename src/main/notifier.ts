@@ -65,19 +65,19 @@ function agentNotice<A extends Pick<AgentRow, 'pid' | 'startedAt' | 'worktree'>>
  *   다시, 30분 안에는 다시 알리지 않는다. 제목은 원인을 따른다(RAM 이 위험이면 RAM, 아니면 커밋).
  * - 무거운 작업 겹침: 겹침이 시작될 때. 끝나야 다시, 10분 안에는 다시 알리지 않는다.
  * 에이전트 알림은 모두 pitwall 창이 앞에 있으면 보내지 않고, 한꺼번에 여럿이면 하나로 묶는다.
- * - 권한 대기: 훅이나 Claude 세션 파일로 응답 대기가 된 세션마다. 본문에 기다리는 도구 이름(G3e, 훅만 안다). 세션 파일로
+ * - 응답 대기: 훅이나 Claude 세션 파일로 응답 대기가 된 세션마다. 본문에 기다리는 도구 이름(G3e, 훅만 안다). 세션 파일로
  *   안 대기가 질문·입력 요청 등이면 제목이 "답을 기다려요". 계속 기다리면 마지막으로 알린(알릴 때였던) 뒤 reminderMs
  *   마다 다시(0 이면 끔). 풀렸다가 다시 기다리면 새 대기라 첫 알림부터.
  * - 작업 끝남(F4): 정확한 상태(CPU 추정 아님)의 에이전트가 2분 넘게 작업 중이다가 쉬는 중이 될 때.
  * - 조용함(G3c): 조용한 에이전트가 생길 때 한 번.
- * - 꺼짐: 지난 스냅샷에 정확한 상태로 작업 중·권한 대기이던 에이전트가 이번 스냅샷에 없을 때.
+ * - 꺼짐: 지난 스냅샷에 정확한 상태로 작업 중·응답 대기이던 에이전트가 이번 스냅샷에 없을 때.
  */
 export function createNotifier(deps: {
   show: (notice: Notice) => void
   settings: () => NotifySettings
   isFocused: () => boolean
   now: () => number
-  /** 계속 권한 대기일 때 다시 알릴 간격(ms). 0 이면 다시 알리지 않는다. */
+  /** 계속 응답 대기일 때 다시 알릴 간격(ms). 0 이면 다시 알리지 않는다. */
   reminderMs: () => number
 }): { update(s: DashboardSnapshot): void } {
   let started = false
@@ -87,13 +87,13 @@ export function createNotifier(deps: {
   let ramBelowSince: number | null = null
   let heavyArmed = true
   let heavyLastAt = Number.NEGATIVE_INFINITY
-  /** 권한 대기 중인 에이전트: 처음 본 시각과 마지막으로 알린(창이 앞에 있어 건너뛴 것 포함) 시각. */
+  /** 응답 대기 중인 에이전트: 처음 본 시각과 마지막으로 알린(창이 앞에 있어 건너뛴 것 포함) 시각. */
   let waiting = new Map<string, { firstSeen: number; notifiedAt: number }>()
   /** 정확한 상태로 작업 중인 에이전트와 그 작업이 시작된 시각. */
   let working = new Map<string, number | null>()
   /** 조용한 에이전트. */
   let quiet = new Set<string>()
-  /** 정확한 상태로 작업 중·권한 대기인 에이전트(다음 스냅샷에 없으면 꺼짐). */
+  /** 정확한 상태로 작업 중·응답 대기인 에이전트(다음 스냅샷에 없으면 꺼짐). */
   let active = new Map<string, AgentBrief>()
 
   /** 이 에이전트 알림을 보내도 되는지(설정에서 켰고 pitwall 창이 앞에 있지 않음). */

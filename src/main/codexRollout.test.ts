@@ -564,6 +564,37 @@ describe('토큰·사용 한도(G6)', () => {
     expect((await reader.infoFor(agent, now)).usage?.totalTokens).toBe(668963)
   })
 
+  test('이미 돌던 읽기가 dropUsage 뒤에 끝나도 숫자를 다시 담지 않는다', async () => {
+    const path = await rolloutAt(new Date(2026, 10, 10, 9, 1, 0), [
+      event('task_started', '2026-11-10T00:01:00.000Z'),
+      tokenCount('2026-11-10T00:02:00.000Z', INFO, LIMITS)
+    ])
+    const working = {
+      state: 'working' as const,
+      since: Date.parse('2026-11-10T00:01:00.000Z'),
+      lastEventAt: Date.parse('2026-11-10T00:01:00.000Z')
+    }
+    let on = true
+    const reader = createCodexReader(home, { usage: () => on })
+    // 읽는 도중에 설정을 끄고 들고 있던 숫자를 버린다.
+    const pending = reader.infoFor(agent, now)
+    on = false
+    reader.dropUsage()
+    expect(await pending).toEqual({ state: working, usage: null, limits: null })
+    // 들고 있지도 않다: 다시 켜면 처음부터 읽는다(같은 길이로 바꾼 새 값).
+    await rewrite(path, '668962', '668963')
+    on = true
+    expect((await reader.infoFor(agent, now)).usage?.totalTokens).toBe(668963)
+
+    // 끄고 다시 켠 사이(그 사이 dropUsage)에 끝난 읽기도 숫자를 담지 않는다.
+    const fresh = createCodexReader(home, { usage: () => on })
+    const inFlight = fresh.infoFor(agent, now)
+    fresh.dropUsage()
+    expect(await inFlight).toEqual({ state: working, usage: null, limits: null })
+    await rewrite(path, '668963', '668964')
+    expect((await fresh.infoFor(agent, now)).usage?.totalTokens).toBe(668964)
+  })
+
   test('잠깐 읽지 못하면(EBUSY 등) 알던 상태·숫자를 둔다', async () => {
     const path = await rolloutAt(new Date(2026, 10, 10, 9, 1, 0), [
       event('task_started', '2026-11-10T00:01:00.000Z'),

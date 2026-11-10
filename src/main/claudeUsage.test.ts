@@ -463,6 +463,24 @@ describe('Claude 세션 기록에서 토큰 숫자 읽기(G6)', () => {
     const none = createClaudeUsageReader({ projectsDir: join(home, 'none') })
     expect(await none.transcriptFor(SESSION)).toBeNull()
   })
+
+  test('찾지 못한 세션 id 는 60초 동안 다시 찾지 않는다(clear 는 이 기억도 지운다)', async () => {
+    const clock = { now: 0 }
+    const reader = createClaudeUsageReader({ projectsDir: projects, now: () => clock.now })
+    expect(await reader.transcriptFor(SESSION)).toBeNull()
+    // 그 사이 기록이 생겨도 60초 동안은 projects 아래를 다시 훑지 않는다(수집마다 훑지 않게).
+    const path = await transcript([reply({})])
+    clock.now += 60_000 - 1
+    expect(await reader.transcriptFor(SESSION)).toBeNull()
+    clock.now += 1
+    expect(await reader.transcriptFor(SESSION)).toBe(path)
+
+    const other = '0199a1b2-c3d4-4e5f-8a9b-0c1d2e3f4a5c'
+    expect(await reader.transcriptFor(other)).toBeNull()
+    const otherPath = await transcript([reply({})], other)
+    reader.clear()
+    expect(await reader.transcriptFor(other)).toBe(otherPath)
+  })
 })
 
 describe('토큰 숫자 기억(수집을 기다리게 하지 않는다)', () => {

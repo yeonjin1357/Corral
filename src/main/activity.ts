@@ -43,7 +43,7 @@ export function lastActiveOf(
 
 /**
  * 오래 쉬는 세션: 쉬는 중·오류·확인 중이고 마지막 활동이 기준 시간(parkedMs) 이상 전.
- * 작업 중·권한 대기는 아무리 오래여도 아니다. 마지막 활동을 모르면 아니다.
+ * 작업 중·응답 대기는 아무리 오래여도 아니다. 마지막 활동을 모르면 아니다.
  */
 export function isParked(
   agent: Pick<AgentRow, 'state' | 'lastActiveAt'>,
@@ -62,7 +62,7 @@ export type CalmMemo = Map<string, number>
 
 /**
  * 조용한 조건: 훅으로 작업 중이고 트리 CPU 가 작업 기준(WORKING_CPU_PERCENT) 아래. CPU 를 모르면 아니다.
- * CPU 추정·세션 기록·세션 파일 상태와 쉬는 중·권한 대기는 아니다.
+ * CPU 추정·세션 기록·세션 파일 상태와 쉬는 중·응답 대기는 아니다.
  */
 function isCalm(agent: Pick<AgentRow, 'stateSource' | 'state' | 'cpuPercent'>): boolean {
   return (

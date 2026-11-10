@@ -15,7 +15,7 @@ export interface ClaudeSession {
   firstSeen: number
   /** 짝지은 Claude 프로세스(`pid:시작 시각`). 아직 모르면 null. */
   processKey: string | null
-  /** 권한 대기 중이면 권한을 요청한 도구 이름(모르면 null). 다른 도구가 끝나도 대기를 유지하는 데 쓴다. */
+  /** 응답 대기 중이면 권한을 요청한 도구 이름(모르면 null). 다른 도구가 끝나도 대기를 유지하는 데 쓴다. */
   waitingTool?: string | null
   /** 마지막으로 응답이 끝난(Stop·StopFailure) 시각. 새 입력이 오면 지운다. */
   stoppedAt?: number | null
@@ -249,7 +249,7 @@ const ENDS_TOOL = new Set(['Stop', 'StopFailure', 'Interrupt', 'UserPromptSubmit
  * 이벤트를 반영한 하는 일(G3b). 제목은 session_title 이 오면 덮어쓰고, 마지막 요청은 UserPromptSubmit 마다 새로 정한다
  * (프롬프트가 없으면 모름). 실행 중인 도구는 PreToolUse 에 담고(상태에 반영하지 않은 늦은 이벤트는 빼고) 같은 이름의
  * PostToolUse·PermissionRequest(권한을 기다림 = 아직 돌지 않음)·응답 끝·오류·중단·새 입력에 비운다. 권한을 기다리는
- * 도구는 PermissionRequest 에 담고 권한 대기를 벗어나면 비운다. 아는 것이 하나도 없으면 undefined.
+ * 도구는 PermissionRequest 에 담고 응답 대기를 벗어나면 비운다. 아는 것이 하나도 없으면 undefined.
  */
 function nextActivity(
   ev: Record<string, unknown>,
@@ -493,7 +493,7 @@ export interface HookView {
 /**
  * 에이전트 프로세스 하나의 훅 상태(G3a). 그 프로세스(`pid:시작 시각`)와 짝지은 세션이 있으면 그 세션들에서,
  * 없으면 아직 짝이 없는 같은 워크트리·같은 도구 세션에서 고른다(다른 프로세스와 짝지은 세션은 쓰지 않는다).
- * 여럿이면 권한 대기 > 작업 중 > 오류 > 쉬는 중, 같은 상태면 가장 오래 이어진 것(가장 오래 기다린 권한 대기 등).
+ * 여럿이면 응답 대기 > 작업 중 > 오류 > 쉬는 중, 같은 상태면 가장 오래 이어진 것(가장 오래 기다린 응답 대기 등).
  * 세션 파일로 그 프로세스의 세션(sessionId)을 알면 그 세션만 본다: 그 프로세스와 짝지었거나 아직 짝이 없는(수집
  * 사이에 처음 소식이 온) 그 id 의 세션. 워크트리의 다른 짝 없는 세션은 빌리지 않는다(남의 세션 상태로 오가지 않게).
  * 붙는 세션이 없으면 null.

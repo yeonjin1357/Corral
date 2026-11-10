@@ -3,13 +3,10 @@ import { mkdtemp, rm } from 'fs/promises'
 import { tmpdir, totalmem } from 'os'
 import { join } from 'path'
 import { existsSync, writeFileSync } from 'fs'
-import { runCommand, type CommandResult } from './runCommand'
+import { runCommand } from './runCommand'
 import { buildTree, classifyAgent } from '../processTree'
 import { hostFinder } from '../agents'
-import { createFocuser, focusScript } from '../focusWindow'
-import { blankSnapshot } from '../../shared/snapshot'
-import { selectionKey } from '../../shared/keys'
-import type { AgentRow } from '../../shared/types'
+import { focusScript } from '../focusWindow'
 import {
   parseWindowsSample,
   WINDOWS_SAMPLE_SCRIPT,
@@ -661,7 +658,8 @@ describe.runIf(process.platform === 'win32')('실제 Windows 에서', () => {
   test('실제 스크립트가 커밋과 시스템 커밋을 낸다', async () => {
     const s = await sampleWindows()
     const known = s.processes.filter((p) => (p.commitBytes ?? 0) > 0)
-    expect(known.length).toBeGreaterThanOrEqual(s.processes.length / 2)
+    // 다른 사용자·보안 프로세스는 열 수 없다(잠긴 PC 일수록 많다): 전용 작업 세트 시험과 같은 기준(3분의 1).
+    expect(known.length).toBeGreaterThan(s.processes.length / 3)
     const self = s.processes.find((p) => p.pid === process.pid)!
     expect(self.commitBytes).toBeGreaterThanOrEqual(self.memoryBytes * 0.5)
     expect(s.system?.commitLimitBytes).toBeGreaterThanOrEqual(totalmem())
@@ -715,59 +713,20 @@ describe.runIf(process.platform === 'win32')('실제 Windows 에서', () => {
     const agent =
       tree.ancestors(process.pid, 64).find(classifyAgent) ?? tree.byPid.get(process.pid)!
     const host = hostFinder(s.processes, tree)(agent.pid)
-    const row: AgentRow = {
-      pid: agent.pid,
-      tool: 'claude',
-      worktree: null,
-      workspace: null,
-      startedAt: agent.startedAt,
-      memoryBytes: agent.memoryBytes,
-      commitBytes: null,
-      descendantCount: 0,
-      processes: [],
-      state: 'idle',
-      stateSource: 'cpu',
-      stateSince: null,
-      cpuPercent: null,
-      lastActiveAt: null,
-      parked: false,
-      activity: null,
-      quietSince: null,
-      usage: null,
-      waitReason: null,
-      host
-    }
-    const scripts: string[] = []
-    const results: CommandResult[] = []
-    const focuser = createFocuser({
-      platform: 'win32',
-      latest: () => ({
-        ...blankSnapshot(1),
-        platform: 'win32',
-        collectMode: s.collectMode,
-        agents: [row]
-      }),
-      run: async (argv, opts) => {
-        scripts.push(Buffer.from(argv[argv.length - 1], 'base64').toString('utf16le'))
-        const result = await runCommand(argv, opts)
-        results.push(result)
-        return result
-      },
-      helperDllPath: () => null,
-      isDirectory: async () => false
+    // 창으로 가기와 같은 창 후보(조상)로 찾는 스크립트만 돌린다. 후보가 없으면 창으로 가기도 실행하지 않는다.
+    if (host.pids.length === 0) return
+    const script = focusScript(null, host.pids, 'find')
+    expect(script).not.toContain('[PitwallWindow]::Focus(')
+    const r = await runCommand([powershellPath(), ...buildPowerShellArgs(script)], {
+      timeoutMs: 30000
     })
-    const found = await focuser.findHost(selectionKey.agent(row))
+    // 못 찾았을 때도 오류 없이 JSON 한 줄(null)을 낸다.
+    expect(r).toMatchObject({ exitCode: 0, stderr: '' })
+    const found = JSON.parse(r.stdout) as { pid: number; title: string; focused: boolean } | null
     if (found) {
       expect(host.pids).toContain(found.pid)
       expect(found.title.length).toBeGreaterThan(0)
-    } else expect(found).toBeNull()
-    // 후보가 없으면 실행하지 않는다.
-    expect(scripts).toHaveLength(host.pids.length > 0 ? 1 : 0)
-    for (const script of scripts) expect(script).not.toContain('[PitwallWindow]::Focus(')
-    // 못 찾았을 때도 오류 없이 JSON 한 줄(null)을 낸다.
-    for (const result of results) {
-      expect(result).toMatchObject({ exitCode: 0, stderr: '' })
-      expect(() => JSON.parse(result.stdout)).not.toThrow()
+      expect(found.focused).toBe(false)
     }
   }, 60000)
 

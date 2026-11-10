@@ -108,8 +108,11 @@ export interface PitwallApi {
     enable(): Promise<ClaudeHookActionResult>
     disable(): Promise<ClaudeHookActionResult>
   }
-  /** 앱 버전 등(설정 > 정보). */
-  appInfo(): Promise<{ version: string }>
+  /**
+   * 앱 버전(설정 > 정보)과 앱(메인)이 시작된 시각(ms). 시작 시각은 창을 숨긴 적이 없을 때 자리 비운 사이(G3g)의 기준이다
+   * (트레이로만 시작한 뒤 창을 처음 열 때).
+   */
+  appInfo(): Promise<{ version: string; startedAt: number }>
   /** 스냅샷에 나온 실행 파일의 OS 앱 아이콘(PNG 데이터 주소). 없으면 null. */
   fileIcon(path: string): Promise<string | null>
   /** 새 버전 확인(설정 > 정보). */

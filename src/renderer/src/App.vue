@@ -140,18 +140,25 @@ function addEvents(added: PitEvent[]): void {
 /** 창을 이만큼 안 보다가 다시 보면 그 사이 일을 요약해 준다. */
 const AWAY_MS = 10 * 60_000
 let hiddenAt: number | null = null
+/** 창을 숨긴 적이 있는지. 없으면(트레이로만 시작한 뒤 처음 연 창) 앱이 시작된 때(appStartedAt)부터 센다. */
+let everHidden = false
+let appStartedAt: number | null = null
 const away = ref<AwaySummary | null>(null)
-function onVisibility(): void {
-  if (document.visibilityState === 'hidden') {
-    hiddenAt = Date.now()
-    away.value = null
-    return
-  }
-  const since = hiddenAt
-  hiddenAt = null
+function showAway(since: number | null): void {
   const now = Date.now()
   if (since == null || now - since < AWAY_MS) return
   away.value = awaySummary(events.value, history.value.ram, since, now)
+}
+function onVisibility(): void {
+  if (document.visibilityState === 'hidden') {
+    hiddenAt = Date.now()
+    everHidden = true
+    away.value = null
+    return
+  }
+  const since = hiddenAt ?? (everHidden ? null : appStartedAt)
+  hiddenAt = null
+  showAway(since)
 }
 function showEvents(): void {
   away.value = null
@@ -164,7 +171,7 @@ onMounted(async () => {
   unsubscribe = window.pitwall.onSnapshot(receive)
   document.addEventListener('visibilitychange', onVisibility)
   unsubscribeEvents = window.pitwall.events.onAdded(addEvents)
-  void window.pitwall.events
+  const eventsLoaded = window.pitwall.events
     .get()
     .then(addEvents)
     .catch(() => {})
@@ -180,13 +187,22 @@ onMounted(async () => {
     else goHome()
   })
   void window.pitwall.settings.get().then((s) => (settings.value = s))
-  void window.pitwall.appInfo().then((info) => (version.value = info.version))
+  const info = window.pitwall.appInfo().then((i) => {
+    version.value = i.version
+    appStartedAt = i.startedAt
+  })
   unsubscribeUpdate = window.pitwall.update.onChange((s) => (update.value = s))
   void window.pitwall.update.get().then((s) => (update.value = s))
   // 앱이 기억한 RAM 추이로 그래프를 채운다(창을 다시 열거나 앱을 다시 켜도 이어짐).
-  void window.pitwall
+  const ramLoaded = window.pitwall
     .historyRam()
     .then((points) => (history.value = seedRam(history.value, points)))
+    .catch(() => {})
+  // 트레이로만 시작한 뒤 처음 연 창은 숨긴 적이 없어도 앱이 시작된 때부터의 일을 요약한다(기록·RAM 추이를 받은 뒤).
+  void Promise.all([info, eventsLoaded, ramLoaded])
+    .then(() => {
+      if (!everHidden && document.visibilityState === 'visible') showAway(appStartedAt)
+    })
     .catch(() => {})
   const latest = await window.pitwall.getLatest()
   // 창이 늦게 열려 놓친 스냅샷만 채운다. 그 사이 받은 더 새 스냅샷은 덮어쓰지 않는다.

@@ -86,7 +86,7 @@ const agentCounts = computed(() => {
 const recommendation = computed(() => (s.value ? cleanupRecommendation(s.value) : null))
 const workspaces = computed(() => (s.value ? workspaceSummary(s.value).slice(0, 5) : []))
 type Agent = DashboardSnapshot['agents'][number]
-/** 사용자가 봐야 할 것(권한 대기·조용함·오류·작업 중)이 먼저. */
+/** 사용자가 봐야 할 것(응답 대기·조용함·오류·작업 중)이 먼저. */
 const ORDER = { waiting: 0, quiet: 1, error: 2, working: 3, idle: 4, unknown: 5 }
 const rank = (a: Agent): number => (a.quietSince != null ? ORDER.quiet : ORDER[a.state])
 const agents = computed(() =>
@@ -94,7 +94,7 @@ const agents = computed(() =>
 )
 /** 표(에이전트 탭)와 같은 상태 글자: "응답 대기 · 3분", "조용함 · 18분", "오래 쉼 · 3시간". */
 const agentState = (a: Agent): string => agentStatus(a, s.value?.takenAt ?? 0).text
-/** 사용자를 기다리는(권한 대기·조용함) 줄은 주황. */
+/** 사용자를 기다리는(응답 대기·조용함) 줄은 주황. */
 const needsAttention = (a: Agent): boolean => a.state === 'waiting' || a.quietSince != null
 const subtitle = computed(() => (!s.value ? T.reading : s.value.stale ? T.stale : T.live))
 </script>

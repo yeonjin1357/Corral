@@ -164,7 +164,7 @@ describe('창으로 가기', () => {
   test(`창 후보가 ${HOST_CANDIDATE_LIMIT}개를 넘으면(스냅샷이 이상해도) 앞의 ${HOST_CANDIDATE_LIMIT}개만 넣는다`, async () => {
     const pids = Array.from({ length: 100 }, (_, i) => 1000 + i)
     const f = fakes({ latest: snap({ agents: [agent({ host: { pids, app: null } })] }) })
-    await f.focuser.findHost(KEY)
+    await f.focuser.focusAgent(KEY)
     expect(findLine(scriptOf(f.calls[0].argv))).toBe(
       `$w = [PitwallWindow]::Find([int[]]@(${pids.slice(0, HOST_CANDIDATE_LIMIT).join(',')}))`
     )
@@ -183,7 +183,6 @@ describe('창으로 가기', () => {
       { toString: () => KEY }
     ] as unknown as string[]) {
       expect(await f.focuser.focusAgent(key)).toBe(false)
-      expect(await f.focuser.findHost(key)).toBeNull()
     }
     expect(f.calls).toEqual([])
     // 스냅샷이 아직 없어도 실행하지 않는다.
@@ -226,19 +225,8 @@ describe('창으로 가기', () => {
     ]) {
       const f = fakes({ latest, reply: found(true) })
       expect(await f.focuser.focusAgent(KEY)).toBe(false)
-      expect(await f.focuser.findHost(KEY)).toBeNull()
       expect(f.calls).toEqual([])
     }
-  })
-
-  test('findHost 는 find 로만 찾아 pid·제목을 돌려준다(창을 앞으로 가져오지 않는다)', async () => {
-    const f = fakes({ reply: found(false) })
-    expect(await f.focuser.findHost(KEY)).toEqual({
-      pid: 3000,
-      title: '관리자: Windows PowerShell'
-    })
-    expect(scriptOf(f.calls[0].argv)).not.toContain('[PitwallWindow]::Focus(')
-    expect(await fakes().focuser.findHost(KEY)).toBeNull()
   })
 
   test('macOS 는 host.app 을 open 으로, 없으면 false', async () => {
@@ -273,8 +261,6 @@ describe('창으로 가기', () => {
       expect(await f.focuser.focusAgent(KEY)).toBe(false)
       expect(f.calls).toEqual([])
     }
-    // macOS 에는 창 찾기가 없다.
-    expect(await ok.focuser.findHost(KEY)).toBeNull()
   })
 })
 

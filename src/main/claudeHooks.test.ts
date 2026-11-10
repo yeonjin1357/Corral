@@ -602,6 +602,45 @@ describe.runIf(process.platform === 'win32' || process.platform === 'darwin')(
       }
     }, 30000)
 
+    test('질문 훅: 받기만 하고 답하지 않으면 2초(-m 2)에 끝나고 아무것도 찍지 않고 종료 코드 0(3초 안)', async () => {
+      const got: string[] = []
+      // 요청을 끝까지 받지만 답하지 않는다(멈춘 pitwall).
+      const server = createServer((req) => {
+        let body = ''
+        req.on('data', (c: Buffer) => (body += c.toString('utf8')))
+        req.on('end', () => got.push(body))
+      })
+      await new Promise<void>((r) => server.listen(0, '127.0.0.1', r))
+      const port = (server.address() as { port: number }).port
+      const guard = guardCommand(
+        process.platform === 'darwin' ? 'darwin' : 'win32',
+        port,
+        TOKEN,
+        process.env.SystemRoot
+      )
+      try {
+        for (const [name, argv] of hookShells(guard.command)) {
+          const payload = JSON.stringify({ via: name })
+          const startedAt = Date.now()
+          const result = await runHook(argv, payload)
+          const ms = Date.now() - startedAt
+          expect({ name, code: result.code, out: result.stdout, err: result.stderr }).toEqual({
+            name,
+            code: 0,
+            out: '',
+            err: ''
+          })
+          expect(got.pop()).toBe(payload)
+          // 훅 제한(timeout 3초) 안에 끝난다.
+          expect(ms, name).toBeGreaterThanOrEqual(1900)
+          expect(ms, name).toBeLessThan(3000)
+        }
+      } finally {
+        server.closeAllConnections()
+        await new Promise<void>((r) => server.close(() => r()))
+      }
+    }, 30000)
+
     test('질문 훅: pitwall 이 꺼져 있으면(닫힌 포트) 아무것도 찍지 않고 종료 코드 0', async () => {
       const blocker = createServer()
       await new Promise<void>((r) => blocker.listen(0, '127.0.0.1', r))

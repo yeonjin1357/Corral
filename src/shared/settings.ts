@@ -14,7 +14,7 @@ export interface NotifySettings {
   agentDone: boolean
   /** 훅으로 작업 중인 에이전트가 조용해졌을 때(G3c — 15분 넘게 이벤트도 CPU 사용도 없음). */
   agentQuiet: boolean
-  /** 정확한 상태로 작업 중·권한 대기이던 에이전트가 꺼졌을 때. */
+  /** 정확한 상태로 작업 중·응답 대기이던 에이전트가 꺼졌을 때. */
   agentGone: boolean
 }
 
@@ -31,7 +31,7 @@ export interface Settings {
   idlePortMinutes: number
   /** 쉬는 에이전트의 마지막 활동이 이 시간 이상 전이면 오래 쉬는 세션(G2). */
   agentParkedMinutes: number
-  /** 권한 대기가 이 시간 넘게 이어지면 다시 알린다(그 뒤로도 이 간격마다). 0 이면 다시 알리지 않는다. */
+  /** 응답 대기가 이 시간 넘게 이어지면 다시 알린다(그 뒤로도 이 간격마다). 0 이면 다시 알리지 않는다. */
   waitingReminderMinutes: number
   /** "명령 이름 [인자…]" — 예: `vue-tsc`, `vite build`. */
   heavyPatterns: string[]

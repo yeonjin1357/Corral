@@ -6,6 +6,8 @@ import { GIT_ENV, GIT_TIMEOUT_MS } from './git'
 
 /** 같은 워크트리를 다시 세는 간격. */
 const CHANGE_TTL_MS = 5 * 60 * 1000
+/** 시간 초과(10초)가 난 워크트리를 다시 세는 간격(큰 저장소에서 10초씩 git 을 자꾸 돌리지 않게). */
+const TIMEOUT_RETRY_MS = 30 * 60 * 1000
 /** 한 번에 도는 git 수. */
 const CHANGE_CONCURRENCY = 2
 /** 이만큼 찾지 않은 워크트리는 잊는다(기억이 끝없이 늘지 않게). */
@@ -18,12 +20,15 @@ const NETWORK_PATH = /^[\\/]{2}/
  */
 const STATUS_CONFIG = ['-c', 'core.fsmonitor=false', '-c', 'core.untrackedCache=false']
 
+/** 변경 수를 센 결과: 줄 수, 저장소가 아니거나 실패하면 null, 제한 시간 안에 끝나지 않으면 'timeout'. */
+export type ChangeCount = number | null | 'timeout'
+
 /**
  * 워크트리의 커밋 안 한 변경 수: `git status --porcelain` 의 빈 줄이 아닌 줄 수(바꾼 파일·새 파일, 새 폴더는 한 줄).
  * 저장소를 작업 폴더(cwd)로 쓰지 않고 `-C` 로 넘기며, 잠금 파일을 만들지 않는다(GIT_OPTIONAL_LOCKS=0). 제한 10초.
- * 저장소가 아니거나 실패·시간 초과면 null.
+ * 저장소가 아니거나 실패하면 null, 시간 초과(runCommand 의 Error('timeout'))면 'timeout'.
  */
-export async function countChanges(root: string, run: Runner = runCommand): Promise<number | null> {
+export async function countChanges(root: string, run: Runner = runCommand): Promise<ChangeCount> {
   try {
     const r = await run(['git', '-C', root, ...STATUS_CONFIG, 'status', '--porcelain'], {
       timeoutMs: GIT_TIMEOUT_MS,
@@ -31,8 +36,8 @@ export async function countChanges(root: string, run: Runner = runCommand): Prom
     })
     if (r.exitCode !== 0) return null
     return r.stdout.split(/\r?\n/).filter((line) => line.trim() !== '').length
-  } catch {
-    return null
+  } catch (err) {
+    return err instanceof Error && err.message === 'timeout' ? 'timeout' : null
   }
 }
 
@@ -48,6 +53,8 @@ interface Entry {
   value: number | null
   /** 마지막으로 다 센(실패 포함) 시각. 아직이면 null. */
   countedAt: number | null
+  /** 다시 셀 때까지의 간격(보통 ttl, 시간 초과가 났으면 30분). */
+  retryMs: number
   /** 마지막으로 찾은 시각. */
   wantedAt: number
   /** 줄을 섰거나 세는 중. */
@@ -56,11 +63,12 @@ interface Entry {
 
 /**
  * 변경 수를 수집과 따로 센다: get 은 기억한 값을 바로 주고, want 가 처음 보거나 ttl(기본 5분)이 지난 워크트리를 뒤에서
- * 한 번에 concurrency(기본 2)개씩 센다. 세다가 실패하거나 시간이 넘으면 null 로 두고 ttl 뒤에 다시 센다.
+ * 한 번에 concurrency(기본 2)개씩 센다. 세다가 실패하면 null 로 두고 ttl 뒤에, 시간이 넘으면(run 이 'timeout') null 로
+ * 두고 30분 뒤에 다시 센다(그 뒤 성공하면 다시 ttl 마다).
  * 경로는 worktreeKey 로 견준다. 네트워크 경로는 세지 않는다. 30분 동안 찾지 않은 워크트리는 잊는다.
  */
 export function createChangeCounter(deps: {
-  run: (root: string) => Promise<number | null>
+  run: (root: string) => Promise<ChangeCount>
   now: () => number
   ttlMs?: number
   concurrency?: number
@@ -72,14 +80,15 @@ export function createChangeCounter(deps: {
   let running = 0
 
   async function count(entry: Entry): Promise<void> {
-    let value: number | null
+    let value: ChangeCount
     try {
       value = await deps.run(entry.root)
     } catch {
       value = null
     }
-    entry.value = value
+    entry.value = value === 'timeout' ? null : value
     entry.countedAt = deps.now()
+    entry.retryMs = value === 'timeout' ? TIMEOUT_RETRY_MS : ttl
     entry.pending = false
   }
 
@@ -97,7 +106,7 @@ export function createChangeCounter(deps: {
 
   /** 다시 셀 때가 됐나(시계가 뒤로 가도 다시 센다). */
   const due = (entry: Entry, now: number): boolean =>
-    entry.countedAt === null || now < entry.countedAt || now - entry.countedAt >= ttl
+    entry.countedAt === null || now < entry.countedAt || now - entry.countedAt >= entry.retryMs
 
   return {
     get: (root) => entries.get(worktreeKey(root))?.value ?? null,
@@ -108,7 +117,14 @@ export function createChangeCounter(deps: {
         const key = worktreeKey(root)
         let entry = entries.get(key)
         if (!entry) {
-          entry = { root, value: null, countedAt: null, wantedAt: now, pending: false }
+          entry = {
+            root,
+            value: null,
+            countedAt: null,
+            retryMs: ttl,
+            wantedAt: now,
+            pending: false
+          }
           entries.set(key, entry)
         }
         entry.wantedAt = now

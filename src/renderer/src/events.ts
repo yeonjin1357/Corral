@@ -146,7 +146,7 @@ export interface AwaySummary {
 }
 
 /**
- * since 뒤의 기록을 센다: 작업 끝남·권한 대기·꺼진 에이전트(작업 중이던 것만)·조용함, 그 사이 RAM 최고.
+ * since 뒤의 기록을 센다: 작업 끝남·응답 대기·꺼진 에이전트(작업 중이던 것만)·조용함, 그 사이 RAM 최고.
  * 넷이 모두 0 이면 보여 줄 것이 없어 null.
  */
 export function awaySummary(

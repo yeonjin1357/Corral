@@ -353,9 +353,9 @@ export const text = {
       /** 풍선말의 창 하나: "5시간: 14% · 11월 10일 오후 3:00 초기화"(초기화 시각을 모르면 앞부분만). */
       codexLimitTip: (label: string, percent: number, resetAt: string | null): string =>
         resetAt ? `${label}: ${percent}% · ${resetAt} 초기화` : `${label}: ${percent}%`,
-      /** 풍선말 끝: 숫자를 읽은 때(ago: "3분"). */
       /** 상세 패널 사용 한도 카드의 초기화 시각: "5시간 오후 9:21 초기화". */
       codexLimitReset: (label: string, at: string): string => `${label} · ${at} 초기화`,
+      /** 풍선말 끝: 숫자를 읽은 때(ago: "3분"). */
       codexLimitsAt: (ago: string): string => `${ago} 전 기준`,
       /** 창 길이 이름: 주간·N일·N시간·N분. */
       windowWeek: '주간',
@@ -710,15 +710,15 @@ export const text = {
       resetDefaults: '기본값으로',
       heavyGuard: '겹치면 에이전트가 기다리게 하기(Claude Code)',
       heavyGuardHelp:
-        '켜면 Claude 가 Bash 명령을 실행하기 전에 pitwall 에 물어봐요. 무거운 작업이 이미 돌고 있고 메모리가 경고 기준을 넘었을 때만, 같은 명령을 두 번까지 1분 뒤로 미루게 해요. Claude 설정 파일에 훅을 하나 더 넣어요(확인 창·백업). pitwall 이 꺼져 있으면 아무 일도 없어요.',
+        '켜면 Claude 가 Bash·PowerShell 명령을 실행하기 전에 pitwall 에 물어봐요. 무거운 작업이 이미 돌고 있고 메모리가 경고 기준을 넘었을 때만, 같은 명령을 두 번까지 1분 뒤로 미루게 해요. Claude 설정 파일에 훅을 하나 더 넣어요(확인 창·백업). pitwall 이 꺼져 있으면 아무 일도 없어요.',
       /** 켜려고 저장했는데 메인이 켜지 않았을 때(질문 훅 설치를 취소·실패) "저장했어요" 대신. */
       heavyGuardNotChanged:
         '에이전트 기다리게 하기는 켜지 않았어요(훅 설치를 취소했거나 실패했어요).',
       /** 켜져 있는데 Claude 연동이 켜져 있지 않을 때 체크 아래에. */
       heavyGuardNeedsHook:
         'Claude 연동이 꺼져 있어 지금은 동작하지 않아요. Claude 연동을 켜면 질문 훅도 함께 설치돼요.',
-      notifyRamLow: 'RAM 부족',
-      notifyRamLowHelp: 'RAM 이 위험 기준을 넘으면, 끄면 확보할 수 있는 양과 함께 알려요.',
+      notifyRamLow: '메모리 부족',
+      notifyRamLowHelp: 'RAM 이나 커밋이 위험 기준을 넘으면, 끄면 확보할 수 있는 양과 함께 알려요.',
       notifyAgentDone: '에이전트 작업 끝남',
       notifyAgentDoneHelp:
         '정확한 상태를 아는 에이전트(Claude·Codex 연동, Codex 세션 기록)가 2분 넘게 일한 뒤 끝나면 알려요. 짧은 답에는 알리지 않아요.',

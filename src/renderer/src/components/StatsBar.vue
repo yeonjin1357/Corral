@@ -141,7 +141,7 @@ const agentCounts = computed(() => {
     restLabel: rest.every((a) => a.state === 'idle')
       ? text.ui.agent.states.idle
       : text.ui.cards.agentOthers,
-    // 오래 쉬는 세션(G2)은 작업 중·권한 대기가 아니므로 모두 셋째 칸에 든다.
+    // 오래 쉬는 세션(G2)은 작업 중·응답 대기가 아니므로 모두 셋째 칸에 든다.
     parked: rest.filter((a) => a.parked).length
   }
 })

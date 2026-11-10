@@ -94,21 +94,20 @@ export function createFocuser(deps: {
   isDirectory: (p: string) => Promise<boolean>
 }): {
   focusAgent(key: string): Promise<boolean>
-  findHost(key: string): Promise<{ pid: number; title: string } | null>
 } {
   function agentFor(key: unknown): AgentRow | null {
     if (typeof key !== 'string' || key.length === 0 || key.length > MAX_KEY_LENGTH) return null
     return deps.latest()?.agents.find((a) => selectionKey.agent(a) === key) ?? null
   }
 
-  async function windowsHost(agent: AgentRow, mode: 'find' | 'focus'): Promise<FocusResult | null> {
+  async function focusWindowsHost(agent: AgentRow): Promise<FocusResult | null> {
     const collectMode = deps.latest()?.collectMode
     if (collectMode === 'basic' || collectMode === 'safe') return null
     // 수집이 이미 상한을 지키지만, 명령줄 길이를 넘지 않도록 여기서도 앞의 것만 넣는다.
     const pids = agent.host.pids.filter(isScriptPid).slice(0, HOST_CANDIDATE_LIMIT)
     if (pids.length === 0) return null
     const result = await deps.run(
-      [powershellPath(), ...buildPowerShellArgs(focusScript(deps.helperDllPath(), pids, mode))],
+      [powershellPath(), ...buildPowerShellArgs(focusScript(deps.helperDllPath(), pids, 'focus'))],
       { timeoutMs: COMMAND_TIMEOUT_MS }
     )
     return result.exitCode === 0 ? parseFocusResult(result.stdout, pids) : null
@@ -129,19 +128,9 @@ export function createFocuser(deps: {
       if (!agent) return false
       try {
         if (deps.platform === 'darwin') return await openApp(agent.host.app)
-        return (await windowsHost(agent, 'focus'))?.focused === true
+        return (await focusWindowsHost(agent))?.focused === true
       } catch {
         return false
-      }
-    },
-    async findHost(key) {
-      const agent = agentFor(key)
-      if (!agent || deps.platform === 'darwin') return null
-      try {
-        const found = await windowsHost(agent, 'find')
-        return found ? { pid: found.pid, title: found.title } : null
-      } catch {
-        return null
       }
     }
   }

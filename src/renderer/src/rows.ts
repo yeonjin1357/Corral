@@ -867,7 +867,7 @@ function workspaceHead(
     [text.ui.workspaces.changed, ws.changedFiles ?? 0]
   ]
   const parts = counts.filter(([, n]) => n > 0).map(([label, n]) => st.groupCount(label, n))
-  // 작업 중·권한 대기인 에이전트가 있으면 마지막 활동은 "지금"이라 붙이지 않는다.
+  // 작업 중·응답 대기인 에이전트가 있으면 마지막 활동은 "지금"이라 붙이지 않는다.
   const busy = m.agents.some((a) => a.state === 'working' || a.state === 'waiting')
   if (!busy && ws.lastActiveAt != null)
     parts.push(st.lastActive(formatDuration(Math.max(0, now - ws.lastActiveAt))))
@@ -887,7 +887,7 @@ function workspaceHead(
 }
 
 /**
- * 작업 공간 머리 상태: 에이전트가 권한 대기 > 조용함 > 작업 중, 아니면 서버 요약.
+ * 작업 공간 머리 상태: 에이전트가 응답 대기 > 조용함 > 작업 중, 아니면 서버 요약.
  * 서버가 없으면 비운다(서버 요약의 "연결 없음"은 서버가 있을 때의 말이라).
  */
 function workspaceStatus(agents: AgentRow[], servers: ServerRow[]): Cell {

@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from 'fs/promises'
 import { join } from 'path'
-import { countChanges, createChangeCounter } from './gitStatus'
+import { countChanges, createChangeCounter, type ChangeCount } from './gitStatus'
 import type { CommandOptions, CommandResult } from './collect/runCommand'
 import { createGitFixture, type GitFixture } from './testing/gitFixture'
 
@@ -77,7 +77,7 @@ describe('createChangeCounter', () => {
     await settle()
     expect(counter.get(ROOT)).toBe(4)
     clock.now += 5 * MIN
-    run.mockRejectedValueOnce(new Error('timeout'))
+    run.mockRejectedValueOnce(new Error('EACCES'))
     counter.want([ROOT])
     await settle()
     expect(counter.get(ROOT)).toBeNull()
@@ -90,6 +90,30 @@ describe('createChangeCounter', () => {
     await settle()
     expect(run).toHaveBeenCalledTimes(3)
     expect(counter.get(ROOT)).toBe(4)
+  })
+
+  test('시간 초과(10초)가 난 워크트리는 30분 뒤에 다시 세고, 성공하면 다시 5분마다 센다', async () => {
+    const clock = { now: 0 }
+    const run = vi.fn<(root: string) => Promise<ChangeCount>>(async () => 'timeout')
+    const counter = createChangeCounter({ run, now: () => clock.now })
+    counter.want([ROOT])
+    await settle()
+    expect(counter.get(ROOT)).toBeNull()
+    // 큰 저장소에서 10초씩 git 을 다시 돌리지 않는다.
+    clock.now += 30 * MIN - 1
+    counter.want([ROOT])
+    await settle()
+    expect(run).toHaveBeenCalledTimes(1)
+    clock.now += 1
+    run.mockResolvedValueOnce(5)
+    counter.want([ROOT])
+    await settle()
+    expect(run).toHaveBeenCalledTimes(2)
+    expect(counter.get(ROOT)).toBe(5)
+    clock.now += 5 * MIN
+    counter.want([ROOT])
+    await settle()
+    expect(run).toHaveBeenCalledTimes(3)
   })
 
   test('한 번에 둘까지만 돈다', async () => {
@@ -167,17 +191,22 @@ describe('countChanges', () => {
     expect(opts).not.toHaveProperty('cwd')
   })
 
-  test('저장소가 아니거나 시간 안에 끝나지 않으면 null', async () => {
+  test('저장소가 아니거나 실행하지 못하면 null, 시간 안에 끝나지 않으면 timeout', async () => {
     const notRepo = async (): Promise<CommandResult> => ({
       stdout: '',
       stderr: 'fatal: not a git repository',
       exitCode: 128
     })
     expect(await countChanges(ROOT, notRepo)).toBeNull()
+    const missing = async (): Promise<CommandResult> => {
+      throw Object.assign(new Error('spawn git ENOENT'), { code: 'ENOENT' })
+    }
+    expect(await countChanges(ROOT, missing)).toBeNull()
+    // runCommand 는 시간 초과를 Error('timeout') 으로 알린다.
     const timeout = async (): Promise<CommandResult> => {
       throw new Error('timeout')
     }
-    expect(await countChanges(ROOT, timeout)).toBeNull()
+    expect(await countChanges(ROOT, timeout)).toBe('timeout')
   })
 
   describe('실제 git', () => {

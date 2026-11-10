@@ -1,7 +1,7 @@
 import type { AgentTool, MemoryLevel } from './types'
 
 /**
- * 기록(G3g)에 남는 일의 종류. 에이전트 시작·꺼짐·작업 끝남·권한 대기·오류·조용함, 서버 시작·꺼짐,
+ * 기록(G3g)에 남는 일의 종류. 에이전트 시작·꺼짐·작업 끝남·응답 대기·오류·조용함, 서버 시작·꺼짐,
  * 무거운 작업 시작·끝, 메모리 단계 변화, 정리(끄기), 디스크 지움, 에이전트를 기다리게 함(G7).
  */
 export const PIT_EVENT_KINDS = [
@@ -45,6 +45,6 @@ export interface PitEvent {
   count?: number
   percent?: number
   level?: MemoryLevel
-  /** agent-end: 작업 중·권한 대기이던 것이 꺼짐. */
+  /** agent-end: 작업 중·응답 대기이던 것이 꺼짐. */
   abnormal?: boolean
 }

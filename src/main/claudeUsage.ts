@@ -36,8 +36,10 @@ const MAX_ID_LENGTH = 200
 const MAX_MODEL_LENGTH = 100
 /** 읽던 위치를 기억하는 파일 수(넘으면 가장 오래 안 읽은 것부터 잊는다). */
 const MAX_FILES = 64
-/** 세션 id → 찾은 기록 파일을 기억하는 수. */
+/** 세션 id → 찾은 기록 파일을 기억하는 수(못 찾은 세션 id 의 기억도 같은 수까지). */
 const MAX_FOUND = 500
+/** 기록 파일을 못 찾은 세션 id 는 이만큼 다시 찾지 않는다(수집마다 모든 프로젝트 폴더를 훑지 않게). */
+const MISS_RETRY_MS = 60 * 1000
 /** Claude Code 가 오류 등으로 직접 만든 응답의 모델 이름(실제 요청이 아니다 — 숫자가 0 이다). */
 const SYNTHETIC_MODEL = '<synthetic>'
 /** 세션 id 로 기록 파일을 찾을 때 받는 모양(경로 글자가 들어가지 않게). */
@@ -150,14 +152,14 @@ export interface ClaudeUsageReader {
   usageFor(transcriptPath: string): Promise<AgentUsage | null>
   /**
    * 세션 id 의 기록 파일(`<projects>/<폴더>/<id>.jsonl`, projects 바로 아래 폴더들에서 찾는다). 찾은 경로는 기억하고
-   * 그 파일이 없어지면 다시 찾는다. id 모양이 다르거나 없으면 null.
+   * 그 파일이 없어지면 다시 찾는다. 훑어도 못 찾은 id 는 60초 동안 다시 찾지 않는다. id 모양이 다르거나 없으면 null.
    */
   transcriptFor(sessionId: string): Promise<string | null>
   /** 그 파일의 읽던 위치·집계를 잊는다. */
   forget(transcriptPath: string): void
   /**
-   * 들고 있던 것을 모두 버린다(설정 readUsage 를 끌 때). 그 전에 시작한 읽기는 아직 파일을 열지 않았으면 열지 않고,
-   * 읽던 중이면 결과를 남기지 않는다.
+   * 들고 있던 것을 모두 버린다(설정 readUsage 를 끌 때 — 찾은·못 찾은 세션 id 의 기억도). 그 전에 시작한 읽기는 아직
+   * 파일을 열지 않았으면 열지 않고, 읽던 중이면 결과를 남기지 않는다.
    */
   clear(): void
 }
@@ -177,6 +179,8 @@ export function createClaudeUsageReader(o: {
   maxIds?: number
   /** 읽던 위치를 기억하는 파일 수(기본 64). */
   maxFiles?: number
+  /** 시계(못 찾은 세션 id 를 다시 찾을 때를 잰다). 기본 Date.now. */
+  now?: () => number
 }): ClaudeUsageReader {
   const maxFullBytes = o.maxFullBytes ?? MAX_FULL_BYTES
   const tailBytes = o.tailBytes ?? TAIL_BYTES
@@ -190,6 +194,9 @@ export function createClaudeUsageReader(o: {
   const progress = new Map<string, Progress>()
   const inflight = new Map<string, Promise<AgentUsage | null>>()
   const found = new Map<string, string>()
+  /** 훑어도 기록 파일을 못 찾은 세션 id → 그때 시각. */
+  const missed = new Map<string, number>()
+  const now = o.now ?? Date.now
   /** clear 할 때마다 는다: 그 전에 시작한 읽기는 파일을 열지 않고 결과를 남기지 않는다. */
   let generation = 0
 
@@ -295,6 +302,12 @@ export function createClaudeUsageReader(o: {
       const known = found.get(sessionId)
       if (known && (await isFile(known))) return known
       found.delete(sessionId)
+      // 얼마 전에 훑어도 못 찾았으면 다시 훑지 않는다(시계가 뒤로 갔으면 다시 찾는다).
+      const missedAt = missed.get(sessionId)
+      const t = now()
+      if (missedAt !== undefined && t >= missedAt && t - missedAt < MISS_RETRY_MS) return null
+      missed.delete(sessionId)
+      const started = generation
       let dirs: Dirent[]
       try {
         dirs = await readdir(o.projectsDir, { withFileTypes: true })
@@ -309,6 +322,11 @@ export function createClaudeUsageReader(o: {
         found.set(sessionId, path)
         return path
       }
+      // 훑는 사이 clear 했으면 기억하지 않는다.
+      if (started === generation) {
+        if (missed.size >= MAX_FOUND) missed.clear()
+        missed.set(sessionId, t)
+      }
       return null
     },
     forget(transcriptPath) {
@@ -319,6 +337,7 @@ export function createClaudeUsageReader(o: {
       progress.clear()
       inflight.clear()
       found.clear()
+      missed.clear()
     }
   }
 }

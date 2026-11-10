@@ -153,9 +153,9 @@ function memoryEvents(prev: DashboardSnapshot, next: DashboardSnapshot): NewEven
 /**
  * 이어지는 두 스냅샷의 변화를 기록 줄로 바꾼다. prev 가 없으면(첫 스냅샷은 기준선) 또는 둘 중 하나가 지연된
  * 스냅샷(옛 데이터)이면 빈 목록 — 사라졌다·바뀌었다고 보지 않는다. 바뀐 것이 없으면(다시 내보낸 스냅샷) 빈 목록.
- * - 에이전트(agentKey): 새로 보임 agent-start, 사라짐 agent-end(abnormal = 정확한 상태로 작업 중·권한 대기였음).
+ * - 에이전트(agentKey): 새로 보임 agent-start, 사라짐 agent-end(abnormal = 정확한 상태로 작업 중·응답 대기였음).
  *   정확한 상태(CPU 추정 아님)로 넘어갈 때만: 작업 중 → 쉬는 중이고 2분 넘게 일했으면 agent-done(ms),
- *   권한 대기 agent-waiting, 오류 agent-error. 조용해지면 agent-quiet.
+ *   응답 대기 agent-waiting, 오류 agent-error. 조용해지면 agent-quiet.
  * - 보이는 서버: server-start·server-end(label = 포트 목록).
  * - 무거운 작업: heavy-start, heavy-end(ms = 시작부터, bytes = 그동안의 최대 메모리). peaks 를 이 함수가 갱신한다.
  * - 메모리 단계가 바뀌면 memory-level(level·percent = RAM %).

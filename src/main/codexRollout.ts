@@ -12,7 +12,7 @@ import {
 
 /**
  * Codex 세션 기록(rollout) 읽기(F7 기본). 사용자 설정을 바꾸지 않고 `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-*.jsonl`
- * 에서 작업 중·쉬는 중·오류를 안다. 권한 대기는 기록에 남지 않아 알 수 없다.
+ * 에서 작업 중·쉬는 중·오류를 안다. 응답 대기는 기록에 남지 않아 알 수 없다.
  * - 세션 폴더 안의 파일만 연다(`auth.json` 등 다른 파일은 열지 않는다).
  * - 줄에서 type·이벤트 이름·시각·cwd·error 여부만 꺼내고 대화 내용은 버린다(결과에 남기지 않는다).
  * - 토큰 숫자를 읽을 때(G6, 설정 readUsage)는 token_count 이벤트의 숫자·사용 한도·요금제 이름도 꺼낸다.
@@ -332,7 +332,8 @@ interface RolloutProgress {
  *   마지막 줄은 들고 있지 않는다(대화 내용이 든 줄 조각을 읽기 사이에 남기지 않는다).
  * - 잠깐 읽지 못하면(EBUSY·EPERM·EACCES 등) 알던 것과 읽던 위치를 두고, 파일이 없어지면 잊는다.
  * 토큰 숫자(G6)는 o.usage() 가 true 일 때만 읽는다(기본 true). 꺼져 있으면 token_count 줄을 읽지 않고 들고 있던
- * 숫자도 버린다(dropUsage 로 바로 버릴 수도 있다). 다시 켜면 그 파일을 처음부터(끝 firstReadBytes) 다시 읽는다.
+ * 숫자도 버린다(dropUsage 로 바로 버릴 수도 있다). 읽는 도중에 꺼지거나 dropUsage 가 있었으면 그 읽기가 얻은 숫자도
+ * 담지 않는다. 다시 켜면 그 파일을 처음부터(끝 firstReadBytes) 다시 읽는다.
  */
 export function createCodexReader(
   home: string,
@@ -357,6 +358,8 @@ export function createCodexReader(
   const usageOn = o.usage ?? ((): boolean => true)
   const firstReadBytes = Math.max(1, o.firstReadBytes ?? FIRST_READ_BYTES)
   const progress = new Map<string, RolloutProgress>()
+  /** dropUsage 를 부른 횟수. 읽기를 시작한 뒤 바뀌었으면 그 읽기가 얻은 숫자는 담지 않는다. */
+  let drops = 0
 
   /** 읽지 못했을 때: 파일이 없어졌으면 잊고, 잠깐의 실패면 알던 것과 읽던 위치를 둔다. */
   function failed(path: string, known: RolloutProgress | undefined, err: unknown): CodexInfo {
@@ -367,7 +370,11 @@ export function createCodexReader(
     return known?.info ?? NO_INFO
   }
 
-  async function follow(path: string, withUsage: boolean): Promise<CodexInfo> {
+  /**
+   * 그 파일을 읽던 위치부터 이어 읽는다. dropsSeen 은 withUsage 를 정할 때의 drops: 읽는 사이에 숫자 읽기가 꺼졌거나
+   * dropUsage 가 있었으면 이 읽기가 얻은 숫자·한도는 담지 않는다(다시 필요하면 처음부터 읽는다).
+   */
+  async function follow(path: string, withUsage: boolean, dropsSeen: number): Promise<CodexInfo> {
     const known = progress.get(path)
     let size: number
     try {
@@ -400,7 +407,10 @@ export function createCodexReader(
           info = readRollout([line.toString('utf8')], info, withUsage)
         }
       )
-      const p = { cursor, info, withUsage }
+      const dropped = withUsage && (!usageOn() || drops !== dropsSeen)
+      const p = dropped
+        ? { cursor, info: { ...info, usage: null, limits: null }, withUsage: false }
+        : { cursor, info, withUsage }
       if (progress.size > 50) progress.clear()
       progress.set(path, p)
       return p.info
@@ -413,6 +423,7 @@ export function createCodexReader(
 
   /** 들고 있던 토큰 숫자·한도를 버린다. 상태와 읽은 위치는 그대로다. */
   function dropUsage(): void {
+    drops++
     for (const [path, p] of progress)
       if (p.withUsage)
         progress.set(path, {
@@ -434,11 +445,12 @@ export function createCodexReader(
   async function infoFor(agent: CodexRolloutAgent, now: number): Promise<CodexInfo> {
     const withUsage = usageOn()
     if (!withUsage) dropUsage()
+    const dropsSeen = drops
     // 훅이 알려 준 기록 파일은 sessions 폴더 안의 .jsonl 일 때만 쓴다(링크를 풀어도 안이어야 한다).
     const path =
       (await jsonlInside(agent.transcriptPath, sessionsDir)) ??
       (await findRollout(home, agent, now, cachedCwd))
-    return path ? follow(path, withUsage).catch(() => NO_INFO) : NO_INFO
+    return path ? follow(path, withUsage, dropsSeen).catch(() => NO_INFO) : NO_INFO
   }
 
   return {

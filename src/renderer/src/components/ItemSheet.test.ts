@@ -589,7 +589,8 @@ describe('상세 패널: 사용 한도 카드(Codex, G6)', () => {
     [...document.body.querySelectorAll<HTMLElement>('[data-slot=card]')].find((c) =>
       c.textContent?.trim().startsWith('사용 한도')
     ) ?? null
-  const flat = (el: HTMLElement | null): string => el?.textContent?.replace(/s+/g, ' ').trim() ?? ''
+  const flat = (el: HTMLElement | null): string =>
+    el?.textContent?.replace(/\s+/g, ' ').trim() ?? ''
 
   test('Codex 행에 한도가 있으면 모든 창과 초기화 시각·기준 시각', () => {
     sheet({ kind: 'agent', row: agentRow({ tool: 'codex' }) }, null, 'win32', 'helper-dll', limits)

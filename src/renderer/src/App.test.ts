@@ -86,7 +86,8 @@ function fake(over: Partial<PitwallApi> = {}): Fake {
     focusAgent: vi.fn(async () => true),
     claudeHook: { status: async () => null, enable: vi.fn(), disable: vi.fn() },
     codexHook: { status: async () => null, enable: vi.fn(), disable: vi.fn() },
-    appInfo: async () => ({ version: '0.1.0' }),
+    // 창과 함께 막 시작한 앱.
+    appInfo: async () => ({ version: '0.1.0', startedAt: Date.now() }),
     fileIcon: async () => null,
     update: {
       get: async () => null,
@@ -419,7 +420,7 @@ test('설정 > 무거운 작업에서 "겹치면 에이전트가 기다리게 �
     '겹치면 에이전트가 기다리게 하기(Claude Code)'
   )
   expect(w.text()).toContain(
-    '켜면 Claude 가 Bash 명령을 실행하기 전에 pitwall 에 물어봐요. 무거운 작업이 이미 돌고 있고 메모리가 경고 기준을 넘었을 때만, 같은 명령을 두 번까지 1분 뒤로 미루게 해요. Claude 설정 파일에 훅을 하나 더 넣어요(확인 창·백업). pitwall 이 꺼져 있으면 아무 일도 없어요.'
+    '켜면 Claude 가 Bash·PowerShell 명령을 실행하기 전에 pitwall 에 물어봐요. 무거운 작업이 이미 돌고 있고 메모리가 경고 기준을 넘었을 때만, 같은 명령을 두 번까지 1분 뒤로 미루게 해요. Claude 설정 파일에 훅을 하나 더 넣어요(확인 창·백업). pitwall 이 꺼져 있으면 아무 일도 없어요.'
   )
   // 위의 무거운 명령 도움말은 알리기만 한다고 말하고 아래 항목을 가리킨다.
   expect(w.text()).toContain(
@@ -847,6 +848,35 @@ describe('자리 비운 사이', () => {
     await flushPromises()
     expect(w.find('[data-away]').exists()).toBe(false)
     w.unmount()
+  })
+
+  test('트레이로만 시작한 뒤 창을 처음 열면 앱이 시작된 때부터 요약한다', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(T0 + 40 * 60_000)
+    const events = [done(1, T0 + 5 * 60_000), done(2, T0 + 20 * 60_000)]
+    const opened = (startedAt: number): Fake =>
+      fake({
+        appInfo: async () => ({ version: '0.1.0', startedAt }),
+        events: { get: async () => events, onAdded: () => () => {} }
+      })
+    const w = await start(opened(T0))
+    expect(w.find('[data-away]').exists()).toBe(true)
+    expect(w.find('[data-away]').text()).toContain('40분 동안: 작업 끝남 2')
+    w.unmount()
+
+    // 처음 불러올 때 숨김이던 창이 나중에 보여도 마찬가지다.
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' })
+    const late = await start(opened(T0))
+    expect(late.find('[data-away]').exists()).toBe(false)
+    setVisibility('visible')
+    await flushPromises()
+    expect(late.find('[data-away]').text()).toContain('40분 동안: 작업 끝남 2')
+    late.unmount()
+
+    // 앱과 함께 창이 열렸으면(시작한 지 10분이 안 됨) 카드가 없다.
+    const fresh = await start(opened(T0 + 35 * 60_000))
+    expect(fresh.find('[data-away]').exists()).toBe(false)
+    fresh.unmount()
   })
 
   test('10분이 안 됐으면 카드가 없다', async () => {
