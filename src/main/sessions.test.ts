@@ -589,7 +589,15 @@ describe('Claude 세션 파일로 정확한 짝(G3a)', () => {
     new Map(
       entries.map(([pid, sessionId]) => [
         pid,
-        { pid, sessionId, status: 'idle', statusUpdatedAt: null, name: null, nameSource: null }
+        {
+          pid,
+          sessionId,
+          status: 'idle',
+          statusUpdatedAt: null,
+          waitingFor: null,
+          name: null,
+          nameSource: null
+        }
       ])
     )
   const keys = new Map([

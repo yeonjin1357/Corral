@@ -255,6 +255,7 @@ describe('작업 공간 한 번에 정리(F2)', () => {
     activity: null,
     quietSince: null,
     usage: null,
+    waitReason: null,
     host: { pids: [], app: null }
   }
   const latest =

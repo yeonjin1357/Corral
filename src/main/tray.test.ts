@@ -79,6 +79,7 @@ function agentRow(state: AgentRow['state'], quietSince: number | null = null): A
     activity: null,
     quietSince,
     usage: null,
+    waitReason: null,
     host: { pids: [], app: null }
   }
 }
@@ -125,6 +126,7 @@ describe('buildTrayMenu', () => {
       activity: null,
       quietSince: null,
       usage: null,
+      waitReason: null,
       host: { pids: [], app: null }
     })
     const base = snap()

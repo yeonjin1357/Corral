@@ -287,10 +287,17 @@ export interface OtherPort {
 export type AgentTool = 'claude' | 'codex'
 
 /**
- * working: 일하는 중, waiting: 권한 확인 등 사용자 응답 대기(훅으로만 앎), idle: 쉬는 중,
- * error: 마지막 응답이 오류로 끝남(훅으로만 앎), unknown: 아직 판단할 근거가 없음(첫 샘플 등).
+ * working: 일하는 중, waiting: 권한 확인·질문 등 사용자 응답 대기(훅이나 Claude 세션 파일로 앎 — 어떤 도구가 권한을
+ * 기다리는지는 훅으로만 앎), idle: 쉬는 중, error: 마지막 응답이 오류로 끝남(훅으로만 앎),
+ * unknown: 아직 판단할 근거가 없음(첫 샘플 등).
  */
 export type AgentState = 'working' | 'waiting' | 'idle' | 'error' | 'unknown'
+
+/**
+ * Claude 세션 파일로 안 응답 대기의 이유(파일의 waitingFor). permission: 도구 권한·계획 승인 등, input: 질문·입력 요청,
+ * sandbox: 샌드박스 허용 요청, worker: 하위 작업의 요청, goal: 목표 제안, other: 모르는 이유.
+ */
+export type WaitReason = 'permission' | 'input' | 'sandbox' | 'worker' | 'goal' | 'other'
 
 /**
  * 에이전트가 하는 일(G3b). 훅이 알려 준 내용을 메모리에만 들고 pitwall 창에만 보인다(history.json·기록·로그·OS 알림에는
@@ -365,9 +372,11 @@ export interface AgentRow {
   state: AgentState
   /**
    * hook: 훅 이벤트로 안 상태, rollout: Codex 세션 기록으로 안 상태, file: Claude 실행 중 세션 파일로 안 상태
-   * (작업 중·쉬는 중만), cpu: CPU 변화로 짐작한 상태.
+   * (작업 중·쉬는 중·응답 대기), cpu: CPU 변화로 짐작한 상태.
    */
   stateSource: 'hook' | 'cpu' | 'rollout' | 'file'
+  /** 응답 대기의 이유: 상태가 waiting 이고 그 근거가 세션 파일(stateSource 'file')일 때만, 아니면 null. */
+  waitReason: WaitReason | null
   /**
    * 지금 상태가 시작된 시각. 훅 상태는 그 상태가 된 이벤트 시각, 세션 파일은 상태가 바뀐 시각(모르면 CPU 추정처럼),
    * CPU 추정은 pitwall 이 그 상태를 처음 본 시각. 아직 판단하지 못했으면(unknown) null.

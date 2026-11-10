@@ -58,6 +58,7 @@ function agent(
     activity: null,
     quietSince: null,
     usage: null,
+    waitReason: null,
     host: { pids: [], app: null },
     ...overrides
   }

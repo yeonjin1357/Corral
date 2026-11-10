@@ -323,7 +323,13 @@ const view = computed<View | null>(() => {
         ],
         facts: [
           { label: t.columns.tool, value: t.agent.toolNames[r.tool] },
-          { label: t.agent.stateSource, value: t.agent.sources[r.stateSource] },
+          // 세션 파일로 안 응답 대기는 그 이유를 덧붙인다.
+          {
+            label: t.agent.stateSource,
+            value: r.waitReason
+              ? `${t.agent.sources[r.stateSource]} · ${t.agent.waitReason[r.waitReason]}`
+              : t.agent.sources[r.stateSource]
+          },
           {
             label: t.columns.branch,
             value: r.worktree?.branch ?? (r.worktree ? text.detached : t.none)

@@ -540,6 +540,7 @@ describe('상태 시작 시각(F3)', () => {
     activity: null,
     quietSince: null,
     usage: null,
+    waitReason: null,
     host: { pids: [], app: null },
     ...over
   })

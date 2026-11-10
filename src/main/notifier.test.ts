@@ -72,6 +72,7 @@ function agent(pid: number, state: AgentRow['state'], root = 'C:\\work\\shop-web
     activity: null,
     quietSince: null,
     usage: null,
+    waitReason: null,
     host: { pids: [], app: null }
   }
 }
@@ -590,6 +591,106 @@ describe('권한 대기 본문·다시 알림(G3e)', () => {
     clock.now = 40 * MIN
     update(snap({ agents: [waitingOn(5000, 0)] }))
     expect(shown.map((n) => n.title)).toEqual(['Claude 가 40분째 권한을 기다려요'])
+  })
+
+  /** 세션 파일로 기다림을 아는 에이전트(기다리는 도구는 모르고 이유만 안다). */
+  const fileWaiting = (
+    pid: number,
+    waitReason: NonNullable<AgentRow['waitReason']>,
+    since = 0,
+    root?: string
+  ): AgentRow => ({
+    ...agent(pid, 'waiting', root),
+    stateSource: 'file',
+    stateSince: since,
+    waitReason
+  })
+  const fileWorking = (pid: number, root?: string): AgentRow => ({
+    ...agent(pid, 'working', root),
+    stateSource: 'file'
+  })
+
+  test('세션 파일로 안 입력 대기도 알린다', () => {
+    const { shown, update } = setup()
+    update(snap({ agents: [fileWorking(5000)] }))
+    update(snap({ agents: [fileWaiting(5000, 'permission')] }))
+    // 기다리는 도구를 모르면 본문은 폴더 · 브랜치만.
+    expect(shown).toEqual([
+      {
+        title: 'Claude 가 권한을 기다려요',
+        body: 'shop-web · develop',
+        target: 'agent:5000:5000',
+        focusAgentKey: 'agent:5000:5000'
+      }
+    ])
+    // 샌드박스·하위 작업 요청도 허락을 기다리는 것이라 같은 제목이다.
+    for (const reason of ['sandbox', 'worker'] as const) {
+      const other = setup()
+      other.update(snap({ agents: [fileWorking(5000)] }))
+      other.update(snap({ agents: [fileWaiting(5000, reason)] }))
+      expect(other.shown.map((n) => n.title)).toEqual(['Claude 가 권한을 기다려요'])
+    }
+    // 계속 기다리면 다시 알리지 않고, 시작할 때 이미 기다리던 것·설정에서 끈 것은 알리지 않는다.
+    update(snap({ agents: [fileWaiting(5000, 'permission')] }))
+    expect(shown).toHaveLength(1)
+    const start = setup()
+    start.update(snap({ agents: [fileWaiting(5000, 'input')] }))
+    expect(start.shown).toEqual([])
+    const off = setup({ notify: { claudeWaiting: false } })
+    off.update(snap({ agents: [fileWorking(5000)] }))
+    off.update(snap({ agents: [fileWaiting(5000, 'input')] }))
+    expect(off.shown).toEqual([])
+  })
+
+  test('질문·입력 요청이면 제목은 "답을 기다려요"', () => {
+    for (const reason of ['input', 'goal', 'other'] as const) {
+      const { shown, update } = setup()
+      update(snap({ agents: [fileWorking(5000)] }))
+      update(snap({ agents: [fileWaiting(5000, reason)] }))
+      expect(shown).toEqual([
+        {
+          title: 'Claude 가 답을 기다려요',
+          body: 'shop-web · develop',
+          target: 'agent:5000:5000',
+          focusAgentKey: 'agent:5000:5000'
+        }
+      ])
+    }
+    // 여럿을 묶은 제목은 지금 문구 그대로.
+    const many = setup()
+    many.update(snap({ agents: [fileWorking(5000), hooked(5100, 'working', 0, 'C:\\work\\wt-a')] }))
+    many.update(
+      snap({ agents: [fileWaiting(5000, 'input'), waitingOn(5100, 0, 'C:\\work\\wt-a')] })
+    )
+    expect(many.shown).toEqual([
+      {
+        title: 'Claude 2개가 권한을 기다려요',
+        body: 'shop-web · develop, wt-a · develop',
+        target: null
+      }
+    ])
+  })
+
+  test('세션 파일로 안 입력 대기도 다시 알린다', () => {
+    const { shown, clock, update } = setup()
+    update(snap({ agents: [fileWorking(5000)] }))
+    update(snap({ agents: [fileWaiting(5000, 'input')] }))
+    clock.now = 10 * MIN - 1
+    update(snap({ agents: [fileWaiting(5000, 'input')] }))
+    expect(shown).toHaveLength(1)
+    clock.now = 10 * MIN
+    update(snap({ agents: [fileWaiting(5000, 'input')] }))
+    // 다시 알림 제목은 지금 문구 그대로.
+    expect(shown[1]).toEqual({
+      title: 'Claude 가 10분째 권한을 기다려요',
+      body: 'shop-web · develop',
+      target: 'agent:5000:5000',
+      focusAgentKey: 'agent:5000:5000'
+    })
+    // 근거가 훅으로 바뀌어도 같은 대기다(새로 알리지 않는다).
+    clock.now = 11 * MIN
+    update(snap({ agents: [waitingOn(5000, 0)] }))
+    expect(shown).toHaveLength(2)
   })
 
   test('여럿이 함께 다시 알릴 때가 되면 하나로 묶는다', () => {

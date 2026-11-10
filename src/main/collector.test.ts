@@ -518,6 +518,7 @@ describe('Claude 세션 파일(G3a)', () => {
     sessionId: 'f1',
     status: 'idle',
     statusUpdatedAt: null,
+    waitingFor: null,
     name: null,
     nameSource: null,
     ...over
@@ -592,6 +593,136 @@ describe('Claude 세션 파일(G3a)', () => {
       stateSource: 'file',
       stateSince: 14 * MIN,
       lastActiveAt: 14 * MIN
+    })
+  })
+
+  test('세션 파일이 waiting 이면 훅 없이도 입력 대기(file)이고 waitReason 을 갖는다', async () => {
+    const current = {
+      file: fileOf({ status: 'waiting', waitingFor: 'input needed', statusUpdatedAt: 7 * MIN })
+    }
+    const { deps, clock } = setup({ claudeSessionFiles: filesFrom(current) })
+    const collector = createCollector(deps)
+    const s = await collector.collect()
+    expect(s.agents[0]).toMatchObject({
+      pid: 5000,
+      state: 'waiting',
+      stateSource: 'file',
+      waitReason: 'input',
+      stateSince: 7 * MIN,
+      // 기다리는 동안 마지막 활동은 상태가 바뀐 시각.
+      lastActiveAt: 7 * MIN,
+      parked: false
+    })
+    // 다른 에이전트(CPU 추정)는 이유가 없다.
+    expect(s.agents.find((a) => a.pid === 6000)?.waitReason).toBeNull()
+    // 수집 사이(훅 이벤트가 왔을 때)에도 그대로.
+    clock.now += 10_000
+    applyHookEvent(
+      deps.sessions,
+      { session_id: 'elsewhere', cwd: 'C:\\tmp', hook_event_name: 'UserPromptSubmit' },
+      clock.now
+    )
+    expect((await collector.restate(s)).agents[0]).toMatchObject({
+      state: 'waiting',
+      stateSource: 'file',
+      waitReason: 'input',
+      stateSince: 7 * MIN
+    })
+    // 이유를 모르면 other, 사용자가 연 창(dialog open)은 쉬는 중이라 이유가 없다.
+    const reasons: [string | null, string, string | null][] = [
+      ['permission prompt', 'waiting', 'permission'],
+      ['goal proposal', 'waiting', 'goal'],
+      [null, 'waiting', 'other'],
+      ['dialog open', 'idle', null]
+    ]
+    for (const [waitingFor, state, waitReason] of reasons) {
+      current.file = fileOf({ status: 'waiting', waitingFor, statusUpdatedAt: 8 * MIN })
+      clock.now += 5000
+      expect((await collector.collect()).agents[0]).toMatchObject({
+        state,
+        stateSource: 'file',
+        waitReason,
+        stateSince: 8 * MIN
+      })
+    }
+    // 답한 뒤 다시 일하면 이유는 사라진다.
+    current.file = fileOf({ status: 'busy', statusUpdatedAt: 9 * MIN })
+    clock.now += 5000
+    expect((await collector.collect()).agents[0]).toMatchObject({
+      state: 'working',
+      stateSource: 'file',
+      waitReason: null
+    })
+  })
+
+  test('세션 파일이 shell 이면 쉬는 중(file)이고 마지막 활동은 상태가 바뀐 시각', async () => {
+    const { deps, clock } = setup({
+      claudeSessionFiles: filesFrom({
+        file: fileOf({ status: 'shell', statusUpdatedAt: 4 * HOUR })
+      })
+    })
+    clock.now = 8 * HOUR
+    const collector = createCollector(deps)
+    const s = await collector.collect()
+    expect(s.agents[0]).toMatchObject({
+      pid: 5000,
+      state: 'idle',
+      stateSource: 'file',
+      waitReason: null,
+      stateSince: 4 * HOUR,
+      // 백그라운드 셸이 돌아도 턴은 끝났다(작업 중으로 보지 않는다).
+      lastActiveAt: 4 * HOUR,
+      parked: true
+    })
+    clock.now += 10_000
+    expect((await collector.restate(s)).agents[0]).toMatchObject({
+      state: 'idle',
+      stateSource: 'file',
+      lastActiveAt: 4 * HOUR
+    })
+  })
+
+  test('훅으로 권한 대기를 아는 행의 waitReason 은 null', async () => {
+    const current = { file: null as ClaudeSessionFile | null }
+    const { deps, sessions, clock } = setup({ claudeSessionFiles: filesFrom(current) })
+    clock.now = 60 * MIN
+    hookEvent(sessions, 'UserPromptSubmit', clock.now - 2 * MIN)
+    hookEvent(sessions, 'PermissionRequest', clock.now - 30_000, { tool_name: 'Bash' })
+    // 파일도 같은 때 기다림을 적었다: 도구 이름을 아는 훅이 이긴다.
+    current.file = fileOf({
+      status: 'waiting',
+      waitingFor: 'permission prompt',
+      statusUpdatedAt: clock.now - 28_000
+    })
+    const collector = createCollector(deps)
+    const s = await collector.collect()
+    expect(s.agents[0]).toMatchObject({
+      pid: 5000,
+      state: 'waiting',
+      stateSource: 'hook',
+      waitReason: null,
+      stateSince: clock.now - 30_000
+    })
+    expect(s.agents[0].activity?.waiting?.tool).toBe('Bash')
+    // 파일이 더 늦은 근거로 기다림을 알리면 파일을 따르고, 그 뒤 훅 소식이 오면 다시 훅(이유 없음).
+    current.file = fileOf({
+      status: 'waiting',
+      waitingFor: 'input needed',
+      statusUpdatedAt: clock.now - 10_000
+    })
+    hookEvent(sessions, 'PostToolUse', clock.now - 20_000, { tool_name: 'Bash' })
+    const fromFile = await collector.collect()
+    expect(fromFile.agents[0]).toMatchObject({
+      state: 'waiting',
+      stateSource: 'file',
+      waitReason: 'input'
+    })
+    clock.now += 10_000
+    hookEvent(sessions, 'UserPromptSubmit', clock.now)
+    expect((await collector.restate(fromFile)).agents[0]).toMatchObject({
+      state: 'working',
+      stateSource: 'hook',
+      waitReason: null
     })
   })
 
@@ -805,6 +936,7 @@ describe('하는 일(G3b)', () => {
     sessionId: 'f1',
     status: null,
     statusUpdatedAt: null,
+    waitingFor: null,
     name: null,
     nameSource: null,
     ...over
@@ -1731,6 +1863,7 @@ describe('토큰·한도(G6)', () => {
     sessionId,
     status: 'idle',
     statusUpdatedAt: null,
+    waitingFor: null,
     name: null,
     nameSource: null
   })

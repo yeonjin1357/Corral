@@ -430,19 +430,28 @@ describe('상세 패널: 조용한 에이전트(G3c)', () => {
 
 describe('상세 패널: 세션 파일로 안 에이전트', () => {
   const FILE_NOTE =
-    'Claude Code 가 남기는 세션 파일로 작업 중·쉬는 중을 알아요. 권한 대기는 Claude 연동을 켜야 알 수 있어요.'
+    'Claude Code 가 남기는 세션 파일로 작업 중·쉬는 중·응답 대기를 알아요. 어떤 도구가 권한을 기다리는지는 Claude 연동을 켜야 알 수 있어요.'
   const fileAgent = (): Selected => ({
     kind: 'agent',
     row: agentRow({ state: 'idle', stateSource: 'file' })
   })
   const bodyText = (): string => document.body.textContent!.replace(/\s+/g, ' ')
+  const sourceText = (): string | undefined =>
+    [...document.body.querySelectorAll('p')]
+      .find((p) => p.textContent?.trim() === '상태 출처')
+      ?.nextElementSibling?.textContent?.trim()
 
   test('상태 출처는 Claude 세션 파일', () => {
     sheet(fileAgent())
-    const source = [...document.body.querySelectorAll('p')].find(
-      (p) => p.textContent?.trim() === '상태 출처'
-    )?.nextElementSibling
-    expect(source?.textContent?.trim()).toBe('Claude 세션 파일')
+    expect(sourceText()).toBe('Claude 세션 파일')
+  })
+
+  test('세션 파일로 안 응답 대기는 상태 출처에 대기 이유를 덧붙인다', () => {
+    sheet({
+      kind: 'agent',
+      row: agentRow({ state: 'waiting', stateSource: 'file', waitReason: 'input' })
+    })
+    expect(sourceText()).toBe('Claude 세션 파일 · 질문에 답 대기')
   })
 
   test('세션 파일 출처 설명은 Claude 연동이 꺼져 있을 때만', () => {

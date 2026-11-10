@@ -255,6 +255,8 @@ export function buildAgents(input: {
       processes: summarizeProcesses(members),
       state: hook?.state ?? cpuState(cpuPercent),
       stateSource: hook ? 'hook' : 'cpu',
+      // 응답 대기의 이유는 세션 파일을 아는 수집기가 채운다(G3a).
+      waitReason: null,
       // 상태 시작 시각·마지막 활동·오래 쉬는 세션은 이전 것을 기억하는 수집기가 채운다.
       stateSince: null,
       cpuPercent,

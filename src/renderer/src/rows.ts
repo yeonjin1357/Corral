@@ -213,8 +213,9 @@ export function agentStatus(a: AgentRow, now: number): Cell {
 }
 
 /**
- * 하는 일 칸(G3b): 권한 대기면 "권한: Bash · npm run build", 도구 실행 중이면 "Bash · npm run build", 아니면 세션 제목,
- * 없으면 마지막 요청, 없으면 —. 칸이 좁아 잘리므로 전체 글은 title 에.
+ * 하는 일 칸(G3b): 권한 대기면 "권한: Bash · npm run build", 기다리는 도구를 모르고 세션 파일로 안 대기 이유가 있으면
+ * 그 이유("질문에 답 대기" — 내용이 아니라 상태라 하는 일 보기를 꺼도 보인다), 도구 실행 중이면 "Bash · npm run build",
+ * 아니면 세션 제목, 없으면 마지막 요청, 없으면 —. 칸이 좁아 잘리므로 전체 글은 title 에.
  */
 function activityCell(a: AgentRow): Cell {
   const act = a.activity
@@ -222,9 +223,11 @@ function activityCell(a: AgentRow): Cell {
   const waiting = act?.waiting ? ag.activityTool(act.waiting.tool, act.waiting.summary) : ''
   const label = waiting
     ? ag.activityWaiting(waiting)
-    : act?.tool
-      ? ag.activityTool(act.tool.name, act.tool.summary)
-      : (act?.title ?? act?.prompt ?? null)
+    : a.waitReason
+      ? ag.waitReason[a.waitReason]
+      : act?.tool
+        ? ag.activityTool(act.tool.name, act.tool.summary)
+        : (act?.title ?? act?.prompt ?? null)
   return label ? { text: label, title: label } : { text: text.ui.none, muted: true }
 }
 

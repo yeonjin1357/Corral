@@ -1,5 +1,5 @@
 import type { PitEventKind } from './events'
-import type { MemoryLevel } from './types'
+import type { MemoryLevel, WaitReason } from './types'
 
 /** 화면·트레이·확인 창에 나오는 문구는 모두 여기 모은다(나중에 다국어로 넓힐 때 이 파일만 바꾸면 되도록). */
 export const text = {
@@ -90,6 +90,8 @@ export const text = {
       `정리 후보 ${n}개를 끄면 ${freed} 를 확보할 수 있어요.`,
     ramNoCandidates: '정리할 후보가 없어요. 메모리를 많이 쓰는 앱을 확인해 보세요.',
     waitingTitle: (tool: string): string => `${tool} 가 권한을 기다려요`,
+    /** 세션 파일로 안 응답 대기의 이유가 질문·입력 요청·목표 제안·모름일 때의 제목(하나만 알릴 때). */
+    waitingInputTitle: (tool: string): string => `${tool} 가 답을 기다려요`,
     /**
      * where: "폴더 · 브랜치", waitingTool: 권한을 기다리는 도구 이름(모르면 null). 명령·프롬프트는 넣지 않는다
      * (OS 알림 센터가 디스크에 남긴다).
@@ -779,7 +781,16 @@ export const text = {
         'Codex 세션 기록으로 상태를 알아요. 권한 대기는 Codex 연동을 켜야 알 수 있어요.',
       noHookNote: 'Claude 연동을 켜면 권한 대기까지 정확히 알 수 있어요.',
       fileNote:
-        'Claude Code 가 남기는 세션 파일로 작업 중·쉬는 중을 알아요. 권한 대기는 Claude 연동을 켜야 알 수 있어요.',
+        'Claude Code 가 남기는 세션 파일로 작업 중·쉬는 중·응답 대기를 알아요. 어떤 도구가 권한을 기다리는지는 Claude 연동을 켜야 알 수 있어요.',
+      /** 세션 파일로 안 응답 대기의 이유(하는 일 칸·상세 패널의 상태 출처). */
+      waitReason: {
+        permission: '권한 확인 대기',
+        input: '질문에 답 대기',
+        sandbox: '샌드박스 허용 대기',
+        worker: '하위 작업 요청 대기',
+        goal: '목표 제안에 답 대기',
+        other: '응답 대기'
+      } satisfies Record<WaitReason, string>,
       /** 조용한 에이전트(G3c)의 상세 패널 설명(상태 출처 설명보다 먼저). */
       quietNote:
         '작업 중인데 한동안 이벤트가 없고 CPU 도 거의 쓰지 않아요. 오래 걸리는 명령을 기다리는 중일 수도, 멈춘 것일 수도 있어요.',

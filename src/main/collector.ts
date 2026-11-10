@@ -33,7 +33,7 @@ import {
   type CalmMemo,
   type SeenMemo
 } from './activity'
-import { fileStateOver, type ClaudeSessionFile } from './claudeSessionFiles'
+import { fileStateOver, waitReasonOf, type ClaudeSessionFile } from './claudeSessionFiles'
 import type { UsageCache, UsageTarget } from './claudeUsage'
 import { activityOf, judgeServers, type ServerMemo } from './judge'
 import { agentToolOf, topLevelAgentPids } from './processTree'
@@ -161,7 +161,8 @@ export interface CollectorDeps {
    */
   claudeUsage?: Pick<UsageCache, 'get' | 'want'>
   /**
-   * Claude 실행 중 세션 파일(G3a, pid → 파일). 세션과 프로세스를 정확히 잇고, 훅이 없을 때 작업 중·쉬는 중을 안다.
+   * Claude 실행 중 세션 파일(G3a, pid → 파일). 세션과 프로세스를 정확히 잇고, 훅이 없을 때 작업 중·쉬는 중·응답 대기를
+   * 안다.
    * 없으면 쓰지 않는다(지금처럼 추측으로 잇고 CPU 추정).
    */
   claudeSessionFiles?: (
@@ -277,21 +278,32 @@ export function createCollector(deps: CollectorDeps): {
   /**
    * 훅·Claude 세션 파일·CPU 가운데 이 에이전트 상태의 근거(G3a). 훅과 파일이 둘 다 있으면 더 늦은 근거를 따르고
    * (fileStateOver), 둘 다 없으면 CPU 추정. Codex 세션 기록은 따로 정한다(readRollouts).
+   * 파일을 따라 응답 대기가 되면 그 이유(waitReason)를 담고, 그 밖에는 이유가 없다.
    */
   function stateFrom(a: AgentRow, hook: HookView | null): AgentRow {
     const file = a.tool === 'claude' ? sessionFiles.get(a.pid) : undefined
     const fromFile = file ? fileStateOver(file, hook) : null
-    if (fromFile) return { ...a, state: fromFile, stateSource: 'file' }
+    if (file && fromFile) {
+      const reason = fromFile === 'waiting' ? waitReasonOf(file.waitingFor) : null
+      return {
+        ...a,
+        state: fromFile,
+        stateSource: 'file',
+        waitReason: reason === 'dialog' ? null : reason
+      }
+    }
     return {
       ...a,
       state: hook?.state ?? cpuState(a.cpuPercent),
-      stateSource: hook ? 'hook' : 'cpu'
+      stateSource: hook ? 'hook' : 'cpu',
+      waitReason: null
     }
   }
 
   /**
    * 정확한 근거로 아는 마지막 활동 시각. 훅은 그 프로세스 세션의 마지막 활동 이벤트, Codex 세션 기록은 마지막 이벤트,
-   * 세션 파일은 상태가 바뀐 시각(작업 중이면 지금). CPU 추정이거나 모르면 null.
+   * 세션 파일은 상태가 바뀐 시각(busy 일 때만 지금 — shell·waiting·idle 은 그 상태가 된 뒤 활동이 없다).
+   * CPU 추정이거나 모르면 null.
    */
   function exactActivityOf(
     a: AgentRow,

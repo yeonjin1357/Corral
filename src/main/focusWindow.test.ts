@@ -28,6 +28,7 @@ function agent(over: Partial<AgentRow> = {}): AgentRow {
     activity: null,
     quietSince: null,
     usage: null,
+    waitReason: null,
     host: { pids: [4000, 3000, 2000], app: null },
     ...over
   }

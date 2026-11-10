@@ -734,6 +734,7 @@ describe.runIf(process.platform === 'win32')('실제 Windows 에서', () => {
       activity: null,
       quietSince: null,
       usage: null,
+      waitReason: null,
       host
     }
     const scripts: string[] = []

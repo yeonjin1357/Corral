@@ -65,8 +65,9 @@ function agentNotice<A extends Pick<AgentRow, 'pid' | 'startedAt' | 'worktree'>>
  *   다시, 30분 안에는 다시 알리지 않는다. 제목은 원인을 따른다(RAM 이 위험이면 RAM, 아니면 커밋).
  * - 무거운 작업 겹침: 겹침이 시작될 때. 끝나야 다시, 10분 안에는 다시 알리지 않는다.
  * 에이전트 알림은 모두 pitwall 창이 앞에 있으면 보내지 않고, 한꺼번에 여럿이면 하나로 묶는다.
- * - 권한 대기: 훅으로 권한 대기가 된 세션마다. 본문에 기다리는 도구 이름(G3e). 계속 기다리면 마지막으로 알린(알릴 때였던)
- *   뒤 reminderMs 마다 다시(0 이면 끔). 풀렸다가 다시 기다리면 새 대기라 첫 알림부터.
+ * - 권한 대기: 훅이나 Claude 세션 파일로 응답 대기가 된 세션마다. 본문에 기다리는 도구 이름(G3e, 훅만 안다). 세션 파일로
+ *   안 대기가 질문·입력 요청 등이면 제목이 "답을 기다려요". 계속 기다리면 마지막으로 알린(알릴 때였던) 뒤 reminderMs
+ *   마다 다시(0 이면 끔). 풀렸다가 다시 기다리면 새 대기라 첫 알림부터.
  * - 작업 끝남(F4): 정확한 상태(CPU 추정 아님)의 에이전트가 2분 넘게 작업 중이다가 쉬는 중이 될 때.
  * - 조용함(G3c): 조용한 에이전트가 생길 때 한 번.
  * - 꺼짐: 지난 스냅샷에 정확한 상태로 작업 중·권한 대기이던 에이전트가 이번 스냅샷에 없을 때.
@@ -135,7 +136,7 @@ export function createNotifier(deps: {
     const still = new Map<AgentRow, number>()
     const next = new Map<string, { firstSeen: number; notifiedAt: number }>()
     for (const a of s.agents) {
-      if (a.state !== 'waiting' || a.stateSource !== 'hook') continue
+      if (a.state !== 'waiting' || (a.stateSource !== 'hook' && a.stateSource !== 'file')) continue
       const key = agentKey(a)
       const prev = waiting.get(key)
       if (!prev) {
@@ -156,14 +157,13 @@ export function createNotifier(deps: {
         agents.length,
         agents.every((a) => a.tool === agents[0].tool) ? toolName(agents[0]) : null
       )
+    // 세션 파일로 안 대기는 이유를 따른다: 질문·입력 요청·목표 제안·모르는 이유는 "답을 기다려요"(권한이 아니다).
+    const title = (a: AgentRow): string =>
+      a.waitReason === 'input' || a.waitReason === 'goal' || a.waitReason === 'other'
+        ? text.notify.waitingInputTitle(toolName(a))
+        : text.notify.waitingTitle(toolName(a))
     if (fresh.length > 0)
-      deps.show(
-        agentNotice(
-          fresh,
-          (a) => ({ title: text.notify.waitingTitle(toolName(a)), body: body(a) }),
-          manyTitle(fresh)
-        )
-      )
+      deps.show(agentNotice(fresh, (a) => ({ title: title(a), body: body(a) }), manyTitle(fresh)))
     if (still.size > 0) {
       const agents = [...still.keys()]
       deps.show(

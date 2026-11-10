@@ -12,6 +12,7 @@ import {
   workspaceTable
 } from './rows'
 import { selectionKey } from '../../shared/keys'
+import type { AgentRow } from '../../shared/types'
 import {
   GB,
   MB,
@@ -343,6 +344,55 @@ describe('에이전트 표', () => {
       [rows[0], rows[1], rows[2]].map((r) => r.key)
     )
     expect(filterRows(rows, 'rm -rf')).toEqual([])
+  })
+
+  test('하는 일 칸: 기다리는 도구를 모르면 대기 이유를 보인다', () => {
+    const title = { title: '로그인 버그', prompt: '고쳐 줘', tool: null, waiting: null }
+    const fileWaiting = (
+      pid: number,
+      waitReason: AgentRow['waitReason'],
+      activity: AgentRow['activity'] = title
+    ): AgentRow => agentRow({ pid, state: 'waiting', stateSource: 'file', waitReason, activity })
+    const s = snapshot({
+      agents: [
+        fileWaiting(1, 'permission'),
+        fileWaiting(2, 'input'),
+        fileWaiting(3, 'sandbox'),
+        fileWaiting(4, 'worker'),
+        fileWaiting(5, 'goal'),
+        fileWaiting(6, 'other'),
+        // 기다리는 도구를 알면(훅) 그 도구가 먼저다.
+        fileWaiting(7, 'input', { ...title, waiting: { tool: 'Bash', summary: 'npm test' } })
+      ]
+    })
+    const rows = tableFor('agents', s).rows
+    expect(rows.map((r) => r.cells.activity.text)).toEqual([
+      '권한 확인 대기',
+      '질문에 답 대기',
+      '샌드박스 허용 대기',
+      '하위 작업 요청 대기',
+      '목표 제안에 답 대기',
+      '응답 대기',
+      '권한: Bash · npm test'
+    ])
+    expect(rows[1].cells.activity).toEqual({ text: '질문에 답 대기', title: '질문에 답 대기' })
+  })
+
+  test('하는 일 보기를 꺼도 대기 이유는 보인다', () => {
+    const s = snapshot({
+      agents: [
+        agentRow({
+          state: 'waiting',
+          stateSource: 'file',
+          waitReason: 'input',
+          activity: null
+        })
+      ]
+    })
+    expect(tableFor('agents', s).rows[0].cells.activity).toEqual({
+      text: '질문에 답 대기',
+      title: '질문에 답 대기'
+    })
   })
 
   test('작업 폴더를 모르면 그렇게 보이고, 동작은 자세히만(에이전트는 끄지 않는다)', () => {

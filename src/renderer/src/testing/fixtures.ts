@@ -53,6 +53,7 @@ export function agentRow(over: Partial<AgentRow> = {}): AgentRow {
     processes: [],
     state: 'working',
     stateSource: 'hook',
+    waitReason: null,
     stateSince: null,
     cpuPercent: 12.5,
     lastActiveAt: null,
