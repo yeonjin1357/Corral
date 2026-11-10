@@ -249,6 +249,16 @@ export interface AgentActivity {
   waiting: { tool: string | null; summary: string | null } | null
 }
 
+/**
+ * 에이전트가 떠 있는 창을 찾을 단서(G3f 창으로 가기). pids: 에이전트의 조상 pid(가까운 순, 최대 12, Windows 셸 explorer.exe
+ * 와 그 위는 빼고), app: 조상 가운데 명령줄이 `/…/<이름>.app/Contents/MacOS/…` 인 첫 것의 `.app` 경로(다른 .app 안의 보조 앱은
+ * 건너뛴다). 모르면 빈 목록·null.
+ */
+export interface AgentHost {
+  pids: number[]
+  app: string | null
+}
+
 export interface AgentRow {
   pid: number
   tool: AgentTool
@@ -292,6 +302,8 @@ export interface AgentRow {
    * 멈췄다고 단정하지 않는다(오래 걸리는 명령을 기다리는 중일 수도 있다).
    */
   quietSince: number | null
+  /** 에이전트가 떠 있는 터미널·에디터 창을 찾을 단서(G3f 창으로 가기). */
+  host: AgentHost
 }
 
 export type ClaudeHookState = 'off' | 'on' | 'partial' | 'error'

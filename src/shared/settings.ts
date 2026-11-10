@@ -57,6 +57,11 @@ export interface Settings {
    * 끄면 훅이 알려 준 내용을 받는 순간 버리고, 들고 있던 것도 지운다.
    */
   showAgentActivity: boolean
+  /**
+   * 에이전트 하나에 대한 OS 알림을 누르면 먼저 그 에이전트가 떠 있는 터미널·에디터 창으로 가 본다(G3f).
+   * 창을 찾지 못하거나 OS 가 거절하면 pitwall 을 연다.
+   */
+  notifyClickFocus: boolean
 }
 
 export const SETTINGS_VERSION = 3
@@ -132,7 +137,8 @@ export const DEFAULT_SETTINGS: Settings = {
   extraRepos: [],
   hiddenServers: [],
   workspaceAliases: {},
-  showAgentActivity: true
+  showAgentActivity: true,
+  notifyClickFocus: true
 }
 
 function oneOf<T extends string>(value: unknown, choices: readonly T[], fallback: T): T {
@@ -356,6 +362,7 @@ export function normalizeSettings(value: unknown): Settings {
       cleanHidden
     ),
     workspaceAliases: aliases(v.workspaceAliases),
-    showAgentActivity: bool(v.showAgentActivity, d.showAgentActivity)
+    showAgentActivity: bool(v.showAgentActivity, d.showAgentActivity),
+    notifyClickFocus: bool(v.notifyClickFocus, d.notifyClickFocus)
   }
 }

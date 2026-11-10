@@ -48,6 +48,7 @@ const api: PitwallApi = {
   refreshNow: () => ipcRenderer.invoke(IPC.refreshNow),
   openPort: (port) => ipcRenderer.invoke(IPC.openPort, port),
   quick: (kind, path) => ipcRenderer.invoke(IPC.quick, kind, path),
+  focusAgent: (key) => ipcRenderer.invoke(IPC.focusAgent, key),
   claudeHook: {
     status: () => ipcRenderer.invoke(IPC.claudeHookStatus),
     enable: () => ipcRenderer.invoke(IPC.claudeHookEnable),

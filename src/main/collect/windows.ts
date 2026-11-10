@@ -11,7 +11,7 @@ import type {
   TcpState
 } from '../../shared/types'
 import { COMMAND_TIMEOUT_MS } from '../../shared/defaults'
-import { runCommand, type CommandOptions, type CommandResult } from './runCommand'
+import { runCommand, type CommandResult, type Runner } from './runCommand'
 
 /**
  * 프로세스 목록과 TCP 연결을 PowerShell 한 번으로 JSON 으로 받는다.
@@ -25,6 +25,11 @@ import { runCommand, type CommandOptions, type CommandResult } from './runComman
  * - PitwallCwd: 다른 프로세스의 작업 폴더. Windows 에는 이를 알려주는 기본 명령이 없어
  *   프로세스 메모리의 PEB → ProcessParameters → CurrentDirectory 를 읽는다(같은 사용자 프로세스만, 64비트만).
  *   오프셋: PEB.ProcessParameters = 0x20, RTL_USER_PROCESS_PARAMETERS.CurrentDirectory.DosPath = 0x38.
+ * - PitwallWindow: 에이전트가 떠 있는 창 찾기·앞으로 가져오기(G3f 창으로 가기, focusWindow.ts). 수집 스크립트는 부르지 않는다.
+ *   Find: 주어진 pid 순서(가까운 조상부터)에서 보이는·소유자 없는(GW_OWNER=4)·제목 있는 최상위 창을 가진 첫 pid 와
+ *   그 창(EnumWindows 는 Z 순서라 그 프로세스의 맨 앞 창). 없으면 null. 제목은 앞 255자까지만 읽는다.
+ *   Focus: 최소화돼 있으면 되살리고(SW_RESTORE=9) 앞으로. OS 가 거절할 수 있어(앞 창 제한) 실제로 앞에 왔는지 돌려준다.
+ * 이 원본 전체가 수집 스크립트에 들어가 명령줄 길이 제한(32767자)을 나눠 쓰므로 주석은 여기에 둔다.
  */
 const NATIVE_HELPERS = `using System;
 using System.Collections.Generic;
@@ -163,6 +168,41 @@ public static class PitwallSys {
     r["kernel"] = (long)((pi.KernelPaged.ToUInt64() + pi.KernelNonpaged.ToUInt64()) * page);
     return r;
   }
+}
+public class PitwallWindowRow { public int Pid; public long Hwnd; public string Title; }
+public static class PitwallWindow {
+  const string U = "user32.dll";
+  delegate bool EnumProc(IntPtr h, IntPtr l);
+  [DllImport(U)] static extern bool EnumWindows(EnumProc cb, IntPtr l);
+  [DllImport(U)] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+  [DllImport(U)] static extern bool IsWindowVisible(IntPtr h);
+  [DllImport(U)] static extern IntPtr GetWindow(IntPtr h, uint cmd);
+  [DllImport(U, CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr h, System.Text.StringBuilder s, int n);
+  [DllImport(U)] static extern bool IsIconic(IntPtr h);
+  [DllImport(U)] static extern bool ShowWindow(IntPtr h, int cmd);
+  [DllImport(U)] static extern bool SetForegroundWindow(IntPtr h);
+  [DllImport(U)] static extern IntPtr GetForegroundWindow();
+  public static PitwallWindowRow Find(int[] pids) {
+    var found = new Dictionary<int, PitwallWindowRow>();
+    EnumProc cb = delegate (IntPtr h, IntPtr l) {
+      uint raw; GetWindowThreadProcessId(h, out raw);
+      int pid = (int)raw;
+      var title = new System.Text.StringBuilder(256);
+      if (Array.IndexOf(pids, pid) >= 0 && !found.ContainsKey(pid) && IsWindowVisible(h) && GetWindow(h, 4) == IntPtr.Zero && GetWindowText(h, title, 256) > 0)
+        found[pid] = new PitwallWindowRow { Pid = pid, Hwnd = h.ToInt64(), Title = title.ToString() };
+      return true;
+    };
+    EnumWindows(cb, IntPtr.Zero);
+    GC.KeepAlive(cb);
+    foreach (int p in pids) if (found.ContainsKey(p)) return found[p];
+    return null;
+  }
+  public static bool Focus(long hwnd) {
+    var h = new IntPtr(hwnd);
+    if (IsIconic(h)) ShowWindow(h, 9);
+    SetForegroundWindow(h);
+    return GetForegroundWindow() == h;
+  }
 }`
 
 /** 보조 코드가 바뀌면 이름도 바뀌어 새로 컴파일된다. */
@@ -170,11 +210,16 @@ export function nativeHelperDllName(): string {
   return `pitwall-native-${createHash('sha256').update(NATIVE_HELPERS).digest('hex').slice(0, 12)}.dll`
 }
 
+/** 보조 코드의 C# 원본을 `$src` 에 담는 줄들(helperLoadLines 앞에 둔다). */
+export function helperSourceLines(): string[] {
+  return ["$src = @'", NATIVE_HELPERS, "'@"]
+}
+
 /**
  * 보조 코드를 불러오는 줄들. DLL 경로가 있으면 처음 한 번만 컴파일해 두고 다음부터는 불러오기만 한다
  * (매번 컴파일하면 csc.exe 가 뜬다). DLL 이 깨졌거나 쓸 수 없으면 지우고 메모리에서 컴파일한다.
  */
-function helperLoadLines(dllPath: string | null): string[] {
+export function helperLoadLines(dllPath: string | null): string[] {
   // $helperMode: 불러오기에 성공한 방법을 남긴다(없으면 'none'). Node 는 이것을 보고 DLL 재시도를 그만둔다.
   const inMemory = ['Add-Type -ErrorAction Stop -TypeDefinition $src', "$helperMode = 'memory'"]
   if (!dllPath) return inMemory
@@ -191,6 +236,18 @@ function helperLoadLines(dllPath: string | null): string[] {
   ]
 }
 
+/**
+ * `$json` 을 UTF-8 바이트로 표준 출력에 직접 쓰는 줄들.
+ * PowerShell 호스트 출력(Write-Output)으로 600KB 가 넘는 한 줄을 내면 2초 가까이 걸린다.
+ * UTF-8 바이트를 표준 출력 스트림에 직접 써서 그 시간을 없애고, 콘솔 인코딩(한글 경로)에도 의존하지 않는다.
+ */
+export const WRITE_JSON_LINES: readonly string[] = [
+  '$bytes = (New-Object System.Text.UTF8Encoding($false)).GetBytes($json)',
+  '$out = [Console]::OpenStandardOutput()',
+  '$out.Write($bytes, 0, $bytes.Length)',
+  '$out.Flush()'
+]
+
 export function windowsSampleScript(helperDllPath: string | null): string {
   return [
     "$ProgressPreference = 'SilentlyContinue'",
@@ -198,9 +255,7 @@ export function windowsSampleScript(helperDllPath: string | null): string {
     '$t = $null',
     '$cwds = @{}',
     "$helperMode = 'none'",
-    "$src = @'",
-    NATIVE_HELPERS,
-    "'@",
+    ...helperSourceLines(),
     // 보조 코드는 회사 정책 등으로 Add-Type 이 막힐 수 있다. 그래도 아래 대체 경로로 샘플은 그대로 낸다.
     'try {',
     ...helperLoadLines(helperDllPath),
@@ -219,12 +274,7 @@ export function windowsSampleScript(helperDllPath: string | null): string {
     '$system = $null',
     "if ('PitwallSys' -as [type]) { try { $system = [PitwallSys]::Read() } catch {} }",
     '$json = @{ processes = $p; tcp = $t; cwds = $cwds; privateWs = $privateWs; commit = $commit; system = $system; helperMode = $helperMode } | ConvertTo-Json -Compress -Depth 3',
-    // PowerShell 호스트 출력(Write-Output)으로 600KB 가 넘는 한 줄을 내면 2초 가까이 걸린다.
-    // UTF-8 바이트를 표준 출력 스트림에 직접 써서 그 시간을 없애고, 콘솔 인코딩(한글 경로)에도 의존하지 않는다.
-    '$bytes = (New-Object System.Text.UTF8Encoding($false)).GetBytes($json)',
-    '$out = [Console]::OpenStandardOutput()',
-    '$out.Write($bytes, 0, $bytes.Length)',
-    '$out.Flush()'
+    ...WRITE_JSON_LINES
   ].join('\n')
 }
 
@@ -235,6 +285,11 @@ let configuredHelperDllPath: string | null = null
 /** 앱 시작 시 보조 코드 DLL 을 둘 경로(앱 데이터 폴더)를 정한다. */
 export function configureWindowsSampler(options: { helperDllPath: string | null }): void {
   configuredHelperDllPath = options.helperDllPath
+}
+
+/** 지금 쓰는 보조 코드 DLL 경로. DLL 이 막힌 PC 로 판명되면(메모리 컴파일로 넘어감) null. */
+export function windowsHelperDllPath(): string | null {
+  return configuredHelperDllPath
 }
 
 /** PATH 에 의존하지 않도록 Windows PowerShell 5.1 의 전체 경로를 쓴다(모든 Windows 10/11 에 있음). */
@@ -451,8 +506,6 @@ export function parseWindowsSample(raw: string): RawSample {
     system: parseSystemMemory(data?.system)
   }
 }
-
-type Runner = (argv: string[], opts?: CommandOptions) => Promise<CommandResult>
 
 /** 'full' = 기본 스크립트(보조 C# 포함), 'safe' = 제한 모드용 대체 스크립트. */
 let mode: 'full' | 'safe' = 'full'

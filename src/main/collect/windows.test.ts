@@ -3,7 +3,13 @@ import { mkdtemp, rm } from 'fs/promises'
 import { tmpdir, totalmem } from 'os'
 import { join } from 'path'
 import { existsSync, writeFileSync } from 'fs'
-import { runCommand } from './runCommand'
+import { runCommand, type CommandResult } from './runCommand'
+import { buildTree } from '../processTree'
+import { hostOf } from '../agents'
+import { createFocuser } from '../focusWindow'
+import { blankSnapshot } from '../../shared/snapshot'
+import { selectionKey } from '../../shared/keys'
+import type { AgentRow } from '../../shared/types'
 import {
   parseWindowsSample,
   WINDOWS_SAMPLE_SCRIPT,
@@ -546,6 +552,21 @@ test('보조 코드 DLL 경로를 주면 한 번만 컴파일해 재사용하고
   expect(nativeHelperDllName()).toMatch(/^pitwall-native-[0-9a-f]{12}\.dll$/)
 })
 
+test('보조 코드에 창 찾기·앞으로 가져오기(PitwallWindow)가 있고, 수집 스크립트는 그것을 부르지 않는다', () => {
+  for (const api of [
+    'EnumWindows',
+    'GetWindowThreadProcessId',
+    'IsWindowVisible',
+    'GetWindow(h, 4) == IntPtr.Zero',
+    'GetWindowText(h, title, 256) > 0',
+    'IsIconic(h)) ShowWindow(h, 9)',
+    'SetForegroundWindow(h)',
+    'GetForegroundWindow() == h'
+  ])
+    expect(WINDOWS_SAMPLE_SCRIPT).toContain(api)
+  expect(WINDOWS_SAMPLE_SCRIPT).not.toContain('[PitwallWindow]::')
+})
+
 test('명령줄 길이 제한(32767자) 안에 들어간다', () => {
   const longPath =
     'C:\\Users\\' + '가'.repeat(60) + '\\AppData\\Roaming\\pitwall\\' + nativeHelperDllName()
@@ -684,6 +705,63 @@ describe.runIf(process.platform === 'win32')('실제 Windows 에서', () => {
     } finally {
       await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
     }
+  }, 60000)
+
+  // 읽기 전용: find 만 실제로 돌린다(focus 는 사용자의 앞 창을 가져가므로 실제 창에 실행하지 않는다).
+  test('find 는 이 테스트 프로세스의 조상 가운데 창을 가진 프로세스를 찾거나 null 을 돌려주고 예외를 내지 않는다', async () => {
+    const s = await sampleWindows()
+    const self = s.processes.find((p) => p.pid === process.pid)!
+    const host = hostOf(buildTree(s.processes), process.pid)
+    expect(host.pids.length).toBeGreaterThan(0)
+    const row: AgentRow = {
+      pid: process.pid,
+      tool: 'claude',
+      worktree: null,
+      workspace: null,
+      startedAt: self.startedAt,
+      memoryBytes: self.memoryBytes,
+      commitBytes: null,
+      descendantCount: 0,
+      processes: [],
+      state: 'idle',
+      stateSource: 'cpu',
+      stateSince: null,
+      cpuPercent: null,
+      lastActiveAt: null,
+      parked: false,
+      activity: null,
+      quietSince: null,
+      host
+    }
+    const scripts: string[] = []
+    const results: CommandResult[] = []
+    const focuser = createFocuser({
+      platform: 'win32',
+      latest: () => ({
+        ...blankSnapshot(1),
+        platform: 'win32',
+        collectMode: s.collectMode,
+        agents: [row]
+      }),
+      run: async (argv, opts) => {
+        scripts.push(Buffer.from(argv[argv.length - 1], 'base64').toString('utf16le'))
+        const result = await runCommand(argv, opts)
+        results.push(result)
+        return result
+      },
+      helperDllPath: () => null,
+      isDirectory: async () => false
+    })
+    const found = await focuser.findHost(selectionKey.agent(row))
+    if (found) {
+      expect(host.pids).toContain(found.pid)
+      expect(found.title.length).toBeGreaterThan(0)
+    } else expect(found).toBeNull()
+    expect(scripts).toHaveLength(1)
+    expect(scripts[0]).not.toContain('[PitwallWindow]::Focus(')
+    // 못 찾았을 때도 오류 없이 JSON 한 줄(null)을 낸다.
+    expect(results[0]).toMatchObject({ exitCode: 0, stderr: '' })
+    expect(() => JSON.parse(results[0].stdout)).not.toThrow()
   }, 60000)
 
   test('상대 경로로 띄운 서버도 작업 폴더(한글 포함)를 읽는다', async () => {

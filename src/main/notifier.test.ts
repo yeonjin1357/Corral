@@ -70,7 +70,8 @@ function agent(pid: number, state: AgentRow['state'], root = 'C:\\work\\shop-web
     lastActiveAt: null,
     parked: false,
     activity: null,
-    quietSince: null
+    quietSince: null,
+    host: { pids: [], app: null }
   }
 }
 
@@ -673,12 +674,12 @@ describe('조용함·꺼짐 알림(G3e)', () => {
     update({ ...snap({ agents: [] }), stale: true })
     expect(shown).toEqual([])
     update(snap({ agents: [] }))
+    // 꺼진 에이전트는 목록 행도 창도 없어 누르면 한눈에 보기로 연다(창으로 가기 키 없음).
     expect(shown).toEqual([
       {
         title: 'shop-web 의 Claude 가 꺼졌어요',
         body: '작업 중이었어요.',
-        target: 'agent:1:1',
-        focusAgentKey: 'agent:1:1'
+        target: null
       }
     ])
 

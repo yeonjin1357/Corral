@@ -13,7 +13,8 @@ import { text } from '../shared/text'
 
 /**
  * OS 알림 하나. target 은 누르면 갈 목록 항목(선택 키), null 이면 한눈에 보기.
- * focusAgentKey 는 에이전트 하나에 대한 알림이면 그 에이전트의 선택 키(누르면 그 에이전트의 창으로 가 본다).
+ * focusAgentKey 는 지금 있는 에이전트 하나에 대한 알림이면 그 에이전트의 선택 키(누르면 그 에이전트의 창으로 가 본다,
+ * 설정 notifyClickFocus). 꺼짐 알림에는 없다.
  * 제목·본문에는 명령·프롬프트·세션 제목을 넣지 않는다(OS 알림 센터가 디스크에 남긴다). 도구 이름까지만.
  */
 export interface Notice {
@@ -232,16 +233,16 @@ export function createNotifier(deps: {
         ])
     )
     if (!notify || gone.length === 0 || !allowed('agentGone')) return
-    deps.show(
-      agentNotice(
-        gone,
-        (a) => ({
-          title: text.notify.goneTitle(worktreeFolder(a.worktree), toolName(a)),
-          body: text.notify.goneBody[a.state === 'waiting' ? 'waiting' : 'working']
-        }),
-        text.notify.goneManyTitle(gone.length)
-      )
+    const { title, body } = agentNotice(
+      gone,
+      (a) => ({
+        title: text.notify.goneTitle(worktreeFolder(a.worktree), toolName(a)),
+        body: text.notify.goneBody[a.state === 'waiting' ? 'waiting' : 'working']
+      }),
+      text.notify.goneManyTitle(gone.length)
     )
+    // 꺼진 에이전트는 목록 행도 창도 없다: 갈 항목·창으로 가기 키 없이 누르면 한눈에 보기를 연다.
+    deps.show({ title, body, target: null })
   }
 
   function heavy(s: DashboardSnapshot, notify: boolean): void {

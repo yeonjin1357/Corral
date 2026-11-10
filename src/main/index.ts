@@ -31,7 +31,12 @@ import { text } from '../shared/text'
 import { mkdirSync, readdirSync, rmSync } from 'fs'
 import { access, stat } from 'fs/promises'
 import { sample, toPlatform } from './collect/sample'
-import { configureWindowsSampler, nativeHelperDllName } from './collect/windows'
+import {
+  configureWindowsSampler,
+  nativeHelperDllName,
+  windowsHelperDllPath
+} from './collect/windows'
+import { runCommand } from './collect/runCommand'
 import { allCwdsDarwin } from './collect/darwin'
 import { readMemory } from './collect/memory'
 import { resolveProcessWorktrees, resolveWorkspace, resolveWorktree } from './collect/worktree'
@@ -52,6 +57,7 @@ import { loginItemOptions, shouldStartHidden } from './startup'
 import { createUpdater } from './updates'
 import { localUrlFor } from './open'
 import { createQuickActions, isQuickKind } from './quickActions'
+import { createFocuser, openNoticeTarget } from './focusWindow'
 import { backgroundFor, overlayFor, windowChrome } from './windowChrome'
 import { createIconSource } from './icons'
 import { createRamHistory, loadHistory, saveHistory } from './historyStore'
@@ -189,6 +195,13 @@ const icons = createIconSource({
   getFileIcon: (path) => app.getFileIcon(path, { size: 'normal' })
 })
 
+/** 지금도 폴더인지(없거나 읽을 수 없으면 false). */
+const isDirectory = (path: string): Promise<boolean> =>
+  stat(path).then(
+    (s) => s.isDirectory(),
+    () => false
+  )
+
 /** 상세 패널의 바로 가기(경로 복사·폴더 열기·터미널 열기). 지금 스냅샷에 있는 폴더만 다룬다. */
 const quickActions = createQuickActions({
   latest: () => scheduler.latest(),
@@ -200,14 +213,19 @@ const quickActions = createQuickActions({
       () => true,
       () => false
     ),
-  isDirectory: (path) =>
-    stat(path).then(
-      (s) => s.isDirectory(),
-      () => false
-    ),
+  isDirectory,
   openPath: (path) => shell.openPath(path),
   writeClipboard: (value) => clipboard.writeText(value),
   spawn: (command, args, options) => spawn(command, args, options)
+})
+
+/** 창으로 가기(상세 패널·알림 누르기). 지금 스냅샷의 에이전트만 다룬다. */
+const focuser = createFocuser({
+  platform: platform ?? 'win32',
+  latest: () => scheduler.latest(),
+  run: runCommand,
+  helperDllPath: windowsHelperDllPath,
+  isDirectory
 })
 
 /** 창을 열고(없으면 만들고) 화면에 보여 줄 곳을 알린다. 창이 아직 로딩 중이면 다 뜬 뒤에 보낸다. */
@@ -231,9 +249,14 @@ function showNotice(notice: Notice): void {
   const forget = (): void => {
     notices.delete(note)
   }
+  // 에이전트 알림은 먼저 그 에이전트의 창으로 가 보고(설정 notifyClickFocus), 안 되면 pitwall 의 그 항목을 연다.
   note.on('click', () => {
     forget()
-    navigate({ page: 'dashboard', key: notice.target })
+    void openNoticeTarget(notice, {
+      clickFocus: settings.notifyClickFocus,
+      focusAgent: (key) => focuser.focusAgent(key),
+      navigate: (key) => navigate({ page: 'dashboard', key })
+    })
   })
   note.on('close', forget)
   note.show()
@@ -670,6 +693,11 @@ function registerIpc(): void {
     if (!fromMainWindow(event.sender) || !isQuickKind(kind) || typeof path !== 'string')
       return false
     return quickActions.run(kind, path)
+  })
+  // 키는 믿지 않는다: 문자열·길이를 보고, 지금 스냅샷의 에이전트인지는 focuser 가 확인한다.
+  ipcMain.handle(IPC.focusAgent, async (event, key: unknown) => {
+    if (!fromMainWindow(event.sender) || typeof key !== 'string') return false
+    return focuser.focusAgent(key)
   })
 }
 

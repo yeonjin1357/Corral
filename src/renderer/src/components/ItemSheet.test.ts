@@ -3,7 +3,7 @@ import { mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach } from 'vitest'
 import ItemSheet, { type Selected } from './ItemSheet.vue'
 import { MB, agentRow, diskRow, heavyJob, leftoverRow, serverRow } from '../testing/fixtures'
-import type { ClaudeHookStatus } from '../../../shared/types'
+import type { ClaudeHookStatus, Platform } from '../../../shared/types'
 
 let wrapper: VueWrapper | null = null
 afterEach(() => {
@@ -12,7 +12,11 @@ afterEach(() => {
   document.body.innerHTML = ''
 })
 
-function sheet(item: Selected, hook: ClaudeHookStatus | null = null): VueWrapper {
+function sheet(
+  item: Selected,
+  hook: ClaudeHookStatus | null = null,
+  platform: Platform = 'win32'
+): VueWrapper {
   wrapper = mount(ItemSheet, {
     attachTo: document.body,
     props: {
@@ -22,7 +26,7 @@ function sheet(item: Selected, hook: ClaudeHookStatus | null = null): VueWrapper
       windowMs: 600_000,
       busy: false,
       hook,
-      platform: 'win32',
+      platform,
       cpuCount: 8,
       open: true
     }
@@ -117,6 +121,46 @@ describe('상세 패널: 바로 가기(G3f)', () => {
     wrapper?.unmount()
     sheet({ kind: 'leftover', row: leftoverRow({ worktree: null }) })
     expect(quickButtons()).toEqual([])
+  })
+})
+
+describe('상세 패널: 창으로 가기(G3f)', () => {
+  /** 동작 줄의 버튼 글자(순서대로). */
+  const actionRow = (): string[] => [
+    ...[...document.body.querySelectorAll('[data-quick], [data-action="focus"]')].map((b) =>
+      b.textContent!.trim()
+    )
+  ]
+  const focusButton = (): HTMLElement | null =>
+    document.body.querySelector<HTMLElement>('[data-action="focus"]')
+  const host = { pids: [4000, 3000], app: null }
+
+  test('에이전트는 동작 줄 맨 앞에 창으로 가기, 누르면 그 에이전트의 선택 키로', () => {
+    const w = sheet({ kind: 'agent', row: agentRow({ pid: 5000, startedAt: 100, host }) })
+    expect(actionRow()).toEqual(['창으로 가기', '경로 복사', '폴더 열기', '터미널 열기'])
+    focusButton()!.click()
+    expect(w.emitted('focus')).toEqual([['agent:5000:100']])
+  })
+
+  test('폴더를 몰라도 창으로 가기는 있다', () => {
+    sheet({ kind: 'agent', row: agentRow({ worktree: null, host }) })
+    expect(actionRow()).toEqual(['창으로 가기'])
+  })
+
+  test('찾아볼 조상(Windows)이나 .app(macOS)이 없으면 버튼이 없다, 에이전트가 아니면 없다', () => {
+    sheet({ kind: 'agent', row: agentRow({ host: { pids: [], app: null } }) })
+    expect(focusButton()).toBeNull()
+    wrapper?.unmount()
+    // macOS 는 조상 pid 가 있어도 .app 번들을 모르면 갈 곳이 없다.
+    sheet({ kind: 'agent', row: agentRow({ host }) }, null, 'darwin')
+    expect(focusButton()).toBeNull()
+    wrapper?.unmount()
+    const iterm = { pids: [300], app: '/Applications/iTerm.app' }
+    sheet({ kind: 'agent', row: agentRow({ host: iterm }) }, null, 'darwin')
+    expect(focusButton()).not.toBeNull()
+    wrapper?.unmount()
+    sheet({ kind: 'server', row: serverRow() })
+    expect(focusButton()).toBeNull()
   })
 })
 

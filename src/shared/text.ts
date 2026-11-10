@@ -460,7 +460,10 @@ export const text = {
       folder: '폴더 열기',
       terminal: '터미널 열기',
       copied: '경로를 복사했어요.',
-      failed: '열지 못했어요. 폴더가 없어졌을 수 있어요.'
+      failed: '열지 못했어요. 폴더가 없어졌을 수 있어요.',
+      /** 에이전트가 떠 있는 터미널·에디터 창을 앞으로 가져온다. */
+      focus: '창으로 가기',
+      focusFailed: '그 에이전트의 창을 찾지 못했어요.'
     },
     footer: {
       count: (label: string, n: number): string => `${label} ${n}개`,
@@ -598,6 +601,9 @@ export const text = {
         '훅으로 작업 중인 에이전트가 15분 넘게 이벤트도 CPU 사용도 없으면 알려요. 오래 걸리는 명령을 기다리는 중일 수도 있어요.',
       notifyAgentGone: '에이전트 꺼짐',
       notifyAgentGoneHelp: '작업 중이거나 권한을 기다리던 에이전트가 꺼지면 알려요.',
+      notifyClickFocus: '알림을 누르면 그 에이전트의 창으로',
+      notifyClickFocusHelp:
+        '에이전트 알림을 누르면 그 에이전트가 떠 있는 터미널·에디터 창을 앞으로 가져와요. 창을 찾지 못하면 pitwall 을 열어요. 탭까지 고르지는 못해요.',
       waitingReminder: '권한 대기 다시 알림',
       waitingReminderHelp:
         '권한 대기가 이 시간 넘게 이어지면 다시 알려요. 0 이면 다시 알리지 않아요.',

@@ -24,6 +24,7 @@ export const IPC = {
   refreshNow: 'pitwall:refresh-now',
   openPort: 'pitwall:open-port',
   quick: 'pitwall:quick',
+  focusAgent: 'pitwall:focus-agent',
   claudeHookStatus: 'pitwall:claude-hook-status',
   claudeHookEnable: 'pitwall:claude-hook-enable',
   claudeHookDisable: 'pitwall:claude-hook-disable',
@@ -87,6 +88,11 @@ export interface PitwallApi {
    * (path 는 찾는 열쇠일 뿐 그대로 열지 않는다). 했으면 true.
    */
   quick(kind: QuickKind, path: string): Promise<boolean>
+  /**
+   * 창으로 가기: 그 에이전트(선택 키)가 떠 있는 터미널·에디터 창을 앞으로 가져온다. 메인은 지금 스냅샷의 에이전트만 다룬다.
+   * 창을 찾지 못했거나 OS 가 거절하면 false.
+   */
+  focusAgent(key: string): Promise<boolean>
   /** Claude 훅 연동. 켜기·끄기는 메인에서 설정 파일 경로와 백업을 알리는 확인 창을 띄운다. */
   claudeHook: {
     status(): Promise<ClaudeHookStatus | null>

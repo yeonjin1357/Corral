@@ -128,6 +128,7 @@ describe('조용한 에이전트(G3c)', () => {
     parked: false,
     activity: null,
     quietSince: null,
+    host: { pids: [], app: null },
     ...over
   })
   /** 수집을 차례로 흉내 낸다: [시각, 행] 마다 trackQuiet 를 돌려 그때의 quietSince. */

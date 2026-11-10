@@ -514,6 +514,15 @@ const NOTICES_URL = `${REPO_URL}/blob/main/THIRD_PARTY_NOTICES.md`
                   <p class="mt-1 text-xs leading-relaxed text-muted-foreground">{{ item.help }}</p>
                 </div>
               </div>
+              <div class="flex items-start gap-3">
+                <Checkbox id="notify-click-focus" v-model="draft.notifyClickFocus" class="mt-0.5" />
+                <div>
+                  <Label for="notify-click-focus">{{ S.notifyClickFocus }}</Label>
+                  <p class="mt-1 text-xs leading-relaxed text-muted-foreground">
+                    {{ S.notifyClickFocusHelp }}
+                  </p>
+                </div>
+              </div>
               <div class="flex items-center justify-between gap-6">
                 <div>
                   <Label for="waiting-reminder">{{ S.waitingReminder }}</Label>

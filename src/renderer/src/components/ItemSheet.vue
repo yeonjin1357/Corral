@@ -2,11 +2,12 @@
   NeoHtop (MIT) modals/ProcessDetailsModal.svelte 의 오른쪽 패널(아이콘 상자 + 제목, 두 숫자 카드, 정보 카드, 명령줄 카드).
   바꾼 점: 프로세스 하나 대신 pitwall 항목(포트·에이전트·남은 프로세스·무거운 작업·디스크 정리)을 보여 주고,
   제목 아래에 그 항목의 동작(브라우저로 열기·내리기·끄기·지우기) 버튼을 둔다. 끄기·지우기는 OS 확인 창을 거친다.
-  폴더를 아는 항목에는 바로 가기(경로 복사·폴더 열기·터미널 열기)도 둔다.
+  폴더를 아는 항목에는 바로 가기(경로 복사·폴더 열기·터미널 열기)도 둔다. 에이전트는 맨 앞에 창으로 가기.
 -->
 <script setup lang="ts">
 import { computed } from 'vue'
 import {
+  AppWindow,
   Copy,
   Cpu,
   EyeOff,
@@ -42,7 +43,7 @@ import {
   worktreeFolder
 } from '../../../shared/format'
 import { text } from '../../../shared/text'
-import type { Point } from '../history'
+import { selectionKey, type Point } from '../history'
 import Sheet from '../ui/Sheet.vue'
 import Card from '../ui/Card.vue'
 import CardHeader from '../ui/CardHeader.vue'
@@ -81,10 +82,24 @@ const emit = defineEmits<{
   remove: []
   hide: []
   quick: [kind: QuickKind, path: string]
+  /** 창으로 가기: 그 에이전트의 선택 키. */
+  focus: [key: string]
 }>()
 const open = defineModel<boolean>('open', { required: true })
 
 const t = text.ui
+
+/**
+ * 창으로 가기(G3f)를 보일 에이전트의 선택 키. 찾아볼 곳이 없으면(Windows 는 조상 pid, macOS 는 .app 번들을 모름) null 이고
+ * 버튼을 보이지 않는다.
+ */
+const focusKey = computed(() => {
+  const item = props.item
+  if (item?.kind !== 'agent') return null
+  const { host } = item.row
+  const canTry = props.platform === 'darwin' ? host.app != null : host.pids.length > 0
+  return canTry ? selectionKey.agent(item.row) : null
+})
 
 /** 바로 가기로 다룰 그 항목의 폴더(워크트리). 모르면(판별 불가 등) null 이고 바로 가기를 보이지 않는다. */
 const quickPath = computed(() => {
@@ -461,10 +476,23 @@ const folderSize = (f: DiskRow['folders'][number]): string =>
 
       <div
         v-if="
-          item.kind === 'server' || item.kind === 'leftover' || item.kind === 'disk' || quickPath
+          item.kind === 'server' ||
+          item.kind === 'leftover' ||
+          item.kind === 'disk' ||
+          quickPath ||
+          focusKey
         "
         class="flex flex-wrap gap-2"
       >
+        <Button
+          v-if="focusKey"
+          variant="outline"
+          size="sm"
+          data-action="focus"
+          @click="emit('focus', focusKey)"
+        >
+          <AppWindow />{{ t.quick.focus }}
+        </Button>
         <template v-if="item.kind === 'server'">
           <!-- 포트가 여럿이면 포트마다(화면을 내주는 포트가 첫 포트가 아닐 수 있다). -->
           <Button

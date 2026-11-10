@@ -1,4 +1,5 @@
 import type {
+  AgentHost,
   AgentRow,
   AgentState,
   AgentTool,
@@ -8,7 +9,7 @@ import type {
 } from '../shared/types'
 import { commitSum, worktreeFolder } from '../shared/format'
 import { agentKey } from '../shared/keys'
-import { agentToolOf, buildTree, topLevelAgentPids } from './processTree'
+import { agentToolOf, buildTree, topLevelAgentPids, type ProcessTree } from './processTree'
 import { summarizeProcesses } from './processSummary'
 import type { HookView } from './sessions'
 
@@ -79,6 +80,38 @@ export function measureTreeCpu(
   if (self.cpuMs != null)
     next.set(cpuKey(self), { cpuMs: self.cpuMs, at: now, percent: cpuPercent })
   return cpuPercent
+}
+
+/** 창을 찾아볼 조상 수(가까운 것부터). */
+const HOST_MAX_DEPTH = 12
+
+/**
+ * Windows 셸. 시작 메뉴·작업 표시줄로 띄운 것은 모두 이 아래라 조상에 흔히 있지만, 그 창(바탕 화면·탐색기)은
+ * 에이전트의 창이 아니다. 여기까지 왔으면 에이전트를 띄운 창은 조상에 없는 것이다(Windows Terminal 로 넘긴 콘솔 등).
+ */
+const WINDOWS_SHELL = /^explorer\.exe$/i
+
+/** 절대 경로의 `.app` 번들 실행 파일(`/…/<이름>.app/Contents/MacOS/…`)에서 앞의 `.app` 경로. */
+const APP_BUNDLE = /^(\/.*?\.app)\/Contents\/MacOS\//
+
+/**
+ * 명령줄이 macOS 앱 번들의 실행 파일이면 그 `.app` 경로. 다른 `.app` 안의 보조 앱(VS Code 의 Code Helper.app 등)은
+ * null 이다 — open 으로 열면 보조 앱이 따로 뜰 수 있고, 그 위 조상이 본 앱이다.
+ */
+export function appBundleOf(commandLine: string): string | null {
+  const app = APP_BUNDLE.exec(commandLine)?.[1]
+  return app && !app.includes('.app/') ? app : null
+}
+
+/** 에이전트(pid)가 떠 있는 창을 찾을 단서: 가까운 조상 pid 들과 그 가운데 첫 `.app` 번들. */
+export function hostOf(tree: ProcessTree, pid: number): AgentHost {
+  const ancestors: ProcessInfo[] = []
+  for (const p of tree.ancestors(pid, HOST_MAX_DEPTH)) {
+    if (WINDOWS_SHELL.test(p.name)) break
+    ancestors.push(p)
+  }
+  const app = ancestors.map((p) => appBundleOf(p.commandLine)).find((a) => a !== null) ?? null
+  return { pids: ancestors.map((p) => p.pid), app }
 }
 
 /** 에이전트별 지금 상태와 그 상태를 처음 본 시각. 키는 agentKey. */
@@ -180,7 +213,8 @@ export function buildAgents(input: {
       // 하는 일(G3b)은 최종 상태·세션 파일·설정을 아는 수집기가 채운다.
       activity: null,
       // 조용함(G3c)은 조용한 조건이 이어진 시각을 기억하는 수집기가 채운다.
-      quietSince: null
+      quietSince: null,
+      host: hostOf(tree, pid)
     })
   }
 

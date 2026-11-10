@@ -19,7 +19,7 @@ const api = serverRow({
   worktree: { root: 'C:\\work\\ws\\api', branch: 'feat/api', isLinkedWorktree: false }
 })
 const solo = serverRow({ pid: 3, ports: [3000], memoryBytes: 100 * MB })
-const agent = agentRow({ pid: 5000 })
+const agent = agentRow({ pid: 5000, host: { pids: [4000], app: null } })
 
 function snap(): DashboardSnapshot {
   return snapshot({
@@ -54,6 +54,7 @@ function fake(over: Partial<PitwallApi> = {}): Fake {
     refreshNow: vi.fn(async () => {}),
     openPort: vi.fn(async () => true),
     quick: vi.fn(async () => true),
+    focusAgent: vi.fn(async () => true),
     claudeHook: { status: async () => null, enable: vi.fn(), disable: vi.fn() },
     codexHook: { status: async () => null, enable: vi.fn(), disable: vi.fn() },
     appInfo: async () => ({ version: '0.1.0' }),
@@ -215,6 +216,30 @@ test('설정 > 알림에서 조용함·꺼짐 알림을 끄고 권한 대기 다
   await flushPromises()
   expect(f.saved.at(-1)?.notify).toMatchObject({ agentQuiet: false, agentGone: false })
   expect(f.saved.at(-1)?.waitingReminderMinutes).toBe(0)
+  w.unmount()
+})
+
+test('설정 > 알림에서 "알림을 누르면 그 에이전트의 창으로"를 끄고 저장한다', async () => {
+  const f = fake()
+  const w = await start(f)
+  f.navigate({ page: 'settings' })
+  await flushPromises()
+  await w
+    .findAll('button')
+    .find((b) => b.text().trim() === '알림')!
+    .trigger('click')
+  const box = w.find('#notify-click-focus')
+  expect(box.attributes('aria-checked')).toBe('true')
+  expect(w.find('label[for="notify-click-focus"]').text()).toBe(
+    '알림을 누르면 그 에이전트의 창으로'
+  )
+  expect(w.text()).toContain(
+    '에이전트 알림을 누르면 그 에이전트가 떠 있는 터미널·에디터 창을 앞으로 가져와요. 창을 찾지 못하면 pitwall 을 열어요. 탭까지 고르지는 못해요.'
+  )
+  await box.trigger('click')
+  await w.find('form').trigger('submit')
+  await flushPromises()
+  expect(f.saved.at(-1)?.notifyClickFocus).toBe(false)
   w.unmount()
 })
 
@@ -409,6 +434,24 @@ test('상세 패널의 바로 가기: 경로를 복사하면 알리고, 열지 �
   await flushPromises()
   expect(f.api.quick).toHaveBeenLastCalledWith('folder', 'C:\\work\\ws\\api')
   expect(notice(w)).toContain('열지 못했어요. 폴더가 없어졌을 수 있어요.')
+  w.unmount()
+})
+
+test('상세 패널의 창으로 가기: 그 에이전트의 키로 부르고, 찾지 못하면 한 줄로 알린다', async () => {
+  const f = fake()
+  const w = await start(f)
+  f.navigate({ page: 'dashboard', key: selectionKey.agent(agent) })
+  await flushPromises()
+  const button = (): HTMLElement =>
+    document.body.querySelector<HTMLElement>('[data-action="focus"]')!
+  button().click()
+  await flushPromises()
+  expect(f.api.focusAgent).toHaveBeenCalledWith(selectionKey.agent(agent))
+  expect(notice(w)).toBe('')
+  vi.mocked(f.api.focusAgent).mockResolvedValueOnce(false)
+  button().click()
+  await flushPromises()
+  expect(notice(w)).toContain('그 에이전트의 창을 찾지 못했어요.')
   w.unmount()
 })
 

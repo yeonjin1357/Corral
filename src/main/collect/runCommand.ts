@@ -14,6 +14,9 @@ export interface CommandOptions {
   env?: Record<string, string>
 }
 
+/** 명령 실행기(테스트는 가짜를 넣는다). */
+export type Runner = (argv: string[], opts?: CommandOptions) => Promise<CommandResult>
+
 const MAX_BUFFER_BYTES = 32 * 1024 * 1024
 
 /**

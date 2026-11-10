@@ -115,6 +115,13 @@ test('에이전트가 하는 일 보기(showAgentActivity)는 기본 켬, 불린
   expect(normalizeSettings({ showAgentActivity: 'no' }).showAgentActivity).toBe(true)
 })
 
+test('알림을 누르면 그 에이전트의 창으로(notifyClickFocus)는 기본 켬, 불린이 아니면 기본값', () => {
+  expect(DEFAULT_SETTINGS.notifyClickFocus).toBe(true)
+  expect(normalizeSettings({}).notifyClickFocus).toBe(true)
+  expect(normalizeSettings({ notifyClickFocus: false }).notifyClickFocus).toBe(false)
+  expect(normalizeSettings({ notifyClickFocus: 0 }).notifyClickFocus).toBe(true)
+})
+
 test('오래 쉬는 세션 기준은 10~10080분, 기본 180분', () => {
   expect(DEFAULT_SETTINGS.agentParkedMinutes).toBe(180)
   expect(normalizeSettings({}).agentParkedMinutes).toBe(180)

@@ -345,6 +345,17 @@ async function quick(kind: QuickKind, path: string): Promise<void> {
   }
 }
 
+/** 창으로 가기(G3f): 그 에이전트가 떠 있는 터미널·에디터 창을 앞으로. 창이 앞으로 오는 것으로 충분하고, 못 하면 알린다. */
+async function focusAgent(key: string): Promise<void> {
+  say('action', null)
+  try {
+    if (!(await window.pitwall.focusAgent(key)))
+      say('action', { text: text.ui.quick.focusFailed, tone: 'error' })
+  } catch (e) {
+    say('action', { text: failureText(e), tone: 'error' })
+  }
+}
+
 // ── 묶음 보기·숨기기·별칭(F1·F2·F11) ──
 /** 설정을 바꾸고 바로 다시 수집해 화면에 반영한다(숨김·별칭은 수집기가 적용). */
 async function updateSettings(change: (s: Settings) => Settings): Promise<void> {
@@ -832,6 +843,7 @@ const takenAt = computed(() =>
       @remove="sheetAction('remove')"
       @hide="hideSelected"
       @quick="quick"
+      @focus="focusAgent"
     />
     <MemorySheet
       v-if="snapshot"

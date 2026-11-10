@@ -57,6 +57,7 @@ export function agentRow(over: Partial<AgentRow> = {}): AgentRow {
     parked: false,
     activity: null,
     quietSince: null,
+    host: { pids: [], app: null },
     ...over
   }
 }

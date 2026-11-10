@@ -194,6 +194,69 @@ describe('에이전트 행', () => {
   })
 })
 
+describe('에이전트가 떠 있는 창(G3f 창으로 가기)', () => {
+  test('host.pids 는 가까운 조상부터 최대 12개', () => {
+    // 100 ← 101 ← … ← 115 ← claude(5000): 조상 16개 가운데 가까운 12개.
+    const chain = Array.from({ length: 16 }, (_, i) => proc(100 + i, i === 0 ? 1 : 99 + i, 'x.exe'))
+    const { agents } = run([...chain, proc(5000, 115, 'claude.exe')])
+    expect(agents[0].host).toEqual({
+      pids: [115, 114, 113, 112, 111, 110, 109, 108, 107, 106, 105, 104],
+      app: null
+    })
+    // 부모를 모르면(목록에 없음·pid 재사용) 빈 목록.
+    const orphan = run([proc(7, 1, 'cmd.exe', { startedAt: 900 }), proc(5000, 7, 'claude.exe')])
+    expect(orphan.agents[0].host).toEqual({ pids: [], app: null })
+  })
+
+  test('Windows 셸(explorer.exe)과 그 위는 넣지 않는다(바탕 화면·탐색기 창은 에이전트의 창이 아니다)', () => {
+    const { agents } = run([
+      proc(4, 1, 'winlogon.exe'),
+      proc(10, 4, 'Explorer.EXE'),
+      proc(20, 10, 'cmd.exe'),
+      proc(5000, 20, 'claude.exe')
+    ])
+    expect(agents[0].host.pids).toEqual([20])
+  })
+
+  test('host.app 은 .app 번들 조상의 경로', () => {
+    const mac = (pid: number, ppid: number, commandLine: string): ProcessInfo =>
+      proc(pid, ppid, commandLine.split('/').pop()!.split(' ')[0], { commandLine })
+    const terminal = run([
+      mac(1, 0, '/sbin/launchd'),
+      mac(300, 1, '/System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal'),
+      mac(301, 300, 'login -pf dev'),
+      mac(302, 301, '-zsh'),
+      mac(5000, 302, '/Users/dev/.local/bin/claude')
+    ])
+    expect(terminal.agents[0].host).toEqual({
+      pids: [302, 301, 300, 1],
+      app: '/System/Applications/Utilities/Terminal.app'
+    })
+    // 다른 .app 안의 보조 앱(Code Helper)은 건너뛰고 그 위의 본 앱(띄어쓰기 포함)을 쓴다.
+    const vscode = run([
+      mac(400, 1, '/Applications/Visual Studio Code.app/Contents/MacOS/Electron'),
+      mac(
+        401,
+        400,
+        '/Applications/Visual Studio Code.app/Contents/Frameworks/Code Helper (Plugin).app/Contents/MacOS/Code Helper (Plugin) --type=utility'
+      ),
+      mac(402, 401, '/bin/zsh -il'),
+      mac(5000, 402, '/Users/dev/.local/bin/claude')
+    ])
+    expect(vscode.agents[0].host.app).toBe('/Applications/Visual Studio Code.app')
+    // 상대 경로·인자 속 .app·Windows 경로는 번들이 아니다.
+    const none = run([
+      mac(500, 1, 'Terminal.app/Contents/MacOS/Terminal'),
+      mac(501, 500, 'node /Users/dev/x.app/Contents/MacOS/y'),
+      proc(502, 501, 'WindowsTerminal.exe', {
+        commandLine: 'C:\\Program Files\\WindowsApps\\wt.app\\Contents\\MacOS\\wt.exe'
+      }),
+      mac(5000, 502, '/Users/dev/.local/bin/claude')
+    ])
+    expect(none.agents[0].host.app).toBeNull()
+  })
+})
+
 describe('CPU 로 작업 중 판단', () => {
   test('이전 샘플이 없으면 알 수 없음', () => {
     const { agents } = run([proc(5000, 1, 'claude.exe', { cpuMs: 5000 })])
@@ -400,6 +463,7 @@ describe('상태 시작 시각(F3)', () => {
     parked: false,
     activity: null,
     quietSince: null,
+    host: { pids: [], app: null },
     ...over
   })
 
