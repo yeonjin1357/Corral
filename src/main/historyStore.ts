@@ -18,6 +18,8 @@ export type ServerMemoData = Record<
   { state: 'idle' | 'tabs'; since: number; shielded?: boolean }
 >
 export type AgentStateData = Record<string, { state: AgentState; since: number }>
+/** 에이전트별 pitwall 이 처음 본 시각·마지막으로 작업 중으로 본 시각(G2, CPU 추정의 마지막 활동). */
+export type AgentSeenData = Record<string, { firstSeen: number; lastWorking: number | null }>
 
 /**
  * userData/history.json 의 모양. version 2: 서버 메모리 기록이 커밋(알 때)으로 바뀌었다.
@@ -30,6 +32,8 @@ export interface HistoryFile {
   servers: ServerHistoryData
   serverMemo: ServerMemoData
   agentStates: AgentStateData
+  /** 나중에 더한 값이라 예전에 저장한 파일에는 없다. */
+  agentSeen?: AgentSeenData
 }
 
 export interface LoadedHistory {
@@ -38,6 +42,7 @@ export interface LoadedHistory {
   /** 꺼져 있던 시간이 10분을 넘었거나 시계가 뒤로 갔으면 null(판단 기억을 버림). */
   serverMemo: ServerMemoData | null
   agentStates: AgentStateData | null
+  agentSeen: AgentSeenData | null
 }
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
@@ -77,6 +82,22 @@ function validServerMemo(value: unknown): ServerMemoData {
   return result
 }
 
+/** 에이전트를 본 기록: 처음 본 시각이 수이고 마지막 작업 시각이 수 또는 null 인 항목만 남긴다. */
+function validSeen(value: unknown): AgentSeenData {
+  const result: AgentSeenData = {}
+  if (!isRecord(value)) return result
+  for (const [key, entry] of Object.entries(value).slice(0, MAX_ENTRIES)) {
+    if (!isRecord(entry) || !Number.isFinite(entry.firstSeen)) continue
+    const lastWorking = entry.lastWorking
+    if (lastWorking !== null && !Number.isFinite(lastWorking)) continue
+    result[key] = {
+      firstSeen: entry.firstSeen as number,
+      lastWorking: lastWorking as number | null
+    }
+  }
+  return result
+}
+
 /**
  * history.json 을 읽는다. 없거나 깨졌거나 형식(버전)이 다르면 null(새로 시작).
  * 저장한 지 10분이 넘었으면(또는 저장 시각이 지금보다 뒤면) 정리 판단 기억은 버리고 기록만 돌려준다.
@@ -95,7 +116,8 @@ export async function loadHistory(path: string, now: number): Promise<LoadedHist
     ram: validPoints(raw.ram),
     servers: isRecord(raw.servers) ? (raw.servers as ServerHistoryData) : {},
     serverMemo: resume ? validServerMemo(raw.serverMemo) : null,
-    agentStates: resume ? validStates(raw.agentStates, AGENT_STATES) : null
+    agentStates: resume ? validStates(raw.agentStates, AGENT_STATES) : null,
+    agentSeen: resume ? validSeen(raw.agentSeen) : null
   }
 }
 

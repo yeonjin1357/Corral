@@ -84,6 +84,7 @@ function setup(over: Partial<CollectorDeps> = {}): {
     options: () => ({
       thresholds: { ramWarnPercent: 80, ramDangerPercent: 90 },
       idlePortMs: 20 * MIN,
+      agentParkedMs: 180 * MIN,
       heavyPatterns: ['tsc']
     }),
     selfPid: 999,
@@ -235,14 +236,137 @@ test('같은 워크트리에 다른 Claude 가 살아 있어도, 짝지은 프�
   )
   await collector.collect()
   clock.now += 5000
-  await collector.collect()
+  const both = await collector.collect()
   expect(sessions.size).toBe(2)
-  // 권한 대기 세션(stuck)은 더 늦게 시작한 5001 과, calm 은 5000 과 짝지어진다. 5001 의 창을 닫는다.
+  // 권한 대기 세션(stuck)은 더 늦게 시작한 5001 과, calm 은 5000 과 짝지어진다.
   expect(sessions.get('stuck')?.processKey).toBe('5001:200')
+  // 같은 폴더의 두 Claude 는 각자 자기 세션의 상태를 보인다(G3a).
+  expect(
+    both.agents.filter((a) => a.tool === 'claude').map((a) => [a.pid, a.state, a.stateSource])
+  ).toEqual([
+    [5000, 'idle', 'hook'],
+    [5001, 'waiting', 'hook']
+  ])
+  // 5001 의 창을 닫는다.
   clock.now += 5000
   const s = await collector.collect()
   expect([...sessions.keys()]).toEqual(['calm'])
   expect(s.agents.find((a) => a.pid === 5000)).toMatchObject({ state: 'idle', stateSource: 'hook' })
+})
+
+describe('마지막 활동·오래 쉬는 세션(G2)', () => {
+  const hookEvent = (
+    sessions: Sessions,
+    name: string,
+    at: number,
+    extra: Record<string, unknown> = {}
+  ): void => {
+    applyHookEvent(
+      sessions,
+      { session_id: 's1', cwd: W1.root, hook_event_name: name, ...extra },
+      at
+    )
+  }
+
+  test('훅으로 아는 에이전트의 lastActiveAt 은 그 세션의 마지막 활동 시각', async () => {
+    const { deps, sessions, clock } = setup()
+    clock.now = 60 * MIN
+    hookEvent(sessions, 'UserPromptSubmit', 30 * MIN)
+    hookEvent(sessions, 'Stop', 40 * MIN)
+    // 응답이 끝나고 오는 idle 알림은 활동이 아니다.
+    hookEvent(sessions, 'Notification', 41 * MIN, { notification_type: 'idle_prompt' })
+    const s = await createCollector(deps).collect()
+    expect(s.agents.find((a) => a.pid === 5000)).toMatchObject({
+      state: 'idle',
+      stateSource: 'hook',
+      stateSince: 40 * MIN,
+      lastActiveAt: 40 * MIN,
+      parked: false
+    })
+    // CPU 추정은 pitwall 이 처음 본 시각(그 전은 모른다).
+    expect(s.agents.find((a) => a.pid === 6000)).toMatchObject({
+      stateSource: 'cpu',
+      lastActiveAt: 60 * MIN,
+      parked: false
+    })
+  })
+
+  test('Codex 세션 기록으로 아는 에이전트의 lastActiveAt 은 기록의 마지막 이벤트 시각', async () => {
+    const { deps } = setup({
+      codexState: async () => ({ state: 'idle', since: 2 * MIN, lastEventAt: 3 * MIN })
+    })
+    const s = await createCollector(deps).collect()
+    expect(s.agents.find((a) => a.pid === 6000)).toMatchObject({
+      stateSource: 'rollout',
+      stateSince: 2 * MIN,
+      lastActiveAt: 3 * MIN
+    })
+  })
+
+  test('agentParkedMs 를 넘긴 쉬는 에이전트는 parked', async () => {
+    const { deps, sessions, clock } = setup({
+      options: () => ({
+        thresholds: { ramWarnPercent: 80, ramDangerPercent: 90 },
+        idlePortMs: 20 * MIN,
+        agentParkedMs: 30 * MIN,
+        heavyPatterns: []
+      })
+    })
+    const stoppedAt = clock.now - 1
+    hookEvent(sessions, 'Stop', stoppedAt)
+    const collector = createCollector(deps)
+    await collector.collect()
+    clock.now = stoppedAt + 30 * MIN - 1
+    expect((await collector.collect()).agents[0]).toMatchObject({
+      pid: 5000,
+      state: 'idle',
+      parked: false
+    })
+    clock.now = stoppedAt + 30 * MIN
+    const parked = await collector.collect()
+    expect(parked.agents[0]).toMatchObject({
+      pid: 5000,
+      state: 'idle',
+      lastActiveAt: stoppedAt,
+      parked: true
+    })
+    // 새 입력이 오면(훅 이벤트 → restate) 바로 오래 쉬는 세션이 아니다.
+    hookEvent(sessions, 'UserPromptSubmit', clock.now)
+    const next = await collector.restate(parked)
+    expect(next.agents[0]).toMatchObject({
+      pid: 5000,
+      state: 'working',
+      lastActiveAt: clock.now,
+      parked: false
+    })
+  })
+
+  test('처음 본 시각·마지막 작업 시각을 내보내고, 다시 켜면 이어 쓴다(지금보다 뒤의 시각은 버림)', async () => {
+    const { deps, clock } = setup()
+    const before = createCollector(deps)
+    await before.collect()
+    expect(before.exportState().agentSeen).toEqual({
+      '5000:100': { firstSeen: 10 * MIN, lastWorking: null },
+      '6000:100': { firstSeen: 10 * MIN, lastWorking: null }
+    })
+    clock.now += 5 * MIN
+    const after = createCollector(deps)
+    after.importState(
+      {
+        ...before.exportState(),
+        agentSeen: {
+          '5000:100': { firstSeen: 2 * MIN, lastWorking: 3 * MIN },
+          '6000:100': { firstSeen: clock.now + MIN, lastWorking: null }
+        }
+      },
+      clock.now
+    )
+    const s = await after.collect()
+    expect(s.agents.map((a) => [a.pid, a.lastActiveAt])).toEqual([
+      [5000, 3 * MIN],
+      [6000, clock.now]
+    ])
+  })
 })
 
 test('네트워크 경로(UNC·WSL)에서 연 세션은 워크트리를 찾아보지 않는다(응답 없는 공유에 수집이 묶이지 않게)', async () => {
@@ -267,6 +391,7 @@ test('설정(기준값)을 바꾸면 다음 수집부터 반영된다', async ()
   const options = {
     thresholds: { ramWarnPercent: 80, ramDangerPercent: 90 },
     idlePortMs: 20 * MIN,
+    agentParkedMs: 180 * MIN,
     heavyPatterns: []
   }
   const { deps, clock } = setup({ options: () => options })
@@ -292,11 +417,13 @@ test('설정에서 수집 기준값을 만든다(분 → ms)', () => {
       ...DEFAULT_SETTINGS,
       ramWarnPercent: 70,
       ramDangerPercent: 85,
-      idlePortMinutes: 45
+      idlePortMinutes: 45,
+      agentParkedMinutes: 240
     })
   ).toEqual({
     thresholds: { ramWarnPercent: 70, ramDangerPercent: 85 },
     idlePortMs: 45 * MIN,
+    agentParkedMs: 240 * MIN,
     heavyPatterns: DEFAULT_SETTINGS.heavyPatterns,
     hiddenServers: [],
     workspaceAliases: {}
@@ -453,7 +580,7 @@ test('판단 기억 없이(null) 불러오면 처음부터 센다', async () => 
     processes: [proc(4100, 1, 'node.exe', 0, 'node vite')]
   }
   const c = createCollector({ ...deps, sample: async () => noAgents })
-  c.importState({ servers: {}, serverMemo: null, agentStates: null }, clock.now)
+  c.importState({ servers: {}, serverMemo: null, agentStates: null, agentSeen: null }, clock.now)
   const s = await c.collect()
   expect(s.servers[0]).toMatchObject({ judgement: null, idleSince: 10 * MIN })
 })
@@ -468,6 +595,7 @@ describe('숨기기·별칭(F11)', () => {
     () => ({
       thresholds: { ramWarnPercent: 80, ramDangerPercent: 90 },
       idlePortMs: 20 * MIN,
+      agentParkedMs: 180 * MIN,
       heavyPatterns: [],
       hiddenServers,
       workspaceAliases
@@ -513,7 +641,7 @@ describe('숨기기·별칭(F11)', () => {
 describe('Codex 세션 기록(F7)', () => {
   test('Codex 는 세션 기록 상태와 그 시각을 쓴다', async () => {
     const codexState = vi.fn<NonNullable<CollectorDeps['codexState']>>(async (a) =>
-      a.cwd === W2.root ? { state: 'working', since: 5 * MIN } : null
+      a.cwd === W2.root ? { state: 'working', since: 5 * MIN, lastEventAt: 5 * MIN } : null
     )
     const { deps } = setup({ codexState })
     const s = await createCollector(deps).collect()
@@ -535,7 +663,7 @@ describe('Codex 세션 기록(F7)', () => {
   })
 
   test('Codex 둘이 같은 폴더에서 돌면 어느 쪽 기록인지 몰라 쓰지 않는다', async () => {
-    const codexState = vi.fn(async () => ({ state: 'working' as const, since: 1 }))
+    const codexState = vi.fn(async () => ({ state: 'working' as const, since: 1, lastEventAt: 1 }))
     const { deps } = setup({ codexState })
     const two: RawSample = {
       ...sampleAt(0),
@@ -570,7 +698,9 @@ describe('Codex 세션 기록(F7)', () => {
   })
 
   test('restate(훅 이벤트)는 세션 기록 상태를 덮어쓰지 않는다', async () => {
-    const { deps } = setup({ codexState: async () => ({ state: 'error', since: 7 * MIN }) })
+    const { deps } = setup({
+      codexState: async () => ({ state: 'error', since: 7 * MIN, lastEventAt: 7 * MIN })
+    })
     const collector = createCollector(deps)
     const s = await collector.collect()
     const next = await collector.restate(s)
@@ -590,7 +720,7 @@ describe('Codex 연동 훅(F7)', () => {
       path: 'C:\\Users\\dev\\.codex\\hooks.json'
     }
     const { deps, sessions } = setup({
-      codexState: async () => ({ state: 'working', since: 1 }),
+      codexState: async () => ({ state: 'working', since: 1, lastEventAt: 1 }),
       codexHookStatus: async () => status,
       resolveWorktree: async (path) =>
         path.startsWith(W1.root) ? W1 : path.startsWith(W2.root) ? W2 : null
@@ -730,7 +860,7 @@ describe('Codex 검토 뒤 보강', () => {
 
   test('Codex 연동 중 오류로 끝난 턴(Stop 이 오지 않음)은 세션 기록의 끝 이벤트로 바로잡는다', async () => {
     const after = setup({
-      codexState: async () => ({ state: 'error', since: 3 * MIN }),
+      codexState: async () => ({ state: 'error', since: 3 * MIN, lastEventAt: 3 * MIN }),
       resolveWorktree: async (path) =>
         path.startsWith(W1.root) ? W1 : path.startsWith(W2.root) ? W2 : null
     })
@@ -749,7 +879,7 @@ describe('Codex 검토 뒤 보강', () => {
 
     // 세션 기록의 끝 이벤트가 훅의 작업 시작보다 이르면(지난 턴) 훅 상태를 그대로 쓴다.
     const before = setup({
-      codexState: async () => ({ state: 'idle', since: MIN / 2 }),
+      codexState: async () => ({ state: 'idle', since: MIN / 2, lastEventAt: MIN / 2 }),
       resolveWorktree: async (path) =>
         path.startsWith(W1.root) ? W1 : path.startsWith(W2.root) ? W2 : null
     })

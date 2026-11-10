@@ -20,6 +20,7 @@ test('기본값: 보통 갱신, 자동 테마, 로그인 시 실행·업데이�
     ramWarnPercent: 80,
     ramDangerPercent: 90,
     idlePortMinutes: 20,
+    agentParkedMinutes: 180,
     notify: { ramLow: true, claudeWaiting: true, heavyOverlap: true, agentDone: true },
     dependencyDirs: [
       'node_modules',
@@ -97,6 +98,16 @@ test('안 쓰는 포트 기준은 1~1440분', () => {
   expect(normalizeSettings({ idlePortMinutes: 5000 }).idlePortMinutes).toBe(1440)
   expect(normalizeSettings({ idlePortMinutes: 30.4 }).idlePortMinutes).toBe(30)
   expect(normalizeSettings({ idlePortMinutes: Infinity }).idlePortMinutes).toBe(20)
+})
+
+test('오래 쉬는 세션 기준은 10~10080분, 기본 180분', () => {
+  expect(DEFAULT_SETTINGS.agentParkedMinutes).toBe(180)
+  expect(normalizeSettings({}).agentParkedMinutes).toBe(180)
+  expect(normalizeSettings({ agentParkedMinutes: 5 }).agentParkedMinutes).toBe(10)
+  expect(normalizeSettings({ agentParkedMinutes: 20_000 }).agentParkedMinutes).toBe(10080)
+  expect(normalizeSettings({ agentParkedMinutes: 240.4 }).agentParkedMinutes).toBe(240)
+  expect(normalizeSettings({ agentParkedMinutes: '60' }).agentParkedMinutes).toBe(180)
+  expect(normalizeSettings({ agentParkedMinutes: NaN }).agentParkedMinutes).toBe(180)
 })
 
 test('무거운 명령 패턴: 공백 정리·빈 값·중복(대소문자 무시) 제거, 100자·50개 제한', () => {
@@ -232,7 +243,10 @@ test('예전에 저장한 지울 폴더가 예전 기본값(node_modules 하나)
   expect(
     normalizeSettings({ settingsVersion: 2, dependencyDirs: ['node_modules'] }).dependencyDirs
   ).toEqual(['node_modules'])
-  expect(normalizeSettings({}).settingsVersion).toBe(2)
+  expect(
+    normalizeSettings({ settingsVersion: 3, dependencyDirs: ['node_modules'] }).dependencyDirs
+  ).toEqual(['node_modules'])
+  expect(normalizeSettings({}).settingsVersion).toBe(3)
 })
 
 test('숨긴 서버는 "워크트리 경로:포트"(그 워크트리의 그 포트 서버만)도 받는다', () => {

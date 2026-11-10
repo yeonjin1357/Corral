@@ -5,7 +5,15 @@ import {
   WORKING_CPU_PERCENT,
   type CpuMemo
 } from './agents'
-import type { AgentRow, AgentState, ProcessInfo, RawSample, WorktreeInfo } from '../shared/types'
+import type { HookView } from './sessions'
+import type {
+  AgentRow,
+  AgentState,
+  AgentTool,
+  ProcessInfo,
+  RawSample,
+  WorktreeInfo
+} from '../shared/types'
 
 const MB = 1024 * 1024
 
@@ -39,7 +47,11 @@ function run(
     now?: number
     devServerPids?: number[]
     worktrees?: [number, WorktreeInfo][]
-    hookStates?: (root: string, tool: 'claude' | 'codex') => AgentState | null
+    hookFor?: (agent: {
+      key: string
+      worktreeRoot: string | null
+      tool: AgentTool
+    }) => HookView | null
   } = {}
 ): ReturnType<typeof buildAgents> {
   const sample: RawSample = { processes, tcp: [] }
@@ -49,9 +61,16 @@ function run(
     devServerPids: new Set(opts.devServerPids ?? []),
     previousCpu: opts.previousCpu ?? new Map(),
     now: opts.now ?? 10_000,
-    hookStates: opts.hookStates
+    hookFor: opts.hookFor
   })
 }
+
+const hookView = (state: AgentState): HookView => ({
+  state,
+  since: 1,
+  lastActivityAt: 1,
+  sessionId: 's1'
+})
 
 describe('에이전트 행', () => {
   test('최상위 에이전트만 행이 되고, 하위 에이전트(같은 세션)는 행이 아니다', () => {
@@ -90,12 +109,35 @@ describe('에이전트 행', () => {
     )
     expect(agents[0].memoryBytes).toBe(430 * MB)
     expect(agents[0].descendantCount).toBe(2)
+    // 마지막 활동·오래 쉬는 세션은 수집기가 채운다.
+    expect(agents[0]).toMatchObject({ lastActiveAt: null, parked: false })
     // 상세 패널의 프로세스 목록도 같은 프로세스(자기 포함)로 메모리와 맞는다.
     expect(agents[0].processes.map((p) => [p.name, p.count, p.memoryBytes / MB])).toEqual([
       ['claude.exe', 1, 400],
       ['node.exe', 1, 20],
       ['bash.exe', 1, 10]
     ])
+  })
+
+  test('members: 에이전트 키 → 자기와 센 자손 pid(개발 서버와 그 아래는 빼고)', () => {
+    const { members } = run(
+      [
+        proc(5000, 1, 'claude.exe', { startedAt: 50 }),
+        proc(5100, 5000, 'node.exe'),
+        proc(5101, 5100, 'esbuild.exe'),
+        proc(5200, 5000, 'bash.exe'),
+        proc(5201, 5200, 'node.exe'),
+        proc(6000, 1, 'codex.exe', { startedAt: null }),
+        proc(7000, 1, 'python.exe')
+      ],
+      { devServerPids: [5100, 5101] }
+    )
+    expect(members).toEqual(
+      new Map([
+        ['5000:50', [5000, 5200, 5201]],
+        ['6000:', [6000]]
+      ])
+    )
   })
 
   test('커밋은 메모리와 같은 프로세스(자기 + 개발 서버가 아닌 자손)의 합, 하나도 모르면 null', () => {
@@ -270,7 +312,7 @@ describe('CPU 로 작업 중 판단', () => {
 })
 
 describe('훅 상태', () => {
-  test('Claude 행은 워크트리의 훅 상태가 있으면 그것이 우선이고, CPU 값은 그대로 보인다', () => {
+  test('Claude 행은 그 프로세스의 훅 상태가 있으면 그것이 우선이고, CPU 값은 그대로 보인다', () => {
     const first = run([proc(5000, 1, 'claude.exe', { cpuMs: 1000 })], {
       now: 10_000,
       worktrees: [[5000, W1]]
@@ -279,7 +321,7 @@ describe('훅 상태', () => {
       now: 15_000,
       previousCpu: first.cpu,
       worktrees: [[5000, W1]],
-      hookStates: (root) => (root === W1.root ? 'waiting' : null)
+      hookFor: (a) => (a.worktreeRoot === W1.root ? hookView('waiting') : null)
     })
     expect(second.agents[0]).toMatchObject({
       state: 'waiting',
@@ -288,14 +330,35 @@ describe('훅 상태', () => {
     })
   })
 
-  test('훅 상태가 없거나 워크트리를 모르면 CPU 판단', () => {
-    const hookStates = vi.fn((): AgentState | null => null)
-    const { agents } = run([proc(5000, 1, 'claude.exe'), proc(5001, 1, 'claude.exe')], {
-      worktrees: [[5000, W1]],
-      hookStates
-    })
+  test('훅 상태는 에이전트마다(프로세스 키·워크트리·도구로) 묻고, 없으면 CPU 판단', () => {
+    const hookFor = vi.fn((): HookView | null => null)
+    const { agents } = run(
+      [proc(5000, 1, 'claude.exe'), proc(5001, 1, 'claude.exe', { startedAt: 200 })],
+      { worktrees: [[5000, W1]], hookFor }
+    )
     expect(agents.map((a) => a.stateSource)).toEqual(['cpu', 'cpu'])
-    expect(hookStates).toHaveBeenCalledTimes(1)
+    // 워크트리를 몰라도 묻는다(그 프로세스와 짝지은 세션이 있을 수 있다).
+    expect(hookFor.mock.calls).toEqual([
+      [{ key: '5000:100', worktreeRoot: W1.root, tool: 'claude' }],
+      [{ key: '5001:200', worktreeRoot: null, tool: 'claude' }]
+    ])
+  })
+
+  test('같은 워크트리의 두 Claude 는 각자 자기 훅 상태를 쓴다', () => {
+    const { agents } = run(
+      [proc(5000, 1, 'claude.exe'), proc(5001, 1, 'claude.exe', { startedAt: 200 })],
+      {
+        worktrees: [
+          [5000, W1],
+          [5001, W1]
+        ],
+        hookFor: (a) => hookView(a.key === '5000:100' ? 'waiting' : 'idle')
+      }
+    )
+    expect(agents.map((a) => [a.pid, a.state])).toEqual([
+      [5000, 'waiting'],
+      [5001, 'idle']
+    ])
   })
 
   test('훅 상태는 도구별: Codex 행은 Codex 훅 상태, Claude 행은 Claude 훅 상태', () => {
@@ -306,7 +369,7 @@ describe('훅 상태', () => {
           [8200, W1],
           [5000, W1]
         ],
-        hookStates: (_root, tool) => (tool === 'codex' ? 'waiting' : null)
+        hookFor: (a) => (a.tool === 'codex' ? hookView('waiting') : null)
       }
     )
     expect(agents.find((a) => a.tool === 'codex')).toMatchObject({
@@ -332,6 +395,8 @@ describe('상태 시작 시각(F3)', () => {
     stateSource: 'cpu',
     stateSince: null,
     cpuPercent: 10,
+    lastActiveAt: null,
+    parked: false,
     ...over
   })
 

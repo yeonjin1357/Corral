@@ -239,7 +239,9 @@ describe('작업 공간 한 번에 정리(F2)', () => {
     state: 'idle',
     stateSource: 'hook',
     stateSince: 1,
-    cpuPercent: 0
+    cpuPercent: 0,
+    lastActiveAt: null,
+    parked: false
   }
   const latest =
     (over: Partial<ReturnType<typeof blankSnapshot>> = {}) =>

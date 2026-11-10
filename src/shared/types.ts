@@ -252,6 +252,14 @@ export interface AgentRow {
   stateSince: number | null
   /** 지난 샘플 이후 하위 트리 CPU 사용률(코어 1개 = 100). 모르면 null. */
   cpuPercent: number | null
+  /**
+   * 마지막 활동 시각(G2). 훅은 그 프로세스 세션의 마지막 활동 이벤트(60초 뒤의 idle 알림은 활동이 아니다),
+   * Codex 세션 기록은 마지막 이벤트, CPU 추정은 pitwall 이 마지막으로 작업 중으로 본 시각(본 적 없으면 처음 본 시각).
+   * 수집기가 채우기 전에는 null.
+   */
+  lastActiveAt: number | null
+  /** 오래 쉬는 세션: 쉬는 중·오류·확인 중이고 마지막 활동이 기준 시간(설정 agentParkedMinutes) 이상 전. */
+  parked: boolean
 }
 
 export type ClaudeHookState = 'off' | 'on' | 'partial' | 'error'

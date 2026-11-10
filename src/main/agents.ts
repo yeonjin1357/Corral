@@ -10,6 +10,7 @@ import { commitSum, worktreeFolder } from '../shared/format'
 import { agentKey } from '../shared/keys'
 import { agentToolOf, buildTree, topLevelAgentPids } from './processTree'
 import { summarizeProcesses } from './processSummary'
+import type { HookView } from './sessions'
 
 /** 하위 트리 CPU 사용률이 코어 1개 기준 이 값(%) 이상이면 작업 중으로 본다. */
 export const WORKING_CPU_PERCENT = 2
@@ -120,13 +121,26 @@ export function buildAgents(input: {
   devServerPids: Set<number>
   previousCpu: CpuMemo
   now: number
-  /** 워크트리의 훅 상태(도구별 — Claude 훅·Codex 훅). 없으면 null. */
-  hookStates?: (worktreeRoot: string, tool: AgentTool) => AgentState | null
-}): { agents: AgentRow[]; cpu: CpuMemo } {
+  /**
+   * 그 에이전트 프로세스의 훅 상태(G3a — 그 프로세스와 짝지은 세션, 없으면 그 워크트리의 짝 없는 세션, 도구별).
+   * 워크트리를 모르면 worktreeRoot 는 null. 없으면 null.
+   */
+  hookFor?: (agent: {
+    key: string
+    worktreeRoot: string | null
+    tool: AgentTool
+  }) => HookView | null
+}): {
+  agents: AgentRow[]
+  cpu: CpuMemo
+  /** agentKey → 자기와 센 자손(개발 서버가 아닌 것) pid. 메모리·커밋에 센 프로세스와 같다. */
+  members: Map<string, number[]>
+} {
   const { sample, worktrees, devServerPids, previousCpu, now } = input
   const tree = buildTree(sample.processes)
   const cpu: CpuMemo = new Map()
   const agents: AgentRow[] = []
+  const memberPids = new Map<string, number[]>()
 
   for (const pid of topLevelAgentPids(sample.processes, tree)) {
     const self = tree.byPid.get(pid)
@@ -141,7 +155,10 @@ export function buildAgents(input: {
     const cpuPercent = measureTreeCpu(self, members, previousCpu, now, cpu)
 
     const worktree = worktrees.get(pid) ?? null
-    const hookState = worktree && input.hookStates ? input.hookStates(worktree.root, tool) : null
+    const key = agentKey({ pid, startedAt: self.startedAt })
+    const hook = input.hookFor?.({ key, worktreeRoot: worktree?.root ?? null, tool }) ?? null
+    const pids = members.map((m) => m.pid)
+    memberPids.set(key, pids)
 
     agents.push({
       pid,
@@ -153,11 +170,13 @@ export function buildAgents(input: {
       commitBytes: commitSum(members),
       descendantCount: descendants.length,
       processes: summarizeProcesses(members),
-      state: hookState ?? cpuState(cpuPercent),
-      stateSource: hookState ? 'hook' : 'cpu',
-      // 상태 시작 시각은 이전 상태를 기억하는 수집기(withStateSince)가 채운다.
+      state: hook?.state ?? cpuState(cpuPercent),
+      stateSource: hook ? 'hook' : 'cpu',
+      // 상태 시작 시각·마지막 활동·오래 쉬는 세션은 이전 것을 기억하는 수집기가 채운다.
       stateSince: null,
-      cpuPercent
+      cpuPercent,
+      lastActiveAt: null,
+      parked: false
     })
   }
 
@@ -169,5 +188,5 @@ export function buildAgents(input: {
       a.pid - b.pid
     )
   })
-  return { agents, cpu }
+  return { agents, cpu, members: memberPids }
 }

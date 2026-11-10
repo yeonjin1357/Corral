@@ -66,7 +66,9 @@ function agent(pid: number, state: AgentRow['state'], root = 'C:\\work\\shop-web
     state,
     stateSource: state === 'waiting' ? 'hook' : 'cpu',
     stateSince: null,
-    cpuPercent: 0
+    cpuPercent: 0,
+    lastActiveAt: null,
+    parked: false
   }
 }
 

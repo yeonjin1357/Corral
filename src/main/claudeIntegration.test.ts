@@ -142,6 +142,7 @@ test('끄기: 확인 후 pitwall 훅만 빼고 서버를 닫고 세션을 비운
     state: 'working',
     updatedAt: 1,
     firstSeen: 1,
+    lastActivityAt: 1,
     processKey: null
   })
 

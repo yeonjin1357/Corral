@@ -25,6 +25,8 @@ export interface Settings {
   ramDangerPercent: number
   /** 에이전트 없는 워크트리의 포트가 이 시간 이상 안 쓰이면 정리 후보. */
   idlePortMinutes: number
+  /** 쉬는 에이전트의 마지막 활동이 이 시간 이상 전이면 오래 쉬는 세션(G2). */
+  agentParkedMinutes: number
   /** "명령 이름 [인자…]" — 예: `vue-tsc`, `vite build`. */
   heavyPatterns: string[]
   notify: NotifySettings
@@ -32,7 +34,7 @@ export interface Settings {
   dependencyDirs: string[]
   /**
    * 저장 형식 버전. 2: 지울 폴더 기본값에 빌드 결과 폴더를 더함(그 전에 저장한 기본값 node_modules 하나는
-   * 새 기본값으로 옮긴다). 없으면 그 전 형식.
+   * 새 기본값으로 옮긴다). 3: 오래 쉬는 세션 기준(agentParkedMinutes)을 더함. 없으면 그 전 형식.
    */
   settingsVersion: number
   /** 디스크 정리에서 살펴볼 저장소(에이전트·개발 서버를 본 저장소는 자동으로 기억한다). */
@@ -46,7 +48,9 @@ export interface Settings {
   workspaceAliases: Record<string, string>
 }
 
-export const SETTINGS_VERSION = 2
+export const SETTINGS_VERSION = 3
+/** 지울 폴더 기본값을 새 기본값으로 옮긴 형식 버전(이 버전부터 저장한 목록은 그대로 둔다). */
+const DEPENDENCY_DIRS_MIGRATED_VERSION = 2
 
 export const REFRESH_INTERVALS: Record<RefreshSpeed, { openMs: number; closedMs: number }> = {
   fast: { openMs: 2000, closedMs: 10000 },
@@ -58,6 +62,7 @@ export const SETTINGS_LIMITS = {
   ramWarn: { min: 50, max: 98 },
   ramDangerMax: 99,
   idlePortMinutes: { min: 1, max: 1440 },
+  agentParkedMinutes: { min: 10, max: 10080 },
   heavyPatterns: 50,
   patternLength: 100,
   dependencyDirs: 20,
@@ -76,6 +81,7 @@ export const DEFAULT_SETTINGS: Settings = {
   ramWarnPercent: 80,
   ramDangerPercent: 90,
   idlePortMinutes: 20,
+  agentParkedMinutes: 180,
   heavyPatterns: [
     'tsc',
     'vue-tsc',
@@ -267,7 +273,9 @@ export function normalizeSettings(value: unknown): Settings {
   // 버전 2 전에 저장한 지울 폴더가 그때 기본값(node_modules 하나)이면 새 기본값으로 옮긴다. git 이 무시하고
   // 추적하는 파일이 없는 폴더만 지우므로 빌드 결과 폴더가 더해져도 소스를 지우지 않는다.
   const oldDefaultDirs =
-    !(typeof v.settingsVersion === 'number' && v.settingsVersion >= SETTINGS_VERSION) &&
+    !(
+      typeof v.settingsVersion === 'number' && v.settingsVersion >= DEPENDENCY_DIRS_MIGRATED_VERSION
+    ) &&
     Array.isArray(v.dependencyDirs) &&
     v.dependencyDirs.length === 1 &&
     typeof v.dependencyDirs[0] === 'string' &&
@@ -288,6 +296,12 @@ export function normalizeSettings(value: unknown): Settings {
       SETTINGS_LIMITS.idlePortMinutes.min,
       SETTINGS_LIMITS.idlePortMinutes.max,
       d.idlePortMinutes
+    ),
+    agentParkedMinutes: int(
+      v.agentParkedMinutes,
+      SETTINGS_LIMITS.agentParkedMinutes.min,
+      SETTINGS_LIMITS.agentParkedMinutes.max,
+      d.agentParkedMinutes
     ),
     heavyPatterns: list(
       v.heavyPatterns,

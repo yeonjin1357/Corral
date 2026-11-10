@@ -26,7 +26,11 @@ describe('rolloutState', () => {
         event('task_complete', '2026-11-09T01:01:00.000Z'),
         event('task_started', '2026-11-09T01:05:00.000Z')
       ])
-    ).toEqual({ state: 'working', since: Date.parse('2026-11-09T01:05:00.000Z') })
+    ).toEqual({
+      state: 'working',
+      since: Date.parse('2026-11-09T01:05:00.000Z'),
+      lastEventAt: Date.parse('2026-11-09T01:05:00.000Z')
+    })
   })
 
   test('task_complete 면 쉬는 중, error 가 있으면 오류', () => {
@@ -35,13 +39,21 @@ describe('rolloutState', () => {
         event('task_started', '2026-11-09T01:00:00.000Z'),
         event('task_complete', '2026-11-09T01:02:00.000Z', { last_agent_message: 'done' })
       ])
-    ).toEqual({ state: 'idle', since: Date.parse('2026-11-09T01:02:00.000Z') })
+    ).toEqual({
+      state: 'idle',
+      since: Date.parse('2026-11-09T01:02:00.000Z'),
+      lastEventAt: Date.parse('2026-11-09T01:02:00.000Z')
+    })
     expect(
       rolloutState([
         event('task_started', '2026-11-09T01:00:00.000Z'),
         event('task_complete', '2026-11-09T01:02:00.000Z', { error: { message: 'quota' } })
       ])
-    ).toEqual({ state: 'error', since: Date.parse('2026-11-09T01:02:00.000Z') })
+    ).toEqual({
+      state: 'error',
+      since: Date.parse('2026-11-09T01:02:00.000Z'),
+      lastEventAt: Date.parse('2026-11-09T01:02:00.000Z')
+    })
   })
 
   test('turn_aborted 는 쉬는 중', () => {
@@ -50,7 +62,11 @@ describe('rolloutState', () => {
         event('task_started', '2026-11-09T01:00:00.000Z'),
         event('turn_aborted', '2026-11-09T01:00:30.000Z', { reason: 'interrupted' })
       ])
-    ).toEqual({ state: 'idle', since: Date.parse('2026-11-09T01:00:30.000Z') })
+    ).toEqual({
+      state: 'idle',
+      since: Date.parse('2026-11-09T01:00:30.000Z'),
+      lastEventAt: Date.parse('2026-11-09T01:00:30.000Z')
+    })
   })
 
   test('대화 내용 필드는 읽은 결과에 남지 않고, 대화 속 글자는 이벤트로 치지 않는다', () => {
@@ -69,8 +85,30 @@ describe('rolloutState', () => {
         '2026-11-09T01:00:03.000Z'
       )
     ])
-    expect(r).toEqual({ state: 'idle', since: Date.parse('2026-11-09T01:00:02.000Z') })
+    expect(r).toEqual({
+      state: 'idle',
+      since: Date.parse('2026-11-09T01:00:02.000Z'),
+      lastEventAt: Date.parse('2026-11-09T01:00:02.000Z')
+    })
     expect(JSON.stringify(r)).not.toContain('비밀')
+  })
+
+  test('lastEventAt 은 읽은 이벤트 가운데 가장 늦은 시각(앞서 읽은 상태에서 이어 간다)', () => {
+    // 줄 순서와 시각이 어긋나도(늦게 쓰인 이른 이벤트) 가장 늦은 시각을 쓴다.
+    const first = rolloutState([
+      event('task_started', '2026-11-09T01:05:00.000Z'),
+      event('task_complete', '2026-11-09T01:04:00.000Z')
+    ])
+    expect(first).toEqual({
+      state: 'idle',
+      since: Date.parse('2026-11-09T01:04:00.000Z'),
+      lastEventAt: Date.parse('2026-11-09T01:05:00.000Z')
+    })
+    // 덧붙은 줄에 이벤트가 없으면 그대로, 있으면 새 시각.
+    expect(rolloutState([line('response_item', { type: 'message' }, 'x')], first)).toEqual(first)
+    expect(
+      rolloutState([event('task_started', '2026-11-09T02:00:00.000Z')], first)?.lastEventAt
+    ).toBe(Date.parse('2026-11-09T02:00:00.000Z'))
   })
 
   test('근거가 없거나 깨진 줄뿐이면 null', () => {
@@ -155,7 +193,8 @@ describe('기록 파일 찾기·읽기', () => {
     ])
     expect(await readRolloutState(path)).toEqual({
       state: 'idle',
-      since: Date.parse('2026-11-09T01:09:00.000Z')
+      since: Date.parse('2026-11-09T01:09:00.000Z'),
+      lastEventAt: Date.parse('2026-11-09T01:09:00.000Z')
     })
     expect(await readRolloutState(join(home, 'none.jsonl'))).toBeNull()
   })
@@ -170,7 +209,8 @@ describe('기록 파일 찾기·읽기', () => {
     ])
     expect(await reader.stateFor(agent, start.getTime() + 2 * MIN)).toEqual({
       state: 'working',
-      since: Date.parse('2026-11-09T01:01:05.000Z')
+      since: Date.parse('2026-11-09T01:01:05.000Z'),
+      lastEventAt: Date.parse('2026-11-09T01:01:05.000Z')
     })
   })
 
@@ -232,7 +272,8 @@ describe('검토 뒤 보강(긴 턴·다른 프로세스의 기록)', () => {
     const agent = { cwd: CWD, startedAt: start.getTime() }
     expect(await reader.stateFor(agent, start.getTime() + 5 * MIN)).toEqual({
       state: 'working',
-      since: Date.parse('2026-11-09T01:00:00.000Z')
+      since: Date.parse('2026-11-09T01:00:00.000Z'),
+      lastEventAt: Date.parse('2026-11-09T01:00:00.000Z')
     })
     await appendFile(
       path,
@@ -240,7 +281,8 @@ describe('검토 뒤 보강(긴 턴·다른 프로세스의 기록)', () => {
     )
     expect(await reader.stateFor(agent, start.getTime() + 25 * MIN)).toEqual({
       state: 'idle',
-      since: Date.parse('2026-11-09T01:20:00.000Z')
+      since: Date.parse('2026-11-09T01:20:00.000Z'),
+      lastEventAt: Date.parse('2026-11-09T01:20:00.000Z')
     })
   })
 
@@ -257,7 +299,8 @@ describe('검토 뒤 보강(긴 턴·다른 프로세스의 기록)', () => {
     const agent = { cwd: CWD, startedAt: start.getTime(), transcriptPath: own }
     expect(await reader.stateFor(agent, start.getTime() + 5 * MIN)).toEqual({
       state: 'working',
-      since: Date.parse('2026-11-09T02:01:00.000Z')
+      since: Date.parse('2026-11-09T02:01:00.000Z'),
+      lastEventAt: Date.parse('2026-11-09T02:01:00.000Z')
     })
   })
 

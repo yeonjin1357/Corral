@@ -1,16 +1,27 @@
 import {
   applyHookEvent,
   codexTranscriptFor,
+  hookViewForAgent,
   reconcileSessions,
   SESSION_EXPIRE_MS,
-  hookStateForWorktree,
-  stateForWorktree,
+  type ClaudeSession,
+  type HookView,
   type LiveClaude,
   type Sessions
 } from './sessions'
-import type { AgentState } from '../shared/types'
+import type { AgentState, AgentTool } from '../shared/types'
 
 const CWD = 'C:\\work\\shop-web'
+
+/** 아직 어느 세션과도 짝짓지 않은 에이전트(그 워크트리의 짝 없는 세션을 본다). */
+function freeView(
+  sessions: Sessions,
+  rootKey: string,
+  rootOfCwd: (cwd: string) => string | null,
+  tool: AgentTool = 'claude'
+): HookView | null {
+  return hookViewForAgent(sessions, { key: 'free:0', rootKey, tool }, rootOfCwd)
+}
 
 function ev(name: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
   return { session_id: 's1', cwd: CWD, hook_event_name: name, ...extra }
@@ -129,8 +140,45 @@ describe('훅 이벤트 → 세션 상태', () => {
       firstSeen: 1000,
       processKey: null,
       stateSince: 2000,
+      lastActivityAt: 2000,
       stoppedAt: null
     })
+  })
+
+  test('idle_prompt 알림은 활동 시각을 바꾸지 않는다', () => {
+    const sessions: Sessions = new Map()
+    applyHookEvent(sessions, ev('UserPromptSubmit'), 1000)
+    applyHookEvent(sessions, ev('Stop'), 5000)
+    // 응답이 끝나고 약 60초 뒤에 오는 알림은 사용자가 한 일이 아니다.
+    applyHookEvent(sessions, ev('Notification', { notification_type: 'idle_prompt' }), 65_000)
+    applyHookEvent(sessions, ev('Notification', { notification_type: 'auth_success' }), 70_000)
+    applyHookEvent(sessions, ev('PreCompact'), 75_000)
+    expect(sessions.get('s1')).toMatchObject({ state: 'idle', lastActivityAt: 5000 })
+    // 권한·질문 알림은 활동이다(사용자에게 답을 기다림).
+    applyHookEvent(sessions, ev('Notification', { notification_type: 'permission_prompt' }), 80_000)
+    expect(sessions.get('s1')?.lastActivityAt).toBe(80_000)
+    applyHookEvent(
+      sessions,
+      ev('Notification', { notification_type: 'elicitation_dialog' }),
+      90_000
+    )
+    expect(sessions.get('s1')?.lastActivityAt).toBe(90_000)
+  })
+
+  test.each([
+    'SessionStart',
+    'UserPromptSubmit',
+    'PreToolUse',
+    'PostToolUse',
+    'PermissionRequest',
+    'Stop',
+    'StopFailure',
+    'Interrupt'
+  ])('%s 는 활동 시각을 새로 한다', (name) => {
+    const sessions: Sessions = new Map()
+    applyHookEvent(sessions, ev('SessionStart'), 1000)
+    applyHookEvent(sessions, ev(name, { tool_name: 'Bash' }), 9000)
+    expect(sessions.get('s1')?.lastActivityAt).toBe(9000)
   })
 
   test.each<[string, unknown]>([
@@ -174,13 +222,42 @@ describe('세션 정리(살아 있는 Claude 프로세스와 짝짓기)', () => 
     applyHookEvent(sessions, { ...ev(name), session_id: id }, at)
   }
 
-  test('6시간 동안 소식이 없으면 버린다', () => {
+  test('짝 없는 세션은 6시간 동안 소식이 없으면 버린다', () => {
     const sessions: Sessions = new Map()
     start(sessions, 's1', 1000)
     const opts = { sampledAt: 500, live: [claude('p1')], rootOfCwd }
     reconcileSessions(sessions, { ...opts, now: 1000 + SESSION_EXPIRE_MS - 1 })
     expect(sessions.size).toBe(1)
     reconcileSessions(sessions, { ...opts, now: 1000 + SESSION_EXPIRE_MS })
+    expect(sessions.size).toBe(0)
+  })
+
+  test('살아 있는 프로세스와 짝지은 세션은 6시간이 지나도 남고, 짝 없는 세션은 만료된다', () => {
+    const sessions: Sessions = new Map()
+    start(sessions, 'parked', 1000, 'Stop')
+    reconcileSessions(sessions, {
+      now: 3000,
+      sampledAt: 2000,
+      live: [claude('p1', 900)],
+      rootOfCwd
+    })
+    expect(sessions.get('parked')?.processKey).toBe('p1')
+    // 어느 워크트리인지 모르는 세션은 짝지을 수 없어 짝 없이 남는다.
+    applyHookEvent(sessions, { ...ev('SessionStart'), session_id: 'stray', cwd: 'C:\\tmp' }, 3000)
+
+    const later = 3000 + SESSION_EXPIRE_MS
+    reconcileSessions(sessions, {
+      now: later,
+      sampledAt: later,
+      live: [claude('p1', 900)],
+      rootOfCwd
+    })
+    // 며칠째 쉬는 세션의 마지막 활동을 잃지 않는다.
+    expect([...sessions.keys()]).toEqual(['parked'])
+    expect(sessions.get('parked')).toMatchObject({ state: 'idle', lastActivityAt: 1000 })
+
+    // 짝지은 프로세스가 꺼지면 그때 버린다(지금 규칙 그대로).
+    reconcileSessions(sessions, { now: later + 1, sampledAt: later + 1, live: [], rootOfCwd })
     expect(sessions.size).toBe(0)
   })
 
@@ -282,7 +359,7 @@ describe('세션 정리(살아 있는 Claude 프로세스와 짝짓기)', () => 
   })
 })
 
-describe('워크트리 상태', () => {
+describe('짝 없는 세션은 워크트리로 붙인다', () => {
   const rootOfCwd = (cwd: string): string | null =>
     cwd.startsWith(CWD) ? CWD : cwd.startsWith('C:\\work\\api') ? 'C:\\work\\api' : null
 
@@ -290,7 +367,7 @@ describe('워크트리 상태', () => {
     return new Map(
       entries.map(([id, cwd, state]) => [
         id,
-        { id, cwd, state, updatedAt: 1, firstSeen: 1, processKey: null }
+        { id, cwd, state, updatedAt: 1, firstSeen: 1, lastActivityAt: 1, processKey: null }
       ])
     )
   }
@@ -303,7 +380,7 @@ describe('워크트리 상태', () => {
           .slice(0, i + 1)
           .map((state, j): [string, string, AgentState] => [`s${j}`, CWD, state])
       )
-      expect(stateForWorktree(s, CWD, rootOfCwd)).toBe(order[i])
+      expect(freeView(s, CWD, rootOfCwd)?.state).toBe(order[i])
     }
   })
 
@@ -312,8 +389,141 @@ describe('워크트리 상태', () => {
       ['a', CWD + '\\packages\\web', 'working'],
       ['b', 'C:\\work\\api', 'waiting']
     )
-    expect(stateForWorktree(s, CWD, rootOfCwd)).toBe('working')
-    expect(stateForWorktree(s, 'C:\\work\\none', rootOfCwd)).toBeNull()
+    expect(freeView(s, CWD, rootOfCwd)).toMatchObject({ state: 'working', sessionId: 'a' })
+    expect(freeView(s, 'C:\\work\\none', rootOfCwd)).toBeNull()
+  })
+})
+
+describe('프로세스 단위 상태(G3a)', () => {
+  const ROOT = CWD.toLowerCase()
+  const rootOfCwd = (cwd: string): string | null =>
+    cwd.toLowerCase().startsWith(ROOT) ? ROOT : null
+  const claude = (key: string, startedAt: number): LiveClaude => ({ key, rootKey: ROOT, startedAt })
+  const agent = (
+    key: string,
+    rootKey: string | null = ROOT,
+    tool: AgentTool = 'claude'
+  ): Parameters<typeof hookViewForAgent>[1] => ({ key, rootKey, tool })
+  const start = (sessions: Sessions, id: string, at: number, name = 'SessionStart'): void => {
+    applyHookEvent(sessions, { ...ev(name), session_id: id }, at)
+  }
+
+  test('같은 워크트리의 두 프로세스는 각자 짝지은 세션의 상태를 본다', () => {
+    const sessions: Sessions = new Map()
+    start(sessions, 'a', 1000, 'PermissionRequest')
+    start(sessions, 'b', 1100, 'Stop')
+    reconcileSessions(sessions, {
+      now: 3000,
+      sampledAt: 2000,
+      live: [claude('p1', 900), claude('p2', 1050)],
+      rootOfCwd
+    })
+    expect(sessions.get('a')?.processKey).toBe('p1')
+    expect(sessions.get('b')?.processKey).toBe('p2')
+    expect(hookViewForAgent(sessions, agent('p1'), rootOfCwd)).toEqual({
+      state: 'waiting',
+      since: 1000,
+      lastActivityAt: 1000,
+      sessionId: 'a'
+    })
+    expect(hookViewForAgent(sessions, agent('p2'), rootOfCwd)).toEqual({
+      state: 'idle',
+      since: 1100,
+      lastActivityAt: 1100,
+      sessionId: 'b'
+    })
+  })
+
+  test('짝 없는 새 세션은 그 워크트리의 짝 없는 에이전트에만 보인다', () => {
+    const sessions: Sessions = new Map()
+    start(sessions, 'a', 1000, 'Stop')
+    reconcileSessions(sessions, {
+      now: 3000,
+      sampledAt: 2000,
+      live: [claude('p1', 900)],
+      rootOfCwd
+    })
+    // 다음 샘플 전에 같은 폴더에서 새 Claude(p2)가 일을 시작했다(아직 짝 없음).
+    start(sessions, 'new', 4000, 'UserPromptSubmit')
+    expect(hookViewForAgent(sessions, agent('p1'), rootOfCwd)).toMatchObject({
+      state: 'idle',
+      sessionId: 'a'
+    })
+    expect(hookViewForAgent(sessions, agent('p2'), rootOfCwd)).toMatchObject({
+      state: 'working',
+      sessionId: 'new'
+    })
+    // 다른 워크트리·워크트리를 모르는 에이전트·다른 도구에는 붙이지 않는다.
+    expect(hookViewForAgent(sessions, agent('p3', 'c:\\work\\api'), rootOfCwd)).toBeNull()
+    expect(hookViewForAgent(sessions, agent('p4', null), rootOfCwd)).toBeNull()
+    expect(hookViewForAgent(sessions, agent('p5', ROOT, 'codex'), rootOfCwd)).toBeNull()
+  })
+
+  test('/clear 로 세션이 바뀌면 그 프로세스는 새 세션의 상태를 본다', () => {
+    const sessions: Sessions = new Map()
+    start(sessions, 'old', 1000, 'PermissionRequest')
+    start(sessions, 'other', 1100, 'UserPromptSubmit')
+    reconcileSessions(sessions, {
+      now: 3000,
+      sampledAt: 2000,
+      live: [claude('p1', 900), claude('p2', 1050)],
+      rootOfCwd
+    })
+    // p1 에서 /clear: SessionEnd 없이 새 세션이 시작된다. p2 는 그 뒤에도 계속 일한다.
+    start(sessions, 'cleared', 4000)
+    applyHookEvent(sessions, { ...ev('PostToolUse'), session_id: 'other' }, 5000)
+    reconcileSessions(sessions, {
+      now: 9000,
+      sampledAt: 8000,
+      live: [claude('p1', 900), claude('p2', 1050)],
+      rootOfCwd
+    })
+    expect(hookViewForAgent(sessions, agent('p1'), rootOfCwd)).toMatchObject({
+      state: 'idle',
+      since: 4000,
+      sessionId: 'cleared'
+    })
+    expect(hookViewForAgent(sessions, agent('p2'), rootOfCwd)).toMatchObject({
+      state: 'working',
+      sessionId: 'other'
+    })
+  })
+
+  test('한 프로세스에 짝지은 세션이 여럿이면 권한 대기가 먼저이고, 활동 시각은 가장 최근', () => {
+    const session = (
+      id: string,
+      state: AgentState,
+      since: number,
+      lastActivityAt: number,
+      processKey: string | null
+    ): [string, ClaudeSession] => [
+      id,
+      {
+        id,
+        cwd: CWD,
+        state,
+        updatedAt: lastActivityAt,
+        firstSeen: 1,
+        stateSince: since,
+        lastActivityAt,
+        processKey
+      }
+    ]
+    const sessions: Sessions = new Map([
+      session('idle', 'idle', 100, 9000, 'p1'),
+      session('waiting', 'waiting', 500, 600, 'p1'),
+      session('waiting-old', 'waiting', 300, 400, 'p1'),
+      // 다른 프로세스와 짝지은 세션은 쓰지 않는다.
+      session('mine-not', 'working', 1, 99_000, 'p2'),
+      // 짝지은 세션이 있으면 짝 없는 세션은 보지 않는다.
+      session('loose', 'working', 1, 99_000, null)
+    ])
+    expect(hookViewForAgent(sessions, agent('p1'), rootOfCwd)).toEqual({
+      state: 'waiting',
+      since: 300,
+      lastActivityAt: 9000,
+      sessionId: 'waiting-old'
+    })
   })
 })
 
@@ -323,11 +533,11 @@ describe('상태 시작 시각(F3)', () => {
     const root = (cwd: string): string | null => (cwd.startsWith(CWD) ? CWD : null)
     applyHookEvent(sessions, ev('UserPromptSubmit'), 1000)
     applyHookEvent(sessions, ev('PostToolUse', { tool_name: 'Bash' }), 2000)
-    expect(hookStateForWorktree(sessions, CWD, root)).toEqual({ state: 'working', since: 1000 })
+    expect(freeView(sessions, CWD, root)).toMatchObject({ state: 'working', since: 1000 })
     applyHookEvent(sessions, ev('Stop'), 9000)
-    expect(hookStateForWorktree(sessions, CWD, root)).toEqual({ state: 'idle', since: 9000 })
+    expect(freeView(sessions, CWD, root)).toMatchObject({ state: 'idle', since: 9000 })
     applyHookEvent(sessions, ev('Notification', { notification_type: 'idle_prompt' }), 70_000)
-    expect(hookStateForWorktree(sessions, CWD, root)).toEqual({ state: 'idle', since: 9000 })
+    expect(freeView(sessions, CWD, root)).toMatchObject({ state: 'idle', since: 9000 })
   })
 
   test('같은 워크트리에 같은 상태 세션이 여럿이면 가장 오래 이어진 시각', () => {
@@ -335,8 +545,12 @@ describe('상태 시작 시각(F3)', () => {
     const root = (cwd: string): string | null => (cwd.startsWith(CWD) ? CWD : null)
     applyHookEvent(sessions, { ...ev('UserPromptSubmit'), session_id: 'a' }, 5000)
     applyHookEvent(sessions, { ...ev('UserPromptSubmit'), session_id: 'b' }, 3000)
-    expect(hookStateForWorktree(sessions, CWD, root)).toEqual({ state: 'working', since: 3000 })
-    expect(stateForWorktree(sessions, CWD, root)).toBe('working')
+    expect(freeView(sessions, CWD, root)).toEqual({
+      state: 'working',
+      since: 3000,
+      lastActivityAt: 5000,
+      sessionId: 'b'
+    })
   })
 })
 
@@ -351,7 +565,7 @@ describe('Codex 훅 세션(F7)', () => {
 
   test('Codex 훅 이벤트로 작업 중·권한 대기·쉬는 중', () => {
     const sessions: Sessions = new Map()
-    const state = (): AgentState | null => stateForWorktree(sessions, CWD, root, 'codex')
+    const state = (): AgentState | null => freeView(sessions, CWD, root, 'codex')?.state ?? null
     applyHookEvent(sessions, codexEv('SessionStart'), 1000, 'codex')
     expect(state()).toBe('idle')
     applyHookEvent(sessions, codexEv('UserPromptSubmit'), 2000, 'codex')
@@ -366,9 +580,11 @@ describe('Codex 훅 세션(F7)', () => {
     expect(state()).toBe('idle')
     applyHookEvent(sessions, codexEv('UserPromptSubmit'), 7000, 'codex')
     applyHookEvent(sessions, codexEv('Stop'), 8000, 'codex')
-    expect(hookStateForWorktree(sessions, CWD, root, 'codex')).toEqual({
+    expect(freeView(sessions, CWD, root, 'codex')).toEqual({
       state: 'idle',
-      since: 8000
+      since: 8000,
+      lastActivityAt: 8000,
+      sessionId: 'c1'
     })
   })
 
@@ -376,9 +592,9 @@ describe('Codex 훅 세션(F7)', () => {
     const sessions: Sessions = new Map()
     applyHookEvent(sessions, codexEv('PermissionRequest'), 1000, 'codex')
     applyHookEvent(sessions, ev('UserPromptSubmit'), 1000)
-    expect(stateForWorktree(sessions, CWD, root)).toBe('working')
-    expect(stateForWorktree(sessions, CWD, root, 'claude')).toBe('working')
-    expect(stateForWorktree(sessions, CWD, root, 'codex')).toBe('waiting')
+    expect(freeView(sessions, CWD, root)?.state).toBe('working')
+    expect(freeView(sessions, CWD, root, 'claude')?.state).toBe('working')
+    expect(freeView(sessions, CWD, root, 'codex')?.state).toBe('waiting')
   })
 
   test('Codex 세션은 같은 워크트리의 Codex 프로세스와만 짝짓는다', () => {

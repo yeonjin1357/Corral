@@ -51,6 +51,8 @@ export function agentRow(over: Partial<AgentRow> = {}): AgentRow {
     stateSource: 'hook',
     stateSince: null,
     cpuPercent: 12.5,
+    lastActiveAt: null,
+    parked: false,
     ...over
   }
 }

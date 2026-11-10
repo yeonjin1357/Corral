@@ -44,7 +44,9 @@ function agent(worktree: WorktreeInfo | null, tool: AgentRow['tool'] = 'claude')
     state: 'idle',
     stateSource: 'cpu',
     stateSince: null,
-    cpuPercent: 0
+    cpuPercent: 0,
+    lastActiveAt: null,
+    parked: false
   }
 }
 

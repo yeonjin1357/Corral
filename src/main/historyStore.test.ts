@@ -22,7 +22,8 @@ function file(savedAt: number): HistoryFile {
     ram: [{ t: savedAt - MIN, value: 71.5 }],
     servers: { 'server:4100:200': [{ t: savedAt - MIN, bytes: 1024 }] },
     serverMemo: { 'server:4100:200': { state: 'idle', since: savedAt - 15 * MIN } },
-    agentStates: { '5000:100': { state: 'working', since: savedAt - 3 * MIN } }
+    agentStates: { '5000:100': { state: 'working', since: savedAt - 3 * MIN } },
+    agentSeen: { '5000:100': { firstSeen: savedAt - 30 * MIN, lastWorking: savedAt - 3 * MIN } }
   }
 }
 
@@ -34,7 +35,8 @@ test('10분 안에 다시 켜면 정리 판단 기억을 이어 쓴다', async (
     ram: saved.ram,
     servers: saved.servers,
     serverMemo: saved.serverMemo,
-    agentStates: saved.agentStates
+    agentStates: saved.agentStates,
+    agentSeen: saved.agentSeen
   })
 })
 
@@ -46,7 +48,34 @@ test('10분이 넘으면 판단 기억은 버리고 RAM·서버 메모리 기록
     ram: saved.ram,
     servers: saved.servers,
     serverMemo: null,
-    agentStates: null
+    agentStates: null,
+    agentSeen: null
+  })
+})
+
+test('에이전트를 처음 본 기록(agentSeen)이 없는 파일(예전 저장)도 읽고, 모양이 틀린 항목은 버린다', async () => {
+  const older = file(100 * MIN)
+  delete older.agentSeen
+  await writeFile(path, JSON.stringify(older))
+  expect((await loadHistory(path, 101 * MIN))?.agentSeen).toEqual({})
+
+  await writeFile(
+    path,
+    JSON.stringify({
+      ...file(100 * MIN),
+      agentSeen: {
+        'a:1': { firstSeen: 10 * MIN, lastWorking: null },
+        'b:2': { firstSeen: 10 * MIN, lastWorking: 20 * MIN, extra: 'x' },
+        'c:3': { firstSeen: 'x', lastWorking: null },
+        'd:4': { firstSeen: 10 * MIN, lastWorking: 'x' },
+        'e:5': { firstSeen: 10 * MIN },
+        'f:6': null
+      }
+    })
+  )
+  expect((await loadHistory(path, 101 * MIN))?.agentSeen).toStrictEqual({
+    'a:1': { firstSeen: 10 * MIN, lastWorking: null },
+    'b:2': { firstSeen: 10 * MIN, lastWorking: 20 * MIN }
   })
 })
 

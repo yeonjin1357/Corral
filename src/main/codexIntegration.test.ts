@@ -6,7 +6,7 @@ import { createCodexIntegration, type CodexIntegrationDeps } from './codexIntegr
 import { createClaudeIntegration } from './claudeIntegration'
 import { createHookHub } from './hookHub'
 import { loadConfig, pickFreePort } from './config'
-import { applyHookEvent, stateForWorktree, type Sessions } from './sessions'
+import { applyHookEvent, hookViewForAgent, type Sessions } from './sessions'
 import type { KillConfirm } from './kill'
 
 let userData: string
@@ -90,7 +90,10 @@ test('켜기: 확인 창 → hooks.json 에 더함 → /hooks 승인 안내 → 
   })
   expect(await post(hook!.port, `/pitwall-hook/codex?t=${hook!.token}`, body)).toBe(204)
   const root = (cwd: string): string | null => cwd
-  expect(stateForWorktree(sessions, 'C:\\work\\shop-web', root, 'codex')).toBe('waiting')
+  expect(
+    hookViewForAgent(sessions, { key: '1:1', rootKey: 'C:\\work\\shop-web', tool: 'codex' }, root)
+      ?.state
+  ).toBe('waiting')
   await deps.hub.stop()
 })
 

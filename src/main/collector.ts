@@ -1,7 +1,6 @@
 import { hiddenMatches } from '../shared/settings'
 import type {
   AgentRow,
-  AgentState,
   AgentTool,
   ClaudeHookStatus,
   CodexHookStatus,
@@ -23,19 +22,21 @@ import {
   type AgentStateMemo,
   type CpuMemo
 } from './agents'
+import { isParked, lastActiveOf, trackSeen, type SeenMemo } from './activity'
 import { activityOf, judgeServers, type ServerMemo } from './judge'
 import { agentToolOf, topLevelAgentPids } from './processTree'
 import {
   codexTranscriptFor,
-  hookStateForWorktree,
+  hookViewForAgent,
   reconcileSessions,
+  type HookView,
   type LiveClaude,
   type Sessions
 } from './sessions'
 import { buildSnapshot, pidsForWorktreeLookup } from './snapshot'
 import { createServerHistory, type ServerHistoryData } from './serverHistory'
 import { cwdKey, type RolloutState } from './codexRollout'
-import type { AgentStateData, ServerMemoData } from './historyStore'
+import type { AgentSeenData, AgentStateData, ServerMemoData } from './historyStore'
 import { agentKey, selectionKey } from '../shared/keys'
 import { normalizeCandidate, selfWorkspace } from './collect/worktree'
 
@@ -44,6 +45,8 @@ export interface CollectOptions {
   thresholds: { ramWarnPercent: number; ramDangerPercent: number }
   /** 에이전트 없는 워크트리의 포트가 이 시간 이상 안 쓰이면 정리 후보. */
   idlePortMs: number
+  /** 쉬는 에이전트의 마지막 활동이 이 시간 이상 전이면 오래 쉬는 세션(G2). */
+  agentParkedMs: number
   /** 무거운 명령 패턴. */
   heavyPatterns: string[]
   /** 숨길 서버(`:포트` 또는 프로세스 이름). */
@@ -65,6 +68,7 @@ export function collectOptionsFrom(s: Settings): CollectOptions {
   return {
     thresholds: { ramWarnPercent: s.ramWarnPercent, ramDangerPercent: s.ramDangerPercent },
     idlePortMs: s.idlePortMinutes * 60 * 1000,
+    agentParkedMs: s.agentParkedMinutes * 60 * 1000,
     heavyPatterns: s.heavyPatterns,
     hiddenServers: s.hiddenServers,
     workspaceAliases: s.workspaceAliases
@@ -110,11 +114,15 @@ export interface CollectorState {
   servers: ServerHistoryData
   serverMemo: ServerMemoData
   agentStates: AgentStateData
+  agentSeen: AgentSeenData
 }
 
 export function createCollector(deps: CollectorDeps): {
   collect(): Promise<DashboardSnapshot>
-  /** 저장할 기억: 서버 메모리 기록, 서버별 정리 판단 시작 시각, 에이전트 상태 시작 시각. */
+  /**
+   * 저장할 기억: 서버 메모리 기록, 서버별 정리 판단 시작 시각, 에이전트 상태 시작 시각,
+   * 에이전트를 처음 본 시각·마지막으로 작업 중으로 본 시각.
+   */
   exportState(): CollectorState
   /**
    * 저장했던 기억을 불러온다(첫 수집 전). 판단 기억이 null 이면(꺼진 지 오래) 처음부터 센다.
@@ -125,6 +133,7 @@ export function createCollector(deps: CollectorDeps): {
       servers: ServerHistoryData
       serverMemo: ServerMemoData | null
       agentStates: AgentStateData | null
+      agentSeen: AgentSeenData | null
     },
     now: number
   ): void
@@ -136,6 +145,8 @@ export function createCollector(deps: CollectorDeps): {
   let previousServerCpu: CpuMemo = new Map()
   /** 에이전트별 지금 상태를 처음 본 시각(F3). */
   let agentStates: AgentStateMemo = new Map()
+  /** 에이전트별 pitwall 이 처음 본 시각·마지막으로 작업 중으로 본 시각(G2). */
+  let agentSeen: SeenMemo = new Map()
   /** 서버별 메모리 기록(F6, 1분 간격·60분). */
   const serverHistory = createServerHistory()
   let serverMemo: ServerMemo = new Map()
@@ -144,14 +155,23 @@ export function createCollector(deps: CollectorDeps): {
   /** 세션 작업 폴더 → 워크트리 키. 수집 때마다 다시 판별하고, 그 사이 새 세션은 restate 가 채운다. */
   let rootOfCwd = new Map<string, string | null>()
 
+  /** 그 에이전트 프로세스의 훅 세션(짝지은 세션, 없으면 그 워크트리의 짝 없는 세션 — G3a). */
   const hookFor =
     (roots: Map<string, string | null>) =>
-    (root: string, tool: AgentTool): ReturnType<typeof hookStateForWorktree> =>
-      hookStateForWorktree(deps.sessions, worktreeKey(root), (cwd) => roots.get(cwd) ?? null, tool)
-  const hookStateFor =
+    (agent: { key: string; worktreeRoot: string | null; tool: AgentTool }): HookView | null =>
+      hookViewForAgent(
+        deps.sessions,
+        {
+          key: agent.key,
+          rootKey: agent.worktreeRoot === null ? null : worktreeKey(agent.worktreeRoot),
+          tool: agent.tool
+        },
+        (cwd) => roots.get(cwd) ?? null
+      )
+  const hookOfRow =
     (roots: Map<string, string | null>) =>
-    (root: string, tool: AgentTool): AgentState | null =>
-      hookFor(roots)(root, tool)?.state ?? null
+    (a: AgentRow): HookView | null =>
+      hookFor(roots)({ key: agentKey(a), worktreeRoot: a.worktree?.root ?? null, tool: a.tool })
   /** Codex 세션 기록으로 안 상태(pid → 상태). restate 가 덮어쓰지 않도록 기억한다. */
   let rollouts = new Map<number, RolloutState>()
   /** 정확한 상태의 시작 시각: 훅은 이벤트 시각, Codex 세션 기록은 기록의 이벤트 시각. */
@@ -159,8 +179,32 @@ export function createCollector(deps: CollectorDeps): {
     (roots: Map<string, string | null>) =>
     (a: AgentRow): number | null => {
       if (a.stateSource === 'rollout') return rollouts.get(a.pid)?.since ?? null
-      return a.worktree ? (hookFor(roots)(a.worktree.root, a.tool)?.since ?? null) : null
+      return hookOfRow(roots)(a)?.since ?? null
     }
+
+  /**
+   * 마지막 활동 시각과 오래 쉬는 세션(G2)을 채운다. 훅은 그 프로세스 세션의 마지막 활동 이벤트, Codex 세션 기록은
+   * 마지막 이벤트, CPU 추정은 pitwall 이 본 기록(마지막으로 작업 중으로 본 시각, 없으면 처음 본 시각).
+   */
+  function withActivity(
+    agents: AgentRow[],
+    roots: Map<string, string | null>,
+    now: number,
+    parkedMs: number
+  ): AgentRow[] {
+    agentSeen = trackSeen(agents, agentSeen, now)
+    return agents.map((a): AgentRow => {
+      const exact =
+        a.stateSource === 'rollout'
+          ? (rollouts.get(a.pid)?.lastEventAt ?? null)
+          : a.stateSource === 'hook'
+            ? (hookOfRow(roots)(a)?.lastActivityAt ?? null)
+            : null
+      const seen = agentSeen.get(agentKey(a)) ?? { firstSeen: now, lastWorking: null }
+      const lastActiveAt = lastActiveOf(a, exact, seen)
+      return { ...a, lastActiveAt, parked: isParked({ ...a, lastActiveAt }, now, parkedMs) }
+    })
+  }
 
   /**
    * Codex 에이전트마다 세션 기록 상태를 읽는다. 같은 폴더에서 Codex 가 둘 이상 돌면 어느 쪽 기록인지 알 수 없어
@@ -357,7 +401,7 @@ export function createCollector(deps: CollectorDeps): {
       devServerPids,
       previousCpu,
       now: sampledAt,
-      hookStates: hookStateFor(roots)
+      hookFor: hookFor(roots)
     })
     previousCpu = cpu
     rollouts = await readRollouts(built, raw.cwds ?? {}, now)
@@ -366,13 +410,14 @@ export function createCollector(deps: CollectorDeps): {
       if (!r) return a
       if (a.stateSource === 'cpu') return { ...a, state: r.state, stateSource: 'rollout' }
       // 훅은 작업 중인데 세션 기록에 그 뒤 끝 이벤트가 있으면(오류로 끝난 턴 등) 세션 기록을 따른다.
-      const since = a.worktree ? hookFor(roots)(a.worktree.root, a.tool)?.since : null
+      const since = hookOfRow(roots)(a)?.since
       return r.state !== 'working' && since != null && r.since >= since
         ? { ...a, state: r.state, stateSource: 'rollout' }
         : a
     })
     const stated = withStateSince(withRollout, agentStates, sampledAt, exactSinceFor(roots))
     agentStates = stated.memo
+    const active = withActivity(stated.agents, roots, sampledAt, options.agentParkedMs)
 
     // 작업 공간은 판단 전에 정한다: 같은 작업 공간에서 에이전트가 일하면 그 작업 공간의 서버·남은 프로세스는
     // 정리 후보로 올리지 않는다(스펙 §4 — 다른 저장소에서 일하는 에이전트가 이 서버를 쓰고 있을 수 있다).
@@ -381,14 +426,14 @@ export function createCollector(deps: CollectorDeps): {
         ...snapshot.servers.map((r) => r.worktree),
         ...snapshot.leftovers.map((r) => r.worktree),
         ...snapshot.heavyJobs.map((r) => r.worktree),
-        ...stated.agents.map((a) => a.worktree)
+        ...active.map((a) => a.worktree)
       ],
       options.workspaceAliases
     )
     const withWorkspace = <T extends { worktree: WorktreeInfo | null }>(
       row: T
     ): T & { workspace: WorkspaceInfo | null } => ({ ...row, workspace: workspaceOf(row.worktree) })
-    const agents = stated.agents.map(withWorkspace)
+    const agents = active.map(withWorkspace)
     const agentWorkspaces = new Set(
       agents.flatMap((a) => (a.workspace ? [worktreeKey(a.workspace.root)] : []))
     )
@@ -451,7 +496,7 @@ export function createCollector(deps: CollectorDeps): {
   async function restate(snapshot: DashboardSnapshot): Promise<DashboardSnapshot> {
     rootOfCwd = await resolveSessionRoots(rootOfCwd)
     const restated = snapshot.agents.map((a): AgentRow => {
-      const hook = a.worktree ? hookFor(rootOfCwd)(a.worktree.root, a.tool) : null
+      const hook = hookOfRow(rootOfCwd)(a)
       const fromHook = hook?.state ?? null
       // 세션 기록 상태는 다음 수집에서 다시 읽는다. 그보다 새 훅 이벤트(새 입력 등)가 왔을 때만 훅을 따른다.
       if (a.stateSource === 'rollout') {
@@ -464,16 +509,19 @@ export function createCollector(deps: CollectorDeps): {
         stateSource: fromHook ? 'hook' : 'cpu'
       }
     })
-    const stated = withStateSince(restated, agentStates, deps.now(), exactSinceFor(rootOfCwd))
+    const now = deps.now()
+    const stated = withStateSince(restated, agentStates, now, exactSinceFor(rootOfCwd))
     agentStates = stated.memo
-    return { ...snapshot, agents: stated.agents }
+    const agents = withActivity(stated.agents, rootOfCwd, now, deps.options().agentParkedMs)
+    return { ...snapshot, agents }
   }
 
   function exportState(): CollectorState {
     return {
       servers: serverHistory.export(),
       serverMemo: Object.fromEntries(serverMemo),
-      agentStates: Object.fromEntries(agentStates)
+      agentStates: Object.fromEntries(agentStates),
+      agentSeen: Object.fromEntries(agentSeen)
     }
   }
 
@@ -486,6 +534,11 @@ export function createCollector(deps: CollectorDeps): {
       Object.entries(entries ?? {}).filter(([, v]) => v.since <= now)
     serverMemo = new Map(past(state.serverMemo))
     agentStates = new Map(past(state.agentStates))
+    agentSeen = new Map(
+      Object.entries(state.agentSeen ?? {}).filter(
+        ([, v]) => v.firstSeen <= now && (v.lastWorking === null || v.lastWorking <= now)
+      )
+    )
   }
 
   return { collect, restate, exportState, importState }

@@ -9,7 +9,12 @@ import { join, resolve, sep } from 'path'
  * - 근거가 없으면 null(지어내지 않음 — 화면은 CPU 추정을 쓴다).
  */
 
-export type RolloutState = { state: 'working' | 'idle' | 'error'; since: number }
+/** since: 지금 상태가 된 이벤트 시각, lastEventAt: 읽은 이벤트 가운데 가장 늦은 시각(마지막 활동, G2). */
+export type RolloutState = {
+  state: 'working' | 'idle' | 'error'
+  since: number
+  lastEventAt: number
+}
 
 /** 파일 끝에서 읽을 크기(큰 기록 파일도 부하가 일정하게). */
 const TAIL_BYTES = 64 * 1024
@@ -137,7 +142,8 @@ export async function findRollout(
 
 /**
  * 기록 줄에서 지금 상태. 마지막 task_started 뒤에 task_complete·turn_aborted 가 없으면 작업 중,
- * task_complete 에 error 가 있으면 오류, 그 밖은 쉬는 중. since 는 그 이벤트 시각. 근거가 없으면 null.
+ * task_complete 에 error 가 있으면 오류, 그 밖은 쉬는 중. since 는 그 이벤트 시각, lastEventAt 은 읽은 이벤트
+ * 가운데 가장 늦은 시각(앞서 읽은 상태에서 이어 간다). 근거가 없으면 null.
  */
 export function rolloutState(
   lines: string[],
@@ -155,13 +161,29 @@ export function rolloutState(
     if (row.type !== 'event_msg' || typeof row.timestamp !== 'string') continue
     const since = Date.parse(row.timestamp)
     if (!Number.isFinite(since)) continue
-    const kind = row.payload?.type
-    if (kind === 'task_started' || kind === 'turn_started') state = { state: 'working', since }
-    else if (kind === 'task_complete' || kind === 'turn_complete')
-      state = { state: row.payload?.error ? 'error' : 'idle', since }
-    else if (kind === 'turn_aborted') state = { state: 'idle', since }
+    const next = eventState(row.payload)
+    if (next === null) continue
+    state = { state: next, since, lastEventAt: Math.max(state?.lastEventAt ?? since, since) }
   }
   return state
+}
+
+/** 이벤트 종류가 정하는 상태. 상태와 상관없는 이벤트는 null. */
+function eventState(
+  payload: { type?: unknown; error?: unknown } | undefined
+): RolloutState['state'] | null {
+  switch (payload?.type) {
+    case 'task_started':
+    case 'turn_started':
+      return 'working'
+    case 'task_complete':
+    case 'turn_complete':
+      return payload.error ? 'error' : 'idle'
+    case 'turn_aborted':
+      return 'idle'
+    default:
+      return null
+  }
 }
 
 /** 기록 파일 끝 64KB 로 지금 상태. 읽을 수 없으면 null. */
