@@ -18,9 +18,19 @@ function snap(
   level: MemoryLevel = 'normal'
 ): DashboardSnapshot {
   const usedPercent = { normal: 50, warn: 85, danger: 93.6 }[level]
+  const usedBytes = (32 * GB * usedPercent) / 100
   return {
     ...blankSnapshot(1),
-    memory: { totalBytes: 32 * GB, usedBytes: (32 * GB * usedPercent) / 100, usedPercent, level },
+    memory: {
+      totalBytes: 32 * GB,
+      usedBytes,
+      usedPercent,
+      availableBytes: 32 * GB - usedBytes,
+      level,
+      ramLevel: level,
+      commit: null,
+      kernelBytes: null
+    },
     ...over
   }
 }
@@ -33,6 +43,7 @@ function agent(pid: number, state: AgentRow['state'], root = 'C:\\work\\shop-web
     workspace: null,
     startedAt: pid,
     memoryBytes: 1,
+    commitBytes: null,
     descendantCount: 0,
     processes: [],
     state,
@@ -51,6 +62,7 @@ function heavy(pid: number, label: string): HeavyJobRow {
     worktree: null,
     workspace: null,
     memoryBytes: 4 * GB,
+    commitBytes: null,
     descendantPids: [],
     processes: [],
     startedAt: 1
@@ -66,6 +78,7 @@ const candidate = {
   workspace: null,
   unresolvable: false,
   memoryBytes: 900 * MB,
+  commitBytes: null,
   descendantPids: [],
   processes: [],
   clientCount: 0,
@@ -115,6 +128,15 @@ describe('RAM 부족', () => {
     update(snap({}, 'danger'))
     expect(shown).toHaveLength(2)
     expect(shown[1].body).toBe('정리할 후보가 없어요. 메모리를 많이 쓰는 앱을 확인해 보세요.')
+  })
+
+  test('정리 후보의 커밋을 알면 RAM·커밋 둘 다 알린다', () => {
+    const { shown, update } = setup()
+    update(snap())
+    update(snap({ servers: [{ ...candidate, commitBytes: 2 * GB }] }, 'danger'))
+    expect(shown[0].body).toBe(
+      '정리 후보 1개를 끄면 RAM 약 900 MB · 커밋 약 2.0 GB 를 확보할 수 있어요.'
+    )
   })
 
   test('30분 안에는 다시 알리지 않는다(기준선 근처에서 오르내림)', () => {

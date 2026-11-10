@@ -4,7 +4,16 @@ import type { DashboardSnapshot } from './types'
 export function blankSnapshot(takenAt: number): DashboardSnapshot {
   return {
     takenAt,
-    memory: { totalBytes: 0, usedBytes: 0, usedPercent: 0, level: 'normal' },
+    memory: {
+      totalBytes: 0,
+      usedBytes: 0,
+      usedPercent: 0,
+      availableBytes: 0,
+      level: 'normal',
+      ramLevel: 'normal',
+      commit: null,
+      kernelBytes: null
+    },
     servers: [],
     hiddenServers: [],
     leftovers: [],

@@ -42,6 +42,23 @@ export function formatBytes(bytes: number): string {
   return `${(bytes / GiB).toFixed(1)} GB`
 }
 
+/**
+ * 커밋 크기 합(바이트). 아는 값만 더하고(모르는 값을 0 으로 지어내지 않는다), 하나도 모르면 null.
+ * 프로세스 목록·행·추천 항목 모두에 쓴다.
+ */
+export function commitSum(items: Iterable<{ commitBytes?: number | null }>): number | null {
+  let sum: number | null = null
+  for (const item of items) if (item.commitBytes != null) sum = (sum ?? 0) + item.commitBytes
+  return sum
+}
+
+/** 끄면 확보할 메모리(확인 창·결과·알림): 커밋을 알면 "RAM 약 1.2 GB · 커밋 약 4.2 GB", 모르면 "약 1.2 GB". */
+export function formatFreed(memoryBytes: number, commitBytes: number | null): string {
+  return commitBytes == null
+    ? text.freed.ramOnly(formatBytes(memoryBytes))
+    : text.freed.withCommit(formatBytes(memoryBytes), formatBytes(commitBytes))
+}
+
 /** 실행 시간 같은 길이를 짧게: 30초, 45분, 3시간 12분, 2일 5시간. 알 수 없으면 —. */
 export function formatDuration(ms: number): string {
   if (!Number.isFinite(ms) || ms < 0) return text.ui.none

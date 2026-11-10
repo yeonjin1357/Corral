@@ -106,11 +106,36 @@ describe('summarizeProcesses: 이름·짧은 이름별로 묶어 메모리 큰 �
       proc('cmd.exe', 'cmd.exe', 5),
       proc('CMD.EXE', 'cmd.exe', 5)
     ])
+    const row = (name: string, hint: string | null, count: number, mb: number): object => ({
+      name,
+      hint,
+      count,
+      memoryBytes: mb * MB,
+      commitBytes: null
+    })
     expect(list).toEqual([
-      { name: 'claude.exe', hint: null, count: 1, memoryBytes: 300 * MB },
-      { name: 'node.exe', hint: '@scope/mcp-one', count: 2, memoryBytes: 150 * MB },
-      { name: 'node.exe', hint: 'other-mcp', count: 1, memoryBytes: 40 * MB },
-      { name: 'cmd.exe', hint: null, count: 2, memoryBytes: 10 * MB }
+      row('claude.exe', null, 1, 300),
+      row('node.exe', '@scope/mcp-one', 2, 150),
+      row('node.exe', 'other-mcp', 1, 40),
+      row('cmd.exe', null, 2, 10)
+    ])
+  })
+
+  test('묶인 프로세스의 커밋은 아는 것만 더하고, 하나도 모르면 null', () => {
+    const commit = (p: ProcessInfo, mb: number | null): ProcessInfo => ({
+      ...p,
+      commitBytes: mb == null ? null : mb * MB
+    })
+    const list = summarizeProcesses([
+      commit(proc('java.exe', 'java', 300), null),
+      commit(proc('java.exe', 'java', 200), 900),
+      commit(proc('java.exe', 'java', 100), 400),
+      commit(proc('cmd.exe', 'cmd.exe', 5), null),
+      proc('cmd.exe', 'cmd.exe', 5)
+    ])
+    expect(list.map((g) => [g.name, g.count, g.commitBytes])).toEqual([
+      ['java.exe', 3, 1300 * MB],
+      ['cmd.exe', 2, null]
     ])
   })
 

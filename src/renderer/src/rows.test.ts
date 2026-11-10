@@ -165,6 +165,7 @@ describe('남은 프로세스·무거운 작업·디스크·다른 앱 표', () 
     const apps = Array.from({ length: 7 }, (_, i) => ({
       name: `app${i}.exe`,
       memoryBytes: (7 - i) * MB,
+      commitBytes: null,
       processCount: 1,
       exePath: null
     }))

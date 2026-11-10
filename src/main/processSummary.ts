@@ -121,7 +121,10 @@ function findHint(p: ProcessInfo): string | null {
   return script ? baseName(script) : null
 }
 
-/** 이름(대소문자 무시)·짧은 이름별로 묶어 메모리 큰 순(같으면 개수·이름 순)으로 한도만큼. */
+/**
+ * 이름(대소문자 무시)·짧은 이름별로 묶어 메모리 큰 순(같으면 개수·이름 순)으로 한도만큼.
+ * 커밋은 묶인 프로세스 중 아는 것의 합(하나도 모르면 null).
+ */
 export function summarizeProcesses(
   members: ProcessInfo[],
   limit = PROCESS_SUMMARY_LIMIT
@@ -134,7 +137,15 @@ export function summarizeProcesses(
     if (g) {
       g.count++
       g.memoryBytes += p.memoryBytes
-    } else groups.set(key, { name: p.name, hint, count: 1, memoryBytes: p.memoryBytes })
+      if (p.commitBytes != null) g.commitBytes = (g.commitBytes ?? 0) + p.commitBytes
+    } else
+      groups.set(key, {
+        name: p.name,
+        hint,
+        count: 1,
+        memoryBytes: p.memoryBytes,
+        commitBytes: p.commitBytes ?? null
+      })
   }
   return [...groups.values()]
     .sort(

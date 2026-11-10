@@ -28,11 +28,11 @@ describe('카드의 메모리 합은 메모리 카드 묶음과 같은 값(같�
     const s = snapshot({
       servers: [serverRow({ ports: [8081, 8082], pid: 4100, memoryBytes: 1600 * MB })],
       groups: [
-        { group: 'devServer', memoryBytes: 1600 * MB, processCount: 2 },
-        { group: 'agent', memoryBytes: 500 * MB, processCount: 4 },
-        { group: 'heavy', memoryBytes: 0, processCount: 0 },
-        { group: 'otherApps', memoryBytes: 18 * GB, processCount: 300 },
-        { group: 'system', memoryBytes: 2 * GB, processCount: 0 }
+        { group: 'devServer', memoryBytes: 1600 * MB, commitBytes: null, processCount: 2 },
+        { group: 'agent', memoryBytes: 500 * MB, commitBytes: null, processCount: 4 },
+        { group: 'heavy', memoryBytes: 0, commitBytes: null, processCount: 0 },
+        { group: 'otherApps', memoryBytes: 18 * GB, commitBytes: null, processCount: 300 },
+        { group: 'system', memoryBytes: 2 * GB, commitBytes: null, processCount: 0 }
       ]
     })
     expect(cardMemory(bar(s), '개발 서버')).toBe('1.6 GB')
@@ -44,11 +44,11 @@ describe('카드의 메모리 합은 메모리 카드 묶음과 같은 값(같�
       agents: [agentRow({ memoryBytes: 2600 * MB })],
       heavyJobs: [heavyJob({ memoryBytes: 2000 * MB })],
       groups: [
-        { group: 'devServer', memoryBytes: 2200 * MB, processCount: 5 },
-        { group: 'agent', memoryBytes: 600 * MB, processCount: 4 },
-        { group: 'heavy', memoryBytes: 2000 * MB, processCount: 3 },
-        { group: 'otherApps', memoryBytes: 18 * GB, processCount: 300 },
-        { group: 'system', memoryBytes: 2 * GB, processCount: 0 }
+        { group: 'devServer', memoryBytes: 2200 * MB, commitBytes: null, processCount: 5 },
+        { group: 'agent', memoryBytes: 600 * MB, commitBytes: null, processCount: 4 },
+        { group: 'heavy', memoryBytes: 2000 * MB, commitBytes: null, processCount: 3 },
+        { group: 'otherApps', memoryBytes: 18 * GB, commitBytes: null, processCount: 300 },
+        { group: 'system', memoryBytes: 2 * GB, commitBytes: null, processCount: 0 }
       ]
     })
     const w = bar(s)

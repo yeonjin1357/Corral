@@ -26,19 +26,25 @@ const s = snapshot({
   agents: [agentRow({ pid: 10 }), agentRow({ pid: 11 })],
   heavyJobs: [heavyJob({ pid: 20 })],
   apps: [
-    { name: 'chrome.exe', memoryBytes: 2 * GB, processCount: 40, exePath: null },
-    { name: 'svchost.exe', memoryBytes: 1 * GB, processCount: 90, exePath: null },
-    { name: 'a.exe', memoryBytes: 300 * MB, processCount: 1, exePath: null },
-    { name: 'b.exe', memoryBytes: 200 * MB, processCount: 1, exePath: null },
-    { name: 'c.exe', memoryBytes: 100 * MB, processCount: 1, exePath: null },
-    { name: 'd.exe', memoryBytes: 50 * MB, processCount: 1, exePath: null }
+    { name: 'chrome.exe', memoryBytes: 2 * GB, commitBytes: null, processCount: 40, exePath: null },
+    {
+      name: 'svchost.exe',
+      memoryBytes: 1 * GB,
+      commitBytes: null,
+      processCount: 90,
+      exePath: null
+    },
+    { name: 'a.exe', memoryBytes: 300 * MB, commitBytes: null, processCount: 1, exePath: null },
+    { name: 'b.exe', memoryBytes: 200 * MB, commitBytes: null, processCount: 1, exePath: null },
+    { name: 'c.exe', memoryBytes: 100 * MB, commitBytes: null, processCount: 1, exePath: null },
+    { name: 'd.exe', memoryBytes: 50 * MB, commitBytes: null, processCount: 1, exePath: null }
   ],
   groups: [
-    { group: 'devServer', memoryBytes: 2 * GB, processCount: 5 },
-    { group: 'agent', memoryBytes: 1 * GB, processCount: 37 },
-    { group: 'heavy', memoryBytes: 3 * GB, processCount: 4 },
-    { group: 'otherApps', memoryBytes: 4 * GB, processCount: 134 },
-    { group: 'system', memoryBytes: 2 * GB, processCount: 0 }
+    { group: 'devServer', memoryBytes: 2 * GB, commitBytes: null, processCount: 5 },
+    { group: 'agent', memoryBytes: 1 * GB, commitBytes: null, processCount: 37 },
+    { group: 'heavy', memoryBytes: 3 * GB, commitBytes: null, processCount: 4 },
+    { group: 'otherApps', memoryBytes: 4 * GB, commitBytes: null, processCount: 134 },
+    { group: 'system', memoryBytes: 2 * GB, commitBytes: null, processCount: 0 }
   ]
 })
 

@@ -23,7 +23,11 @@ function snap(over: Partial<DashboardSnapshot> = {}): DashboardSnapshot {
       totalBytes: 32 * GB,
       usedBytes: Math.round(26.3 * GB),
       usedPercent: 82.2,
-      level: 'warn'
+      availableBytes: 32 * GB - Math.round(26.3 * GB),
+      level: 'warn',
+      ramLevel: 'warn',
+      commit: null,
+      kernelBytes: null
     },
     servers: [1, 2, 3].map((i) => ({
       ports: [3000 + i],
@@ -34,6 +38,7 @@ function snap(over: Partial<DashboardSnapshot> = {}): DashboardSnapshot {
       workspace: null,
       unresolvable: false,
       memoryBytes: 1,
+      commitBytes: null,
       descendantPids: [],
       processes: [],
       clientCount: 0,
@@ -80,6 +85,7 @@ describe('buildTrayMenu', () => {
       workspace: null,
       startedAt: 1,
       memoryBytes: 1,
+      commitBytes: null,
       descendantCount: 0,
       processes: [],
       state,
@@ -100,6 +106,7 @@ describe('buildTrayMenu', () => {
           worktree: null,
           workspace: null,
           memoryBytes: 1,
+          commitBytes: null,
           descendantPids: [],
           processes: [],
           startedAt: 1,
@@ -138,7 +145,7 @@ describe('buildTrayMenu', () => {
       stale: true,
       error: 'x',
       servers: [],
-      memory: { totalBytes: 0, usedBytes: 0, usedPercent: 0, level: 'normal' }
+      memory: blankSnapshot(1).memory
     })
     expect(labels(buildTrayMenu(failed, actions))[0]).toBe('RAM 정보를 가져오지 못했어요')
   })
@@ -163,6 +170,7 @@ describe('buildTrayMenu', () => {
       worktree: null,
       workspace: null,
       memoryBytes: 1,
+      commitBytes: null,
       descendantPids: [],
       processes: [],
       startedAt: 1
@@ -258,7 +266,16 @@ describe('createTrayController', () => {
     expect(tray.setToolTip).toHaveBeenCalledTimes(2)
     controller.update(
       snap({
-        memory: { totalBytes: 32 * GB, usedBytes: 30 * GB, usedPercent: 93.7, level: 'danger' }
+        memory: {
+          totalBytes: 32 * GB,
+          usedBytes: 30 * GB,
+          usedPercent: 93.7,
+          availableBytes: 2 * GB,
+          level: 'danger',
+          ramLevel: 'danger',
+          commit: null,
+          kernelBytes: null
+        }
       })
     )
     expect(tray.setImage).toHaveBeenLastCalledWith('icon:danger')
@@ -346,6 +363,7 @@ test('남은 프로세스 줄은 에이전트 워크트리의 것을 빼고 센�
     worktree: null,
     workspace: null,
     memoryBytes: 1,
+    commitBytes: null,
     descendantPids: [],
     processes: [],
     startedAt: 1,

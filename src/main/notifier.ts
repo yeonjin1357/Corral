@@ -1,6 +1,6 @@
 import type { AgentRow, DashboardSnapshot } from '../shared/types'
 import type { NotifySettings } from '../shared/settings'
-import { formatBytes, formatDuration, worktreeFolder, worktreeLabel } from '../shared/format'
+import { formatDuration, formatFreed, worktreeFolder, worktreeLabel } from '../shared/format'
 import { agentKey, selectionKey } from '../shared/keys'
 import { cleanupRecommendation } from '../shared/recommend'
 import { text } from '../shared/text'
@@ -54,7 +54,7 @@ export function createNotifier(deps: {
       title: text.notify.ramTitle(Math.floor(s.memory.usedPercent)),
       body:
         rec.items.length > 0
-          ? text.notify.ramBody(rec.items.length, formatBytes(rec.totalBytes))
+          ? text.notify.ramBody(rec.items.length, formatFreed(rec.totalBytes, rec.totalCommitBytes))
           : text.notify.ramNoCandidates,
       target: null
     })

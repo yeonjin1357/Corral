@@ -98,6 +98,31 @@ describe('에이전트 행', () => {
     ])
   })
 
+  test('커밋은 메모리와 같은 프로세스(자기 + 개발 서버가 아닌 자손)의 합, 하나도 모르면 null', () => {
+    const withCommit = (p: ProcessInfo, mb: number | null): ProcessInfo => ({
+      ...p,
+      commitBytes: mb == null ? null : mb * MB
+    })
+    const { agents } = run(
+      [
+        withCommit(proc(5000, 1, 'claude.exe', { mb: 400 }), 1000),
+        withCommit(proc(5100, 5000, 'node.exe', { mb: 900 }), 4000),
+        withCommit(proc(5200, 5000, 'bash.exe', { mb: 10 }), null),
+        withCommit(proc(5201, 5200, 'node.exe', { mb: 20 }), 60),
+        proc(6000, 1, 'codex.exe')
+      ],
+      { devServerPids: [5100] }
+    )
+    const claude = agents.find((a) => a.pid === 5000)!
+    expect(claude.commitBytes).toBe(1060 * MB)
+    expect(claude.processes.map((p) => [p.name, p.commitBytes])).toEqual([
+      ['claude.exe', 1000 * MB],
+      ['node.exe', 60 * MB],
+      ['bash.exe', null]
+    ])
+    expect(agents.find((a) => a.pid === 6000)!.commitBytes).toBeNull()
+  })
+
   test('워크트리는 에이전트 자신의 판별 결과', () => {
     const { agents } = run([proc(5000, 1, 'claude.exe'), proc(6000, 1, 'codex.exe')], {
       worktrees: [[5000, W2]]
@@ -300,6 +325,7 @@ describe('상태 시작 시각(F3)', () => {
     workspace: null,
     startedAt: 100,
     memoryBytes: 1,
+    commitBytes: null,
     descendantCount: 0,
     processes: [],
     state: 'working',

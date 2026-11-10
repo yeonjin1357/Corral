@@ -1,4 +1,5 @@
 import type { HeavyJobRow, RawSample, WorktreeInfo } from '../shared/types'
+import { commitSum } from '../shared/format'
 import { buildTree } from './processTree'
 import { summarizeProcesses } from './processSummary'
 
@@ -173,6 +174,7 @@ export function findHeavyJobs(
       worktree,
       workspace: null,
       memoryBytes,
+      commitBytes: commitSum(members),
       descendantPids,
       processes: summarizeProcesses(members),
       startedAt: p.startedAt

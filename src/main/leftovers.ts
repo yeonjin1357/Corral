@@ -1,5 +1,5 @@
 import type { LeftoverRow, Platform, ProcessInfo, RawSample, WorktreeInfo } from '../shared/types'
-import { agentCovers } from '../shared/format'
+import { agentCovers, commitSum } from '../shared/format'
 import { buildTree, classifyAgent } from './processTree'
 import { processLabel, summarizeProcesses } from './processSummary'
 
@@ -73,6 +73,7 @@ export function findLeftovers(
       commandLine: p.commandLine,
       worktree,
       memoryBytes: members.reduce((sum, m) => sum + m.memoryBytes, 0),
+      commitBytes: commitSum(members),
       descendantPids: descendants,
       processes: summarizeProcesses(members),
       startedAt: p.startedAt,

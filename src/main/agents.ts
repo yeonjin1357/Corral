@@ -6,7 +6,7 @@ import type {
   RawSample,
   WorktreeInfo
 } from '../shared/types'
-import { worktreeFolder } from '../shared/format'
+import { commitSum, worktreeFolder } from '../shared/format'
 import { agentKey } from '../shared/keys'
 import { agentToolOf, buildTree, topLevelAgentPids } from './processTree'
 import { summarizeProcesses } from './processSummary'
@@ -150,6 +150,7 @@ export function buildAgents(input: {
       workspace: null,
       startedAt: self.startedAt,
       memoryBytes: members.reduce((sum, m) => sum + m.memoryBytes, 0),
+      commitBytes: commitSum(members),
       descendantCount: descendants.length,
       processes: summarizeProcesses(members),
       state: hookState ?? cpuState(cpuPercent),

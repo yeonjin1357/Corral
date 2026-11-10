@@ -22,6 +22,7 @@ export function serverRow(over: Partial<ServerRow> = {}): ServerRow {
     workspace: null,
     unresolvable: false,
     memoryBytes: 1200 * MB,
+    commitBytes: null,
     descendantPids: [4101],
     processes: [],
     clientCount: 1,
@@ -43,6 +44,7 @@ export function agentRow(over: Partial<AgentRow> = {}): AgentRow {
     workspace: null,
     startedAt: 100,
     memoryBytes: 600 * MB,
+    commitBytes: null,
     descendantCount: 3,
     processes: [],
     state: 'working',
@@ -62,6 +64,7 @@ export function leftoverRow(over: Partial<LeftoverRow> = {}): LeftoverRow {
     worktree: null,
     workspace: null,
     memoryBytes: 900 * MB,
+    commitBytes: null,
     descendantPids: [7001, 7002],
     processes: [],
     startedAt: 300,
@@ -79,6 +82,7 @@ export function heavyJob(over: Partial<HeavyJobRow> = {}): HeavyJobRow {
     worktree: { root: 'C:\\work\\shop-web', branch: 'develop', isLinkedWorktree: false },
     workspace: null,
     memoryBytes: 6 * GB,
+    commitBytes: null,
     descendantPids: [],
     processes: [],
     startedAt: 0,
@@ -126,27 +130,32 @@ export function snapshot(over: Partial<DashboardSnapshot> = {}): DashboardSnapsh
       totalBytes: 32 * GB,
       usedBytes: Math.round(26.3 * GB),
       usedPercent: 82.2,
-      level: 'warn'
+      availableBytes: 32 * GB - Math.round(26.3 * GB),
+      level: 'warn',
+      ramLevel: 'warn',
+      commit: null,
+      kernelBytes: null
     },
     servers: threeServers,
     leftovers: [],
     agents: [],
     hook: null,
     groups: [
-      { group: 'devServer', memoryBytes: 2200 * MB, processCount: 5 },
-      { group: 'agent', memoryBytes: 500 * MB, processCount: 4 },
-      { group: 'heavy', memoryBytes: 0, processCount: 0 },
-      { group: 'otherApps', memoryBytes: 18 * GB, processCount: 300 },
-      { group: 'system', memoryBytes: 2 * GB, processCount: 0 }
+      { group: 'devServer', memoryBytes: 2200 * MB, commitBytes: null, processCount: 5 },
+      { group: 'agent', memoryBytes: 500 * MB, commitBytes: null, processCount: 4 },
+      { group: 'heavy', memoryBytes: 0, commitBytes: null, processCount: 0 },
+      { group: 'otherApps', memoryBytes: 18 * GB, commitBytes: null, processCount: 300 },
+      { group: 'system', memoryBytes: 2 * GB, commitBytes: null, processCount: 0 }
     ],
     apps: [
       {
         name: 'chrome.exe',
         memoryBytes: 5 * GB,
+        commitBytes: null,
         processCount: 40,
         exePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
       },
-      { name: 'Code.exe', memoryBytes: 2 * GB, processCount: 12, exePath: null }
+      { name: 'Code.exe', memoryBytes: 2 * GB, commitBytes: null, processCount: 12, exePath: null }
     ],
     agentProcessCount: 2,
     platform: 'win32',

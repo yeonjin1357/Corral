@@ -1,8 +1,10 @@
 import { text } from './text'
 import {
   agentCovers,
+  commitSum,
   displayCpuPercent,
   formatBytes,
+  formatFreed,
   worktreeLabel,
   worktreeFolder,
   describeKillResult,
@@ -61,6 +63,18 @@ test('1MB 미만은 KB(최소 1 KB)', () => {
   expect(formatBytes(3000)).toBe('3 KB')
   expect(formatBytes(10)).toBe('1 KB')
   expect(formatBytes(1024 * 1024 - 600)).toBe('1023 KB')
+})
+
+test('확보 예상: 커밋을 알면 RAM·커밋 둘 다, 모르면 RAM 만', () => {
+  expect(formatFreed(1.2 * GB, 4.2 * GB)).toBe('RAM 약 1.2 GB · 커밋 약 4.2 GB')
+  expect(formatFreed(1.2 * GB, null)).toBe('약 1.2 GB')
+})
+
+test('커밋 합: 아는 것만 더하고, 하나도 모르면 null', () => {
+  expect(commitSum([{ commitBytes: 3 }, { commitBytes: null }, {}, { commitBytes: 4 }])).toBe(7)
+  expect(commitSum([{ commitBytes: 0 }])).toBe(0)
+  expect(commitSum([{ commitBytes: null }, {}])).toBeNull()
+  expect(commitSum([])).toBeNull()
 })
 
 test('0·음수·NaN 은 0 MB', () => {

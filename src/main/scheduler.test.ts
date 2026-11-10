@@ -5,7 +5,16 @@ import { blankSnapshot } from '../shared/snapshot'
 function snap(takenAt: number): DashboardSnapshot {
   return {
     ...blankSnapshot(takenAt),
-    memory: { totalBytes: 100, usedBytes: 50, usedPercent: 50, level: 'normal' }
+    memory: {
+      totalBytes: 100,
+      usedBytes: 50,
+      usedPercent: 50,
+      availableBytes: 50,
+      level: 'normal',
+      ramLevel: 'normal',
+      commit: null,
+      kernelBytes: null
+    }
   }
 }
 
@@ -106,7 +115,16 @@ test('첫 수집부터 실패하면 빈 스냅샷을 stale + 에러로 보낸다
     error: '수집 중 문제가 생겼어요: boom',
     agentProcessCount: 0
   })
-  expect(sent[0].memory).toEqual({ totalBytes: 0, usedBytes: 0, usedPercent: 0, level: 'normal' })
+  expect(sent[0].memory).toEqual({
+    totalBytes: 0,
+    usedBytes: 0,
+    usedPercent: 0,
+    availableBytes: 0,
+    level: 'normal',
+    ramLevel: 'normal',
+    commit: null,
+    kernelBytes: null
+  })
   s.stop()
 })
 

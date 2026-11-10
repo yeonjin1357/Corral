@@ -83,11 +83,30 @@ export interface TrendPoint {
   value: number
 }
 
+/** 시스템 커밋(프로세스가 차지하기로 한 메모리 전체, 페이지 파일 포함)과 한도. */
+export interface CommitSummary {
+  usedBytes: number
+  limitBytes: number
+  /** 한도 대비 사용률(소수 1자리). */
+  percent: number
+  /** RAM 과 같은 경고·위험 기준 % 를 커밋 사용률에 적용한 단계. */
+  level: MemoryLevel
+}
+
 export interface MemorySummary {
   totalBytes: number
   usedBytes: number
   usedPercent: number
+  /** 남은 메모리(total − used). */
+  availableBytes: number
+  /** RAM 단계와 커밋 단계 중 높은 쪽(메모리 압박 단계). */
   level: MemoryLevel
+  /** RAM 사용률만으로 본 단계(level 이 어느 쪽 때문인지 알 수 있게). */
+  ramLevel: MemoryLevel
+  /** 시스템 커밋. 모르면 null(macOS·보조 코드가 막힌 PC). */
+  commit: CommitSummary | null
+  /** 커널 메모리(paged + nonpaged pool). 모르면 null. */
+  kernelBytes: number | null
 }
 
 /**
@@ -124,6 +143,8 @@ export interface ServerRow {
   unresolvable: boolean
   /** 맨 위 프로세스 + 모든 자손. */
   memoryBytes: number
+  /** 같은 프로세스의 커밋 합. 하나도 모르면 null(일부만 알면 아는 것의 합). */
+  commitBytes: number | null
   descendantPids: number[]
   /** 맨 위 프로세스 + 자손을 이름별로 묶은 것(상세 패널). */
   processes: ProcessSummary[]
@@ -157,6 +178,8 @@ export interface LeftoverRow {
   workspace: WorkspaceInfo | null
   /** 자기 + 자손. */
   memoryBytes: number
+  /** 같은 프로세스의 커밋 합. 하나도 모르면 null(일부만 알면 아는 것의 합). */
+  commitBytes: number | null
   descendantPids: number[]
   /** 자기 + 자손을 이름별로 묶은 것(상세 패널). */
   processes: ProcessSummary[]
@@ -170,6 +193,8 @@ export type PortJudgement = 'candidate' | 'check'
 export interface GroupUsage {
   group: ProcessGroup
   memoryBytes: number
+  /** 묶음 프로세스의 커밋 합. 하나도 모르면 null. system 은 프로세스가 없어 늘 null. */
+  commitBytes: number | null
   processCount: number
 }
 
@@ -181,12 +206,16 @@ export interface ProcessSummary {
   hint: string | null
   count: number
   memoryBytes: number
+  /** 묶인 프로세스의 커밋 합. 하나도 모르면 null. */
+  commitBytes: number | null
 }
 
 /** 다른 앱을 프로세스 이름별로 묶은 것(예: chrome.exe 40개). */
 export interface AppUsage {
   name: string
   memoryBytes: number
+  /** 그 앱 프로세스의 커밋 합. 하나도 모르면 null. */
+  commitBytes: number | null
   processCount: number
   /** 그 앱의 실행 파일(macOS 는 .app 묶음) 경로. 화면이 OS 앱 아이콘을 보이는 데 쓴다. 모르면 null. */
   exePath: string | null
@@ -208,6 +237,8 @@ export interface AgentRow {
   startedAt: number | null
   /** 자기 + 자손 중 개발 서버가 아닌 것. */
   memoryBytes: number
+  /** 같은 프로세스의 커밋 합. 하나도 모르면 null(일부만 알면 아는 것의 합). */
+  commitBytes: number | null
   descendantCount: number
   /** 메모리에 센 프로세스(자기 포함)를 이름별로 묶은 것(상세 패널). */
   processes: ProcessSummary[]
@@ -339,6 +370,8 @@ export interface HeavyJobRow {
   workspace: WorkspaceInfo | null
   /** 자기 + 자손. */
   memoryBytes: number
+  /** 같은 프로세스의 커밋 합. 하나도 모르면 null(일부만 알면 아는 것의 합). */
+  commitBytes: number | null
   descendantPids: number[]
   /** 자기 + 자손을 이름별로 묶은 것(상세 패널). */
   processes: ProcessSummary[]

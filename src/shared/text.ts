@@ -15,21 +15,28 @@ export const text = {
     confirm: '내리기',
     cancel: '취소'
   },
+  /** 끄면 확보할 메모리(formatFreed). 커밋을 알면 RAM·커밋 둘 다, 모르면 RAM 만. */
+  freed: {
+    withCommit: (ram: string, commit: string): string => `RAM 약 ${ram} · 커밋 약 ${commit}`,
+    ramOnly: (ram: string): string => `약 ${ram}`
+  },
   cleanupWorkspace: {
     title: '작업 공간 정리',
-    message: (name: string, n: number, size: string): string =>
-      `${name} 의 ${n}개를 끌까요? 약 ${size} 를 확보해요.`,
+    /** freed: formatFreed 결과("약 1.2 GB" 또는 "RAM 약 1.2 GB · 커밋 약 4.2 GB"). */
+    message: (name: string, n: number, freed: string): string =>
+      `${name} 의 ${n}개를 끌까요? ${freed} 를 확보해요.`,
     agent: (tool: string, state: string): string =>
       `${tool} 가 이 작업 공간에서 실행 중(${state})이에요. 서버를 꺼도 에이전트는 그대로예요.`
   },
   killMany: {
     title: '메모리 정리',
-    message: (n: number, size: string): string => `${n}개를 끌까요? 약 ${size} 를 확보해요.`,
+    /** freed: formatFreed 결과. */
+    message: (n: number, freed: string): string => `${n}개를 끌까요? ${freed} 를 확보해요.`,
     item: (title: string, where: string, size: string): string => `• ${title} (${where}) — ${size}`,
     more: (n: number): string => `외 ${n}개`,
     note: '끄기 직전에 하나씩 최신 상태를 다시 확인하고, 그 사이 바뀐 것은 건너뛰어요.',
     confirm: '모두 끄기',
-    killed: (n: number, size: string): string => `${n}개를 껐어요. 약 ${size} 를 확보했어요.`,
+    killed: (n: number, freed: string): string => `${n}개를 껐어요. ${freed} 를 확보했어요.`,
     skipped: (n: number): string => `${n}개는 그 사이 바뀌거나 끝나서 건너뛰었어요.`,
     busy: (n: number): string => `${n}개는 이미 처리 중이라 건너뛰었어요.`,
     failed: (n: number): string => `${n}개는 끄지 못했어요(권한이 없거나 이미 끝남).`
@@ -66,8 +73,9 @@ export const text = {
   },
   notify: {
     ramTitle: (percent: number): string => `RAM 이 부족해요 (${percent}%)`,
-    ramBody: (n: number, size: string): string =>
-      `정리 후보 ${n}개를 끄면 약 ${size} 를 확보할 수 있어요.`,
+    /** freed: formatFreed 결과. */
+    ramBody: (n: number, freed: string): string =>
+      `정리 후보 ${n}개를 끄면 ${freed} 를 확보할 수 있어요.`,
     ramNoCandidates: '정리할 후보가 없어요. 메모리를 많이 쓰는 앱을 확인해 보세요.',
     waitingTitle: (tool: string): string => `${tool} 가 권한을 기다려요`,
     waitingManyTitle: (n: number, tool: string | null): string =>

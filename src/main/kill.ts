@@ -9,7 +9,14 @@ import type {
   ProcessInfo,
   RawSample
 } from '../shared/types'
-import { formatBytes, portList, worktreeKey, worktreeLabel } from '../shared/format'
+import {
+  commitSum,
+  formatBytes,
+  formatFreed,
+  portList,
+  worktreeKey,
+  worktreeLabel
+} from '../shared/format'
 import { selectionKey } from '../shared/keys'
 import {
   byMemory,
@@ -149,6 +156,14 @@ function validId(n: number): boolean {
   return Number.isInteger(n) && n > 0
 }
 
+/** 항목들을 끄면 확보할 메모리 문구(RAM 합, 커밋을 알면 커밋 합도). */
+function freedOf(items: RecommendItem[]): string {
+  return formatFreed(
+    items.reduce((sum, i) => sum + i.memoryBytes, 0),
+    commitSum(items)
+  )
+}
+
 /**
  * 서버 내리기와 남은 프로세스 끄기. 둘 다 같은 절차를 거친다:
  * 최신 샘플로 같은 프로세스인지·하위에 에이전트가 없는지 확인 → 네이티브 확인 창 → 한 번 더 확인 → 루트와 자손 종료.
@@ -156,14 +171,13 @@ function validId(n: number): boolean {
  */
 /** 정리 추천을 한꺼번에 끌 때의 확인 창: 항목 목록(최대 10줄)과 합계. */
 export function buildManyConfirm(items: RecommendItem[]): KillConfirm {
-  const total = items.reduce((sum, i) => sum + i.memoryBytes, 0)
   const lines = items
     .slice(0, CONFIRM_LINES)
     .map((i) => text.killMany.item(i.title, i.where, formatBytes(i.memoryBytes)))
   if (items.length > CONFIRM_LINES) lines.push(text.killMany.more(items.length - CONFIRM_LINES))
   return {
     title: text.killMany.title,
-    message: text.killMany.message(items.length, formatBytes(total)),
+    message: text.killMany.message(items.length, freedOf(items)),
     detail: [...lines, '', text.killMany.note].join('\n'),
     buttons: [text.killMany.confirm, text.kill.cancel],
     defaultId: 1,
@@ -181,7 +195,6 @@ export function buildWorkspaceConfirm(
   agents: Pick<AgentRow, 'tool' | 'state'>[]
 ): KillConfirm {
   const base = buildManyConfirm(items)
-  const total = items.reduce((sum, i) => sum + i.memoryBytes, 0)
   const notes = agents
     .slice(0, 3)
     .map((a) =>
@@ -190,7 +203,7 @@ export function buildWorkspaceConfirm(
   return {
     ...base,
     title: text.cleanupWorkspace.title,
-    message: text.cleanupWorkspace.message(name, items.length, formatBytes(total)),
+    message: text.cleanupWorkspace.message(name, items.length, freedOf(items)),
     detail: [base.detail, ...(notes.length ? ['', ...notes] : [])].join('\n')
   }
 }
@@ -384,8 +397,7 @@ export function createKiller(deps: KillDeps): {
 
       // 확인 창을 띄운 동안 시간이 지났으니 항목마다 한 번 더 확인한다.
       const after = await deps.resample()
-      let killed = 0
-      let killedBytes = 0
+      const killedItems: RecommendItem[] = []
       let failed = 0
       let skipped = mine.length - ready.length
       const killedPids: number[] = []
@@ -396,16 +408,16 @@ export function createKiller(deps: KillDeps): {
           continue
         }
         if (terminate(plan.pids).status === 'killed') {
-          killed++
-          killedBytes += t.item.memoryBytes
+          killedItems.push(t.item)
           killedPids.push(...plan.pids)
         } else failed++
       }
       if (killedPids.length > 0 && deps.platform === 'darwin')
         await escalateOnDarwin(killedPids, after)
 
+      const killed = killedItems.length
       const parts: string[] = []
-      if (killed > 0) parts.push(text.killMany.killed(killed, formatBytes(killedBytes)))
+      if (killed > 0) parts.push(text.killMany.killed(killed, freedOf(killedItems)))
       if (skipped > 0) parts.push(text.killMany.skipped(skipped))
       if (busyCount > 0) parts.push(text.killMany.busy(busyCount))
       if (failed > 0) parts.push(text.killMany.failed(failed))

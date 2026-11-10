@@ -7,10 +7,13 @@ import {
   planKill,
   buildKillConfirm,
   buildLeftoverConfirm,
+  buildManyConfirm,
+  buildWorkspaceConfirm,
   createKiller,
   type KillConfirm,
   type KillDeps
 } from './kill'
+import type { RecommendItem } from '../shared/recommend'
 import { buildSnapshot } from './snapshot'
 import { sampleWindows } from './collect/windows'
 import { createWorktreeResolver } from './collect/worktree'
@@ -93,6 +96,7 @@ const row: ServerRow = {
   workspace: null,
   unresolvable: false,
   memoryBytes: 2 * MB,
+  commitBytes: null,
   descendantPids: [4101],
   processes: [],
   clientCount: 0,
@@ -192,6 +196,29 @@ test('같은 워크트리에 에이전트가 있으면 확인 창에 한 줄 더
   expect(buildKillConfirm({ ...row, agentInWorktree: true }).detail).toBe(
     'node.exe (PID 4100) 와 하위 프로세스 1개가 종료돼요.\n' +
       '이 워크트리에서 에이전트가 실행 중이에요. 에이전트가 이 서버를 쓰고 있을 수 있어요.'
+  )
+})
+
+test('한꺼번에 끄기·작업 공간 정리 확인 창의 확보 예상: 커밋을 알면 RAM·커밋 둘 다, 모르면 RAM 만', () => {
+  const item = (pid: number, memoryMb: number, commitMb: number | null): RecommendItem => ({
+    kind: 'server',
+    key: `server:${pid}:1`,
+    pid,
+    title: `:${pid}`,
+    where: 'shop-web · develop',
+    memoryBytes: memoryMb * MB,
+    commitBytes: commitMb == null ? null : commitMb * MB
+  })
+  // 커밋은 아는 것만 더한다(3001 은 모름).
+  const known = [item(3000, 800, 3000), item(3001, 400, null)]
+  expect(buildManyConfirm(known).message).toBe(
+    '2개를 끌까요? RAM 약 1.2 GB · 커밋 약 2.9 GB 를 확보해요.'
+  )
+  expect(buildWorkspaceConfirm('work', known, []).message).toBe(
+    'work 의 2개를 끌까요? RAM 약 1.2 GB · 커밋 약 2.9 GB 를 확보해요.'
+  )
+  expect(buildManyConfirm([item(3000, 800, null)]).message).toBe(
+    '1개를 끌까요? 약 800 MB 를 확보해요.'
   )
 })
 
@@ -400,6 +427,7 @@ describe('남은 프로세스 끄기', () => {
     worktree: null,
     workspace: null,
     memoryBytes: 2 * MB,
+    commitBytes: null,
     descendantPids: [4101],
     processes: [],
     startedAt: 200,

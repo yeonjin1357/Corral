@@ -1,5 +1,6 @@
 import type {
   AppUsage,
+  CommitSummary,
   DashboardSnapshot,
   GroupUsage,
   MemoryLevel,
@@ -8,11 +9,12 @@ import type {
   ProcessInfo,
   RawSample,
   ServerRow,
+  SystemMemory,
   WorktreeInfo
 } from '../shared/types'
 import { DEFAULT_THRESHOLDS } from '../shared/defaults'
 import { exePathOf } from '../shared/exePath'
-import { worktreeKey } from '../shared/format'
+import { commitSum, worktreeKey } from '../shared/format'
 import { findLeftovers } from './leftovers'
 import { findHeavyJobs } from './heavy'
 import { summarizeProcesses } from './processSummary'
@@ -93,19 +95,53 @@ export function pidsForWorktreeLookup(
   return pids
 }
 
+const LEVEL_RANK: Record<MemoryLevel, number> = { normal: 0, warn: 1, danger: 2 }
+
+/** 사용률(%, 소수 1자리). 전체가 0 이하면 0. */
+function percentOf(used: number, total: number): number {
+  return total > 0 ? Math.round((used / total) * 1000) / 10 : 0
+}
+
+/** 시스템 커밋 요약. 모르거나 한도가 0 이하(이상한 입력)면 null. 단계는 RAM 과 같은 기준 %. */
+function commitSummaryOf(
+  system: SystemMemory | null | undefined,
+  thresholds: { ramWarnPercent: number; ramDangerPercent: number }
+): CommitSummary | null {
+  if (!system || !(system.commitLimitBytes > 0)) return null
+  const usedBytes = Math.max(0, system.commitUsedBytes)
+  const percent = percentOf(usedBytes, system.commitLimitBytes)
+  return {
+    usedBytes,
+    limitBytes: system.commitLimitBytes,
+    percent,
+    level: levelOf(percent, thresholds)
+  }
+}
+
+/**
+ * 메모리 요약. level 은 RAM 단계와 커밋 단계 중 높은 쪽(RAM 이 넉넉해 보여도 커밋이 한도에 가까우면 메모리가
+ * 모자란 것이다), ramLevel 은 RAM 만으로 본 단계. 시스템 값(커밋·커널)을 모르면 RAM 만으로.
+ */
 function summarizeMemory(
   totalBytes: number,
   freeBytes: number,
-  thresholds: { ramWarnPercent: number; ramDangerPercent: number }
+  thresholds: { ramWarnPercent: number; ramDangerPercent: number },
+  system?: SystemMemory | null
 ): MemorySummary {
   const total = Math.max(0, totalBytes)
   const used = Math.min(total, Math.max(0, total - freeBytes))
-  const usedPercent = total > 0 ? Math.round((used / total) * 1000) / 10 : 0
+  const usedPercent = percentOf(used, total)
+  const ramLevel = levelOf(usedPercent, thresholds)
+  const commit = commitSummaryOf(system, thresholds)
   return {
     totalBytes: total,
     usedBytes: used,
     usedPercent,
-    level: levelOf(usedPercent, thresholds)
+    availableBytes: total - used,
+    level: commit && LEVEL_RANK[commit.level] > LEVEL_RANK[ramLevel] ? commit.level : ramLevel,
+    ramLevel,
+    commit,
+    kernelBytes: system?.kernelBytes ?? null
   }
 }
 
@@ -117,12 +153,15 @@ function appsOf(processes: ProcessInfo[], platform: Platform | null): AppUsage[]
     const app = byName.get(key)
     if (app) {
       app.memoryBytes += p.memoryBytes
+      // 커밋은 아는 것만 더한다(하나도 모르면 null 그대로).
+      if (p.commitBytes != null) app.commitBytes = (app.commitBytes ?? 0) + p.commitBytes
       app.processCount++
       app.exePath ??= exePathOf(p.commandLine, platform)
     } else
       byName.set(key, {
         name: p.name,
         memoryBytes: p.memoryBytes,
+        commitBytes: p.commitBytes ?? null,
         processCount: 1,
         exePath: exePathOf(p.commandLine, platform)
       })
@@ -214,6 +253,7 @@ function serversOf(ports: PortEntry[], tree: ProcessTree): ServerRow[] {
       workspace: null,
       unresolvable: head.unresolvable,
       memoryBytes: members.reduce((sum, m) => sum + m.memoryBytes, 0),
+      commitBytes: commitSum(members),
       descendantPids,
       processes: summarizeProcesses(members),
       clientCount,
@@ -257,6 +297,8 @@ export function buildSnapshot(input: {
     for (const pid of pids) sum += tree.byPid.get(pid)?.memoryBytes ?? 0
     return sum
   }
+  const commitOf = (pids: Iterable<number>): number | null =>
+    commitSum([...pids].flatMap((pid) => tree.byPid.get(pid) ?? []))
 
   const worktreeOf = (pid: number): WorktreeInfo | null => {
     const own = worktrees.get(pid)
@@ -349,7 +391,7 @@ export function buildSnapshot(input: {
     now: input.now
   })
 
-  const memory = summarizeMemory(input.totalBytes, input.freeBytes, input.thresholds)
+  const memory = summarizeMemory(input.totalBytes, input.freeBytes, input.thresholds, sample.system)
   const devBytes = memoryOf(devServer)
   const agentBytes = memoryOf(agent)
   const heavyBytes = memoryOf(heavy)
@@ -362,14 +404,37 @@ export function buildSnapshot(input: {
     memoryOf(rest.map((p) => p.pid)),
     Math.max(0, memory.usedBytes - known)
   )
+  // 커밋은 RAM 처럼 사용량 안으로 줄이지 않는다(페이지 파일 몫까지 들어 RAM 사용량보다 클 수 있다).
+  // 시스템 몫은 프로세스가 아니라 커밋을 셀 수 없다.
   const groups: GroupUsage[] = [
-    { group: 'devServer', memoryBytes: devBytes, processCount: devServer.size },
-    { group: 'agent', memoryBytes: agentBytes, processCount: agent.size },
-    { group: 'heavy', memoryBytes: heavyBytes, processCount: heavy.size },
-    { group: 'otherApps', memoryBytes: otherBytes, processCount: rest.length },
+    {
+      group: 'devServer',
+      memoryBytes: devBytes,
+      commitBytes: commitOf(devServer),
+      processCount: devServer.size
+    },
+    {
+      group: 'agent',
+      memoryBytes: agentBytes,
+      commitBytes: commitOf(agent),
+      processCount: agent.size
+    },
+    {
+      group: 'heavy',
+      memoryBytes: heavyBytes,
+      commitBytes: commitOf(heavy),
+      processCount: heavy.size
+    },
+    {
+      group: 'otherApps',
+      memoryBytes: otherBytes,
+      commitBytes: commitSum(rest),
+      processCount: rest.length
+    },
     {
       group: 'system',
       memoryBytes: Math.max(0, memory.usedBytes - known - otherBytes),
+      commitBytes: null,
       processCount: 0
     }
   ]
@@ -382,7 +447,7 @@ export function buildSnapshot(input: {
     hiddenServers: [],
     leftovers,
     heavyJobs,
-    // RAM 이 넉넉하면 겹쳐도 조용하다(스펙 §3-6).
+    // 메모리(RAM·커밋 중 높은 단계)가 넉넉하면 겹쳐도 조용하다(스펙 §3-6).
     heavyOverlap: heavyJobs.length >= 2 && memory.level !== 'normal',
     agents: [],
     hook: null,

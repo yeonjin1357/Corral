@@ -1,6 +1,6 @@
 import { buildSnapshot, levelOf, pidsForWorktreeLookup, RELAY_PROCESS_NAMES } from './snapshot'
 import { agentToolOf, classifyAgent } from './processTree'
-import type { ProcessInfo, RawSample, TcpEntry, WorktreeInfo } from '../shared/types'
+import type { AppUsage, ProcessInfo, RawSample, TcpEntry, WorktreeInfo } from '../shared/types'
 
 const MB = 1024 * 1024
 const GB = 1024 * MB
@@ -135,8 +135,8 @@ describe('포트를 연 프로세스 고르기', () => {
   test('서버 행은 자기와 자손을 이름별로 묶은 프로세스 목록을 담는다(상세 패널용)', () => {
     const server = buildSnapshot(input).servers.find((r) => r.pid === 4100)!
     expect(server.processes).toEqual([
-      { name: 'node.exe', hint: null, count: 1, memoryBytes: 1000 * MB },
-      { name: 'esbuild.exe', hint: 'esbuild', count: 1, memoryBytes: 200 * MB }
+      { name: 'node.exe', hint: null, count: 1, memoryBytes: 1000 * MB, commitBytes: null },
+      { name: 'esbuild.exe', hint: 'esbuild', count: 1, memoryBytes: 200 * MB, commitBytes: null }
     ])
   })
 
@@ -344,17 +344,19 @@ describe('묶음과 에이전트', () => {
   })
 
   test('다른 앱 전부: 이름별로 묶어 메모리 큰 순(같으면 이름 순)', () => {
+    const app = (name: string, mb: number, processCount: number): AppUsage => ({
+      name,
+      memoryBytes: mb * MB,
+      commitBytes: null,
+      processCount,
+      exePath: null
+    })
     expect(buildSnapshot(input).apps.slice(0, 5)).toEqual([
-      { name: 'claude.exe', memoryBytes: 300 * MB, processCount: 1, exePath: null },
-      { name: 'unrelated.exe', memoryBytes: 300 * MB, processCount: 1, exePath: null },
-      { name: 'python.exe', memoryBytes: 80 * MB, processCount: 1, exePath: null },
-      { name: 'node.exe', memoryBytes: 51 * MB, processCount: 2, exePath: null },
-      {
-        name: 'codex-windows-sandbox-service.exe',
-        memoryBytes: 20 * MB,
-        processCount: 1,
-        exePath: null
-      }
+      app('claude.exe', 300, 1),
+      app('unrelated.exe', 300, 1),
+      app('python.exe', 80, 1),
+      app('node.exe', 51, 2),
+      app('codex-windows-sandbox-service.exe', 20, 1)
     ])
   })
 
@@ -387,6 +389,7 @@ describe('묶음과 에이전트', () => {
     expect(apps[0]).toEqual({
       name: 'Figma.exe',
       memoryBytes: 900 * MB,
+      commitBytes: null,
       processCount: 1,
       exePath: 'C:\\Users\\dev\\AppData\\Local\\Figma\\Figma.exe'
     })
@@ -466,8 +469,176 @@ describe('메모리 요약', () => {
 
   test('총량 0·여유가 총량보다 큰 값 같은 이상한 입력에도 NaN·음수 없음', () => {
     const zero = buildSnapshot({ ...input, totalBytes: 0, freeBytes: 0 })
-    expect(zero.memory).toEqual({ totalBytes: 0, usedBytes: 0, usedPercent: 0, level: 'normal' })
+    expect(zero.memory).toEqual({
+      totalBytes: 0,
+      usedBytes: 0,
+      usedPercent: 0,
+      availableBytes: 0,
+      level: 'normal',
+      ramLevel: 'normal',
+      commit: null,
+      kernelBytes: null
+    })
     expect(buildSnapshot({ ...input, freeBytes: 40 * GB }).memory.usedBytes).toBe(0)
+  })
+
+  test('availableBytes 는 total − used', () => {
+    const m = buildSnapshot(input).memory
+    expect(m.availableBytes).toBe(m.totalBytes - m.usedBytes)
+    expect(m.availableBytes).toBe(Math.round(5.7 * GB))
+    // 여유가 총량보다 크면 사용 0 이라 남은 메모리는 총량.
+    expect(buildSnapshot({ ...input, freeBytes: 40 * GB }).memory.availableBytes).toBe(32 * GB)
+  })
+
+  test('커밋 사용률이 위험 기준을 넘으면 RAM 이 정상이어도 level 은 danger, ramLevel 은 normal', () => {
+    const m = buildSnapshot({
+      ...input,
+      totalBytes: 100,
+      freeBytes: 60,
+      sample: { ...sample, system: { commitUsedBytes: 95, commitLimitBytes: 100, kernelBytes: 7 } }
+    }).memory
+    expect(m.usedPercent).toBe(40)
+    expect(m.ramLevel).toBe('normal')
+    expect(m.level).toBe('danger')
+    expect(m.commit).toEqual({ usedBytes: 95, limitBytes: 100, percent: 95, level: 'danger' })
+    expect(m.kernelBytes).toBe(7)
+  })
+
+  test('level 은 RAM·커밋 단계 중 높은 쪽, 커밋 사용률은 소수 1자리', () => {
+    const at = (free: number, used: number, limit: number): ReturnType<typeof buildSnapshot> =>
+      buildSnapshot({
+        ...input,
+        totalBytes: 100,
+        freeBytes: free,
+        sample: {
+          ...sample,
+          system: { commitUsedBytes: used, commitLimitBytes: limit, kernelBytes: 0 }
+        }
+      })
+    // RAM 95%(위험), 커밋 50%(정상) → 위험.
+    expect(at(5, 50, 100).memory).toMatchObject({ level: 'danger', ramLevel: 'danger' })
+    expect(at(5, 50, 100).memory.commit?.level).toBe('normal')
+    // RAM 40%(정상), 커밋 85%(경고) → 경고.
+    expect(at(60, 85, 100).memory).toMatchObject({ level: 'warn', ramLevel: 'normal' })
+    expect(at(60, 2, 3).memory.commit?.percent).toBe(66.7)
+  })
+
+  test('시스템 값을 모르면 commit·kernelBytes 는 null 이고 level 은 RAM 만으로', () => {
+    for (const system of [undefined, null]) {
+      const m = buildSnapshot({ ...input, sample: { ...sample, system } }).memory
+      expect(m.commit).toBeNull()
+      expect(m.kernelBytes).toBeNull()
+      expect(m.ramLevel).toBe('warn')
+      expect(m.level).toBe('warn')
+    }
+  })
+})
+
+describe('커밋 합', () => {
+  // 서버(4100 + 자손 4101), 에이전트(5000), 다른 앱(chrome 둘·notepad).
+  const claude = '"C:\\Users\\dev\\.local\\bin\\claude.exe"'
+  const withCommit = (p: ProcessInfo, commitMb: number | null | undefined): ProcessInfo =>
+    commitMb === undefined ? p : { ...p, commitBytes: commitMb == null ? null : commitMb * MB }
+  const commitInput = (commits: Record<number, number | null | undefined>): typeof input => ({
+    ...input,
+    sample: {
+      processes: [
+        proc(4100, 1, 'node.exe', 1000, 200),
+        proc(4101, 4100, 'esbuild.exe', 200, 300),
+        proc(5000, 1, 'claude.exe', 400, 100, claude),
+        proc(7000, 1, 'chrome.exe', 300, 100),
+        proc(7001, 7000, 'chrome.exe', 100, 110),
+        proc(7500, 1, 'notepad.exe', 10, 100)
+      ].map((p) => withCommit(p, commits[p.pid])),
+      tcp: [listen(4100, 3000)]
+    },
+    worktrees: new Map<number, WorktreeInfo>([[4100, W1]])
+  })
+  const MB_OR_NULL = (v: number | null): number | null => (v == null ? null : v / MB)
+
+  test('서버·묶음·다른 앱의 커밋은 구성 프로세스의 합, 하나도 모르면 null', () => {
+    const s = buildSnapshot(
+      commitInput({ 4100: 3000, 4101: 500, 5000: 900, 7000: 700, 7001: 200, 7500: null })
+    )
+    const server = s.servers[0]
+    expect(MB_OR_NULL(server.commitBytes)).toBe(3500)
+    expect(server.processes.map((p) => [p.name, MB_OR_NULL(p.commitBytes)])).toEqual([
+      ['node.exe', 3000],
+      ['esbuild.exe', 500]
+    ])
+    const g = Object.fromEntries(s.groups.map((x) => [x.group, MB_OR_NULL(x.commitBytes)]))
+    expect(g).toEqual({ devServer: 3500, agent: 900, heavy: null, otherApps: 900, system: null })
+    expect(s.apps.map((a) => [a.name, MB_OR_NULL(a.commitBytes)])).toEqual([
+      ['chrome.exe', 900],
+      ['notepad.exe', null]
+    ])
+  })
+
+  test('커밋을 하나도 모르면(macOS·보조 코드가 막힌 PC) 행·묶음 모두 null', () => {
+    const s = buildSnapshot(commitInput({}))
+    expect(s.servers[0].commitBytes).toBeNull()
+    expect(s.servers[0].processes.every((p) => p.commitBytes === null)).toBe(true)
+    expect(s.groups.every((x) => x.commitBytes === null)).toBe(true)
+    expect(s.apps.every((a) => a.commitBytes === null)).toBe(true)
+  })
+
+  test('일부 프로세스의 커밋만 알면 아는 것만 더한다', () => {
+    const s = buildSnapshot(commitInput({ 4100: 3000, 4101: null, 7000: 700 }))
+    expect(MB_OR_NULL(s.servers[0].commitBytes)).toBe(3000)
+    expect(s.servers[0].processes.map((p) => [p.name, MB_OR_NULL(p.commitBytes)])).toEqual([
+      ['node.exe', 3000],
+      ['esbuild.exe', null]
+    ])
+    const g = Object.fromEntries(s.groups.map((x) => [x.group, MB_OR_NULL(x.commitBytes)]))
+    expect(g).toMatchObject({ devServer: 3000, agent: null, otherApps: 700 })
+    // 같은 이름으로 묶인 프로세스도 아는 것만 더한다.
+    expect(MB_OR_NULL(s.apps.find((a) => a.name === 'chrome.exe')!.commitBytes)).toBe(700)
+  })
+
+  test('남은 프로세스·무거운 작업의 커밋도 자기 + 자손의 합', () => {
+    const s = buildSnapshot({
+      ...input,
+      now: 60 * 60 * 1000,
+      sample: {
+        processes: [
+          // 부모가 끝나 남은 Vitest(자손 하나).
+          {
+            ...proc(
+              9600,
+              9599,
+              'node.exe',
+              30,
+              100,
+              'node C:\\work\\wt-a\\node_modules\\vitest\\vitest.mjs'
+            ),
+            commitBytes: 90 * MB
+          },
+          { ...proc(9601, 9600, 'node.exe', 10, 110, 'worker'), commitBytes: 40 * MB },
+          // 무거운 작업(자손 하나는 커밋을 모름).
+          {
+            ...proc(
+              7300,
+              1,
+              'node.exe',
+              2000,
+              100,
+              'node C:\\work\\api\\node_modules\\vite\\bin\\vite.js build'
+            ),
+            commitBytes: 5000 * MB
+          },
+          proc(7301, 7300, 'esbuild.exe', 100, 110)
+        ],
+        tcp: []
+      },
+      worktrees: new Map<number, WorktreeInfo>([
+        [9600, W2],
+        [7300, W3]
+      ]),
+      heavyPatterns: ['vite build']
+    })
+    expect(s.leftovers.map((l) => [l.pid, MB_OR_NULL(l.commitBytes)])).toEqual([[9600, 130]])
+    expect(s.heavyJobs.map((j) => [j.pid, MB_OR_NULL(j.commitBytes)])).toEqual([[7300, 5000]])
+    expect(MB_OR_NULL(s.groups.find((x) => x.group === 'heavy')!.commitBytes)).toBe(5000)
   })
 })
 

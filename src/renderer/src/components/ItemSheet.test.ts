@@ -61,9 +61,15 @@ describe('상세 패널: 프로세스 목록', () => {
       row: agentRow({
         descendantCount: 4,
         processes: [
-          { name: 'node.exe', hint: '@playwright/mcp', count: 2, memoryBytes: 310 * MB },
-          { name: 'claude.exe', hint: null, count: 1, memoryBytes: 300 * MB },
-          { name: 'cmd.exe', hint: null, count: 2, memoryBytes: 10 * MB }
+          {
+            name: 'node.exe',
+            hint: '@playwright/mcp',
+            count: 2,
+            memoryBytes: 310 * MB,
+            commitBytes: null
+          },
+          { name: 'claude.exe', hint: null, count: 1, memoryBytes: 300 * MB, commitBytes: null },
+          { name: 'cmd.exe', hint: null, count: 2, memoryBytes: 10 * MB, commitBytes: null }
         ]
       })
     })
@@ -80,7 +86,9 @@ describe('상세 패널: 프로세스 목록', () => {
       kind: 'server',
       row: serverRow({
         descendantPids: [2, 3, 4, 5],
-        processes: [{ name: 'java.exe', hint: null, count: 2, memoryBytes: 900 * MB }]
+        processes: [
+          { name: 'java.exe', hint: null, count: 2, memoryBytes: 900 * MB, commitBytes: null }
+        ]
       })
     })
     expect(processTitle()).toBe('프로세스 5개')
@@ -93,8 +101,8 @@ describe('상세 패널: 프로세스 목록', () => {
       row: heavyJob({
         descendantPids: [2],
         processes: [
-          { name: 'node.exe', hint: 'vue-tsc', count: 1, memoryBytes: 800 * MB },
-          { name: 'cmd.exe', hint: null, count: 1, memoryBytes: 5 * MB }
+          { name: 'node.exe', hint: 'vue-tsc', count: 1, memoryBytes: 800 * MB, commitBytes: null },
+          { name: 'cmd.exe', hint: null, count: 1, memoryBytes: 5 * MB, commitBytes: null }
         ]
       })
     })

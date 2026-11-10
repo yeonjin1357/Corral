@@ -58,9 +58,16 @@ describe('남은 프로세스 찾기', () => {
         worktree: null,
         workspace: null,
         memoryBytes: 500 * MB,
+        commitBytes: null,
         descendantPids: [7001],
         processes: [
-          { name: 'chrome.exe', hint: 'Playwright 브라우저', count: 2, memoryBytes: 500 * MB }
+          {
+            name: 'chrome.exe',
+            hint: 'Playwright 브라우저',
+            count: 2,
+            memoryBytes: 500 * MB,
+            commitBytes: null
+          }
         ],
         startedAt: 100,
         agentInWorktree: false
@@ -73,8 +80,11 @@ describe('남은 프로세스 찾기', () => {
         worktree: W1,
         workspace: null,
         memoryBytes: 150 * MB,
+        commitBytes: null,
         descendantPids: [],
-        processes: [{ name: 'node.exe', hint: 'Vitest', count: 1, memoryBytes: 150 * MB }],
+        processes: [
+          { name: 'node.exe', hint: 'Vitest', count: 1, memoryBytes: 150 * MB, commitBytes: null }
+        ],
         startedAt: 100,
         agentInWorktree: false
       }

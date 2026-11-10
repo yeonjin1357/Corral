@@ -36,6 +36,7 @@ const candidate: ServerRow = {
   workspace: null,
   unresolvable: false,
   memoryBytes: 800 * MB,
+  commitBytes: null,
   descendantPids: [4101],
   processes: [],
   clientCount: 0,
@@ -54,6 +55,7 @@ const daemon: LeftoverRow = {
   worktree: { root: 'C:\\work\\api', branch: 'main', isLinkedWorktree: false },
   workspace: null,
   memoryBytes: 1100 * MB,
+  commitBytes: null,
   descendantPids: [],
   processes: [],
   startedAt: 50,
@@ -126,6 +128,34 @@ test('확인 창을 띄운 사이 바뀐 것은 건너뛰고 결과에 알린다
   })
 })
 
+test('커밋을 알면 확인 창·결과에 RAM·커밋을 둘 다, 결과는 실제로 끈 것만 더한다', async () => {
+  const latest = (): ReturnType<typeof blankSnapshot> => ({
+    ...blankSnapshot(1),
+    servers: [{ ...candidate, commitBytes: 3000 * MB }],
+    leftovers: [{ ...daemon, commitBytes: 1000 * MB }]
+  })
+  const all = deps({ latest })
+  const result = await createKiller(all).killMany(KEYS)
+  expect((all.confirm.mock.calls[0][0] as KillConfirm).message).toBe(
+    '2개를 끌까요? RAM 약 1.9 GB · 커밋 약 3.9 GB 를 확보해요.'
+  )
+  expect(result).toEqual({
+    status: 'killed',
+    message: '2개를 껐어요. RAM 약 1.9 GB · 커밋 약 3.9 GB 를 확보했어요.'
+  })
+
+  // Gradle 데몬이 확인 창 사이에 바뀌어 건너뛰면 서버의 몫만.
+  const changed: RawSample = {
+    processes: [vite, esbuild, { ...gradle, commandLine: 'java Other' }],
+    tcp: []
+  }
+  const samples = [fresh, changed]
+  const some = deps({ latest, resample: async () => samples.shift() ?? changed })
+  expect((await createKiller(some).killMany(KEYS)).message).toBe(
+    '1개를 껐어요. RAM 약 800 MB · 커밋 약 2.9 GB 를 확보했어요. 1개는 그 사이 바뀌거나 끝나서 건너뛰었어요.'
+  )
+})
+
 test('처음 확인에서 모두 바뀌었거나 끝났으면 확인 창 없이 gone', async () => {
   const d = deps({ resample: async () => ({ processes: [], tcp: [] }) })
   await expect(createKiller(d).killMany(KEYS)).resolves.toEqual({ status: 'gone' })
@@ -191,6 +221,7 @@ describe('작업 공간 한 번에 정리(F2)', () => {
     worktree: candidate.worktree,
     workspace: WS,
     memoryBytes: 4000 * MB,
+    commitBytes: null,
     descendantPids: [],
     processes: [],
     startedAt: 1
@@ -202,6 +233,7 @@ describe('작업 공간 한 번에 정리(F2)', () => {
     workspace: WS,
     startedAt: 1,
     memoryBytes: 600 * MB,
+    commitBytes: null,
     descendantCount: 2,
     processes: [],
     state: 'idle',
