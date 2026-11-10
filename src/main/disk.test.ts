@@ -1,7 +1,13 @@
 import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { createDiskManager, createRepoMemory, measureDir, type DiskDeps } from './disk'
+import {
+  createDiskManager,
+  createRepoMemory,
+  measureDir,
+  snapshotWorktrees,
+  type DiskDeps
+} from './disk'
 import { createGitFixture, type GitFixture } from './testing/gitFixture'
 import { blankSnapshot } from '../shared/snapshot'
 import type { KillConfirm } from './kill'
@@ -287,6 +293,21 @@ describe('createDiskManager (실제 git)', () => {
     expect((await manager.remove(gone)).status).toBe('failed')
     expect(await exists(join(gone, 'node_modules'))).toBe(true)
   }, 60000)
+
+  test('숨긴 서버가 그 워크트리에서 돌아도 사용 중으로 표시한다', async () => {
+    const server = {
+      worktree: { root: gone, branch: 'feat-gone', isLinkedWorktree: true }
+    } as ServerRow
+    const latest = (): DashboardSnapshot => ({ ...blankSnapshot(1), hiddenServers: [server] })
+    const report = await createDiskManager(deps({ latest })).scan()
+    expect(report.rows[0].inUse).toBe(true)
+  }, 60000)
+
+  test('저장소 기억에 쓰는 워크트리 목록에 숨긴 서버의 워크트리도 넣는다', () => {
+    const w = { root: gone, branch: 'feat-gone', isLinkedWorktree: true }
+    const hidden = { worktree: w } as ServerRow
+    expect(snapshotWorktrees({ ...blankSnapshot(1), hiddenServers: [hidden] })).toEqual([w])
+  })
 
   test('취소하면 그대로, 목록에 없는 경로(메인 체크아웃 등)는 gone', async () => {
     const manager = createDiskManager(deps({ confirm: vi.fn(async () => false) }))

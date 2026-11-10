@@ -9,7 +9,7 @@ export function iconPathsOf(s: DashboardSnapshot | null): Set<string> {
   const paths = new Set<string>()
   if (!s) return paths
   for (const app of s.apps) if (app.exePath) paths.add(app.exePath)
-  for (const row of [...s.servers, ...s.leftovers, ...s.heavyJobs]) {
+  for (const row of [...s.servers, ...s.hiddenServers, ...s.leftovers, ...s.heavyJobs]) {
     const path = exePathOf(row.commandLine, s.platform)
     if (path) paths.add(path)
   }

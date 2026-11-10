@@ -34,6 +34,11 @@ function snap(): DashboardSnapshot {
   }
 }
 
+test('숨긴 서버의 실행 파일도 아이콘을 준다(숨긴 서버 표에 보이므로)', () => {
+  const s = snap()
+  expect([...iconPathsOf({ ...s, servers: [], hiddenServers: s.servers })]).toContain(GATEWAY)
+})
+
 test('아이콘을 줄 수 있는 경로는 지금 스냅샷에 나온 실행 파일뿐(다른 앱·포트·남은 프로세스·무거운 작업)', () => {
   expect([...iconPathsOf(snap())].sort()).toEqual([CHROME, GATEWAY].sort())
   expect(iconPathsOf(null).size).toBe(0)

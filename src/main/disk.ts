@@ -119,11 +119,11 @@ export function createRepoMemory(
   }
 }
 
-/** 스냅샷에 나온 워크트리(서버·에이전트·남은 프로세스·무거운 작업). */
+/** 스냅샷에 나온 워크트리(서버(숨긴 서버 포함)·에이전트·남은 프로세스·무거운 작업). */
 export function snapshotWorktrees(s: DashboardSnapshot | null): WorktreeInfo[] {
   if (!s) return []
-  return [...s.servers, ...s.agents, ...s.leftovers, ...s.heavyJobs].flatMap((r) =>
-    r.worktree ? [r.worktree] : []
+  return [...s.servers, ...s.hiddenServers, ...s.agents, ...s.leftovers, ...s.heavyJobs].flatMap(
+    (r) => (r.worktree ? [r.worktree] : [])
   )
 }
 
