@@ -274,14 +274,27 @@ export function diskEvidenceText(r: DiskRow): string {
     ? text.ui.disk.staleFor(r.staleDays)
     : text.ui.disk.evidence[r.evidence]
 }
+const withoutExe = (name: string): string => name.replace(/\.exe$/i, '')
+/** 다른 앱 이름: `.exe` 를 떼고, 런타임은 띄운 앱까지("node (Cursor)", G5b). 다른 앱 탭·메모리 상세가 같이 쓴다. */
+export function appName(app: AppUsage): string {
+  const name = withoutExe(app.name)
+  return app.owner ? text.ui.groups.withOwner(name, withoutExe(app.owner)) : name
+}
+/** 다른 앱 이름의 title: 프로세스 이름 그대로("node.exe — Cursor.exe"). */
+export function appTitle(app: AppUsage): string {
+  return app.owner ? text.ui.groups.withOwnerTitle(app.name, app.owner) : app.name
+}
+/** 다른 앱 행 키: 이름이 같아도 띄운 앱이 다르면 다른 행. */
+export function appRowId(app: AppUsage): string {
+  return `app:${app.name}:${app.owner ?? ''}`
+}
+/** 프로세스 이름으로 고른 로고와 OS 앱 아이콘(OS 아이콘을 먼저). */
+function processIcon(name: string, exePath: string | null, title: string): RowIcon {
+  return { brand: appBrand(name), exePath, prefer: 'native', fallback: 'app', title }
+}
+/** 다른 앱 아이콘. 띄운 앱이 있으면 exePath 가 띄운 앱의 것이라(메인이 담는다) 그 앱 아이콘이 보인다. */
 export function appIcon(app: AppUsage): RowIcon {
-  return {
-    brand: appBrand(app.name),
-    exePath: app.exePath,
-    prefer: 'native',
-    fallback: 'app',
-    title: app.name
-  }
+  return processIcon(app.name, app.exePath, appTitle(app))
 }
 
 const AGENT_TONE: Record<AgentState, Tone> = {
@@ -606,9 +619,9 @@ function buildTable(tab: SnapshotTab, s: DashboardSnapshot): Table {
         sort: { id: 'memory', dir: 'desc' },
         rows: s.apps.map((a) => ({
           key: null,
-          id: `app:${a.name}`,
+          id: appRowId(a),
           cells: {
-            name: { text: a.name.replace(/\.exe$/i, ''), title: a.name, icon: appIcon(a) },
+            name: { text: appName(a), title: appTitle(a), icon: appIcon(a) },
             memory: memoryCell(a.memoryBytes),
             commit: commitCell(a.commitBytes),
             processes: {
@@ -617,10 +630,42 @@ function buildTable(tab: SnapshotTab, s: DashboardSnapshot): Table {
             }
           },
           actions: [],
-          search: searchOf(a.name)
+          search: searchOf(a.name, a.owner)
         }))
       }
   }
+}
+
+/** 다른 포트(G5c, 개발 서버 탭 바닥 "다른 포트 n개"). 보기만 한다: 고를 수 없고 동작이 없다. */
+export function otherPortsTable(s: DashboardSnapshot): Table {
+  return dropEmptyCommit({
+    // 동작 칸이 없어 기본 창(1280px)에 넉넉히 들어간다.
+    columns: [
+      { id: 'port', label: c.port, width: 110 },
+      { id: 'name', label: c.process, width: 300 },
+      { id: 'pid', label: c.pid, width: 90, align: 'right' },
+      { id: 'memory', label: c.memory, width: 96, align: 'right' },
+      COMMIT_COLUMN
+    ],
+    sort: { id: 'port', dir: 'asc' },
+    rows: s.otherPorts.map((p) => ({
+      key: null,
+      id: `other:${p.port}:${p.pid}`,
+      cells: {
+        port: { text: portList([p.port]), sort: p.port, mono: true },
+        name: {
+          text: p.processName,
+          title: p.exePath ?? p.processName,
+          icon: processIcon(p.processName, p.exePath, p.processName)
+        },
+        pid: { text: String(p.pid), sort: p.pid, mono: true },
+        memory: memoryCell(p.memoryBytes),
+        commit: commitCell(p.commitBytes)
+      },
+      actions: [],
+      search: searchOf(portList([p.port]), p.port, p.processName)
+    }))
+  })
 }
 
 /** 검색어로 거르기. `:3000` 처럼 앞에 콜론을 붙여도 포트를 찾는다. */

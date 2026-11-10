@@ -8,7 +8,15 @@ import type { NavigateTarget, PitwallApi } from '../../shared/ipc'
 import type { PitEvent } from '../../shared/events'
 import type { DashboardSnapshot } from '../../shared/types'
 import { selectionKey } from '../../shared/keys'
-import { MB, agentRow, diskRow, serverRow, snapshot, workspaceRow } from './testing/fixtures'
+import {
+  MB,
+  agentRow,
+  diskRow,
+  otherPort,
+  serverRow,
+  snapshot,
+  workspaceRow
+} from './testing/fixtures'
 
 const WS = { root: 'C:\\work\\ws', name: 'ws', branch: 'main', outer: true }
 const front = serverRow({ pid: 1, ports: [5173], workspace: WS, memoryBytes: 300 * MB })
@@ -556,6 +564,67 @@ test('상세 패널의 창으로 가기: 그 에이전트의 키로 부르고, �
   button().click()
   await flushPromises()
   expect(notice(w)).toContain('그 에이전트의 창을 찾지 못했어요.')
+  w.unmount()
+})
+
+test('찾는 포트가 개발 서버에 없고 다른 포트에 있으면 다른 포트에서 찾기를 권한다', async () => {
+  const chrome = otherPort({ port: 9229, pid: 4410, processName: 'chrome.exe' })
+  const w = await start(
+    fake({ getLatest: async () => ({ ...snap(), otherPorts: [otherPort(), chrome] }) })
+  )
+  await openTab(w, 'ports')
+  const search = w.find('input[placeholder^="이름"]')
+  const findOther = (): ReturnType<VueWrapper['find']> => w.find('[data-action="find-other"]')
+  // 개발 서버에 있는 포트, 어디에도 없는 포트, 포트 번호가 아닌 검색어에는 권하지 않는다.
+  for (const q of ['3000', ':9999', 'postgres']) {
+    await search.setValue(q)
+    expect(findOther().exists(), q).toBe(false)
+  }
+  await search.setValue(' :5432 ')
+  expect(w.find('tbody').text()).toContain('찾는 항목이 없어요')
+  expect(findOther().text()).toBe('다른 포트에서 찾기')
+  await findOther().trigger('click')
+  // 검색어를 둔 채 다른 포트 보기로: 고를 수 없는 줄, 동작 칸 없음.
+  expect((search.element as HTMLInputElement).value).toBe(' :5432 ')
+  const rows = w.findAll('tbody tr')
+  expect(rows).toHaveLength(1)
+  expect(rows[0].text()).toContain(':5432')
+  expect(rows[0].text()).toContain('postgres.exe')
+  expect(rows[0].attributes('data-key')).toBeUndefined()
+  expect(w.find('.actions-heading').exists()).toBe(false)
+  expect(w.find('[data-action="toggle-other"]').text()).toBe('다른 포트 닫기')
+  expect(w.find('footer').text()).toContain('다른 포트 1개')
+  w.unmount()
+})
+
+test('다른 포트 보기는 숨긴 서버 보기와 하나만 켜지고, 탭을 바꾸면 풀린다', async () => {
+  const hidden = serverRow({ pid: 7, ports: [2375], processName: 'docker.exe' })
+  const w = await start(
+    fake({
+      getLatest: async () => ({ ...snap(), hiddenServers: [hidden], otherPorts: [otherPort()] })
+    })
+  )
+  await openTab(w, 'ports')
+  const other = (): ReturnType<VueWrapper['find']> => w.find('[data-action="toggle-other"]')
+  const hiddenToggle = (): ReturnType<VueWrapper['find']> => w.find('[data-action="toggle-hidden"]')
+  const body = (): string => w.find('tbody').text()
+  expect(other().text()).toBe('다른 포트 1개')
+  await other().trigger('click')
+  expect(body()).toContain('postgres.exe')
+  // 묶음 보기여도 다른 포트는 평평한 표다.
+  expect(w.find('tr[data-group]').exists()).toBe(false)
+  await hiddenToggle().trigger('click')
+  expect(hiddenToggle().text()).toBe('숨긴 서버 닫기')
+  expect(other().text()).toBe('다른 포트 1개')
+  expect(body()).toContain(':2375')
+  expect(body()).not.toContain('postgres.exe')
+  await other().trigger('click')
+  expect(hiddenToggle().text()).toBe('숨김 1개')
+  expect(body()).toContain('postgres.exe')
+  await openTab(w, 'agents')
+  await openTab(w, 'ports')
+  expect(other().text()).toBe('다른 포트 1개')
+  expect(body()).not.toContain('postgres.exe')
   w.unmount()
 })
 

@@ -5,6 +5,7 @@ import type {
   GroupUsage,
   MemoryLevel,
   MemorySummary,
+  OtherPort,
   Platform,
   ProcessInfo,
   RawSample,
@@ -35,9 +36,13 @@ export const RELAY_PROCESS_NAMES: readonly string[] = [
 ]
 const RELAY_SET = new Set(RELAY_PROCESS_NAMES.map((n) => n.toLowerCase()))
 
-/** 1024 미만은 OS·시스템 서비스가 쓰는 포트라 개발 서버로 보지 않는다. */
+/** 1024 미만은 OS·시스템 서비스가 쓰는 포트라 개발 서버로 보지 않는다(다른 포트에도 넣지 않는다). */
 const MIN_DEV_PORT = 1024
 const MAX_ANCESTOR_DEPTH = 3
+/** 이 pid 까지는 OS 자체(Windows 의 Idle·System). 다른 포트에 넣지 않는다. */
+const SYSTEM_PID_MAX = 4
+/** 다른 포트(G5c)는 포트 순으로 이만큼까지(서비스가 여는 동적 포트가 많아도 화면·IPC 가 무거워지지 않게). */
+const OTHER_PORT_LIMIT = 300
 
 export function levelOf(
   usedPercent: number,
@@ -145,12 +150,44 @@ function summarizeMemory(
   }
 }
 
-/** 프로세스 이름별로 묶어 메모리 큰 순(같으면 이름 순). 이름은 대소문자를 무시하고 묶는다. */
-function appsOf(processes: ProcessInfo[], platform: Platform | null): AppUsage[] {
-  const byName = new Map<string, AppUsage>()
+/** 런타임: 자기 이름만으로는 누가 쓰는지 알 수 없는 프로세스(에디터의 언어 서버·확장 호스트 등). */
+const RUNTIME_NAME = /^(node|javaw?|python[\d.]*w?|bun|deno|dotnet|ruby|php)(\.exe)?$/i
+/** 셸·콘솔: 런타임을 띄운 앱을 찾을 때 건너뛴다. macOS 의 로그인 셸은 이름이 `-zsh` 처럼 보인다. */
+const SHELL_NAME = /^-?(cmd|bash|sh|zsh|pwsh|powershell|conhost|openconsole)(\.exe)?$/i
+/** 여기에 먼저 닿으면 사용자가 직접(탐색기·서비스·Dock) 띄운 것이라 띄운 앱을 모른다. */
+const LAUNCHER_NAME = /^(explorer\.exe|services\.exe|launchd|systemd)$/i
+const OWNER_DEPTH = 8
+
+/**
+ * 런타임 프로세스를 띄운 앱(G5b): 가장 가까운 조상(8단계까지) 가운데 런타임·셸이 아닌 것.
+ * 런타임이 아니거나, 그 전에 탐색기·서비스·launchd·systemd·pid 1 에 닿거나, 끝까지 못 찾으면 null.
+ */
+function ownerOf(p: ProcessInfo, tree: ProcessTree): ProcessInfo | null {
+  if (!RUNTIME_NAME.test(p.name)) return null
+  for (const a of tree.ancestors(p.pid, OWNER_DEPTH)) {
+    if (a.pid === 1 || LAUNCHER_NAME.test(a.name)) return null
+    if (!RUNTIME_NAME.test(a.name) && !SHELL_NAME.test(a.name)) return a
+  }
+  return null
+}
+
+/**
+ * 프로세스 이름(런타임은 띄운 앱까지)별로 묶어 메모리 큰 순(같으면 이름 순). 대소문자를 무시하고 묶는다.
+ * 띄운 앱이 있는 묶음의 아이콘 경로는 띄운 앱의 실행 파일(모르면 지금처럼 자기 것).
+ */
+function appsOf(
+  processes: ProcessInfo[],
+  platform: Platform | null,
+  tree: ProcessTree
+): AppUsage[] {
+  const byKey = new Map<string, AppUsage>()
+  const ownerExe = new Map<string, string>()
   for (const p of processes) {
-    const key = p.name.toLowerCase()
-    const app = byName.get(key)
+    const owner = ownerOf(p, tree)
+    const key = `${p.name.toLowerCase()}\0${owner?.name.toLowerCase() ?? ''}`
+    const ownerPath = owner ? exePathOf(owner.commandLine, platform) : null
+    if (ownerPath && !ownerExe.has(key)) ownerExe.set(key, ownerPath)
+    const app = byKey.get(key)
     if (app) {
       app.memoryBytes += p.memoryBytes
       // 커밋은 아는 것만 더한다(하나도 모르면 null 그대로).
@@ -158,17 +195,23 @@ function appsOf(processes: ProcessInfo[], platform: Platform | null): AppUsage[]
       app.processCount++
       app.exePath ??= exePathOf(p.commandLine, platform)
     } else
-      byName.set(key, {
+      byKey.set(key, {
         name: p.name,
+        owner: owner?.name ?? null,
         memoryBytes: p.memoryBytes,
         commitBytes: p.commitBytes ?? null,
         processCount: 1,
         exePath: exePathOf(p.commandLine, platform)
       })
   }
-  return [...byName.values()].sort(
-    (a, b) => b.memoryBytes - a.memoryBytes || a.name.localeCompare(b.name)
-  )
+  return [...byKey]
+    .map(([key, app]) => ({ ...app, exePath: ownerExe.get(key) ?? app.exePath }))
+    .sort(
+      (a, b) =>
+        b.memoryBytes - a.memoryBytes ||
+        a.name.localeCompare(b.name) ||
+        (a.owner ?? '').localeCompare(b.owner ?? '')
+    )
 }
 
 /**
@@ -323,6 +366,7 @@ export function buildSnapshot(input: {
   }
 
   const ports: PortEntry[] = []
+  const otherPorts: OtherPort[] = []
   const seen = new Set<string>()
   for (const t of sample.tcp) {
     if (
@@ -336,11 +380,24 @@ export function buildSnapshot(input: {
     if (seen.has(key)) continue
     seen.add(key)
     const p = tree.byPid.get(t.pid)
+    if (!p) continue
     // 에이전트가 연 포트(예: Claude Code 의 IDE 연동 포트)는 내리면 세션이 끊기므로 개발 서버로 보지 않는다.
-    if (!p || classifyAgent(p)) continue
-    const worktree = worktreeOf(p.pid)
-    const relay = RELAY_SET.has(p.name.toLowerCase())
-    if (!worktree && !relay) continue
+    const agent = classifyAgent(p)
+    const worktree = agent ? null : worktreeOf(p.pid)
+    const relay = !agent && RELAY_SET.has(p.name.toLowerCase())
+    if (!worktree && !relay) {
+      // 개발 서버가 아닌 포트는 다른 포트로만 보인다(G5c, 끄기 없음). pid 4 이하는 OS 자체(System 등).
+      if (p.pid > SYSTEM_PID_MAX)
+        otherPorts.push({
+          port: t.localPort,
+          pid: p.pid,
+          processName: p.name,
+          memoryBytes: p.memoryBytes,
+          commitBytes: p.commitBytes ?? null,
+          exePath: exePathOf(p.commandLine, input.platform ?? null)
+        })
+      continue
+    }
     ports.push({
       port: t.localPort,
       pid: p.pid,
@@ -458,7 +515,10 @@ export function buildSnapshot(input: {
     codexHook: null,
     disk: null,
     groups,
-    apps: appsOf(rest, input.platform ?? null),
+    apps: appsOf(rest, input.platform ?? null, tree),
+    otherPorts: otherPorts
+      .sort((a, b) => a.port - b.port || a.pid - b.pid)
+      .slice(0, OTHER_PORT_LIMIT),
     agentProcessCount,
     platform: input.platform ?? null,
     cpuCount: input.cpuCount && input.cpuCount > 0 ? input.cpuCount : 1,

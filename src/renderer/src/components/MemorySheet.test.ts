@@ -26,18 +26,54 @@ const s = snapshot({
   agents: [agentRow({ pid: 10 }), agentRow({ pid: 11 })],
   heavyJobs: [heavyJob({ pid: 20 })],
   apps: [
-    { name: 'chrome.exe', memoryBytes: 2 * GB, commitBytes: null, processCount: 40, exePath: null },
+    {
+      name: 'chrome.exe',
+      owner: null,
+      memoryBytes: 2 * GB,
+      commitBytes: null,
+      processCount: 40,
+      exePath: null
+    },
     {
       name: 'svchost.exe',
+      owner: null,
       memoryBytes: 1 * GB,
       commitBytes: null,
       processCount: 90,
       exePath: null
     },
-    { name: 'a.exe', memoryBytes: 300 * MB, commitBytes: null, processCount: 1, exePath: null },
-    { name: 'b.exe', memoryBytes: 200 * MB, commitBytes: null, processCount: 1, exePath: null },
-    { name: 'c.exe', memoryBytes: 100 * MB, commitBytes: null, processCount: 1, exePath: null },
-    { name: 'd.exe', memoryBytes: 50 * MB, commitBytes: null, processCount: 1, exePath: null }
+    {
+      name: 'a.exe',
+      owner: null,
+      memoryBytes: 300 * MB,
+      commitBytes: null,
+      processCount: 1,
+      exePath: null
+    },
+    {
+      name: 'b.exe',
+      owner: null,
+      memoryBytes: 200 * MB,
+      commitBytes: null,
+      processCount: 1,
+      exePath: null
+    },
+    {
+      name: 'c.exe',
+      owner: null,
+      memoryBytes: 100 * MB,
+      commitBytes: null,
+      processCount: 1,
+      exePath: null
+    },
+    {
+      name: 'd.exe',
+      owner: null,
+      memoryBytes: 50 * MB,
+      commitBytes: null,
+      processCount: 1,
+      exePath: null
+    }
   ],
   groups: [
     { group: 'devServer', memoryBytes: 2 * GB, commitBytes: null, processCount: 5 },
@@ -88,6 +124,23 @@ describe('메모리 상세: 어디에 쓰고 있나', () => {
       e.getAttribute('data-top-app')
     )
     expect(names).toEqual(['chrome.exe', 'svchost.exe', 'a.exe', 'b.exe', 'c.exe'])
+  })
+
+  test('많이 쓰는 다른 앱은 다른 앱 탭과 같은 이름(띄운 앱까지)으로 보인다', () => {
+    const app = { memoryBytes: GB, commitBytes: null, processCount: 3, exePath: null }
+    sheet({
+      ...s,
+      apps: [
+        { ...app, name: 'node.exe', owner: 'Cursor.exe' },
+        { ...app, name: 'node.exe', owner: null }
+      ]
+    })
+    const rows = [...document.body.querySelectorAll('[data-top-app]')]
+    expect(rows.map((e) => e.querySelector('td')!.textContent!.trim())).toEqual([
+      'node (Cursor)',
+      'node'
+    ])
+    expect(rows[0].querySelector('td')!.getAttribute('title')).toBe('node.exe — Cursor.exe')
   })
 })
 

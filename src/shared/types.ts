@@ -246,14 +246,41 @@ export interface ProcessSummary {
   commitBytes: number | null
 }
 
-/** 다른 앱을 프로세스 이름별로 묶은 것(예: chrome.exe 40개). */
+/**
+ * 다른 앱을 프로세스 이름별로 묶은 것(예: chrome.exe 40개). 런타임(node·java·python 등)은 띄운 앱별로 나눠 묶는다
+ * (G5b, 예: Cursor 가 띄운 node.exe 13개).
+ */
 export interface AppUsage {
   name: string
+  /**
+   * 런타임 프로세스를 띄운 앱의 프로세스 이름(예: Cursor.exe): 가장 가까운 조상(8단계까지) 가운데 런타임·셸이 아닌 것.
+   * 런타임이 아니거나, 띄운 앱을 모르거나, 사용자가 직접(탐색기·서비스·launchd) 띄웠으면 null.
+   */
+  owner: string | null
   memoryBytes: number
   /** 그 앱 프로세스의 커밋 합. 하나도 모르면 null. */
   commitBytes: number | null
   processCount: number
-  /** 그 앱의 실행 파일(macOS 는 .app 묶음) 경로. 화면이 OS 앱 아이콘을 보이는 데 쓴다. 모르면 null. */
+  /**
+   * 그 앱의 실행 파일(macOS 는 .app 묶음) 경로. 화면이 OS 앱 아이콘을 보이는 데 쓴다. 띄운 앱(owner)의 경로를 알면
+   * 그 경로(node (Cursor) 에 Cursor 아이콘). 모르면 null.
+   */
+  exePath: string | null
+}
+
+/**
+ * 개발 서버로 올리지 않은 LISTEN 포트 하나(G5c, 1024 이상): 로컬 데이터베이스·디버깅 브라우저·도구 자신의 포트 등.
+ * 보기만 한다(끄기 없음). 명령줄은 담지 않는다.
+ */
+export interface OtherPort {
+  port: number
+  pid: number
+  processName: string
+  /** 그 프로세스 하나의 메모리. */
+  memoryBytes: number
+  /** 그 프로세스의 커밋. 모르면 null. */
+  commitBytes: number | null
+  /** 실행 파일 경로(앱 아이콘용). 모르면 null. */
   exePath: string | null
 }
 
@@ -387,8 +414,13 @@ export interface DashboardSnapshot {
   /** 디스크 정리(끝난 워크트리의 의존성 폴더). 아직 찾지 않았으면 null. */
   disk: DiskReport | null
   groups: GroupUsage[]
-  /** 다른 앱 전부(이름별, 메모리 큰 순). */
+  /** 다른 앱 전부(이름·띄운 앱별, 메모리 큰 순). */
   apps: AppUsage[]
+  /**
+   * 개발 서버(숨긴 것 포함)가 아닌 LISTEN 포트(G5c). pitwall 자신과 그 조상의 포트는 없다.
+   * (포트, pid) 마다 한 번, 포트 순, 300개까지.
+   */
+  otherPorts: OtherPort[]
   agentProcessCount: number
   /** CPU 표시 기준(Windows 는 전체 CPU 대비, macOS 는 코어 1개 = 100%). 모르면 null. */
   platform: Platform | null

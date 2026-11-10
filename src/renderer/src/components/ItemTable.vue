@@ -426,7 +426,12 @@ const G = text.ui.group
                     >
                       <span class="truncate">{{ row.cells.name.text }}</span>
                     </Button>
-                    <span v-else class="truncate text-[13px]">{{ row.cells.name.text }}</span>
+                    <span
+                      v-else
+                      class="truncate text-[13px]"
+                      :title="row.cells.name.title ?? row.cells.name.text"
+                      >{{ row.cells.name.text }}</span
+                    >
                   </div>
                   <Button
                     v-else-if="col.id === 'target' && row.key"
@@ -508,6 +513,8 @@ const G = text.ui.group
                 <Button v-if="searching" variant="link" size="sm" @click="emit('clearSearch')">
                   {{ text.ui.search.clearAll }}
                 </Button>
+                <!-- 화면이 더하는 권유(개발 서버 탭의 "다른 포트에서 찾기"). -->
+                <slot name="empty-actions" />
               </td>
             </tr>
           </tbody>

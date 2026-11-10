@@ -344,20 +344,122 @@ describe('묶음과 에이전트', () => {
   })
 
   test('다른 앱 전부: 이름별로 묶어 메모리 큰 순(같으면 이름 순)', () => {
-    const app = (name: string, mb: number, processCount: number): AppUsage => ({
+    const app = (
+      name: string,
+      mb: number,
+      processCount: number,
+      owner: string | null = null
+    ): AppUsage => ({
       name,
+      owner,
       memoryBytes: mb * MB,
       commitBytes: null,
       processCount,
       exePath: null
     })
-    expect(buildSnapshot(input).apps.slice(0, 5)).toEqual([
+    const apps = buildSnapshot(input).apps
+    expect(apps.slice(0, 5)).toEqual([
       app('claude.exe', 300, 1),
       app('unrelated.exe', 300, 1),
       app('python.exe', 80, 1),
-      app('node.exe', 51, 2),
+      app('node.exe', 50, 1),
       app('codex-windows-sandbox-service.exe', 20, 1)
     ])
+    // 7205 의 node 는 d.exe 가 띄워 따로 묶인다.
+    expect(apps.find((a) => a.owner === 'd.exe')).toEqual(app('node.exe', 1, 1, 'd.exe'))
+  })
+
+  describe('다른 앱의 띄운 앱(G5b)', () => {
+    const CURSOR = 'C:\\Users\\dev\\AppData\\Local\\Programs\\cursor\\Cursor.exe'
+    const TERMINAL = 'C:\\Program Files\\WindowsApps\\Terminal\\WindowsTerminal.exe'
+    const appsOf = (procs: ProcessInfo[]): AppUsage[] =>
+      buildSnapshot({
+        ...input,
+        platform: 'win32',
+        sample: { processes: procs, tcp: [] },
+        worktrees: new Map()
+      }).apps
+
+    test('런타임 프로세스는 띄운 앱별로 나뉜다(셸·런타임 조상은 건너뛴다)', () => {
+      const apps = appsOf([
+        proc(100, 1, 'Cursor.exe', 400, 100, `"${CURSOR}"`),
+        proc(101, 100, 'Cursor.exe', 300, 110, `"${CURSOR}" --type=utility`),
+        // 확장 호스트가 띄운 언어 서버, 언어 서버가 띄운 node(런타임 조상은 건너뛴다).
+        proc(110, 101, 'node.exe', 300, 120, 'node tsserver.js'),
+        proc(111, 110, 'node.exe', 200, 130, 'node worker.js'),
+        // 확장이 셸로 띄운 node(셸은 건너뛴다).
+        proc(120, 101, 'cmd.exe', 5, 120),
+        proc(121, 120, 'node.exe', 100, 130),
+        proc(130, 101, 'python.exe', 70, 120),
+        // 터미널의 셸에서 띄운 node.
+        proc(200, 1, 'WindowsTerminal.exe', 80, 100, `"${TERMINAL}"`),
+        proc(201, 200, 'pwsh.exe', 60, 110),
+        proc(202, 201, 'OpenConsole.exe', 5, 115),
+        proc(203, 202, 'node.exe', 50, 120),
+        // macOS 의 로그인 셸(-zsh)도 셸이다.
+        proc(600, 1, 'tmux', 10, 100),
+        proc(601, 600, '-zsh', 5, 110),
+        proc(602, 601, 'node', 20, 120)
+      ])
+      const pick = (name: string, owner: string | null): AppUsage | undefined =>
+        apps.find((a) => a.name === name && a.owner === owner)
+      expect(pick('node.exe', 'Cursor.exe')).toEqual({
+        name: 'node.exe',
+        owner: 'Cursor.exe',
+        memoryBytes: 600 * MB,
+        commitBytes: null,
+        processCount: 3,
+        // 아이콘은 띄운 앱의 것.
+        exePath: CURSOR
+      })
+      expect(pick('python.exe', 'Cursor.exe')?.processCount).toBe(1)
+      expect(pick('node.exe', 'WindowsTerminal.exe')).toMatchObject({
+        processCount: 1,
+        exePath: TERMINAL
+      })
+      // 런타임이 아닌 앱(띄운 앱 자신·셸)은 owner 가 없다.
+      expect(pick('Cursor.exe', null)).toMatchObject({ processCount: 2, exePath: CURSOR })
+      expect(pick('cmd.exe', null)?.processCount).toBe(1)
+      expect(pick('pwsh.exe', null)?.processCount).toBe(1)
+      expect(apps.filter((a) => a.name === 'node.exe')).toHaveLength(2)
+      expect(pick('node', 'tmux')?.processCount).toBe(1)
+      // 같은 프로세스를 두 번 세지 않는다.
+      expect(apps.reduce((n, a) => n + a.processCount, 0)).toBe(14)
+    })
+
+    test('띄운 앱을 모르면 owner null 로 지금처럼 묶인다', () => {
+      const deep = Array.from({ length: 8 }, (_, i) =>
+        proc(510 + i, i === 0 ? 500 : 509 + i, i % 2 ? 'cmd.exe' : 'node.exe', 1, 110 + i)
+      )
+      const apps = appsOf([
+        // macOS: launchd(pid 1)가 바로 띄운 node.
+        proc(1, 0, 'launchd', 10, 0),
+        proc(700, 1, 'node', 10, 100),
+        // 부모를 모름.
+        proc(300, 2, 'node.exe', 10, 100, '"C:\\Program Files\\nodejs\\node.exe" a.js'),
+        // 탐색기에서 바로, 탐색기에서 셸을 거쳐.
+        proc(310, 1, 'explorer.exe', 100, 50),
+        proc(311, 310, 'node.exe', 10, 100),
+        proc(312, 310, 'cmd.exe', 5, 100),
+        proc(313, 312, 'node.exe', 10, 110),
+        // 서비스가 띄운 java.
+        proc(320, 1, 'services.exe', 10, 50),
+        proc(321, 320, 'java.exe', 10, 100),
+        // 런타임·셸만 8단계 넘게 이어지면 그 위 앱은 보지 않는다.
+        proc(500, 1, 'Code.exe', 10, 100),
+        ...deep,
+        proc(530, 517, 'node.exe', 10, 130)
+      ])
+      const node = apps.filter((a) => a.name === 'node.exe')
+      // deep 의 node 넷 가운데 Code.exe 까지 8단계 안인 것(510·512·514·516)은 Code 것이다.
+      expect(node.map((a) => [a.owner, a.processCount])).toEqual([
+        [null, 4],
+        ['Code.exe', 4]
+      ])
+      expect(node[0].exePath).toBe('C:\\Program Files\\nodejs\\node.exe')
+      expect(apps.find((a) => a.name === 'java.exe')?.owner).toBeNull()
+      expect(apps.find((a) => a.name === 'node')?.owner).toBeNull()
+    })
   })
 
   test('다른 앱은 상위 몇 개로 자르지 않는다: 앱별 프로세스 수 합이 다른 앱 묶음의 프로세스 수와 같다', () => {
@@ -388,6 +490,7 @@ describe('묶음과 에이전트', () => {
     }).apps
     expect(apps[0]).toEqual({
       name: 'Figma.exe',
+      owner: null,
       memoryBytes: 900 * MB,
       commitBytes: null,
       processCount: 1,
@@ -675,6 +778,84 @@ test('pitwall 을 띄운 조상(개발 실행의 vite 서버 등)이 연 포트�
   expect(s.servers.flatMap((r) => r.ports)).not.toContain(3000)
   expect(s.servers.flatMap((r) => r.ports)).not.toContain(3001)
   expect(s.servers.flatMap((r) => r.ports)).toContain(3003)
+})
+
+describe('다른 포트(G5c)', () => {
+  const POSTGRES = 'C:\\Program Files\\PostgreSQL\\16\\bin\\postgres.exe'
+  test('개발 서버가 아닌 LISTEN 포트는 otherPorts 에, 개발 서버·pitwall 자신의 포트는 없다', () => {
+    const s = buildSnapshot({
+      ...input,
+      platform: 'win32',
+      // pitwall(9900)은 개발 실행의 node(9800) 아래에서 떴다.
+      selfPid: 9900,
+      sample: {
+        processes: [
+          ...processes,
+          {
+            ...proc(7400, 1, 'postgres.exe', 40, 100, `"${POSTGRES}" -D data`),
+            commitBytes: 60 * MB
+          },
+          proc(9800, 1, 'node.exe', 100, 100),
+          proc(9900, 9800, 'electron.exe', 200, 200),
+          proc(9901, 9900, 'electron.exe', 50, 210)
+        ],
+        tcp: [
+          ...tcp,
+          listen(7400, 5432),
+          listen(7400, 5432, '::'),
+          // 에이전트가 연 포트(IDE 연동)는 개발 서버는 아니지만 다른 포트로는 보인다.
+          listen(5000, 7523),
+          // pitwall 자신·자식·조상.
+          listen(9900, 9334),
+          listen(9901, 9333),
+          listen(9800, 5173),
+          // OS 자체(System)와 목록에 없는 프로세스.
+          listen(4, 5357),
+          listen(12345, 6000)
+        ]
+      }
+    })
+    expect(s.otherPorts.map((p) => [p.port, p.pid, p.processName])).toEqual([
+      [3020, 7205, 'node.exe'],
+      [3030, 9100, 'loop-a.exe'],
+      [5432, 7400, 'postgres.exe'],
+      [7523, 5000, 'claude.exe'],
+      [8000, 7000, 'python.exe']
+    ])
+    expect(s.otherPorts.find((p) => p.port === 5432)).toEqual({
+      port: 5432,
+      pid: 7400,
+      processName: 'postgres.exe',
+      memoryBytes: 40 * MB,
+      commitBytes: 60 * MB,
+      exePath: POSTGRES
+    })
+    expect(s.otherPorts.find((p) => p.port === 8000)).toMatchObject({
+      memoryBytes: 80 * MB,
+      commitBytes: null,
+      exePath: null
+    })
+    // 개발 서버의 포트는 다른 포트에 없다(숨긴 서버도 이 단계에서는 개발 서버다).
+    const serverPorts = s.servers.flatMap((r) => r.ports)
+    expect(serverPorts).toEqual([3000, 3003, 3010, 8080])
+    expect(s.otherPorts.some((p) => serverPorts.includes(p.port))).toBe(false)
+  })
+
+  test('1024 미만은 넣지 않는다', () => {
+    const s = buildSnapshot({
+      ...input,
+      sample: { processes, tcp: [listen(7000, 80), listen(7000, 1023), listen(7000, 1024)] }
+    })
+    expect(s.otherPorts.map((p) => p.port)).toEqual([1024])
+  })
+
+  test('다른 포트는 포트 순으로 300개까지', () => {
+    const many = Array.from({ length: 320 }, (_, i) => listen(7000, 40000 - i))
+    const ports = buildSnapshot({ ...input, sample: { processes, tcp: many } }).otherPorts
+    expect(ports).toHaveLength(300)
+    expect(ports[0].port).toBe(40000 - 319)
+    expect(ports.every((p, i) => i === 0 || ports[i - 1].port < p.port)).toBe(true)
+  })
 })
 
 test('수집 방식을 스냅샷에 그대로 옮기고, 없으면 null', () => {

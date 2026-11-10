@@ -5,6 +5,7 @@ import type {
   DiskRow,
   HeavyJobRow,
   LeftoverRow,
+  OtherPort,
   ServerRow,
   WorkspaceRow
 } from '../../../shared/types'
@@ -133,6 +134,19 @@ export function diskRow(over: Partial<DiskRow> = {}): DiskRow {
   }
 }
 
+/** 개발 서버가 아닌 LISTEN 포트(G5c, 기본: 로컬 데이터베이스). */
+export function otherPort(over: Partial<OtherPort> = {}): OtherPort {
+  return {
+    port: 5432,
+    pid: 812,
+    processName: 'postgres.exe',
+    memoryBytes: 40 * MB,
+    commitBytes: null,
+    exePath: null,
+    ...over
+  }
+}
+
 export const threeServers: ServerRow[] = [
   serverRow(),
   serverRow({
@@ -178,13 +192,22 @@ export function snapshot(over: Partial<DashboardSnapshot> = {}): DashboardSnapsh
     apps: [
       {
         name: 'chrome.exe',
+        owner: null,
         memoryBytes: 5 * GB,
         commitBytes: null,
         processCount: 40,
         exePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
       },
-      { name: 'Code.exe', memoryBytes: 2 * GB, commitBytes: null, processCount: 12, exePath: null }
+      {
+        name: 'Code.exe',
+        owner: null,
+        memoryBytes: 2 * GB,
+        commitBytes: null,
+        processCount: 12,
+        exePath: null
+      }
     ],
+    otherPorts: [],
     agentProcessCount: 2,
     platform: 'win32',
     cpuCount: 8,

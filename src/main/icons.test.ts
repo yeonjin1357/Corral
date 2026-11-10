@@ -10,7 +10,14 @@ function snap(): DashboardSnapshot {
     ...blankSnapshot(1),
     platform: 'win32',
     apps: [
-      { name: 'chrome.exe', memoryBytes: 1, commitBytes: null, processCount: 1, exePath: CHROME }
+      {
+        name: 'chrome.exe',
+        owner: null,
+        memoryBytes: 1,
+        commitBytes: null,
+        processCount: 1,
+        exePath: CHROME
+      }
     ],
     servers: [
       {
@@ -42,6 +49,25 @@ function snap(): DashboardSnapshot {
 test('숨긴 서버의 실행 파일도 아이콘을 준다(숨긴 서버 표에 보이므로)', () => {
   const s = snap()
   expect([...iconPathsOf({ ...s, servers: [], hiddenServers: s.servers })]).toContain(GATEWAY)
+})
+
+test('다른 포트(G5c)의 실행 파일도 아이콘을 준다(다른 포트 표에 보이므로)', () => {
+  const POSTGRES = 'C:\\Program Files\\PostgreSQL\\16\\bin\\postgres.exe'
+  const s: DashboardSnapshot = {
+    ...snap(),
+    otherPorts: [
+      {
+        port: 5432,
+        pid: 812,
+        processName: 'postgres.exe',
+        memoryBytes: 1,
+        commitBytes: null,
+        exePath: POSTGRES
+      },
+      { port: 9229, pid: 9, processName: 'x.exe', memoryBytes: 1, commitBytes: null, exePath: null }
+    ]
+  }
+  expect([...iconPathsOf(s)].sort()).toEqual([CHROME, GATEWAY, POSTGRES].sort())
 })
 
 test('아이콘을 줄 수 있는 경로는 지금 스냅샷에 나온 실행 파일뿐(다른 앱·포트·남은 프로세스·무거운 작업)', () => {

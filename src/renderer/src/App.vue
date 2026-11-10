@@ -41,6 +41,7 @@ import {
   groupWorkspaces,
   hiddenServerTable,
   leftoverIcon,
+  otherPortsTable,
   serverIcon,
   tableFor,
   type ActionKind,
@@ -261,12 +262,13 @@ function pick(key: string): void {
   else select(key)
 }
 
-/** 메모리 상세의 묶음에서 그 탭으로(숨긴 서버 보기·검색은 풀어 묶음 전체가 보이게). */
+/** 메모리 상세의 묶음에서 그 탭으로(숨긴 서버·다른 포트 보기와 검색은 풀어 묶음 전체가 보이게). */
 function goToTab(next: TabKey): void {
   memoryOpen.value = false
   page.value = 'dashboard'
   selectedKey.value = null
   showHidden.value = false
+  showOther.value = false
   query.value = ''
   tab.value = next
 }
@@ -524,13 +526,49 @@ const hiddenCount = computed(() => snapshot.value?.hiddenServers.length ?? 0)
 watch(hiddenCount, (n) => {
   if (n === 0) showHidden.value = false
 })
+/** 개발 서버 탭에서 다른 포트(개발 서버가 아닌 LISTEN 포트, G5c)를 보는 중. 숨긴 서버 보기와 하나만 켜진다. */
+const showOther = ref(false)
+const otherCount = computed(() => snapshot.value?.otherPorts.length ?? 0)
+watch(otherCount, (n) => {
+  if (n === 0) showOther.value = false
+})
+const otherView = computed(() => tab.value === 'ports' && showOther.value)
+function toggleHidden(): void {
+  showHidden.value = !showHidden.value
+  if (showHidden.value) showOther.value = false
+}
+function toggleOther(): void {
+  showOther.value = !showOther.value
+  if (showOther.value) showHidden.value = false
+}
+// 탭을 바꾸면 개발 서버 탭은 다시 개발 서버 목록부터.
+watch(tab, () => {
+  showHidden.value = false
+  showOther.value = false
+})
 const table = computed(() => {
   const s = snapshot.value
   if (!s) return null
   if (tab.value === 'events') return eventsTable(events.value, s)
+  if (otherView.value) return otherPortsTable(s)
   return tab.value === 'ports' && showHidden.value ? hiddenServerTable(s) : tableFor(tab.value, s)
 })
 const rows = computed(() => (table.value ? filterRows(table.value.rows, query.value) : []))
+/** 검색어가 포트 번호면 그 번호(앞의 `:` 는 떼고), 아니면 null. */
+const queryPort = computed(() => {
+  const q = query.value.trim().replace(/^:/, '')
+  return /^\d+$/.test(q) ? Number(q) : null
+})
+/** 찾는 포트가 개발 서버에 없고 다른 포트에 있으면 빈 화면에서 다른 포트 보기를 권한다(G5c). */
+const suggestOther = computed(
+  () =>
+    tab.value === 'ports' &&
+    !showHidden.value &&
+    !showOther.value &&
+    rows.value.length === 0 &&
+    queryPort.value != null &&
+    !!snapshot.value?.otherPorts.some((p) => p.port === queryPort.value)
+)
 /** 탭별 정렬. 데이터가 새로 와도·탭을 오가도·다시 켜도 유지한다. */
 const storage = ((): Storage | null => {
   try {
@@ -549,7 +587,9 @@ const grouping = computed<((rows: Row[]) => GroupedRows[]) | null>(() => {
   if (!s) return null
   // 작업 공간 탭은 늘 묶음(작업 공간 하나에 머리 하나).
   if (tab.value === 'workspaces') return (rows) => groupWorkspaces(rows, s, s.takenAt)
-  if (tab.value !== 'ports' || showHidden.value || serverView.value !== 'group') return null
+  // 숨긴 서버·다른 포트는 묶음 보기여도 평평한 표.
+  if (tab.value !== 'ports' || showHidden.value || showOther.value || serverView.value !== 'group')
+    return null
   return (rows) => groupServers(rows, s.servers, s.agents, s.takenAt, s.leftovers)
 })
 /**
@@ -562,9 +602,18 @@ const shown = computed(() =>
     : rows.value.length
 )
 const NO_SORT: SortState = { id: 'name', dir: 'asc' }
+/** 다른 포트 보기의 정렬. 칸이 달라 개발 서버 정렬과 따로 두고 저장하지 않는다(처음은 포트 순). */
+const otherSort = ref<SortState | undefined>(undefined)
 const sort = computed<SortState>({
-  get: () => (table.value ? resolveSort(sorts.value[tab.value], table.value) : NO_SORT),
+  get: () =>
+    table.value
+      ? resolveSort(otherView.value ? otherSort.value : sorts.value[tab.value], table.value)
+      : NO_SORT,
   set: (next) => {
+    if (otherView.value) {
+      otherSort.value = next
+      return
+    }
     sorts.value = { ...sorts.value, [tab.value]: next }
     writeSorts(storage, sorts.value)
   }
@@ -892,22 +941,46 @@ const takenAt = computed(() =>
           @clear-search="query = ''"
           @group-action="groupAction"
           @rename="renameWorkspace"
-        />
+        >
+          <template #empty-actions>
+            <Button
+              v-if="suggestOther"
+              variant="link"
+              size="sm"
+              data-action="find-other"
+              @click="toggleOther"
+            >
+              {{ text.ui.group.findOther }}
+            </Button>
+          </template>
+        </ItemTable>
 
         <footer
           class="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-border bg-card px-4 py-3"
         >
           <span class="flex items-center gap-2 text-xs text-muted-foreground">
-            {{ text.ui.footer.count(text.ui.tabs[tab], shown) }}
+            {{
+              text.ui.footer.count(otherView ? text.ui.group.otherPorts : text.ui.tabs[tab], shown)
+            }}
             <Button
               v-if="tab === 'ports' && hiddenCount > 0"
               variant="ghost"
               size="sm"
               class="h-6 px-2 text-xs"
               data-action="toggle-hidden"
-              @click="showHidden = !showHidden"
+              @click="toggleHidden"
             >
               {{ showHidden ? text.ui.group.hiddenBack : text.ui.group.hiddenToggle(hiddenCount) }}
+            </Button>
+            <Button
+              v-if="tab === 'ports' && otherCount > 0"
+              variant="ghost"
+              size="sm"
+              class="h-6 px-2 text-xs"
+              data-action="toggle-other"
+              @click="toggleOther"
+            >
+              {{ showOther ? text.ui.group.otherBack : text.ui.group.otherToggle(otherCount) }}
             </Button>
           </span>
           <span class="text-xs text-muted-foreground tabular-nums">{{

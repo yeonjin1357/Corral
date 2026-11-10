@@ -26,6 +26,7 @@ export function blankSnapshot(takenAt: number): DashboardSnapshot {
     disk: null,
     groups: [],
     apps: [],
+    otherPorts: [],
     agentProcessCount: 0,
     platform: null,
     cpuCount: 1,

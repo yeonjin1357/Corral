@@ -10,7 +10,7 @@ import type { DashboardSnapshot, ProcessGroup } from '../../../shared/types'
 import { formatBytes } from '../../../shared/format'
 import { text } from '../../../shared/text'
 import type { Point } from '../history'
-import type { TabKey } from '../rows'
+import { appName, appRowId, appTitle, type TabKey } from '../rows'
 import Sheet from '../ui/Sheet.vue'
 import Card from '../ui/Card.vue'
 import CardHeader from '../ui/CardHeader.vue'
@@ -227,11 +227,13 @@ const groups = computed(() =>
             <tbody :class="TABLE.body">
               <tr
                 v-for="app in topApps"
-                :key="app.name"
+                :key="appRowId(app)"
                 :data-top-app="app.name"
                 :class="TABLE.row"
               >
-                <td :class="[TABLE.cell, 'pl-0 text-[13px]']">{{ app.name }}</td>
+                <td :class="[TABLE.cell, 'pl-0 text-[13px]']" :title="appTitle(app)">
+                  {{ appName(app) }}
+                </td>
                 <td :class="[TABLE.cell, 'text-right text-xs text-muted-foreground']">
                   {{ t.groups.processes(app.processCount) }}
                 </td>

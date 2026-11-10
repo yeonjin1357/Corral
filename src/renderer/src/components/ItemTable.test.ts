@@ -229,6 +229,28 @@ test('오래 쉬는 에이전트 서버의 상태 칸은 짧은 문구, 쉰 기�
   expect(cell.find('.truncate').text()).toBe('확인해볼 것 · 에이전트 쉼')
 })
 
+test('고를 수 없는 줄의 이름도 title 에 전체 이름을 보인다(다른 앱의 띄운 앱)', () => {
+  const app = { memoryBytes: MB, commitBytes: null, processCount: 3, exePath: null }
+  const table = tableFor(
+    'apps',
+    snapshot({ apps: [{ ...app, name: 'node.exe', owner: 'Cursor.exe' }] })
+  )
+  const w = mount(ItemTable, {
+    props: {
+      table,
+      rows: table.rows,
+      selectedKey: null,
+      searching: false,
+      emptyText: '',
+      busyKey: null,
+      sort: table.sort
+    }
+  })
+  const name = w.find('tbody tr td span.truncate')
+  expect(name.text()).toBe('node (Cursor)')
+  expect(name.attributes('title')).toBe('node.exe — Cursor.exe')
+})
+
 test('첫 칸은 이름 칸이 아니어도 왼쪽 여백을 갖는다', () => {
   const w = mount(ItemTable, {
     props: {

@@ -3,6 +3,7 @@ import {
   groupServers,
   groupWorkspaces,
   hiddenServerTable,
+  otherPortsTable,
   sortRows,
   tableFor,
   TABS,
@@ -18,6 +19,7 @@ import {
   diskRow,
   heavyJob,
   leftoverRow,
+  otherPort,
   serverRow,
   snapshot,
   workspaceRow
@@ -419,9 +421,48 @@ describe('남은 프로세스·무거운 작업·디스크·다른 앱 표', () 
     expect(row.cells.processes.text).toBe('40개')
   })
 
+  test('다른 앱 이름은 node (Cursor)', () => {
+    const CURSOR = 'C:\\Users\\dev\\AppData\\Local\\Programs\\cursor\\Cursor.exe'
+    const t = tableFor(
+      'apps',
+      snapshot({
+        apps: [
+          {
+            name: 'node.exe',
+            owner: 'Cursor.exe',
+            memoryBytes: 2 * GB,
+            commitBytes: null,
+            processCount: 13,
+            exePath: CURSOR
+          },
+          {
+            name: 'node.exe',
+            owner: null,
+            memoryBytes: 1 * GB,
+            commitBytes: null,
+            processCount: 2,
+            exePath: null
+          }
+        ]
+      })
+    )
+    const [cursor, plain] = t.rows
+    expect(cursor.cells.name).toMatchObject({
+      text: 'node (Cursor)',
+      title: 'node.exe — Cursor.exe'
+    })
+    expect(plain.cells.name).toMatchObject({ text: 'node', title: 'node.exe' })
+    // 이름이 같아도 띄운 앱이 다르면 다른 행이다.
+    expect(cursor.id).not.toBe(plain.id)
+    // 아이콘은 띄운 앱의 것(메인이 띄운 앱의 실행 파일을 담는다).
+    expect(cursor.cells.name.icon).toMatchObject({ exePath: CURSOR, prefer: 'native' })
+    expect(filterRows(t.rows, 'cursor')).toEqual([cursor])
+  })
+
   test('다른 앱: 상위 몇 개로 자르지 않고 전부 보인다', () => {
     const apps = Array.from({ length: 7 }, (_, i) => ({
       name: `app${i}.exe`,
+      owner: null,
       memoryBytes: (7 - i) * MB,
       commitBytes: null,
       processCount: 1,
@@ -906,6 +947,44 @@ describe('새 정보 표시(F3·F5·F6)', () => {
     expect(plain.cells.status.badge).toBeUndefined()
   })
 
+  test('다른 포트 표는 고를 수 없다', () => {
+    const POSTGRES = 'C:\\Program Files\\PostgreSQL\\16\\bin\\postgres.exe'
+    const s = snapshot({
+      otherPorts: [
+        otherPort({ port: 9229, pid: 4410, processName: 'chrome.exe', memoryBytes: 300 * MB }),
+        otherPort({ port: 5432, pid: 812, exePath: POSTGRES })
+      ]
+    })
+    const t = otherPortsTable(s)
+    // 커밋을 하나도 모르면 커밋 칸은 없다(다른 표와 같은 규칙).
+    expect(t.columns.map((c) => [c.id, c.label, c.width])).toEqual([
+      ['port', '포트', 110],
+      ['name', '프로세스', 300],
+      ['pid', 'PID', 90],
+      ['memory', '메모리', 96]
+    ])
+    expect(t.sort).toEqual({ id: 'port', dir: 'asc' })
+    expect(sortRows(t.rows, 'port', 'asc').map((r) => r.cells.port.text)).toEqual([
+      ':5432',
+      ':9229'
+    ])
+    const pg = t.rows.find((r) => r.cells.port.sort === 5432)!
+    expect(pg.key).toBeNull()
+    expect(pg.actions).toEqual([])
+    expect(pg.cells.port).toMatchObject({ text: ':5432', mono: true })
+    expect(pg.cells.name.text).toBe('postgres.exe')
+    expect(pg.cells.name.icon).toMatchObject({ exePath: POSTGRES, prefer: 'native' })
+    expect(pg.cells.pid).toMatchObject({ text: '812', sort: 812, mono: true })
+    expect(pg.cells.memory).toMatchObject({ text: '40 MB', sort: 40 * MB })
+    expect(new Set(t.rows.map((r) => r.id)).size).toBe(2)
+    // 포트(: 있거나 없거나)와 프로세스 이름으로 찾는다.
+    for (const q of [':5432', '5432', 'POSTGRES'])
+      expect(filterRows(t.rows, q).map((r) => r.cells.port.text)).toEqual([':5432'])
+    // 커밋을 하나라도 알면 커밋 칸이 메모리 뒤에.
+    const known = otherPortsTable(snapshot({ otherPorts: [otherPort({ commitBytes: GB })] }))
+    expect(known.columns.map((c) => c.id)).toEqual(['port', 'name', 'pid', 'memory', 'commit'])
+  })
+
   test('숨긴 서버 표: 숨김 풀기 버튼만 있고 상태는 숨김', () => {
     const s = snapshot({
       servers: [],
@@ -925,7 +1004,16 @@ describe('커밋 칸', () => {
       agents: [agentRow({ commitBytes: 1 * GB })],
       leftovers: [leftoverRow({ commitBytes: 1 * GB })],
       heavyJobs: [heavyJob({ commitBytes: 1 * GB })],
-      apps: [{ name: 'a.exe', memoryBytes: GB, commitBytes: GB, processCount: 1, exePath: null }]
+      apps: [
+        {
+          name: 'a.exe',
+          owner: null,
+          memoryBytes: GB,
+          commitBytes: GB,
+          processCount: 1,
+          exePath: null
+        }
+      ]
     })
     for (const tab of ['ports', 'agents', 'leftovers', 'heavy', 'apps'] as const) {
       const cols = ids(tableFor(tab, known))
@@ -1028,4 +1116,8 @@ test('커밋 칸이 있어도 표의 칸 너비 합은 기본 창 너비(1280px)
     // 120 은 ItemTable 이 더하는 동작 칸 너비, 1240 은 세로 스크롤바·테두리 여유.
     expect(sum + 120, tab).toBeLessThanOrEqual(1240)
   }
+  // 다른 포트 표는 동작 칸이 없다.
+  const other = otherPortsTable(snapshot({ otherPorts: [otherPort({ commitBytes: GB })] }))
+  expect(other.columns.map((col) => col.id)).toContain('commit')
+  expect(other.columns.reduce((n, col) => n + col.width, 0)).toBeLessThanOrEqual(1240)
 })

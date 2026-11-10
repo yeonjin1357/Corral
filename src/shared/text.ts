@@ -425,6 +425,7 @@ export const text = {
       folders: '의존성 폴더',
       size: '크기',
       app: '앱',
+      pid: 'PID',
       processes: '프로세스 수',
       actions: '동작'
     },
@@ -495,6 +496,12 @@ export const text = {
       grouped: '묶음',
       hiddenToggle: (n: number): string => `숨김 ${n}개`,
       hiddenBack: '숨긴 서버 닫기',
+      /** 개발 서버가 아닌 LISTEN 포트(G5c) 보기: 표 바닥 전환과 바닥 줄의 이름. */
+      otherPorts: '다른 포트',
+      otherToggle: (n: number): string => `다른 포트 ${n}개`,
+      otherBack: '다른 포트 닫기',
+      /** 찾는 포트가 개발 서버에 없고 다른 포트에 있을 때 빈 화면의 버튼. */
+      findOther: '다른 포트에서 찾기',
       hideHint:
         '이 워크트리의 첫 포트로 숨겨요(다른 프로젝트가 같은 포트를 열면 그대로 보여요). 숨긴 서버는 개수·정리 추천·알림·트레이에서 빠져요.',
       hiddenDone: (entry: string): string =>
@@ -908,6 +915,9 @@ export const text = {
       systemNote:
         '시스템·공유 메모리: 커널·드라이버, 여러 앱이 같이 쓰는 메모리, pitwall 이 읽을 수 없는 프로세스(보안 프로그램·관리자 권한 등)를 합친 값이에요.',
       processes: (n: number): string => `${n}개`,
+      /** 런타임을 띄운 앱까지 적은 다른 앱 이름(G5b, "node (Cursor)")과 그 title("node.exe — Cursor.exe"). */
+      withOwner: (name: string, owner: string): string => `${name} (${owner})`,
+      withOwnerTitle: (name: string, owner: string): string => `${name} — ${owner}`,
       /** 묶음의 행 수(탭 숫자와 같은 단위). 숨긴 서버가 있으면 함께 적는다. */
       count: (n: number, hidden = 0): string =>
         hidden ? `${n}개(숨김 ${hidden}개 포함)` : `${n}개`,
