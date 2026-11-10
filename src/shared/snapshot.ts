@@ -23,6 +23,7 @@ export function blankSnapshot(takenAt: number): DashboardSnapshot {
     workspaces: [],
     hook: null,
     codexHook: null,
+    codexLimits: null,
     disk: null,
     groups: [],
     apps: [],

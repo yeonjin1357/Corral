@@ -60,6 +60,7 @@ export function agentRow(over: Partial<AgentRow> = {}): AgentRow {
     activity: null,
     quietSince: null,
     host: { pids: [], app: null },
+    usage: null,
     ...over
   }
 }

@@ -128,6 +128,7 @@ describe('조용한 에이전트(G3c)', () => {
     parked: false,
     activity: null,
     quietSince: null,
+    usage: null,
     host: { pids: [], app: null },
     ...over
   })

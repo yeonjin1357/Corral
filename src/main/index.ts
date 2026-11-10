@@ -45,6 +45,7 @@ import { countChanges, createChangeCounter } from './gitStatus'
 import { loadConfig, updateConfig } from './config'
 import { claudeConfigDir } from './claudeHooks'
 import { createSessionFileReader } from './claudeSessionFiles'
+import { createClaudeUsageReader, createUsageCache } from './claudeUsage'
 import { createClaudeIntegration } from './claudeIntegration'
 import { createCodexIntegration } from './codexIntegration'
 import { createHookHub } from './hookHub'
@@ -111,12 +112,28 @@ let settings: Settings = DEFAULT_SETTINGS
 /** Claude 훅이 알려 주는 세션들. 훅 서버가 채우고 수집기가 읽는다. */
 const sessions: Sessions = new Map()
 
-/** Codex 세션 기록 읽기(세션 폴더만, 설정은 바꾸지 않는다). */
-const codexReader = createCodexReader(codexHome(process.env, homedir()))
+/**
+ * Codex 세션 기록 읽기(세션 폴더만, 설정은 바꾸지 않는다). 토큰 숫자·사용 한도(G6)는 설정 readUsage 가 켜져 있을
+ * 때만 읽는다.
+ */
+const codexReader = createCodexReader(codexHome(process.env, homedir()), {
+  usage: () => settings.readUsage
+})
 
 /** Claude 실행 중 세션 파일 읽기(`<Claude 설정 폴더>/sessions/<pid>.json` 만 읽는다). */
 const sessionFileReader = createSessionFileReader({
   dir: join(claudeConfigDir(process.env, homedir()), 'sessions')
+})
+
+/**
+ * Claude 세션 기록의 토큰 숫자(G6, `<Claude 설정 폴더>/projects` 안의 .jsonl 만 읽는다). 수집은 기억한 값만 쓰고
+ * 기록은 뒤에서 하나씩 읽는다(처음 읽는 큰 기록이 수집을 늦추지 않게).
+ */
+const claudeUsage = createUsageCache({
+  reader: createClaudeUsageReader({
+    projectsDir: join(claudeConfigDir(process.env, homedir()), 'projects')
+  }),
+  now: Date.now
 })
 
 /** 워크트리마다 커밋 안 한 변경 수(G4, 5분에 한 번 뒤에서 센다). */
@@ -130,8 +147,9 @@ const collector = platform
       resolveProcessWorktrees,
       resolveWorktree,
       resolveWorkspace,
-      codexState: (agent, now) => codexReader.stateFor(agent, now),
+      codexInfo: (agent, now) => codexReader.infoFor(agent, now),
       claudeSessionFiles: (agents, now) => sessionFileReader.read(agents, now),
+      claudeUsage,
       sessions,
       hookStatus: () => claude.status(),
       codexHookStatus: () => codex.status(),
@@ -584,6 +602,8 @@ function applySettings(next: Settings): void {
   settings = next
   // 하는 일(G3b) 보기를 끄면 들고 있던 내용도 지운다(화면은 저장 뒤 새로 수집할 때 비워진다).
   if (!next.showAgentActivity) clearActivity(sessions)
+  // 토큰·한도(G6) 읽기를 끄면 들고 있던 숫자와 읽던 위치를 버린다(Codex 는 다음 읽기에서 버린다).
+  if (!next.readUsage) claudeUsage.clear()
   scheduler.setIntervals(REFRESH_INTERVALS[next.refresh])
   // 화면(prefers-color-scheme)과 확인 창·메뉴가 같은 테마를 따르도록 OS 테마 설정을 바꾼다.
   nativeTheme.themeSource = next.theme === 'auto' ? 'system' : next.theme

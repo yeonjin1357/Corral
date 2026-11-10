@@ -369,3 +369,167 @@ describe('검토 뒤 보강(긴 턴·다른 프로세스의 기록)', () => {
     ).toBe(own)
   })
 })
+
+describe('토큰·사용 한도(G6)', () => {
+  let home: string
+  beforeEach(async () => {
+    home = await mkdtemp(join(tmpdir(), 'pitwall-codex-'))
+  })
+  afterEach(async () => {
+    await rm(home, { recursive: true, force: true })
+  })
+  const pad = (n: number): string => String(n).padStart(2, '0')
+  async function rolloutAt(at: Date, body: string[]): Promise<string> {
+    const dir = join(
+      home,
+      'sessions',
+      String(at.getFullYear()),
+      pad(at.getMonth() + 1),
+      pad(at.getDate())
+    )
+    await mkdir(dir, { recursive: true })
+    const stamp = `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}T${pad(at.getHours())}-${pad(at.getMinutes())}-${pad(at.getSeconds())}`
+    const path = join(dir, `rollout-${stamp}-0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b.jsonl`)
+    const meta = line('session_meta', { id: 'x', cwd: CWD }, at.toISOString())
+    await writeFile(path, [meta, ...body].join('\n') + '\n')
+    return path
+  }
+  const tokenCount = (t: string, info: unknown, rateLimits: unknown): string =>
+    event('token_count', t, { info, rate_limits: rateLimits })
+  /** 실제 모양의 token_count 값. */
+  const INFO = {
+    total_token_usage: {
+      input_tokens: 666008,
+      cached_input_tokens: 590720,
+      output_tokens: 2954,
+      reasoning_output_tokens: 801,
+      total_tokens: 668962
+    },
+    last_token_usage: {
+      input_tokens: 75923,
+      cached_input_tokens: 75392,
+      output_tokens: 243,
+      reasoning_output_tokens: 179,
+      total_tokens: 76166
+    },
+    model_context_window: 258400
+  }
+  const LIMITS = {
+    primary: { used_percent: 14, window_minutes: 300, resets_at: 1794227066 },
+    secondary: { used_percent: 31, window_minutes: 10080, resets_at: 1794447205 },
+    plan_type: 'plus'
+  }
+  const start = new Date(2026, 10, 10, 9, 0, 0)
+  const agent = { cwd: CWD, startedAt: start.getTime() }
+  const now = start.getTime() + 10 * MIN
+
+  test('token_count 에서 합계·컨텍스트·한도를 읽는다', async () => {
+    const path = await rolloutAt(new Date(2026, 10, 10, 9, 1, 0), [
+      event('task_started', '2026-11-10T00:01:00.000Z'),
+      tokenCount('2026-11-10T00:01:30.000Z', null, {
+        ...LIMITS,
+        primary: { ...LIMITS.primary, used_percent: 10 }
+      }),
+      tokenCount('2026-11-10T00:02:00.000Z', INFO, LIMITS),
+      // 내용·한도가 빈 이벤트는 알던 값을 지우지 않는다.
+      tokenCount('2026-11-10T00:02:10.000Z', null, null),
+      event('task_complete', '2026-11-10T00:03:00.000Z')
+    ])
+    const reader = createCodexReader(home)
+    const state = {
+      state: 'idle' as const,
+      since: Date.parse('2026-11-10T00:03:00.000Z'),
+      lastEventAt: Date.parse('2026-11-10T00:03:00.000Z')
+    }
+    expect(await reader.infoFor(agent, now)).toEqual({
+      state,
+      usage: {
+        contextTokens: 76166,
+        contextWindow: 258400,
+        outputTokens: 2954,
+        totalTokens: 668962,
+        model: null
+      },
+      limits: {
+        primary: { usedPercent: 14, windowMinutes: 300, resetsAt: 1794227066000 },
+        secondary: { usedPercent: 31, windowMinutes: 10080, resetsAt: 1794447205000 },
+        planType: 'plus',
+        at: Date.parse('2026-11-10T00:02:00.000Z')
+      }
+    })
+    // 상태만 묻는 쪽은 지금처럼 상태만.
+    expect(await reader.stateFor(agent, now)).toEqual(state)
+
+    // 늦게 쓰인 더 이른 시각의 한도는 덮어쓰지 않는다. 모양이 다른 값은 0 이 아니라 없음.
+    await appendFile(
+      path,
+      [
+        tokenCount('2026-11-10T00:01:00.000Z', null, {
+          ...LIMITS,
+          primary: { ...LIMITS.primary, used_percent: 99 }
+        }),
+        tokenCount(
+          '2026-11-10T00:04:00.000Z',
+          { ...INFO, last_token_usage: null, model_context_window: 'big' },
+          {
+            primary: { used_percent: '50', window_minutes: 300 },
+            secondary: { used_percent: 40, window_minutes: 10080 },
+            plan_type: 7
+          }
+        )
+      ].join('\n') + '\n'
+    )
+    expect(await reader.infoFor(agent, now)).toEqual({
+      state,
+      usage: {
+        contextTokens: null,
+        contextWindow: null,
+        outputTokens: 2954,
+        totalTokens: 668962,
+        model: null
+      },
+      limits: {
+        primary: null,
+        secondary: { usedPercent: 40, windowMinutes: 10080, resetsAt: null },
+        planType: null,
+        at: Date.parse('2026-11-10T00:04:00.000Z')
+      }
+    })
+  })
+
+  test('usage 를 끄면 token_count 를 읽지 않는다', async () => {
+    await rolloutAt(new Date(2026, 10, 10, 9, 1, 0), [
+      event('task_started', '2026-11-10T00:01:00.000Z'),
+      tokenCount('2026-11-10T00:02:00.000Z', INFO, LIMITS)
+    ])
+    let on = false
+    const reader = createCodexReader(home, { usage: () => on })
+    const working = {
+      state: 'working' as const,
+      since: Date.parse('2026-11-10T00:01:00.000Z'),
+      lastEventAt: Date.parse('2026-11-10T00:01:00.000Z')
+    }
+    const parse = vi.spyOn(JSON, 'parse')
+    try {
+      expect(await reader.infoFor(agent, now)).toEqual({
+        state: working,
+        usage: null,
+        limits: null
+      })
+      // token_count 줄은 JSON 으로 읽어 보지도 않는다.
+      expect(parse.mock.calls.some(([raw]) => String(raw).includes('token_count'))).toBe(false)
+    } finally {
+      parse.mockRestore()
+    }
+    // 켜면 처음부터 다시 읽어 숫자를 안다.
+    on = true
+    expect(await reader.infoFor(agent, now)).toMatchObject({
+      state: working,
+      usage: { totalTokens: 668962 },
+      limits: { planType: 'plus' }
+    })
+    // 다시 끄면 알던 숫자도 버린다(상태는 그대로).
+    on = false
+    expect(await reader.infoFor(agent, now)).toEqual({ state: working, usage: null, limits: null })
+  })
+})

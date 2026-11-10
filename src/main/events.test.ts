@@ -58,6 +58,7 @@ function agent(over: Partial<AgentRow> = {}): AgentRow {
     parked: false,
     activity: null,
     quietSince: null,
+    usage: null,
     host: { pids: [], app: null },
     ...over
   }

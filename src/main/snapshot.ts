@@ -516,6 +516,8 @@ export function buildSnapshot(input: {
     workspaces: [],
     hook: null,
     codexHook: null,
+    // 사용 한도(G6)는 Codex 세션 기록을 읽은 수집기가 채운다.
+    codexLimits: null,
     disk: null,
     groups,
     apps: appsOf(rest, input.platform ?? null, tree),

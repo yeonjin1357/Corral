@@ -9,9 +9,14 @@ import { buildTrayMenu } from './tray'
 import { DEFAULT_SETTINGS } from '../shared/settings'
 import type { Sessions } from './sessions'
 import { applyHookEvent } from './sessions'
+import type { Mock } from 'vitest'
 import type { ClaudeSessionFile } from './claudeSessionFiles'
+import type { UsageTarget } from './claudeUsage'
+import type { CodexInfo, RolloutState } from './codexRollout'
 import type {
+  AgentUsage,
   ClaudeHookStatus,
+  CodexLimits,
   ProcessInfo,
   RawSample,
   WorkspaceInfo,
@@ -28,6 +33,14 @@ const HOOK: ClaudeHookStatus = {
   allHooksDisabled: false,
   settingsPath: 'C:\\Users\\a\\.claude\\settings.json'
 }
+
+type CodexAgent = Parameters<NonNullable<CollectorDeps['codexInfo']>>[0]
+/** 세션 기록 상태만 읽는 쪽(토큰·한도는 모름). */
+type CodexStateFn = (agent: CodexAgent, now: number) => Promise<RolloutState | null>
+/** 상태만 돌려주는 읽기를 수집기의 codexInfo 모양으로. */
+const stateOnly =
+  (read: CodexStateFn): NonNullable<CollectorDeps['codexInfo']> =>
+  async (agent, now) => ({ state: await read(agent, now), usage: null, limits: null })
 
 function proc(
   pid: number,
@@ -92,7 +105,8 @@ function setup(over: Partial<CollectorDeps> = {}): {
       idlePortMs: 20 * MIN,
       agentParkedMs: 180 * MIN,
       heavyPatterns: ['tsc'],
-      showAgentActivity: true
+      showAgentActivity: true,
+      readUsage: true
     }),
     selfPid: 999,
     cpuCount: 8,
@@ -301,7 +315,7 @@ describe('마지막 활동·오래 쉬는 세션(G2)', () => {
 
   test('Codex 세션 기록으로 아는 에이전트의 lastActiveAt 은 기록의 마지막 이벤트 시각', async () => {
     const { deps } = setup({
-      codexState: async () => ({ state: 'idle', since: 2 * MIN, lastEventAt: 3 * MIN })
+      codexInfo: stateOnly(async () => ({ state: 'idle', since: 2 * MIN, lastEventAt: 3 * MIN }))
     })
     const s = await createCollector(deps).collect()
     expect(s.agents.find((a) => a.pid === 6000)).toMatchObject({
@@ -318,7 +332,8 @@ describe('마지막 활동·오래 쉬는 세션(G2)', () => {
         idlePortMs: 20 * MIN,
         agentParkedMs: 30 * MIN,
         heavyPatterns: [],
-        showAgentActivity: true
+        showAgentActivity: true,
+        readUsage: true
       })
     })
     const stoppedAt = clock.now - 1
@@ -358,7 +373,8 @@ describe('마지막 활동·오래 쉬는 세션(G2)', () => {
         idlePortMs: 20 * MIN,
         agentParkedMs: 30 * MIN,
         heavyPatterns: [],
-        showAgentActivity: true
+        showAgentActivity: true,
+        readUsage: true
       })
     })
     const stoppedAt = clock.now - 1
@@ -799,7 +815,8 @@ describe('하는 일(G3b)', () => {
     idlePortMs: 20 * MIN,
     agentParkedMs: 180 * MIN,
     heavyPatterns: [],
-    showAgentActivity: true
+    showAgentActivity: true,
+    readUsage: true
   })
   /** 수집기에 넘길 세션 파일 읽기. current 를 바꾸면 다음 수집부터 반영된다. */
   const filesFrom =
@@ -1030,7 +1047,8 @@ describe('하는 일(G3b)', () => {
       idlePortMs: 20 * MIN,
       agentParkedMs: 180 * MIN,
       heavyPatterns: [],
-      showAgentActivity: true
+      showAgentActivity: true,
+      readUsage: true
     }
     const { deps, sessions, clock } = setup({
       options: () => options,
@@ -1080,7 +1098,8 @@ test('설정(기준값)을 바꾸면 다음 수집부터 반영된다', async ()
     idlePortMs: 20 * MIN,
     agentParkedMs: 180 * MIN,
     heavyPatterns: [],
-    showAgentActivity: true
+    showAgentActivity: true,
+    readUsage: true
   }
   const { deps, clock } = setup({ options: () => options })
   const noAgents: RawSample = {
@@ -1107,7 +1126,8 @@ test('설정에서 수집 기준값을 만든다(분 → ms)', () => {
       ramDangerPercent: 85,
       idlePortMinutes: 45,
       agentParkedMinutes: 240,
-      showAgentActivity: false
+      showAgentActivity: false,
+      readUsage: false
     })
   ).toEqual({
     thresholds: { ramWarnPercent: 70, ramDangerPercent: 85 },
@@ -1116,7 +1136,8 @@ test('설정에서 수집 기준값을 만든다(분 → ms)', () => {
     heavyPatterns: DEFAULT_SETTINGS.heavyPatterns,
     hiddenServers: [],
     workspaceAliases: {},
-    showAgentActivity: false
+    showAgentActivity: false,
+    readUsage: false
   })
 })
 
@@ -1247,7 +1268,8 @@ describe('작업 공간 합계(G4)', () => {
       agentParkedMs: 180 * MIN,
       heavyPatterns: [],
       hiddenServers,
-      showAgentActivity: true
+      showAgentActivity: true,
+      readUsage: true
     })
     const shown = setup({ options: options([]), sample: async () => onlyServer })
     expect(
@@ -1382,7 +1404,8 @@ describe('숨기기·별칭(F11)', () => {
       heavyPatterns: [],
       hiddenServers,
       workspaceAliases,
-      showAgentActivity: true
+      showAgentActivity: true,
+      readUsage: true
     })
 
   test('숨긴 서버는 목록·추천·트레이에서 빠지고 숨김 목록에 있다', async () => {
@@ -1424,10 +1447,10 @@ describe('숨기기·별칭(F11)', () => {
 
 describe('Codex 세션 기록(F7)', () => {
   test('Codex 는 세션 기록 상태와 그 시각을 쓴다', async () => {
-    const codexState = vi.fn<NonNullable<CollectorDeps['codexState']>>(async (a) =>
+    const codexState = vi.fn<CodexStateFn>(async (a) =>
       a.cwd === W2.root ? { state: 'working', since: 5 * MIN, lastEventAt: 5 * MIN } : null
     )
-    const { deps } = setup({ codexState })
+    const { deps } = setup({ codexInfo: stateOnly(codexState) })
     const s = await createCollector(deps).collect()
     expect(s.agents.find((a) => a.pid === 6000)).toMatchObject({
       tool: 'codex',
@@ -1441,14 +1464,14 @@ describe('Codex 세션 기록(F7)', () => {
   })
 
   test('기록이 없으면(첫 입력 전·압축·resume) CPU 추정 그대로', async () => {
-    const { deps } = setup({ codexState: async () => null })
+    const { deps } = setup({ codexInfo: stateOnly(async () => null) })
     const s = await createCollector(deps).collect()
     expect(s.agents.find((a) => a.pid === 6000)?.stateSource).toBe('cpu')
   })
 
   test('Codex 둘이 같은 폴더에서 돌면 어느 쪽 기록인지 몰라 쓰지 않는다', async () => {
     const codexState = vi.fn(async () => ({ state: 'working' as const, since: 1, lastEventAt: 1 }))
-    const { deps } = setup({ codexState })
+    const { deps } = setup({ codexInfo: stateOnly(codexState) })
     const two: RawSample = {
       ...sampleAt(0),
       processes: [...sampleAt(0).processes, proc(6100, 1, 'codex.exe', 0)],
@@ -1473,7 +1496,7 @@ describe('Codex 세션 기록(F7)', () => {
 
   test('기록 읽기가 실패해도 수집은 이어진다', async () => {
     const { deps } = setup({
-      codexState: async () => {
+      codexInfo: async () => {
         throw new Error('EBUSY')
       }
     })
@@ -1483,7 +1506,7 @@ describe('Codex 세션 기록(F7)', () => {
 
   test('restate(훅 이벤트)는 세션 기록 상태를 덮어쓰지 않는다', async () => {
     const { deps } = setup({
-      codexState: async () => ({ state: 'error', since: 7 * MIN, lastEventAt: 7 * MIN })
+      codexInfo: stateOnly(async () => ({ state: 'error', since: 7 * MIN, lastEventAt: 7 * MIN }))
     })
     const collector = createCollector(deps)
     const s = await collector.collect()
@@ -1504,7 +1527,7 @@ describe('Codex 연동 훅(F7)', () => {
       path: 'C:\\Users\\dev\\.codex\\hooks.json'
     }
     const { deps, sessions } = setup({
-      codexState: async () => ({ state: 'working', since: 1, lastEventAt: 1 }),
+      codexInfo: stateOnly(async () => ({ state: 'working', since: 1, lastEventAt: 1 })),
       codexHookStatus: async () => status,
       resolveWorktree: async (path) =>
         path.startsWith(W1.root) ? W1 : path.startsWith(W2.root) ? W2 : null
@@ -1526,9 +1549,9 @@ describe('Codex 연동 훅(F7)', () => {
   })
 
   test('훅으로 작업 중인 Codex 는 훅이 알려 준 세션 기록 파일을 읽는다', async () => {
-    const codexState = vi.fn<NonNullable<CollectorDeps['codexState']>>(async () => null)
+    const codexState = vi.fn<CodexStateFn>(async () => null)
     const { deps, sessions } = setup({
-      codexState,
+      codexInfo: stateOnly(codexState),
       resolveWorktree: async (path) =>
         path.startsWith(W1.root) ? W1 : path.startsWith(W2.root) ? W2 : null
     })
@@ -1611,11 +1634,11 @@ test('같은 작업 공간에서 에이전트가 일하면 다른 저장소의 �
 describe('Codex 검토 뒤 보강', () => {
   test('같은 폴더의 다른 Codex 가 꺼진 뒤에도 그 프로세스가 살아 있던 구간은 기록 찾기에서 뺀다', async () => {
     const calls: { exclude?: { from: number; to: number }[] }[] = []
-    const codexState = vi.fn<NonNullable<CollectorDeps['codexState']>>(async (agent) => {
+    const codexState = vi.fn<CodexStateFn>(async (agent) => {
       calls.push(agent)
       return null
     })
-    const { deps, clock, samples } = setup({ codexState })
+    const { deps, clock, samples } = setup({ codexInfo: stateOnly(codexState) })
     const other = { ...proc(6100, 1, 'codex.exe', 0), startedAt: 5 * MIN }
     const both: RawSample = {
       ...sampleAt(0),
@@ -1644,7 +1667,7 @@ describe('Codex 검토 뒤 보강', () => {
 
   test('Codex 연동 중 오류로 끝난 턴(Stop 이 오지 않음)은 세션 기록의 끝 이벤트로 바로잡는다', async () => {
     const after = setup({
-      codexState: async () => ({ state: 'error', since: 3 * MIN, lastEventAt: 3 * MIN }),
+      codexInfo: stateOnly(async () => ({ state: 'error', since: 3 * MIN, lastEventAt: 3 * MIN })),
       resolveWorktree: async (path) =>
         path.startsWith(W1.root) ? W1 : path.startsWith(W2.root) ? W2 : null
     })
@@ -1663,7 +1686,7 @@ describe('Codex 검토 뒤 보강', () => {
 
     // 세션 기록의 끝 이벤트가 훅의 작업 시작보다 이르면(지난 턴) 훅 상태를 그대로 쓴다.
     const before = setup({
-      codexState: async () => ({ state: 'idle', since: MIN / 2, lastEventAt: MIN / 2 }),
+      codexInfo: stateOnly(async () => ({ state: 'idle', since: MIN / 2, lastEventAt: MIN / 2 })),
       resolveWorktree: async (path) =>
         path.startsWith(W1.root) ? W1 : path.startsWith(W2.root) ? W2 : null
     })
@@ -1678,5 +1701,201 @@ describe('Codex 검토 뒤 보강', () => {
       state: 'working',
       stateSource: 'hook'
     })
+  })
+})
+
+describe('토큰·한도(G6)', () => {
+  const usage = (n: number): AgentUsage => ({
+    contextTokens: n,
+    contextWindow: null,
+    outputTokens: n * 2,
+    totalTokens: null,
+    model: 'claude-test'
+  })
+  const limitsAt = (at: number, usedPercent: number): CodexLimits => ({
+    primary: { usedPercent, windowMinutes: 300, resetsAt: null },
+    secondary: null,
+    planType: 'plus',
+    at
+  })
+  const optionsWith = (readUsage: boolean): CollectOptions => ({
+    thresholds: { ramWarnPercent: 80, ramDangerPercent: 90 },
+    idlePortMs: 20 * MIN,
+    agentParkedMs: 180 * MIN,
+    heavyPatterns: [],
+    showAgentActivity: true,
+    readUsage
+  })
+  const fileOf = (pid: number, sessionId: string): ClaudeSessionFile => ({
+    pid,
+    sessionId,
+    status: 'idle',
+    statusUpdatedAt: null,
+    name: null,
+    nameSource: null
+  })
+  /** 기억한 값을 바로 주는 토큰 숫자 기억(want 는 부른 것만 남긴다). */
+  function usageCache(values: Record<string, AgentUsage>): {
+    get: Mock<(sessionId: string) => AgentUsage | null>
+    want: Mock<(targets: UsageTarget[]) => void>
+  } {
+    return {
+      get: vi.fn((id: string) => values[id] ?? null),
+      want: vi.fn<(targets: UsageTarget[]) => void>()
+    }
+  }
+  const PATH_A = 'C:\\Users\\dev\\.claude\\projects\\C--work-shop-web\\a.jsonl'
+
+  /**
+   * shop-web 에 Claude 셋과 wt-a 의 Codex(6000). 5000 은 세션 파일(a)과 그 세션의 훅 소식(기록 경로를 앎),
+   * 5001 은 세션 파일(b)만, 5002 는 짝이 없다(수집 중에 처음 온 세션의 상태만 빌려 본다).
+   */
+  function claudeSetup(
+    readUsage: boolean,
+    over: Partial<CollectorDeps> = {}
+  ): ReturnType<typeof setup> & { claudeUsage: ReturnType<typeof usageCache> } {
+    const threeClaudes: RawSample = {
+      ...sampleAt(0),
+      processes: [
+        ...sampleAt(0).processes,
+        { ...proc(5001, 1, 'claude.exe', 0), startedAt: 200 },
+        { ...proc(5002, 1, 'claude.exe', 0), startedAt: 300 }
+      ],
+      cwds: { 5000: W1.root, 5001: W1.root, 5002: W1.root, 6000: W2.root }
+    }
+    const claudeUsage = usageCache({ a: usage(100), b: usage(200), loose: usage(999) })
+    const ctx = setup({
+      sample: async () => threeClaudes,
+      resolveProcessWorktrees: async (processes) =>
+        new Map(processes.map((p) => [p.pid, p.pid === 6000 ? W2 : W1])),
+      claudeSessionFiles: async () =>
+        new Map([
+          [5000, fileOf(5000, 'a')],
+          [5001, fileOf(5001, 'b')]
+        ]),
+      claudeUsage,
+      options: () => optionsWith(readUsage),
+      ...over
+    })
+    applyHookEvent(
+      ctx.sessions,
+      { session_id: 'a', cwd: W1.root, hook_event_name: 'Stop', transcript_path: PATH_A },
+      ctx.clock.now - 1000
+    )
+    applyHookEvent(
+      ctx.sessions,
+      {
+        session_id: 'loose',
+        cwd: W1.root,
+        hook_event_name: 'UserPromptSubmit',
+        transcript_path: 'C:\\Users\\dev\\.claude\\projects\\C--work-shop-web\\loose.jsonl'
+      },
+      ctx.clock.now
+    )
+    return { ...ctx, claudeUsage }
+  }
+
+  test('짝지은 세션이 있는 Claude 만 usage 를 갖는다', async () => {
+    const { deps, claudeUsage } = claudeSetup(true)
+    const collector = createCollector(deps)
+    const s = await collector.collect()
+    // 훅이 알려 준 기록 경로가 먼저, 없으면 세션 파일의 세션 id(읽는 쪽이 찾는다). 짝이 없으면 읽지 않는다.
+    expect(claudeUsage.want).toHaveBeenCalledTimes(1)
+    expect(claudeUsage.want).toHaveBeenCalledWith([
+      { sessionId: 'a', transcriptPath: PATH_A },
+      { sessionId: 'b', transcriptPath: null }
+    ])
+    expect(s.agents.map((a) => [a.pid, a.stateSource, a.usage])).toEqual([
+      [5000, 'hook', usage(100)],
+      [5001, 'file', usage(200)],
+      [5002, 'hook', null],
+      [6000, 'cpu', null]
+    ])
+    // 기억(history.json)에는 담지 않는다.
+    expect(JSON.stringify(collector.exportState())).not.toContain('claude-test')
+  })
+
+  test('읽기를 끄면(readUsage) 기록을 읽지 않고 usage·codexLimits 는 null', async () => {
+    const codexInfo = vi.fn<NonNullable<CollectorDeps['codexInfo']>>(async () => ({
+      state: null,
+      usage: usage(5),
+      limits: limitsAt(MIN, 10)
+    }))
+    const { deps, claudeUsage } = claudeSetup(false, { codexInfo })
+    const s = await createCollector(deps).collect()
+    expect(claudeUsage.want).not.toHaveBeenCalled()
+    expect(claudeUsage.get).not.toHaveBeenCalled()
+    expect(s.agents.map((a) => a.usage)).toEqual([null, null, null, null])
+    expect(s.codexLimits).toBeNull()
+  })
+
+  test('codexLimits 는 가장 최근 값', async () => {
+    // Codex 둘(다른 폴더): 6000(wt-a) 은 CPU 추정, 6100(api) 은 훅으로 쉬는 중이어도 숫자를 읽는다(상태는 훅 그대로).
+    const W3: WorktreeInfo = { root: 'C:\\work\\api', branch: 'main', isLinkedWorktree: false }
+    const two: RawSample = {
+      ...sampleAt(0),
+      processes: [...sampleAt(0).processes, { ...proc(6100, 1, 'codex.exe', 0), startedAt: 200 }],
+      cwds: { 5000: W1.root, 6000: W2.root, 6100: W3.root }
+    }
+    const infos: Record<string, CodexInfo> = {
+      [W2.root]: {
+        state: { state: 'working', since: MIN, lastEventAt: MIN },
+        usage: usage(10),
+        limits: limitsAt(5 * MIN, 14)
+      },
+      [W3.root]: {
+        state: { state: 'working', since: 9 * MIN, lastEventAt: 9 * MIN },
+        usage: usage(20),
+        limits: limitsAt(7 * MIN, 20)
+      }
+    }
+    const codexInfo = vi.fn<NonNullable<CollectorDeps['codexInfo']>>(async (a) => infos[a.cwd])
+    const options = optionsWith(true)
+    const { deps, sessions } = setup({
+      sample: async () => two,
+      resolveProcessWorktrees: async (processes) =>
+        new Map(
+          processes.map((p): [number, WorktreeInfo] => [
+            p.pid,
+            p.pid === 6000 ? W2 : p.pid === 6100 ? W3 : W1
+          ])
+        ),
+      resolveWorktree: async (path) =>
+        path.startsWith(W3.root) ? W3 : path.startsWith(W1.root) ? W1 : null,
+      codexInfo,
+      options: () => options
+    })
+    applyHookEvent(
+      sessions,
+      { session_id: 'c1', cwd: W3.root, hook_event_name: 'Stop' },
+      MIN,
+      'codex'
+    )
+    const collector = createCollector(deps)
+    const s = await collector.collect()
+    expect(s.codexLimits).toEqual(limitsAt(7 * MIN, 20))
+    expect(
+      s.agents
+        .filter((a) => a.tool === 'codex')
+        .map((a) => [a.pid, a.state, a.stateSource, a.usage])
+    ).toEqual([
+      [6100, 'idle', 'hook', usage(20)],
+      [6000, 'working', 'rollout', usage(10)]
+    ])
+    // 훅 소식만 반영하는 restate 는 숫자를 그대로 둔다.
+    const next = await collector.restate(s)
+    expect(next.codexLimits).toEqual(s.codexLimits)
+    expect(next.agents.map((a) => a.usage)).toEqual(s.agents.map((a) => a.usage))
+
+    // 끄면 restate 부터 숫자를 보이지 않고, 다음 수집은 상태가 필요한 Codex(CPU 추정)만 읽는다.
+    options.readUsage = false
+    const hidden = await collector.restate(s)
+    expect(hidden.codexLimits).toBeNull()
+    expect(hidden.agents.map((a) => a.usage)).toEqual([null, null, null])
+    codexInfo.mockClear()
+    const off = await collector.collect()
+    expect(off.codexLimits).toBeNull()
+    expect(off.agents.map((a) => a.usage)).toEqual([null, null, null])
+    expect(codexInfo.mock.calls.map(([a]) => a.cwd)).toEqual([W2.root])
   })
 })

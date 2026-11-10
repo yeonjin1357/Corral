@@ -115,6 +115,13 @@ test('에이전트가 하는 일 보기(showAgentActivity)는 기본 켬, 불린
   expect(normalizeSettings({ showAgentActivity: 'no' }).showAgentActivity).toBe(true)
 })
 
+test('토큰·한도 읽기(readUsage)는 기본 켬, 불린이 아니면 기본값', () => {
+  expect(DEFAULT_SETTINGS.readUsage).toBe(true)
+  expect(normalizeSettings({}).readUsage).toBe(true)
+  expect(normalizeSettings({ readUsage: false }).readUsage).toBe(false)
+  expect(normalizeSettings({ readUsage: 'off' }).readUsage).toBe(true)
+})
+
 test('알림을 누르면 그 에이전트의 창으로(notifyClickFocus)는 기본 켬, 불린이 아니면 기본값', () => {
   expect(DEFAULT_SETTINGS.notifyClickFocus).toBe(true)
   expect(normalizeSettings({}).notifyClickFocus).toBe(true)

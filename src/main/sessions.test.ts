@@ -1,5 +1,6 @@
 import {
   applyHookEvent,
+  claudeTranscriptFor,
   clearActivity,
   codexTranscriptFor,
   hookViewForAgent,
@@ -163,6 +164,7 @@ describe('훅 이벤트 → 세션 상태', () => {
       updatedAt: 2000,
       firstSeen: 1000,
       processKey: null,
+      transcriptPath: null,
       stateSince: 2000,
       lastActivityAt: 2000,
       stoppedAt: null
@@ -851,6 +853,7 @@ describe('Codex 훅 세션(F7)', () => {
 describe('Codex 세션 기록 파일(transcript_path)', () => {
   const PATH_A = '/home/dev/.codex/sessions/2026/11/10/rollout-a.jsonl'
   const PATH_B = '/home/dev/.codex/sessions/2026/11/10/rollout-b.jsonl'
+  const CLAUDE_PATH = '/home/dev/.claude/projects/-work-app/c.jsonl'
   const rootOf = (cwd: string): string | null => (cwd.startsWith('/work/app') ? '/work/app' : null)
 
   test('Codex 이벤트의 기록 파일 경로를 기억하고, 이후 경로 없는 이벤트에도 유지한다', () => {
@@ -875,7 +878,7 @@ describe('Codex 세션 기록 파일(transcript_path)', () => {
     expect(sessions.get('c1')?.transcriptPath).toBe(PATH_A)
   })
 
-  test('.jsonl 이 아니거나 너무 긴 경로, Claude 이벤트의 경로는 기억하지 않는다', () => {
+  test('.jsonl 이 아니거나 너무 긴 경로는 기억하지 않는다(Claude 세션의 경로는 기억한다 — G6)', () => {
     const sessions: Sessions = new Map()
     const ev = (id: string, transcript_path: unknown): Record<string, unknown> => ({
       session_id: id,
@@ -885,8 +888,14 @@ describe('Codex 세션 기록 파일(transcript_path)', () => {
     })
     applyHookEvent(sessions, ev('a', '/etc/passwd'), 1000, 'codex')
     applyHookEvent(sessions, ev('b', '/x/' + 'y'.repeat(5000) + '.jsonl'), 1000, 'codex')
-    applyHookEvent(sessions, ev('c', PATH_A), 1000, 'claude')
-    expect([...sessions.values()].map((s) => s.transcriptPath ?? null)).toEqual([null, null, null])
+    applyHookEvent(sessions, ev('c', CLAUDE_PATH), 1000, 'claude')
+    applyHookEvent(sessions, ev('d', '/etc/passwd'), 1000, 'claude')
+    expect([...sessions.values()].map((s) => s.transcriptPath ?? null)).toEqual([
+      null,
+      null,
+      CLAUDE_PATH,
+      null
+    ])
   })
 
   test('그 프로세스와 짝지은 Codex 세션의 기록 파일(같은 워크트리의 다른 Codex 세션 것은 고르지 않는다)', () => {
@@ -913,6 +922,62 @@ describe('Codex 세션 기록 파일(transcript_path)', () => {
     expect(codexTranscriptFor(sessions, '10:100')).toBe(PATH_A)
     expect(codexTranscriptFor(sessions, '20:4000')).toBe(PATH_B)
     expect(codexTranscriptFor(sessions, '30:1')).toBeNull()
+  })
+
+  test('Claude 프로세스의 기록 파일 단서(G6): 세션 파일의 세션이 먼저, 없으면 짝지은 세션, 짝이 없으면 null', () => {
+    const sessions: Sessions = new Map()
+    const event = (id: string, at: number, path?: string): void => {
+      applyHookEvent(
+        sessions,
+        {
+          session_id: id,
+          cwd: '/work/app',
+          hook_event_name: 'UserPromptSubmit',
+          ...(path ? { transcript_path: path } : {})
+        },
+        at
+      )
+    }
+    const PATH_OLD = '/home/dev/.claude/projects/-work-app/old.jsonl'
+    const PATH_NEW = '/home/dev/.claude/projects/-work-app/new.jsonl'
+    event('old', 1000, PATH_OLD)
+    event('loose', 3000, '/home/dev/.claude/projects/-work-app/loose.jsonl')
+    // Codex 세션은 쓰지 않는다.
+    applyHookEvent(
+      sessions,
+      {
+        session_id: 'cx',
+        cwd: '/work/app',
+        hook_event_name: 'UserPromptSubmit',
+        transcript_path: PATH_A
+      },
+      500,
+      'codex'
+    )
+    sessions.get('old')!.processKey = '10:100'
+    sessions.get('cx')!.processKey = '10:100'
+    // 세션 파일이 없으면 짝지은 세션의 기록 파일(짝 없는 loose 는 빌리지 않는다).
+    expect(claudeTranscriptFor(sessions, '10:100', null)).toEqual({
+      sessionId: 'old',
+      transcriptPath: PATH_OLD
+    })
+    expect(claudeTranscriptFor(sessions, '20:200', null)).toBeNull()
+    // 세션 파일이 다른 세션(/clear 직후 아직 훅 소식이 없음)을 가리키면 그 세션의 id 만(경로는 읽는 쪽이 찾는다).
+    expect(claudeTranscriptFor(sessions, '10:100', 'new')).toEqual({
+      sessionId: 'new',
+      transcriptPath: null
+    })
+    // 그 세션의 훅 소식이 오면(아직 짝 전이어도) 그 경로.
+    event('new', 4000, PATH_NEW)
+    expect(claudeTranscriptFor(sessions, '10:100', 'new')).toEqual({
+      sessionId: 'new',
+      transcriptPath: PATH_NEW
+    })
+    // 다른 프로세스와 짝지은 세션의 경로는 쓰지 않는다.
+    expect(claudeTranscriptFor(sessions, '20:200', 'old')).toEqual({
+      sessionId: 'old',
+      transcriptPath: null
+    })
   })
 })
 

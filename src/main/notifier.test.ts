@@ -71,6 +71,7 @@ function agent(pid: number, state: AgentRow['state'], root = 'C:\\work\\shop-web
     parked: false,
     activity: null,
     quietSince: null,
+    usage: null,
     host: { pids: [], app: null }
   }
 }

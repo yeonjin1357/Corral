@@ -5,6 +5,7 @@ import type {
   AgentTool,
   ClaudeHookStatus,
   CodexHookStatus,
+  CodexLimits,
   DashboardSnapshot,
   Platform,
   ProcessInfo,
@@ -33,9 +34,11 @@ import {
   type SeenMemo
 } from './activity'
 import { fileStateOver, type ClaudeSessionFile } from './claudeSessionFiles'
+import type { UsageCache, UsageTarget } from './claudeUsage'
 import { activityOf, judgeServers, type ServerMemo } from './judge'
 import { agentToolOf, topLevelAgentPids } from './processTree'
 import {
+  claudeTranscriptFor,
   codexTranscriptFor,
   hookViewForAgent,
   oneLine,
@@ -47,7 +50,7 @@ import {
 } from './sessions'
 import { buildSnapshot, pidsForWorktreeLookup } from './snapshot'
 import { createServerHistory, type ServerHistoryData } from './serverHistory'
-import { cwdKey, type RolloutState } from './codexRollout'
+import { cwdKey, type CodexInfo, type CodexRolloutAgent, type RolloutState } from './codexRollout'
 import type { AgentSeenData, AgentStateData, ServerMemoData } from './historyStore'
 import { agentKey, selectionKey } from '../shared/keys'
 import { text } from '../shared/text'
@@ -69,6 +72,11 @@ export interface CollectOptions {
   workspaceAliases?: Record<string, string>
   /** 에이전트가 하는 일(G3b)을 행에 담는다. 끄면 모두 null 이고 Claude 세션 파일의 이름도 쓰지 않는다. */
   showAgentActivity: boolean
+  /**
+   * 토큰·한도(G6)를 읽는다. 끄면 Claude 세션 기록을 읽게 하지 않고(claudeUsage.want 를 부르지 않음), Codex 는 상태가
+   * 필요한 것만 읽으며, 행의 usage·스냅샷의 codexLimits 는 null.
+   */
+  readUsage: boolean
 }
 
 /** 세션 파일의 이름을 제목으로 쓸 때의 길이(훅 제목과 같다). */
@@ -124,7 +132,8 @@ export function collectOptionsFrom(s: Settings): CollectOptions {
     heavyPatterns: s.heavyPatterns,
     hiddenServers: s.hiddenServers,
     workspaceAliases: s.workspaceAliases,
-    showAgentActivity: s.showAgentActivity
+    showAgentActivity: s.showAgentActivity,
+    readUsage: s.readUsage
   }
 }
 
@@ -141,11 +150,16 @@ export interface CollectorDeps {
   resolveWorktree: (path: string) => Promise<WorktreeInfo | null>
   /** 워크트리를 감싸는 작업 공간(바깥 저장소). */
   resolveWorkspace: (worktree: WorktreeInfo) => Promise<WorkspaceInfo>
-  /** Codex 세션 기록으로 안 상태(F7). 기록이 없으면 null(CPU 추정). 없으면 쓰지 않는다. */
-  codexState?: (
-    agent: { cwd: string; startedAt: number | null; exclude?: { from: number; to: number }[] },
-    now: number
-  ) => Promise<RolloutState | null>
+  /**
+   * Codex 세션 기록으로 안 상태(F7)·토큰 숫자·사용 한도(G6). 기록이 없으면 모두 null(상태는 CPU 추정).
+   * 없으면 쓰지 않는다.
+   */
+  codexInfo?: (agent: CodexRolloutAgent, now: number) => Promise<CodexInfo>
+  /**
+   * Claude 의 토큰 숫자(G6). get 은 기억한 값을 바로 주고(기다리지 않음), want 는 뒤에서 세션 기록을 다시 읽는다.
+   * 없으면 Claude 의 usage 는 null.
+   */
+  claudeUsage?: Pick<UsageCache, 'get' | 'want'>
   /**
    * Claude 실행 중 세션 파일(G3a, pid → 파일). 세션과 프로세스를 정확히 잇고, 훅이 없을 때 작업 중·쉬는 중을 안다.
    * 없으면 쓰지 않는다(지금처럼 추측으로 잇고 CPU 추정).
@@ -338,22 +352,31 @@ export function createCollector(deps: CollectorDeps): {
   }
 
   /**
-   * Codex 에이전트마다 세션 기록 상태를 읽는다. 같은 폴더에서 Codex 가 둘 이상 돌면 어느 쪽 기록인지 알 수 없어
-   * 쓰지 않는다(지어내지 않음). 실패하면 그 에이전트는 CPU 추정 그대로.
-   */
-  /**
    * 폴더별로 본 Codex 프로세스의 생존 구간(시작 ~ 마지막으로 본 시각, 하루 보관). 같은 폴더의 다른 프로세스가
    * 살아 있던 동안 만든 기록 파일은 그 프로세스 것일 수 있어 고르지 않는다(먼저 꺼진 프로세스의 파일을 읽지 않게).
    */
   const codexLives = new Map<string, Map<string, { startedAt: number; lastSeen: number }>>()
 
+  /**
+   * 세션 기록의 상태를 쓸 Codex: CPU 추정인 것, 그리고 훅으로 작업 중인 것(오류로 끝난 턴은 Stop 이 오지 않아 세션
+   * 기록으로 바로잡는다).
+   */
+  const rolloutDecides = (a: AgentRow): boolean =>
+    a.stateSource === 'cpu' || (a.stateSource === 'hook' && a.state === 'working')
+
+  /**
+   * Codex 에이전트마다 세션 기록을 읽는다: 상태가 필요한 것(rolloutDecides), 토큰 숫자를 읽으면(G6, withUsage)
+   * 지금 도는 Codex 모두. 같은 폴더에서 Codex 가 둘 이상 돌면 어느 쪽 기록인지 알 수 없어 읽지 않는다(지어내지 않음).
+   * 실패하면 그 에이전트는 읽은 것이 없다(CPU 추정 그대로).
+   */
   async function readRollouts(
     agents: AgentRow[],
     cwds: Record<number, string>,
-    now: number
-  ): Promise<Map<number, RolloutState>> {
-    const result = new Map<number, RolloutState>()
-    const read = deps.codexState
+    now: number,
+    withUsage: boolean
+  ): Promise<Map<number, CodexInfo>> {
+    const result = new Map<number, CodexInfo>()
+    const read = deps.codexInfo
     if (!read) return result
     const running = agents.filter((a) => a.tool === 'codex' && cwds[a.pid])
     for (const a of running) {
@@ -370,10 +393,7 @@ export function createCollector(deps: CollectorDeps): {
     const count = new Map<string, number>()
     for (const a of running)
       count.set(cwdKey(cwds[a.pid]), (count.get(cwdKey(cwds[a.pid])) ?? 0) + 1)
-    // CPU 추정인 Codex, 그리고 훅으로 작업 중인 Codex(오류로 끝난 턴은 Stop 이 오지 않아 세션 기록으로 바로잡는다).
-    const wanted = running.filter(
-      (a) => a.stateSource === 'cpu' || (a.stateSource === 'hook' && a.state === 'working')
-    )
+    const wanted = running.filter((a) => withUsage || rolloutDecides(a))
     await Promise.all(
       wanted.map(async (a) => {
         const cwd = cwds[a.pid]
@@ -385,7 +405,7 @@ export function createCollector(deps: CollectorDeps): {
         const transcriptPath =
           a.stateSource === 'hook' ? codexTranscriptFor(deps.sessions, agentKey(a)) : null
         try {
-          const state = await read(
+          const info = await read(
             {
               cwd,
               startedAt: a.startedAt,
@@ -394,13 +414,49 @@ export function createCollector(deps: CollectorDeps): {
             },
             now
           )
-          if (state) result.set(a.pid, state)
+          result.set(a.pid, info)
         } catch {
           // 읽지 못하면 CPU 추정을 쓴다.
         }
       })
     )
     return result
+  }
+
+  /**
+   * 그 Claude 에이전트의 토큰 숫자를 읽을 세션 기록(G6): 그 프로세스와 짝지은 세션(세션 파일의 세션이 먼저)의 기록
+   * 파일, 경로를 모르면 세션 id(읽는 쪽이 찾는다). 짝이 없으면 null.
+   */
+  function usageTargetOf(a: AgentRow): UsageTarget | null {
+    if (a.tool !== 'claude') return null
+    const key = agentKey(a)
+    return claudeTranscriptFor(deps.sessions, key, fileSessionOf.get(key) ?? null)
+  }
+
+  /**
+   * 행마다 토큰 숫자(G6)를 붙인다: Claude 는 기억(claudeUsage)한 값, Codex 는 이번 수집에서 읽은 세션 기록의 값.
+   * 설정은 붙이는 그때 새로 읽는다(수집 도중 꺼도 그 결과에 숫자가 나가지 않게 — 이 뒤에는 기다림이 없어야 한다).
+   */
+  function withTokenUsage(
+    agents: AgentRow[],
+    claude: Map<number, UsageTarget>,
+    codex: Map<number, CodexInfo>
+  ): AgentRow[] {
+    if (!deps.options().readUsage) return agents.map((a): AgentRow => ({ ...a, usage: null }))
+    return agents.map((a): AgentRow => {
+      if (a.tool === 'codex') return { ...a, usage: codex.get(a.pid)?.usage ?? null }
+      const target = claude.get(a.pid)
+      return { ...a, usage: target ? (deps.claudeUsage?.get(target.sessionId) ?? null) : null }
+    })
+  }
+
+  /** 지금 도는 Codex 의 세션 기록 가운데 가장 최근 token_count 의 사용 한도(G6). 없거나 설정이 꺼져 있으면 null. */
+  function latestLimits(codex: Map<number, CodexInfo>): CodexLimits | null {
+    if (!deps.options().readUsage) return null
+    let latest: CodexLimits | null = null
+    for (const { limits } of codex.values())
+      if (limits && (latest === null || limits.at > latest.at)) latest = limits
+    return latest
   }
 
   /** known 에 없는 세션 작업 폴더만 판별해 더한 새 표를 돌려준다(known 이 없으면 전부 다시). */
@@ -578,7 +634,23 @@ export function createCollector(deps: CollectorDeps): {
     const built = hooked.map((a) =>
       a.tool === 'claude' && sessionFiles.has(a.pid) ? stateFrom(a, hookOfRow(roots)(a)) : a
     )
-    rollouts = await readRollouts(built, raw.cwds ?? {}, now)
+    const codexInfos = await readRollouts(built, raw.cwds ?? {}, now, options.readUsage)
+    // 상태는 세션 기록이 정하는 Codex 에만 쓴다(숫자만 읽은 훅 상태의 Codex 는 훅 상태 그대로).
+    rollouts = new Map(
+      built.flatMap((a) => {
+        const state = rolloutDecides(a) ? codexInfos.get(a.pid)?.state : null
+        return state ? [[a.pid, state] as const] : []
+      })
+    )
+    // 토큰 숫자(G6): 짝지은 Claude 세션의 기록을 뒤에서 읽게 한다(기다리지 않는다). 기억한 값은 마지막에 붙인다.
+    const usageTargets = new Map<number, UsageTarget>()
+    if (options.readUsage && deps.claudeUsage) {
+      for (const a of built) {
+        const target = usageTargetOf(a)
+        if (target) usageTargets.set(a.pid, target)
+      }
+      deps.claudeUsage.want([...usageTargets.values()])
+    }
     const withRollout = built.map((a): AgentRow => {
       const r = rollouts.get(a.pid)
       if (!r) return a
@@ -615,8 +687,10 @@ export function createCollector(deps: CollectorDeps): {
     const withWorkspace = <T extends { worktree: WorktreeInfo | null }>(
       row: T
     ): T & { workspace: WorkspaceInfo | null } => ({ ...row, workspace: workspaceOf(row.worktree) })
-    // 하는 일(G3b)은 마지막 기다림(작업 공간 판별) 뒤에 붙인다: 그 사이 설정을 꺼도 이 결과에 내용이 나가지 않게.
-    const agents = withAgentActivity(active, roots).map(withWorkspace)
+    // 하는 일(G3b)·토큰 숫자(G6)는 마지막 기다림(작업 공간 판별) 뒤에 붙인다: 그 사이 설정을 꺼도 이 결과에 나가지 않게.
+    const agents = withTokenUsage(withAgentActivity(active, roots), usageTargets, codexInfos).map(
+      withWorkspace
+    )
     const agentWorkspaces = new Set(
       agents.flatMap((a) => (a.workspace ? [worktreeKey(a.workspace.root)] : []))
     )
@@ -694,7 +768,8 @@ export function createCollector(deps: CollectorDeps): {
       agents,
       workspaces,
       hook,
-      codexHook
+      codexHook,
+      codexLimits: latestLimits(codexInfos)
     }
   }
 
@@ -718,9 +793,18 @@ export function createCollector(deps: CollectorDeps): {
     const active = withActivity(stated.agents, rootOfCwd, now, deps.options().agentParkedMs).map(
       (a): AgentRow => ({ ...a, quietSince: stillQuiet(a) })
     )
-    const agents = withAgentActivity(active, rootOfCwd)
+    // 토큰 숫자(G6)는 다음 수집까지 그대로 둔다(설정을 껐으면 바로 숨긴다).
+    const usageOn = deps.options().readUsage
+    const agents = withAgentActivity(active, rootOfCwd).map((a): AgentRow =>
+      usageOn ? a : { ...a, usage: null }
+    )
     // 작업 공간 합계는 다음 수집까지 그대로 두고, 에이전트의 마지막 활동만 다시 반영한다.
-    return { ...snapshot, agents, workspaces: withLatestActivity(snapshot.workspaces, agents) }
+    return {
+      ...snapshot,
+      agents,
+      workspaces: withLatestActivity(snapshot.workspaces, agents),
+      codexLimits: usageOn ? snapshot.codexLimits : null
+    }
   }
 
   function exportState(): CollectorState {

@@ -264,7 +264,9 @@ export function buildAgents(input: {
       activity: null,
       // 조용함(G3c)은 조용한 조건이 이어진 시각을 기억하는 수집기가 채운다.
       quietSince: null,
-      host: hostOf(pid)
+      host: hostOf(pid),
+      // 토큰 숫자(G6)는 세션 기록·설정을 아는 수집기가 채운다.
+      usage: null
     })
   }
 

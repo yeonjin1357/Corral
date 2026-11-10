@@ -28,7 +28,10 @@ export interface ClaudeSession {
   lastActivityAt: number
   /** 어느 도구의 세션인지(없으면 claude). */
   tool?: AgentTool
-  /** Codex 세션 기록 파일(훅 이벤트의 transcript_path). 그 프로세스의 기록을 정확히 고르는 데 쓴다. */
+  /**
+   * 세션 기록 파일(훅 이벤트의 transcript_path, .jsonl 만). Codex 는 그 프로세스의 기록을 정확히 고르는 데,
+   * Claude 는 토큰 숫자(G6)를 읽는 데 쓴다.
+   */
   transcriptPath?: string | null
   /**
    * 하는 일(G3b): 훅이 알려 준 세션 제목·마지막 요청 첫 줄·실행 중인 도구·권한을 기다리는 도구. 메모리에만 둔다.
@@ -327,7 +330,7 @@ export function applyHookEvent(
     firstSeen: existing?.firstSeen ?? now,
     processKey: existing?.processKey ?? null,
     ...(tool === 'claude' ? {} : { tool }),
-    ...(tool === 'codex' ? { transcriptPath: transcript ?? existing?.transcriptPath ?? null } : {}),
+    transcriptPath: transcript ?? existing?.transcriptPath ?? null,
     stateSince:
       existing && existing.state === next ? (existing.stateSince ?? existing.firstSeen) : now,
     // 처음 소식이 활동이 아닌 알림이어도 그 전은 모르므로 지금으로 둔다(오래 쉰다고 단정하지 않게).
@@ -517,15 +520,47 @@ export function hookViewForAgent(
   )
 }
 
+/** 그 프로세스(`pid:시작 시각`)와 짝지은 그 도구의 세션 가운데 기록 파일을 알고 가장 최근 소식이 온 세션. */
+function latestPairedWithTranscript(
+  sessions: Sessions,
+  processKey: string,
+  tool: AgentTool
+): ClaudeSession | null {
+  let best: ClaudeSession | null = null
+  for (const s of sessions.values()) {
+    if (toolOf(s) !== tool || !s.transcriptPath || s.processKey !== processKey) continue
+    if (!best || s.updatedAt > best.updatedAt) best = s
+  }
+  return best
+}
+
 /**
  * 그 Codex 프로세스(`pid:시작 시각`)와 짝지은 세션 가운데 가장 최근 소식이 온 세션의 기록 파일. 없으면 null.
  * 같은 워크트리의 다른 Codex(다른 하위 폴더에서 돈 것)의 기록을 고르지 않도록 프로세스로 고른다.
  */
 export function codexTranscriptFor(sessions: Sessions, processKey: string): string | null {
-  let best: ClaudeSession | null = null
-  for (const s of sessions.values()) {
-    if (toolOf(s) !== 'codex' || !s.transcriptPath || s.processKey !== processKey) continue
-    if (!best || s.updatedAt > best.updatedAt) best = s
+  return latestPairedWithTranscript(sessions, processKey, 'codex')?.transcriptPath ?? null
+}
+
+/**
+ * 그 Claude 프로세스의 세션 기록을 찾을 단서(G6 토큰 숫자). 짝지은 세션의 기록만 읽는다(짝이 없으면 null).
+ * - 세션 파일로 그 프로세스의 세션 id 를 알면 그 세션만 본다: 그 id 의 훅 세션(그 프로세스와 짝지었거나 아직 짝 전)이
+ *   기록 파일을 알려 줬으면 그 경로, 아니면 id 만(읽는 쪽이 projects 폴더에서 찾는다 — 훅 연동이 없어도 읽게).
+ * - 모르면 그 프로세스와 짝지은 세션 가운데 기록 파일을 아는 가장 최근 것.
+ */
+export function claudeTranscriptFor(
+  sessions: Sessions,
+  processKey: string,
+  fileSessionId: string | null
+): { sessionId: string; transcriptPath: string | null } | null {
+  if (fileSessionId !== null) {
+    const s = sessions.get(fileSessionId)
+    const mine =
+      s !== undefined &&
+      toolOf(s) === 'claude' &&
+      (s.processKey === null || s.processKey === processKey)
+    return { sessionId: fileSessionId, transcriptPath: mine ? (s.transcriptPath ?? null) : null }
   }
-  return best?.transcriptPath ?? null
+  const paired = latestPairedWithTranscript(sessions, processKey, 'claude')
+  return paired ? { sessionId: paired.id, transcriptPath: paired.transcriptPath ?? null } : null
 }

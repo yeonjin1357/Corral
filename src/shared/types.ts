@@ -305,6 +305,41 @@ export interface AgentActivity {
 }
 
 /**
+ * 에이전트의 토큰 숫자(G6). 세션 기록에서 숫자와 모델 이름만 읽는다(대화 내용은 읽어 두지 않는다). 모르는 값은 null.
+ * - contextTokens: 마지막 요청의 컨텍스트 크기(Claude: 사이드체인이 아닌 마지막 요청의 입력 + 캐시 토큰,
+ *   Codex: 마지막 요청의 토큰 합계).
+ * - contextWindow: 컨텍스트 한도(Codex 만).
+ * - outputTokens: 세션의 출력 토큰 합(Claude 의 큰 기록은 끝만 읽어 모른다).
+ * - totalTokens: 세션의 토큰 합계(Codex 만).
+ * - model: 그 요청의 모델 이름(Claude 만).
+ */
+export interface AgentUsage {
+  contextTokens: number | null
+  contextWindow: number | null
+  outputTokens: number | null
+  totalTokens: number | null
+  model: string | null
+}
+
+/** 사용 한도 창 하나(G6). usedPercent: 사용률(%), windowMinutes: 창 길이(분), resetsAt: 초기화 시각(ms, 모르면 null). */
+export interface LimitWindow {
+  usedPercent: number
+  windowMinutes: number
+  resetsAt: number | null
+}
+
+/**
+ * Codex 사용 한도(G6, 세션 기록의 token_count 이벤트). primary·secondary: 짧은·긴 창(보통 5시간·주간, 모르면 null),
+ * planType: 요금제 이름, at: 그 값을 담은 이벤트 시각(ms).
+ */
+export interface CodexLimits {
+  primary: LimitWindow | null
+  secondary: LimitWindow | null
+  planType: string | null
+  at: number
+}
+
+/**
  * 에이전트가 떠 있는 창을 찾을 단서(G3f 창으로 가기). pids: 창 후보 pid(고를 순서대로, 최대 64 — 조상과 그 콘솔 호스트 자식,
  * 바깥 앱과 같은 이름의 프로세스, 앱 조상이 없으면 WindowsTerminal. 규칙은 agents.ts 의 hostFinder), app: 조상 가운데 명령줄이
  * `/…/<이름>.app/Contents/MacOS/…` 인 첫 것의 `.app` 경로(다른 .app 안의 보조 앱은 건너뛴다). 모르면 빈 목록·null.
@@ -359,6 +394,11 @@ export interface AgentRow {
   quietSince: number | null
   /** 에이전트가 떠 있는 터미널·에디터 창을 찾을 단서(G3f 창으로 가기). */
   host: AgentHost
+  /**
+   * 토큰 숫자(G6). 설정 readUsage 가 꺼져 있거나 읽을 기록이 없으면 null. Claude 는 그 프로세스와 짝지은 세션의
+   * 기록만 읽는다(짝이 없으면 null).
+   */
+  usage: AgentUsage | null
 }
 
 export type ClaudeHookState = 'off' | 'on' | 'partial' | 'error'
@@ -411,6 +451,11 @@ export interface DashboardSnapshot {
   hook: ClaudeHookStatus | null
   /** Codex 훅 연동 상태. 아직 모르면 null. */
   codexHook: CodexHookStatus | null
+  /**
+   * Codex 사용 한도(G6): 지금 도는 Codex 의 세션 기록 가운데 가장 최근 token_count 이벤트의 값. 없거나 설정
+   * readUsage 가 꺼져 있으면 null.
+   */
+  codexLimits: CodexLimits | null
   /** 디스크 정리(끝난 워크트리의 의존성 폴더). 아직 찾지 않았으면 null. */
   disk: DiskReport | null
   groups: GroupUsage[]

@@ -63,6 +63,12 @@ export interface Settings {
    */
   showAgentActivity: boolean
   /**
+   * 토큰·한도(G6)를 읽는다: Claude 세션 기록(`projects` 폴더의 .jsonl)의 토큰 숫자·모델 이름, Codex 세션 기록의
+   * token_count 이벤트(토큰 숫자·사용 한도). 숫자만 메모리에 두고 파일로 남기지 않는다. 끄면 Claude 세션 기록을 열지
+   * 않고, Codex 는 지금처럼 상태 이벤트만 읽으며, 들고 있던 숫자도 버린다.
+   */
+  readUsage: boolean
+  /**
    * 에이전트 하나에 대한 OS 알림을 누르면 먼저 그 에이전트가 떠 있는 터미널·에디터 창으로 가 본다(G3f).
    * 창을 찾지 못하거나 OS 가 거절하면 pitwall 을 연다.
    */
@@ -145,6 +151,7 @@ export const DEFAULT_SETTINGS: Settings = {
   hiddenServers: [],
   workspaceAliases: {},
   showAgentActivity: true,
+  readUsage: true,
   notifyClickFocus: true
 }
 
@@ -376,6 +383,7 @@ export function normalizeSettings(value: unknown): Settings {
     ),
     workspaceAliases: aliases(v.workspaceAliases),
     showAgentActivity: bool(v.showAgentActivity, d.showAgentActivity),
+    readUsage: bool(v.readUsage, d.readUsage),
     notifyClickFocus: bool(v.notifyClickFocus, d.notifyClickFocus)
   }
 }
