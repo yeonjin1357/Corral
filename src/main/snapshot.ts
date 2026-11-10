@@ -452,6 +452,8 @@ export function buildSnapshot(input: {
     // 메모리(RAM·커밋 중 높은 단계)가 넉넉하면 겹쳐도 조용하다(스펙 §3-6).
     heavyOverlap: heavyJobs.length >= 2 && memory.level !== 'normal',
     agents: [],
+    // 작업 공간 합계는 에이전트·작업 공간을 정한 수집기가 만든다.
+    workspaces: [],
     hook: null,
     codexHook: null,
     disk: null,

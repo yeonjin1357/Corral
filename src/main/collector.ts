@@ -50,7 +50,9 @@ import { createServerHistory, type ServerHistoryData } from './serverHistory'
 import { cwdKey, type RolloutState } from './codexRollout'
 import type { AgentSeenData, AgentStateData, ServerMemoData } from './historyStore'
 import { agentKey, selectionKey } from '../shared/keys'
+import { text } from '../shared/text'
 import { normalizeCandidate, selfWorkspace } from './collect/worktree'
+import { buildWorkspaces, withLatestActivity } from './workspaces'
 
 /** 수집마다 새로 읽는 사용자 기준값(설정 화면에서 바꾸면 다음 수집부터 반영). */
 export interface CollectOptions {
@@ -157,6 +159,11 @@ export interface CollectorDeps {
   hookStatus: () => Promise<ClaudeHookStatus>
   /** Codex 훅 연동 상태. 없으면 스냅샷에 null. */
   codexHookStatus?: () => Promise<CodexHookStatus>
+  /**
+   * 워크트리의 커밋 안 한 변경 수(G4). get 은 기억한 값을 바로 주고(기다리지 않음), want 는 뒤에서 다시 센다.
+   * 없으면 작업 공간의 변경 수는 null.
+   */
+  changedFiles?: { get(root: string): number | null; want(roots: string[]): void }
   options: () => CollectOptions
   selfPid: number
   /** 논리 코어 수(CPU 표시 기준). */
@@ -553,7 +560,11 @@ export function createCollector(deps: CollectorDeps): {
       exact: new Set(fileSessionOf.keys())
     })
 
-    const { agents: hooked, cpu } = buildAgents({
+    const {
+      agents: hooked,
+      cpu,
+      members: agentMembers
+    } = buildAgents({
       sample: raw,
       worktrees,
       devServerPids,
@@ -653,13 +664,35 @@ export function createCollector(deps: CollectorDeps): {
       ...row,
       memoryGrowth: serverHistory.growthOf(selectionKey.server(row), now)
     })
+    const shownServers = servers.map(grown)
+    const heavyJobs = snapshot.heavyJobs.map(withWorkspace)
+    // 작업 공간 합계(G4): 숨긴 서버는 넣지 않는다. 변경 수는 기억한 값만 쓰고, 든 워크트리를 뒤에서 다시 세게 한다.
+    const changed = deps.changedFiles
+    changed?.want([
+      ...new Set(
+        [...agents, ...shownServers, ...heavyJobs, ...leftovers].flatMap((r) =>
+          r.worktree ? [r.worktree.root] : []
+        )
+      )
+    ])
+    const workspaces = buildWorkspaces({
+      processes: raw.processes,
+      servers: shownServers,
+      agents,
+      heavyJobs,
+      leftovers,
+      agentMembers,
+      changed: (root) => changed?.get(root) ?? null,
+      unknownName: text.ui.tags.noWorktree
+    })
     return {
       ...snapshot,
-      servers: servers.map(grown),
+      servers: shownServers,
       hiddenServers: hiddenServers.map(grown),
       leftovers,
-      heavyJobs: snapshot.heavyJobs.map(withWorkspace),
+      heavyJobs,
       agents,
+      workspaces,
       hook,
       codexHook
     }
@@ -686,7 +719,8 @@ export function createCollector(deps: CollectorDeps): {
       (a): AgentRow => ({ ...a, quietSince: stillQuiet(a) })
     )
     const agents = withAgentActivity(active, rootOfCwd)
-    return { ...snapshot, agents }
+    // 작업 공간 합계는 다음 수집까지 그대로 두고, 에이전트의 마지막 활동만 다시 반영한다.
+    return { ...snapshot, agents, workspaces: withLatestActivity(snapshot.workspaces, agents) }
   }
 
   function exportState(): CollectorState {

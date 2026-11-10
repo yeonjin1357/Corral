@@ -41,6 +41,7 @@ import { allCwdsDarwin } from './collect/darwin'
 import { readMemory } from './collect/memory'
 import { resolveProcessWorktrees, resolveWorkspace, resolveWorktree } from './collect/worktree'
 import { collectOptionsFrom, createCollector } from './collector'
+import { countChanges, createChangeCounter } from './gitStatus'
 import { loadConfig, updateConfig } from './config'
 import { claudeConfigDir } from './claudeHooks'
 import { createSessionFileReader } from './claudeSessionFiles'
@@ -118,6 +119,9 @@ const sessionFileReader = createSessionFileReader({
   dir: join(claudeConfigDir(process.env, homedir()), 'sessions')
 })
 
+/** 워크트리마다 커밋 안 한 변경 수(G4, 5분에 한 번 뒤에서 센다). */
+const changeCounter = createChangeCounter({ run: countChanges, now: Date.now })
+
 const collector = platform
   ? createCollector({
       platform,
@@ -131,6 +135,7 @@ const collector = platform
       sessions,
       hookStatus: () => claude.status(),
       codexHookStatus: () => codex.status(),
+      changedFiles: changeCounter,
       options: () => collectOptionsFrom(settings),
       selfPid: process.pid,
       cpuCount: cpus().length,

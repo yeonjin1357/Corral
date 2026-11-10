@@ -1186,6 +1186,99 @@ test('작업 공간 판별이 실패하면 그 워크트리 자체를 작업 공
   })
 })
 
+describe('작업 공간 합계(G4)', () => {
+  test('에이전트가 띄운 무거운 작업은 한 번만 더하고, 워크트리의 변경 수를 붙인다', async () => {
+    const changedFiles = {
+      get: vi.fn((root: string) => (root === W1.root ? 4 : null)),
+      want: vi.fn()
+    }
+    const { deps } = setup({
+      changedFiles,
+      resolveProcessWorktrees: async (processes) =>
+        new Map(
+          processes.flatMap((p): [number, WorktreeInfo][] =>
+            [4100, 5000, 7000].includes(p.pid) ? [[p.pid, W1]] : p.pid === 6000 ? [[p.pid, W2]] : []
+          )
+        )
+    })
+    // Claude(5000)가 띄운 tsc(7000): 에이전트 메모리에도, 무거운 작업에도 들어 있다.
+    const sample: RawSample = {
+      ...sampleAt(0),
+      processes: [...sampleAt(0).processes, proc(7000, 5000, 'node.exe', 0, 'node tsc --noEmit')]
+    }
+    const s = await createCollector({ ...deps, sample: async () => sample }).collect()
+    expect(s.agents[0].memoryBytes + s.heavyJobs[0].memoryBytes + s.servers[0].memoryBytes).toBe(
+      40 * MB
+    )
+    expect(
+      s.workspaces.map((w) => [w.key, w.memoryBytes / MB, w.processCount, w.changedFiles])
+    ).toEqual([
+      ['ws:c:\\work\\shop-web', 30, 3, 4],
+      ['ws:c:\\work\\wt-a', 10, 1, null]
+    ])
+    expect(s.workspaces[0]).toMatchObject({
+      agentKeys: ['agent:5000:100'],
+      serverKeys: ['server:4100:100'],
+      heavyKeys: ['heavy:7000:100'],
+      leftoverKeys: []
+    })
+    // 변경 수는 수집을 기다리게 하지 않고 뒤에서 센다: 든 워크트리마다 한 번 부탁한다.
+    expect(changedFiles.want).toHaveBeenCalledTimes(1)
+    expect([...changedFiles.want.mock.calls[0][0]].sort()).toEqual([W1.root, W2.root])
+  })
+
+  test('변경 수 세기가 없으면 변경 수는 null', async () => {
+    const { deps } = setup()
+    const s = await createCollector(deps).collect()
+    expect(s.workspaces.map((w) => [w.key, w.changedFiles])).toEqual([
+      ['ws:c:\\work\\shop-web', null],
+      ['ws:c:\\work\\wt-a', null]
+    ])
+  })
+
+  test('숨긴 서버는 넣지 않는다', async () => {
+    const onlyServer: RawSample = {
+      ...sampleAt(0),
+      processes: [proc(4100, 1, 'node.exe', 0, 'node vite')]
+    }
+    const options = (hiddenServers: string[]) => (): CollectOptions => ({
+      thresholds: { ramWarnPercent: 80, ramDangerPercent: 90 },
+      idlePortMs: 20 * MIN,
+      agentParkedMs: 180 * MIN,
+      heavyPatterns: [],
+      hiddenServers,
+      showAgentActivity: true
+    })
+    const shown = setup({ options: options([]), sample: async () => onlyServer })
+    expect(
+      (await createCollector(shown.deps).collect()).workspaces.map((w) => [w.key, w.serverKeys])
+    ).toEqual([['ws:c:\\work\\shop-web', ['server:4100:100']]])
+    const hidden = setup({ options: options([':3000']), sample: async () => onlyServer })
+    const s = await createCollector(hidden.deps).collect()
+    expect(s.hiddenServers).toHaveLength(1)
+    expect(s.workspaces).toEqual([])
+  })
+
+  test('restate: 줄은 그대로 두고 마지막 활동만 새로 한다', async () => {
+    const { deps, sessions, clock } = setup()
+    const collector = createCollector(deps)
+    const first = await collector.collect()
+    expect(first.workspaces[0]).toMatchObject({ key: 'ws:c:\\work\\shop-web', lastActiveAt: null })
+    clock.now += MIN
+    applyHookEvent(
+      sessions,
+      { session_id: 's1', cwd: W1.root, hook_event_name: 'UserPromptSubmit' },
+      clock.now
+    )
+    const next = await collector.restate(first)
+    expect(next.agents.find((a) => a.pid === 5000)?.lastActiveAt).toBe(clock.now)
+    expect(next.workspaces).toEqual([
+      { ...first.workspaces[0], lastActiveAt: clock.now },
+      first.workspaces[1]
+    ])
+  })
+})
+
 test('서버 CPU 는 서버 트리의 누적 CPU 변화로 잰다', async () => {
   const { deps, clock, samples } = setup()
   const withServerCpu = (serverCpu: number): RawSample => {

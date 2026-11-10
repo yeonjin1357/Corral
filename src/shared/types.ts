@@ -121,6 +121,34 @@ export interface WorkspaceInfo {
   outer: boolean
 }
 
+/**
+ * 작업 공간 한 줄(G4): 그 작업 공간에 든 에이전트·서버·무거운 작업·남은 프로세스의 합계. 숨긴 서버는 넣지 않는다.
+ * 구성원 키는 각 탭 행의 키(selectionKey)다.
+ */
+export interface WorkspaceRow {
+  /** `ws:<worktreeKey(root)>`, 작업 공간을 모르는 것은 `ws:?`. */
+  key: string
+  /** 작업 공간 경로. `ws:?` 는 null. */
+  root: string | null
+  /** 보여 줄 이름(별칭 포함). `ws:?` 는 "작업 폴더 모름". */
+  name: string
+  outer: boolean
+  /** 구성 프로세스(pid 마다 한 번)의 합. */
+  memoryBytes: number
+  /** 같은 프로세스의 커밋 합. 하나도 모르면 null(일부만 알면 아는 것의 합). */
+  commitBytes: number | null
+  /** 구성 프로세스 수(pid 마다 한 번). */
+  processCount: number
+  agentKeys: string[]
+  serverKeys: string[]
+  heavyKeys: string[]
+  leftoverKeys: string[]
+  /** 든 워크트리들의 커밋 안 한 변경 수 합. 하나도 모르면 null. */
+  changedFiles: number | null
+  /** 든 에이전트의 가장 늦은 lastActiveAt. 에이전트가 없거나 모르면 null. */
+  lastActiveAt: number | null
+}
+
 /** 메모리가 계속 는 서버의 근거(처음·지금 메모리와 잰 시간). */
 export interface MemoryGrowth {
   fromBytes: number
@@ -350,6 +378,8 @@ export interface DashboardSnapshot {
   /** 무거운 작업이 2개 이상 겹치고 RAM 이 경고 기준 이상. */
   heavyOverlap: boolean
   agents: AgentRow[]
+  /** 작업 공간별 합계(G4). 메모리 큰 순, 작업 공간을 모르는 줄(`ws:?`)은 맨 끝. */
+  workspaces: WorkspaceRow[]
   /** Claude 훅 연동 상태. 아직 모르면 null. */
   hook: ClaudeHookStatus | null
   /** Codex 훅 연동 상태. 아직 모르면 null. */

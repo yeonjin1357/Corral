@@ -5,7 +5,8 @@ import type {
   DiskRow,
   HeavyJobRow,
   LeftoverRow,
-  ServerRow
+  ServerRow,
+  WorkspaceRow
 } from '../../../shared/types'
 import { blankSnapshot } from '../../../shared/snapshot'
 
@@ -93,6 +94,26 @@ export function heavyJob(over: Partial<HeavyJobRow> = {}): HeavyJobRow {
     descendantPids: [],
     processes: [],
     startedAt: 0,
+    ...over
+  }
+}
+
+/** 작업 공간 줄(기본: serverRow() 하나가 든 shop-web). */
+export function workspaceRow(over: Partial<WorkspaceRow> = {}): WorkspaceRow {
+  return {
+    key: 'ws:c:\\work\\shop-web',
+    root: 'C:\\work\\shop-web',
+    name: 'shop-web',
+    outer: false,
+    memoryBytes: 1200 * MB,
+    commitBytes: null,
+    processCount: 2,
+    agentKeys: [],
+    serverKeys: ['server:4100:200'],
+    heavyKeys: [],
+    leftoverKeys: [],
+    changedFiles: null,
+    lastActiveAt: null,
     ...over
   }
 }

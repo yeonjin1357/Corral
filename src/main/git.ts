@@ -3,9 +3,9 @@ import { runCommand, type CommandResult } from './collect/runCommand'
 
 /** 디스크 정리에 쓰는 git 명령. 네트워크(fetch)는 하지 않고 이 PC 에 있는 정보만 읽는다. */
 
-const GIT_TIMEOUT_MS = 10000
+export const GIT_TIMEOUT_MS = 10000
 /** 비밀번호 창을 띄우지 않고, 출력은 영어로(`[gone]` 같은 표시를 읽기 위해), 읽기만 하므로 잠금 파일도 만들지 않는다. */
-const GIT_ENV = { GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C', LANG: 'C', GIT_OPTIONAL_LOCKS: '0' }
+export const GIT_ENV = { GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C', LANG: 'C', GIT_OPTIONAL_LOCKS: '0' }
 /** 기본 브랜치의 첫 부모 줄기를 이만큼까지만 본다(아주 오래된 저장소에서 시간이 길어지지 않게). */
 const FIRST_PARENT_LIMIT = 20000
 

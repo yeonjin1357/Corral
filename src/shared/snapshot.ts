@@ -20,6 +20,7 @@ export function blankSnapshot(takenAt: number): DashboardSnapshot {
     heavyJobs: [],
     heavyOverlap: false,
     agents: [],
+    workspaces: [],
     hook: null,
     codexHook: null,
     disk: null,
