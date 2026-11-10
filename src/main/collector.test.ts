@@ -1,4 +1,9 @@
-import { collectOptionsFrom, createCollector, type CollectorDeps } from './collector'
+import {
+  collectOptionsFrom,
+  createCollector,
+  type CollectOptions,
+  type CollectorDeps
+} from './collector'
 import { cleanupRecommendation } from '../shared/recommend'
 import { buildTrayMenu } from './tray'
 import { DEFAULT_SETTINGS } from '../shared/settings'
@@ -436,6 +441,7 @@ describe('Claude 세션 파일(G3a)', () => {
     status: 'idle',
     statusUpdatedAt: null,
     name: null,
+    nameSource: null,
     ...over
   })
   /** 수집기에 넘길 세션 파일 읽기. current.file 을 바꾸면 다음 수집부터 반영된다. */
@@ -722,7 +728,16 @@ describe('하는 일(G3b)', () => {
     status: null,
     statusUpdatedAt: null,
     name: null,
+    nameSource: null,
     ...over
+  })
+  /** 바꿀 수 있는 수집 기준값(하는 일 보기 켬). */
+  const mutableOptions = (): CollectOptions => ({
+    thresholds: { ramWarnPercent: 80, ramDangerPercent: 90 },
+    idlePortMs: 20 * MIN,
+    agentParkedMs: 180 * MIN,
+    heavyPatterns: [],
+    showAgentActivity: true
   })
   /** 수집기에 넘길 세션 파일 읽기. current 를 바꾸면 다음 수집부터 반영된다. */
   const filesFrom =
@@ -808,7 +823,14 @@ describe('하는 일(G3b)', () => {
 
   test('훅 제목이 없으면 세션 파일의 이름(한 줄 80자)을 제목으로 쓴다(훅 세션이 없어도)', async () => {
     const current = {
-      files: [fileOf({ status: 'busy', statusUpdatedAt: 9 * MIN, name: '결제 리팩터링\n둘째 줄' })]
+      files: [
+        fileOf({
+          status: 'busy',
+          statusUpdatedAt: 9 * MIN,
+          name: '결제 리팩터링\n둘째 줄',
+          nameSource: 'user'
+        })
+      ]
     }
     const { deps, sessions, clock } = setup({ claudeSessionFiles: filesFrom(current) })
     const collector = createCollector(deps)
@@ -835,13 +857,90 @@ describe('하는 일(G3b)', () => {
 
     // 긴 이름은 80자로 자른다. 이름도 내용도 없으면 null.
     const fresh = setup({
-      claudeSessionFiles: filesFrom({ files: [fileOf({ name: 'n'.repeat(100) })] })
+      claudeSessionFiles: filesFrom({
+        files: [fileOf({ name: 'n'.repeat(100), nameSource: 'user' })]
+      })
     })
     expect((await createCollector(fresh.deps).collect()).agents[0].activity?.title).toBe(
       'n'.repeat(79) + '…'
     )
-    const none = setup({ claudeSessionFiles: filesFrom({ files: [fileOf({ name: '  ' })] }) })
+    const none = setup({
+      claudeSessionFiles: filesFrom({ files: [fileOf({ name: '  ', nameSource: 'user' })] })
+    })
     expect((await createCollector(none.deps).collect()).agents[0].activity).toBeNull()
+  })
+
+  test('자동으로 붙은 세션 이름(nameSource derived)은 제목으로 쓰지 않는다', async () => {
+    const titleWith = async (nameSource: string | null): Promise<string | null | undefined> => {
+      const { deps } = setup({
+        claudeSessionFiles: filesFrom({ files: [fileOf({ name: 'shop-web-3f', nameSource })] })
+      })
+      const s = await createCollector(deps).collect()
+      return s.agents[0].activity?.title
+    }
+    // Claude Code 가 폴더 이름으로 자동으로 붙인 이름은 프로젝트 칸을 되풀이할 뿐이다.
+    expect(await titleWith('derived')).toBeUndefined()
+    // 어디서 온 이름인지 모르면 쓰지 않는다.
+    expect(await titleWith(null)).toBeUndefined()
+    expect(await titleWith('user')).toBe('shop-web-3f')
+  })
+
+  test('권한 대기 중에 늦게 온 같은 도구의 PreToolUse 는 행에서 실행 중으로 보이지 않는다', async () => {
+    const { deps, sessions, clock } = setup()
+    event(sessions, 'f1', 'UserPromptSubmit', clock.now - 3000)
+    event(sessions, 'f1', 'PermissionRequest', clock.now - 2000, {
+      tool_name: 'Bash',
+      tool_input: { command: 'rm -rf dist' }
+    })
+    // 훅은 따로따로 와서 그 도구의 PreToolUse 가 PermissionRequest 보다 늦게 도착할 수 있다.
+    event(sessions, 'f1', 'PreToolUse', clock.now - 1000, {
+      tool_name: 'Bash',
+      tool_input: { command: 'rm -rf dist' }
+    })
+    const s = await createCollector(deps).collect()
+    expect(s.agents[0]).toMatchObject({
+      state: 'waiting',
+      activity: { tool: null, waiting: { tool: 'Bash', summary: 'rm -rf dist' } }
+    })
+  })
+
+  test('수집 도중 설정을 끄면 그 수집 결과에도 내용이 없다', async () => {
+    const options = mutableOptions()
+    const { deps, sessions, clock } = setup({
+      options: () => options,
+      claudeSessionFiles: filesFrom({ files: [fileOf({ name: '비밀 이름', nameSource: 'user' })] }),
+      // 수집의 마지막 기다림(작업 공간 판별) 동안 사용자가 설정을 끈다.
+      resolveWorkspace: async (w) => {
+        options.showAgentActivity = false
+        return { root: w.root, name: 'self', branch: w.branch, outer: false }
+      }
+    })
+    event(sessions, 'f1', 'UserPromptSubmit', clock.now - 1, { prompt: '비밀 요청' })
+    const s = await createCollector(deps).collect()
+    expect(s.agents.map((a) => a.activity)).toEqual([null, null])
+  })
+
+  test('설정이 꺼져 있으면 세션 파일의 이름을 들고 있지 않는다', async () => {
+    const options = { ...mutableOptions(), showAgentActivity: false }
+    const current = { files: [fileOf({ name: '결제 리팩터링', nameSource: 'user' })] }
+    const { deps, clock } = setup({
+      options: () => options,
+      claudeSessionFiles: filesFrom(current)
+    })
+    const collector = createCollector(deps)
+    const off = await collector.collect()
+    expect(off.agents[0].activity).toBeNull()
+    // 다시 켜도 새로 읽기 전에는(수집 사이) 제목을 모른다 — 꺼져 있을 때 읽은 이름을 들고 있지 않았다.
+    options.showAgentActivity = true
+    expect((await collector.restate(off)).agents[0].activity).toBeNull()
+    clock.now += 5000
+    const on = await collector.collect()
+    expect(on.agents[0].activity?.title).toBe('결제 리팩터링')
+    // 켠 채 읽은 이름도 끄면 버린다(수집 사이에 끄고 다시 켜도 되살아나지 않는다).
+    options.showAgentActivity = false
+    expect((await collector.restate(on)).agents[0].activity).toBeNull()
+    options.showAgentActivity = true
+    expect((await collector.restate(on)).agents[0].activity).toBeNull()
   })
 
   test('실행 중인 도구는 작업 중·권한 대기일 때만(더 늦은 근거로 쉬는 중이면 옛 도구를 보이지 않는다)', async () => {
@@ -873,7 +972,9 @@ describe('하는 일(G3b)', () => {
     }
     const { deps, sessions, clock } = setup({
       options: () => options,
-      claudeSessionFiles: filesFrom({ files: [fileOf({ name: '비밀 세션 이름' })] })
+      claudeSessionFiles: filesFrom({
+        files: [fileOf({ name: '비밀 세션 이름', nameSource: 'user' })]
+      })
     })
     event(sessions, 'f1', 'UserPromptSubmit', clock.now - 1, { prompt: '비밀 요청' })
     const collector = createCollector(deps)

@@ -587,7 +587,7 @@ describe('Claude 세션 파일로 정확한 짝(G3a)', () => {
     new Map(
       entries.map(([pid, sessionId]) => [
         pid,
-        { pid, sessionId, status: 'idle', statusUpdatedAt: null, name: null }
+        { pid, sessionId, status: 'idle', statusUpdatedAt: null, name: null, nameSource: null }
       ])
     )
   const keys = new Map([
@@ -981,6 +981,37 @@ describe('하는 일(G3b)', () => {
     expect(activityOf(sessions)?.waiting).toEqual({ tool: 'WebFetch', summary: null })
     applyHookEvent(sessions, ev('Stop'), 5000)
     expect(activityOf(sessions)?.waiting ?? null).toBeNull()
+  })
+
+  test('PreToolUse 뒤에 온 PermissionRequest 는 그 도구를 실행 중이 아니라 권한 대기로 둔다', () => {
+    const sessions: Sessions = new Map()
+    applyHookEvent(sessions, ev('UserPromptSubmit'), 1000)
+    // Claude 는 권한을 묻기 전에 PreToolUse 를 보낸다. 명령은 아직 돌지 않았다.
+    applyHookEvent(sessions, ev('PreToolUse', bash('rm -rf dist')), 2000)
+    applyHookEvent(sessions, ev('PermissionRequest', bash('rm -rf dist')), 2100)
+    expect(activityOf(sessions)).toMatchObject({
+      tool: null,
+      waiting: { tool: 'Bash', summary: 'rm -rf dist' }
+    })
+    // 승인되어도 다시 실행 중으로 담지 않는다(그 뒤의 이벤트가 알려 줄 때만). 그 도구가 끝나면 대기만 풀린다.
+    applyHookEvent(sessions, ev('PostToolUse', bash('rm -rf dist')), 3000)
+    expect(sessions.get('s1')?.state).toBe('working')
+    expect(activityOf(sessions)?.tool ?? null).toBeNull()
+    expect(activityOf(sessions)?.waiting ?? null).toBeNull()
+
+    // 병렬로 돌던 다른 도구는 실행 중 그대로다.
+    const parallel: Sessions = new Map()
+    applyHookEvent(parallel, ev('UserPromptSubmit'), 1000)
+    applyHookEvent(
+      parallel,
+      ev('PreToolUse', { tool_name: 'Grep', tool_input: { pattern: 'TODO' } }),
+      2000
+    )
+    applyHookEvent(parallel, ev('PermissionRequest', bash('npm i')), 2100)
+    expect(activityOf(parallel)).toMatchObject({
+      tool: { name: 'Grep', summary: 'TODO' },
+      waiting: { tool: 'Bash', summary: 'npm i' }
+    })
   })
 
   test('프롬프트는 첫 줄 200자, 제목은 80자', () => {

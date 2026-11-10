@@ -231,6 +231,45 @@ describe('상세 패널: 하는 일(G3b)', () => {
     expect(Object.keys(facts())).not.toContain('실행 중인 도구')
   })
 
+  test('권한 대기 중에는 기다리는 도구를 실행 중인 도구로 보이지 않는다', () => {
+    const bash = { tool: 'Bash', summary: 'rm -rf dist' }
+    sheet(
+      {
+        kind: 'agent',
+        row: agentRow({
+          state: 'waiting',
+          activity: {
+            title: null,
+            prompt: null,
+            tool: { name: 'Bash', summary: 'rm -rf dist', since: 10_000_000 - 2 * 60_000 },
+            waiting: bash
+          }
+        })
+      },
+      HOOK_ON
+    )
+    expect(facts()['권한을 기다리는 도구']).toBe('Bash · rm -rf dist')
+    expect(Object.keys(facts())).not.toContain('실행 중인 도구')
+    wrapper?.unmount()
+    // 병렬로 도는 다른 도구는 그대로 보인다.
+    sheet(
+      {
+        kind: 'agent',
+        row: agentRow({
+          state: 'waiting',
+          activity: {
+            title: null,
+            prompt: null,
+            tool: { name: 'Grep', summary: 'TODO', since: 10_000_000 - 60_000 },
+            waiting: bash
+          }
+        })
+      },
+      HOOK_ON
+    )
+    expect(facts()['실행 중인 도구']).toBe('Grep · TODO · 1분')
+  })
+
   test('하는 일을 모르면(설정에서 끔 등) 줄도 설명도 없다', () => {
     sheet({ kind: 'agent', row: agentRow({ activity: null }) }, HOOK_ON)
     expect(Object.keys(facts())).not.toContain('제목')

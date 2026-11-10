@@ -18,6 +18,11 @@ export interface ClaudeSessionFile {
   statusUpdatedAt: number | null
   /** 세션 이름(그대로, 자르는 것은 쓰는 쪽). 없으면 null. */
   name: string | null
+  /**
+   * 이름이 어디서 왔는지(예: 폴더 이름으로 자동으로 붙인 이름은 'derived'). 40자까지의 빈 글이 아닌 문자열만, 아니면 null.
+   * 하는 일(G3b)의 제목으로는 derived 가 아닌 이름만 쓴다.
+   */
+  nameSource: string | null
 }
 
 /** 파일의 시작 시각과 프로세스 시작 시각이 이만큼까지 다를 수 있다(파일이 0.5초쯤 늦다). 미래 시각의 여유로도 쓴다. */
@@ -25,6 +30,7 @@ const SLACK_MS = 60 * 1000
 /** 이보다 큰 파일은 읽지 않는다(실제 파일은 1 KB 안팎). */
 const MAX_BYTES = 64 * 1024
 const MAX_ID_LENGTH = 200
+const MAX_NAME_SOURCE_LENGTH = 40
 
 /**
  * 훅과 파일이 둘 다 있을 때, 파일의 상태 시각이 훅 세션의 마지막 활동보다 이 시간을 넘게 늦어야 파일을 따른다.
@@ -77,7 +83,13 @@ function parseSessionFile(
     status: o.status === 'idle' || o.status === 'busy' ? o.status : null,
     statusUpdatedAt:
       finite(o.statusUpdatedAt) && o.statusUpdatedAt <= now + slackMs ? o.statusUpdatedAt : null,
-    name: typeof o.name === 'string' ? o.name : null
+    name: typeof o.name === 'string' ? o.name : null,
+    nameSource:
+      typeof o.nameSource === 'string' &&
+      o.nameSource &&
+      o.nameSource.length <= MAX_NAME_SOURCE_LENGTH
+        ? o.nameSource
+        : null
   }
 }
 

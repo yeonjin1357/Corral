@@ -216,15 +216,20 @@ const view = computed<View | null>(() => {
       const act = r.activity
       const ag = t.agent
       const waiting = act?.waiting ? ag.activityTool(act.waiting.tool, act.waiting.summary) : ''
+      // 권한을 기다리는 그 도구는 아직 돌지 않았다(실행 중으로 보이지 않는다). 병렬로 도는 다른 도구는 보인다.
+      const running =
+        act?.tool && !(r.state === 'waiting' && act.tool.name === act.waiting?.tool)
+          ? act.tool
+          : null
       const activityLines: (Fact | null)[] = [
         act?.title ? { label: ag.activityFacts.title, value: act.title } : null,
         act?.prompt ? { label: ag.activityFacts.prompt, value: act.prompt } : null,
-        act?.tool
+        running
           ? {
               label: ag.activityFacts.tool,
               value: t.rowStatus.withTime(
-                ag.activityTool(act.tool.name, act.tool.summary),
-                formatDuration(Math.max(0, props.now - act.tool.since))
+                ag.activityTool(running.name, running.summary),
+                formatDuration(Math.max(0, props.now - running.since))
               )
             }
           : null,

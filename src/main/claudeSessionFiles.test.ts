@@ -86,7 +86,8 @@ test('pid.json 에서 세션 id·상태·시각을 읽는다', async () => {
           sessionId: 'session-17536',
           status: 'idle',
           statusUpdatedAt: PROC_START + 7759,
-          name: 'shop-web 로그인 고치기'
+          name: 'shop-web 로그인 고치기',
+          nameSource: 'derived'
         }
       ],
       [
@@ -96,11 +97,31 @@ test('pid.json 에서 세션 id·상태·시각을 읽는다', async () => {
           sessionId: 'session-17600',
           status: 'busy',
           statusUpdatedAt: NOW - 1000,
-          name: null
+          name: null,
+          nameSource: 'derived'
         }
       ]
     ])
   )
+})
+
+test('nameSource 를 읽는다(문자열이 아니면 null)', async () => {
+  await put('1.json', sessionJson(1, { nameSource: 'user' }))
+  await put('2.json', sessionJson(2, { nameSource: undefined }))
+  await put('3.json', sessionJson(3, { nameSource: 7 }))
+  await put('4.json', sessionJson(4, { nameSource: 'x'.repeat(41) }))
+  await put('5.json', sessionJson(5, { nameSource: '' }))
+  await put('6.json', sessionJson(6, { nameSource: 'y'.repeat(40) }))
+  const files = await createSessionFileReader({ dir }).read(agents(1, 2, 3, 4, 5, 6), NOW)
+  expect([...files.values()].map((f) => [f.pid, f.nameSource])).toEqual([
+    [1, 'user'],
+    [2, null],
+    [3, null],
+    // 40자를 넘거나 빈 글은 모양이 다른 것으로 본다.
+    [4, null],
+    [5, null],
+    [6, 'y'.repeat(40)]
+  ])
 })
 
 test('.key 파일과 목록에 없는 pid 의 파일은 열지 않는다', async () => {

@@ -239,14 +239,14 @@ export function toolSummary(name: string, input: unknown): string | null {
   }
 }
 
-/** 실행 중인 도구를 비우는 이벤트(같은 이름의 PostToolUse 와 함께): 응답 끝·오류·중단·새 입력. */
+/** 실행 중인 도구를 비우는 이벤트(같은 이름의 PostToolUse·PermissionRequest 와 함께): 응답 끝·오류·중단·새 입력. */
 const ENDS_TOOL = new Set(['Stop', 'StopFailure', 'Interrupt', 'UserPromptSubmit'])
 
 /**
  * 이벤트를 반영한 하는 일(G3b). 제목은 session_title 이 오면 덮어쓰고, 마지막 요청은 UserPromptSubmit 마다 새로 정한다
  * (프롬프트가 없으면 모름). 실행 중인 도구는 PreToolUse 에 담고(상태에 반영하지 않은 늦은 이벤트는 빼고) 같은 이름의
- * PostToolUse·응답 끝·오류·중단·새 입력에 비운다. 권한을 기다리는 도구는 PermissionRequest 에 담고 권한 대기를 벗어나면
- * 비운다. 아는 것이 하나도 없으면 undefined.
+ * PostToolUse·PermissionRequest(권한을 기다림 = 아직 돌지 않음)·응답 끝·오류·중단·새 입력에 비운다. 권한을 기다리는
+ * 도구는 PermissionRequest 에 담고 권한 대기를 벗어나면 비운다. 아는 것이 하나도 없으면 undefined.
  */
 function nextActivity(
   ev: Record<string, unknown>,
@@ -268,7 +268,11 @@ function nextActivity(
         : null
   } else if (
     ENDS_TOOL.has(event) ||
-    (event === 'PostToolUse' && toolName && tool?.name === toolName)
+    // Claude 는 권한을 묻기 전에 PreToolUse 를 보낸다: 권한을 기다리는 그 도구는 아직 돌고 있지 않다.
+    // 승인돼도 다시 담지 않는다(그 뒤의 이벤트가 알려 줄 때만).
+    ((event === 'PostToolUse' || event === 'PermissionRequest') &&
+      toolName &&
+      tool?.name === toolName)
   )
     tool = null
   let waiting = next === 'waiting' ? (prev?.waiting ?? null) : null

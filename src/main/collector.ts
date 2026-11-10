@@ -65,9 +65,24 @@ export interface CollectOptions {
 const TITLE_MAX = 80
 
 /**
- * 행의 하는 일(G3b): 그 행이 상태를 얻는 훅 세션의 내용에, 훅 제목이 없으면 Claude 세션 파일의 이름(한 줄 80자)을 제목으로
- * 쓴다(훅 세션이 없어도). 실행 중인 도구는 작업 중·권한 대기일 때만, 권한을 기다리는 도구는 권한 대기일 때만 보인다
- * (세션 파일·Codex 세션 기록이 더 늦은 근거라 상태가 바뀌었으면 옛 도구를 보이지 않게). 보일 것이 없으면 null.
+ * 세션 파일의 이름 가운데 제목으로 쓸 것: 어디서 왔는지 알고, Claude Code 가 폴더 이름으로 자동으로 붙인 것(derived)이
+ * 아닌 이름만(자동 이름은 프로젝트 칸을 되풀이할 뿐이다).
+ */
+function fileTitle(file: ClaudeSessionFile | undefined): string | null {
+  return file?.nameSource != null && file.nameSource !== 'derived' ? file.name : null
+}
+
+/** 이름을 뺀 세션 파일들(하는 일 보기가 꺼져 있으면 이름을 들고 있지 않는다, G3b). 뺄 것이 없으면 그대로. */
+function withoutNames(files: Map<number, ClaudeSessionFile>): Map<number, ClaudeSessionFile> {
+  if (![...files.values()].some((f) => f.name !== null || f.nameSource !== null)) return files
+  return new Map([...files].map(([pid, f]) => [pid, { ...f, name: null, nameSource: null }]))
+}
+
+/**
+ * 행의 하는 일(G3b): 그 행이 상태를 얻는 훅 세션의 내용에, 훅 제목이 없으면 Claude 세션 파일의 이름(fileTitle, 한 줄
+ * 80자)을 제목으로 쓴다(훅 세션이 없어도). 실행 중인 도구는 작업 중·권한 대기일 때만, 권한을 기다리는 도구는 권한 대기일
+ * 때만 보인다(세션 파일·Codex 세션 기록이 더 늦은 근거라 상태가 바뀌었으면 옛 도구를 보이지 않게). 권한을 기다리는 그
+ * 도구는 실행 중으로 보이지 않는다(늦게 도착한 PreToolUse 등 — 아직 돌지 않았다). 보일 것이 없으면 null.
  */
 function rowActivity(
   state: AgentRow['state'],
@@ -76,8 +91,9 @@ function rowActivity(
 ): AgentActivity | null {
   const title = hook?.title ?? oneLine(fileName, TITLE_MAX)
   const prompt = hook?.prompt ?? null
-  const tool = state === 'working' || state === 'waiting' ? (hook?.tool ?? null) : null
   const waiting = state === 'waiting' ? (hook?.waiting ?? null) : null
+  const running = state === 'working' || state === 'waiting' ? (hook?.tool ?? null) : null
+  const tool = running && waiting && running.name === waiting.tool ? null : running
   return title || prompt || tool || waiting ? { title, prompt, tool, waiting } : null
 }
 
@@ -285,23 +301,22 @@ export function createCollector(deps: CollectorDeps): {
   }
 
   /**
-   * 행마다 하는 일(G3b)을 채운다(최종 상태가 정해진 뒤 — rowActivity). 설정이 꺼져 있으면 모두 null 이고 세션 파일의
-   * 이름도 쓰지 않는다. 세션 파일은 Claude 에만 있다.
+   * 행마다 하는 일(G3b)을 채운다(최종 상태가 정해진 뒤 — rowActivity). 설정은 붙이는 그때 새로 읽는다(수집 도중 꺼도 그
+   * 결과에 내용이 나가지 않게 — 이 뒤에는 기다림이 없어야 한다). 꺼져 있으면 모두 null 이고 기억한 세션 파일의 이름도
+   * 버린다(다시 켜도 다음에 새로 읽을 때까지 제목을 모른다). 세션 파일은 Claude 에만 있다.
    */
-  function withAgentActivity(
-    agents: AgentRow[],
-    roots: Map<string, string | null>,
-    show: boolean
-  ): AgentRow[] {
+  function withAgentActivity(agents: AgentRow[], roots: Map<string, string | null>): AgentRow[] {
+    if (!deps.options().showAgentActivity) {
+      sessionFiles = withoutNames(sessionFiles)
+      return agents.map((a): AgentRow => ({ ...a, activity: null }))
+    }
     return agents.map((a): AgentRow => ({
       ...a,
-      activity: show
-        ? rowActivity(
-            a.state,
-            hookOfRow(roots)(a)?.activity ?? null,
-            a.tool === 'claude' ? (sessionFiles.get(a.pid)?.name ?? null) : null
-          )
-        : null
+      activity: rowActivity(
+        a.state,
+        hookOfRow(roots)(a)?.activity ?? null,
+        a.tool === 'claude' ? fileTitle(sessionFiles.get(a.pid)) : null
+      )
     }))
   }
 
@@ -495,7 +510,8 @@ export function createCollector(deps: CollectorDeps): {
       readSessionFiles(claudeProcs, now)
     ])
     rootOfCwd = roots
-    sessionFiles = files
+    // 하는 일 보기가 꺼져 있으면 세션 파일의 이름은 받는 순간 버린다(G3b).
+    sessionFiles = deps.options().showAgentActivity ? files : withoutNames(files)
     fileSessionOf = new Map(
       claudeProcs.flatMap((c) => {
         const file = files.get(c.pid)
@@ -553,11 +569,7 @@ export function createCollector(deps: CollectorDeps): {
     })
     const stated = withStateSince(withRollout, agentStates, sampledAt, exactSinceFor(roots))
     agentStates = stated.memo
-    const active = withAgentActivity(
-      withActivity(stated.agents, roots, sampledAt, options.agentParkedMs),
-      roots,
-      options.showAgentActivity
-    )
+    const active = withActivity(stated.agents, roots, sampledAt, options.agentParkedMs)
 
     // 작업 공간은 판단 전에 정한다: 같은 작업 공간에서 에이전트가 일하면 그 작업 공간의 서버·남은 프로세스는
     // 정리 후보로 올리지 않는다(스펙 §4 — 다른 저장소에서 일하는 에이전트가 이 서버를 쓰고 있을 수 있다).
@@ -574,7 +586,8 @@ export function createCollector(deps: CollectorDeps): {
     const withWorkspace = <T extends { worktree: WorktreeInfo | null }>(
       row: T
     ): T & { workspace: WorkspaceInfo | null } => ({ ...row, workspace: workspaceOf(row.worktree) })
-    const agents = active.map(withWorkspace)
+    // 하는 일(G3b)은 마지막 기다림(작업 공간 판별) 뒤에 붙인다: 그 사이 설정을 꺼도 이 결과에 내용이 나가지 않게.
+    const agents = withAgentActivity(active, roots).map(withWorkspace)
     const agentWorkspaces = new Set(
       agents.flatMap((a) => (a.workspace ? [worktreeKey(a.workspace.root)] : []))
     )
@@ -648,13 +661,11 @@ export function createCollector(deps: CollectorDeps): {
       return stateFrom(a, hook)
     })
     const now = deps.now()
-    const options = deps.options()
     const stated = withStateSince(restated, agentStates, now, exactSinceFor(rootOfCwd))
     agentStates = stated.memo
     const agents = withAgentActivity(
-      withActivity(stated.agents, rootOfCwd, now, options.agentParkedMs),
-      rootOfCwd,
-      options.showAgentActivity
+      withActivity(stated.agents, rootOfCwd, now, deps.options().agentParkedMs),
+      rootOfCwd
     )
     return { ...snapshot, agents }
   }
