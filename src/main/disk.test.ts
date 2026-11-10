@@ -431,6 +431,16 @@ describe('createDiskManager (실제 git)', () => {
     expect((await createDiskManager(deps()).scan()).rows).toEqual([])
   }, 60000)
 
+  test('같은 저장소를 다른 경로(정션·심볼릭 링크)로 알아도 한 번만 살펴본다', async () => {
+    const alias = join(fx.dir, 'alias-main')
+    await symlink(fx.main, alias, 'junction')
+    const manager = createDiskManager(
+      deps({ knownRepos: () => [join(fx.main, '.git'), join(alias, '.git')] })
+    )
+    const report = await manager.scan()
+    expect(report.rows.map((r) => r.worktreeRoot)).toEqual([gone])
+  }, 60000)
+
   test('저장소 하나를 읽지 못해도 다른 저장소는 보여 준다', async () => {
     const manager = createDiskManager(
       deps({ knownRepos: () => [join(fx.dir, 'no-such-repo', '.git'), join(fx.main, '.git')] })

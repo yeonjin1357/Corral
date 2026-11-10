@@ -1,4 +1,4 @@
-import { lstat, opendir, readFile, rename, rm, stat, writeFile } from 'fs/promises'
+import { lstat, opendir, readFile, realpath, rename, rm, stat, writeFile } from 'fs/promises'
 import { basename, join } from 'path'
 import type {
   DashboardSnapshot,
@@ -264,9 +264,14 @@ export function createDiskManager(deps: DiskDeps): {
   async function repoList(): Promise<string[]> {
     const extra = await Promise.all(deps.settings().extraRepos.map((p) => gitCommonDir(p)))
     const all: string[] = []
+    const real: string[] = []
     for (const dir of [...deps.knownRepos(), ...extra]) {
       // 네트워크 공유는 응답이 없으면 찾기 전체가 멈출 수 있어 보지 않는다(설정의 추가 저장소와 같은 규칙).
-      if (!dir || /^[\\/]{2}/.test(dir) || all.some((d) => samePath(d, dir))) continue
+      if (!dir || /^[\\/]{2}/.test(dir)) continue
+      // 같은 저장소를 다른 경로(정션·subst·8.3 이름)로 알 수 있어 실제 경로로 겹침을 가린다.
+      const canonical = await realpath(dir).catch(() => dir)
+      if (real.some((d) => samePath(d, canonical))) continue
+      real.push(canonical)
       all.push(dir)
     }
     return all

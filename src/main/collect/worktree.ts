@@ -1,4 +1,4 @@
-import { readFile, stat } from 'fs/promises'
+import { readFile, realpath, stat } from 'fs/promises'
 import { homedir } from 'os'
 import * as nodePath from 'path'
 import type { ProcessInfo, WorkspaceInfo, WorktreeInfo } from '../../shared/types'
@@ -93,6 +93,15 @@ async function readGitAt(dir: string): Promise<WorktreeInfo | null> {
     branch: await readBranch(gitDir),
     isLinkedWorktree,
     commonDir: await readCommonDir(gitDir, isLinkedWorktree)
+  }
+}
+
+/** 실제 경로(정션·심볼릭 링크·subst 드라이브·8.3 이름을 푼 것). 못 풀면 그대로. */
+async function canonical(path: string): Promise<string> {
+  try {
+    return await realpath(path)
+  } catch {
+    return path
   }
 }
 
@@ -196,8 +205,10 @@ export function createWorktreeResolver(options: WorktreeResolverOptions = {}): W
     const parent = nodePath.dirname(root)
     if (!worktree.commonDir || parent === root) return selfWorkspace(worktree)
     const outer = await resolveDir(parent, 0)
-    if (!outer?.commonDir || keyOf(outer.commonDir) === keyOf(worktree.commonDir))
-      return selfWorkspace(worktree)
+    if (!outer?.commonDir) return selfWorkspace(worktree)
+    // 같은 저장소를 다른 경로(정션·subst·8.3 이름)로 가리킬 수 있어 실제 경로로 비교한다.
+    const [a, b] = await Promise.all([canonical(outer.commonDir), canonical(worktree.commonDir)])
+    if (keyOf(a) === keyOf(b)) return selfWorkspace(worktree)
     return { root: outer.root, name: folderName(outer.root), branch: outer.branch, outer: true }
   }
 

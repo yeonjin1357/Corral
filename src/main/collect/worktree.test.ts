@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, writeFile, rm } from 'fs/promises'
+import { mkdtemp, mkdir, writeFile, rm, symlink } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { extractPathCandidates, createWorktreeResolver } from './worktree'
@@ -215,6 +215,23 @@ describe('createWorktreeResolver', () => {
         branch: 'feat/x',
         outer: false
       })
+    })
+
+    test('공용 폴더를 다른 경로(정션·심볼릭 링크)로 가리켜도 같은 저장소면 묶지 않는다', async () => {
+      const repo = await makeRepo(join(tmp, 'shop-web'))
+      const alias = join(tmp, 'alias')
+      await symlink(repo, alias, 'junction')
+      // gitdir 를 정션 경로로 적은 워크트리(subst 드라이브·8.3 이름도 같은 경우).
+      const gitdir = join(alias, '.git', 'worktrees', 'x')
+      await mkdir(gitdir, { recursive: true })
+      await writeFile(join(gitdir, 'HEAD'), 'ref: refs/heads/feat/x\n')
+      await writeFile(join(gitdir, 'commondir'), '../..\n')
+      const x = join(repo, '.claude', 'worktrees', 'x')
+      await mkdir(x, { recursive: true })
+      await writeFile(join(x, '.git'), `gitdir: ${gitdir}\n`)
+      const r = createWorktreeResolver({ homeDir: join(tmp, 'home') })
+      const w = (await r.resolveWorktree(x))!
+      expect(await r.resolveWorkspace(w)).toMatchObject({ root: x, outer: false })
     })
 
     test('바깥 저장소가 없으면 자기 자신', async () => {
