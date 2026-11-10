@@ -307,6 +307,7 @@ const G = text.ui.group
                       :aria-label="text.ui.actions.cleanup"
                       :title="text.ui.actions.cleanup"
                       data-action="cleanup"
+                      :disabled="busyKey === `group:${block.group.root}`"
                       @click="emit('groupAction', 'cleanup', block.group.root)"
                     >
                       <Eraser />

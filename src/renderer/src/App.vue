@@ -449,7 +449,7 @@ const collapsedGroups = ref<string[]>([])
 const grouping = computed<((rows: Row[]) => GroupedRows[]) | null>(() => {
   const s = snapshot.value
   if (!s || tab.value !== 'ports' || showHidden.value || serverView.value !== 'group') return null
-  return (rows) => groupServers(rows, s.servers, s.agents, s.takenAt)
+  return (rows) => groupServers(rows, s.servers, s.agents, s.takenAt, s.leftovers)
 })
 const NO_SORT: SortState = { id: 'name', dir: 'asc' }
 const sort = computed<SortState>({

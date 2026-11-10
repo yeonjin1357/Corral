@@ -1,3 +1,4 @@
+import { agentsInWorkspace } from '../shared/workspace'
 import type {
   AgentRow,
   DashboardSnapshot,
@@ -348,7 +349,11 @@ export function createKiller(deps: KillDeps): {
       ...leftovers.map((row) => ({ item: leftoverItem(row), target: row as KillTarget }))
     ].sort((a, b) => byMemory(a.item, b.item))
     const name = (servers[0] ?? leftovers[0])?.workspace?.name ?? root
-    const agents = latest.agents.filter(inside)
+    const agents = agentsInWorkspace(
+      latest.agents,
+      root,
+      [...servers, ...leftovers].flatMap((r) => (r.worktree ? [r.worktree.root] : []))
+    )
     return killBatch(targets, (items) => buildWorkspaceConfirm(name, items, agents))
   }
 

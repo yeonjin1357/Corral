@@ -88,6 +88,15 @@ describe('작업 공간 묶음 보기', () => {
     expect(w.find('tr[data-group] button[aria-expanded="false"]').exists()).toBe(true)
   })
 
+  test('그 작업 공간을 정리하는 동안 정리 버튼을 누를 수 없다', () => {
+    const w = mount(ItemTable, { props: { ...groupProps(), busyKey: 'group:C:\\work\\ws' } })
+    expect(w.find('tr[data-group] [data-action="cleanup"]').attributes('disabled')).toBeDefined()
+    const idle = mount(ItemTable, { props: groupProps() })
+    expect(
+      idle.find('tr[data-group] [data-action="cleanup"]').attributes('disabled')
+    ).toBeUndefined()
+  })
+
   test('묶음 머리의 정리 버튼은 작업 공간 정리를 부른다', async () => {
     const w = mount(ItemTable, { props: groupProps() })
     await w.find('tr[data-group] [data-action="cleanup"]').trigger('click')

@@ -259,6 +259,23 @@ describe('작업 공간 한 번에 정리(F2)', () => {
     )
   })
 
+  test('묶음 머리와 같은 기준: 정리할 서버를 감싸는 폴더에서 일하는 에이전트도 경고한다', async () => {
+    // 작업 공간은 모르지만(판별 실패) 서버 워크트리의 상위 폴더에서 일하는 Codex.
+    const covering: AgentRow = {
+      ...agent,
+      pid: 5100,
+      tool: 'codex',
+      workspace: null,
+      worktree: { root: 'C:\\work', branch: 'main', isLinkedWorktree: false },
+      state: 'working'
+    }
+    const d = deps({ latest: latest({ agents: [covering] }) })
+    await createKiller(d).cleanupWorkspace('C:\\work')
+    expect((d.confirm.mock.calls[0][0] as KillConfirm).detail).toContain(
+      'Codex 가 이 작업 공간에서'
+    )
+  })
+
   test('확인 창 사이에 바뀐 항목은 건너뛴다', async () => {
     const changed: RawSample = {
       processes: [vite, esbuild, { ...gradle, commandLine: 'java Other' }],

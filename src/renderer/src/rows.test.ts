@@ -316,6 +316,15 @@ describe('작업 공간 묶음(F1)', () => {
     expect(ws.status).toEqual({ text: '정리 후보 1 · 사용 중 1', dot: 'stopped' })
   })
 
+  test('검색으로 일부만 보여도 머리의 수치는 작업 공간 전체(정리 버튼이 끄는 범위)', () => {
+    const filtered = rows.filter((r) => r.key === 'server:1:200')
+    const groups = groupServers(filtered, s.servers, s.agents)
+    const ws = groups.find((g) => g.group)?.group
+    expect(ws).toMatchObject({ serverCount: 2, memoryBytes: 300 * MB + 2 * GB })
+    expect(ws!.status).toEqual({ text: '정리 후보 1 · 사용 중 1', dot: 'stopped' })
+    expect(groups.find((g) => g.group)!.rows.map((r) => r.key)).toEqual(['server:1:200'])
+  })
+
   test('혼자인 작업 공간은 머리 없이, 작업 공간을 모르는 서버(판별 불가)도 머리 없이', () => {
     const unknown = serverRow({
       pid: 4,

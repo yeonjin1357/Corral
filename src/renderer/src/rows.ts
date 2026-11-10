@@ -2,6 +2,7 @@
  * 표에 보일 행·칸을 스냅샷에서 만든다(화면 모양과 상관없는 순수 함수라 데이터 정확성을 따로 시험한다).
  * 표 모양은 NeoHtop (MIT) process/ProcessTable·ProcessRow 를 따른다: 첫 칸이 이름(누르면 상세), 숫자 칸은 오른쪽 정렬.
  */
+import { agentsInWorkspace } from '../../shared/workspace'
 import type {
   AgentRow,
   AgentTool,
@@ -489,7 +490,9 @@ export function groupServers(
   rows: Row[],
   servers: ServerRow[],
   agents: AgentRow[],
-  now: number = Date.now()
+  now: number = Date.now(),
+  /** 작업 공간의 남은 프로세스(정리 버튼이 같이 끈다). 그 워크트리를 감싸는 에이전트도 머리에 보인다. */
+  leftovers: Pick<LeftoverRow, 'workspace' | 'worktree'>[] = []
 ): GroupedRows[] {
   const byKey = new Map(servers.map((r) => [selectionKey.server(r), r]))
   const buckets = new Map<string, { rows: Row[]; servers: ServerRow[] }>()
@@ -509,12 +512,18 @@ export function groupServers(
   return order.map((id) => {
     const bucket = buckets.get(id)!
     const ws = bucket.servers[0]?.workspace
-    if (!ws || bucket.rows.length < 2) return { group: null, rows: bucket.rows }
-    const roots = bucket.servers.flatMap((r) => (r.worktree ? [r.worktree.root] : []))
-    const inside = agents.filter(
-      (a) =>
-        (a.workspace && worktreeKey(a.workspace.root) === worktreeKey(ws.root)) ||
-        (a.worktree && roots.some((root) => agentCovers([a.worktree!.root], root)))
+    // 머리의 수치는 검색으로 걸러진 줄이 아니라 작업 공간 전체(정리 버튼이 끄는 범위)로 센다.
+    const key = ws ? worktreeKey(ws.root) : null
+    const all = servers.filter((r) => r.workspace && worktreeKey(r.workspace.root) === key)
+    if (!ws || all.length < 2) return { group: null, rows: bucket.rows }
+    const members = [
+      ...all,
+      ...leftovers.filter((r) => r.workspace && worktreeKey(r.workspace.root) === key)
+    ]
+    const inside = agentsInWorkspace(
+      agents,
+      ws.root,
+      members.flatMap((r) => (r.worktree ? [r.worktree.root] : []))
     )
     return {
       group: {
@@ -522,15 +531,15 @@ export function groupServers(
         root: ws.root,
         name: ws.name,
         outer: ws.outer,
-        serverCount: bucket.servers.length,
-        memoryBytes: bucket.servers.reduce((sum, r) => sum + r.memoryBytes, 0),
+        serverCount: all.length,
+        memoryBytes: all.reduce((sum, r) => sum + r.memoryBytes, 0),
         agents: inside,
         agentBadges: inside.map((a) => ({
           key: selectionKey.agent(a),
           icon: agentIcon(a),
           title: `${text.ui.agent.toolNames[a.tool]} · ${agentStatus(a, now).text}`
         })),
-        status: groupStatus(bucket.servers)
+        status: groupStatus(all)
       },
       rows: bucket.rows
     }
