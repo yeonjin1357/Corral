@@ -214,6 +214,19 @@ describe('사용 흔적(F9)', () => {
     expect(activityOf([server()], [outbound], new Map()).activity.get(KEY)).toBe(false)
   })
 
+  test('서버 트리 안의 프로세스가 자기 포트에 붙은 루프백 연결은 사용 흔적이 아니다', () => {
+    const row = server({ descendantPids: [4101] })
+    const serverSide = tcp('Established', ['::1', 3000], ['::1', 51000], 4100)
+    const ownChild = tcp('Established', ['::1', 51000], ['::1', 3000], 4101)
+    // 이전 샘플에 연결이 없던 서버: 새 상대가 생기면 흔적이다.
+    const seen = (): Map<string, Set<string>> => new Map([[KEY, new Set<string>()]])
+    const own = activityOf([row], [serverSide, ownChild], seen())
+    expect(own.connections.get(KEY)).toEqual(new Set())
+    expect(own.activity.get(KEY)).toBe(false)
+    const browser = tcp('Established', ['::1', 51000], ['::1', 3000], 9999)
+    expect(activityOf([row], [serverSide, browser], seen()).activity.get(KEY)).toBe(true)
+  })
+
   test('새 연결이 생기면 연결 0 시간을 다시 센다', () => {
     const first = activityOf(
       [server()],

@@ -17,6 +17,7 @@ import { worktreeKey } from '../shared/format'
 import { findLeftovers } from './leftovers'
 import { findHeavyJobs } from './heavy'
 import { summarizeProcesses } from './processSummary'
+import { localEndpoints, peerPid } from './tcpPeers'
 import { buildTree, classifyAgent, topLevelAgentPids, type ProcessTree } from './processTree'
 
 /** WSL·Docker·Podman 처럼 다른 환경의 포트를 대신 열어 주는 프로세스. 어느 worktree 것인지 알 수 없다. */
@@ -145,7 +146,8 @@ interface PortEntry {
   commandLine: string
   worktree: WorktreeInfo | null
   unresolvable: boolean
-  clientCount: number
+  /** 이 포트에 붙은 연결마다 상대 프로세스 pid(같은 PC 밖이거나 모르면 null). */
+  peers: (number | null)[]
   startedAt: number | null
 }
 
@@ -166,18 +168,21 @@ function serversOf(ports: PortEntry[], tree: ProcessTree): ServerRow[] {
       if (root != null && portRoots.get(a.pid) === root) top = a.pid
     return top
   }
-  const groups = new Map<number, { head: PortEntry; ports: Set<number>; clientCount: number }>()
+  const groups = new Map<
+    number,
+    { head: PortEntry; ports: Set<number>; peers: (number | null)[] }
+  >()
   for (const row of ports) {
     const top = topOf(row)
     let group = groups.get(top)
     if (!group) {
       const head = ports.find((r) => r.pid === top) ?? row
-      group = { head, ports: new Set(), clientCount: 0 }
+      group = { head, ports: new Set(), peers: [] }
       groups.set(top, group)
     }
     group.ports.add(row.port)
     // 포트 행은 (포트, pid) 마다 하나라 연결이 겹쳐 세지지 않는다.
-    group.clientCount += row.clientCount
+    group.peers.push(...row.peers)
   }
   // 서버의 자손에서 그 아래에 있는 다른 서버(의 트리)는 뺀다. 메모리·프로세스를 두 서버가 겹쳐 세지 않게.
   const heads = new Set(groups.keys())
@@ -189,9 +194,12 @@ function serversOf(ports: PortEntry[], tree: ProcessTree): ServerRow[] {
     return all.filter((d) => !nested.has(d))
   }
   return [...groups.values()]
-    .map(({ head, ports: set, clientCount }) => {
+    .map(({ head, ports: set, peers }) => {
       const descendantPids = ownDescendants(head.pid)
-      const members = [head.pid, ...descendantPids].flatMap((pid) => tree.byPid.get(pid) ?? [])
+      const own = new Set([head.pid, ...descendantPids])
+      const members = [...own].flatMap((pid) => tree.byPid.get(pid) ?? [])
+      // 서버 트리 안의 프로세스가 자기 포트에 붙은 루프백 연결은 클라이언트가 아니다.
+      const clientCount = peers.filter((p) => p == null || !own.has(p)).length
       return { head, set, clientCount, descendantPids, members }
     })
     .map(({ head, set: portSet, clientCount, descendantPids, members }) => ({
@@ -258,11 +266,12 @@ export function buildSnapshot(input: {
     return null
   }
 
-  const clients = new Map<string, number>()
+  const owners = localEndpoints(sample.tcp)
+  const clients = new Map<string, (number | null)[]>()
   for (const t of sample.tcp) {
     if (t.state !== 'Established') continue
     const key = `${t.pid}:${t.localPort}`
-    clients.set(key, (clients.get(key) ?? 0) + 1)
+    clients.set(key, [...(clients.get(key) ?? []), peerPid(t, owners)])
   }
 
   const ports: PortEntry[] = []
@@ -291,7 +300,7 @@ export function buildSnapshot(input: {
       commandLine: p.commandLine,
       worktree,
       unresolvable: !worktree,
-      clientCount: clients.get(`${p.pid}:${t.localPort}`) ?? 0,
+      peers: clients.get(`${p.pid}:${t.localPort}`) ?? [],
       startedAt: p.startedAt
     })
   }

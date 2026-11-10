@@ -259,6 +259,24 @@ describe('서버 행', () => {
     expect(s.groups.find((g) => g.group === 'devServer')!.memoryBytes).toBe(855 * MB)
   })
 
+  test('서버 트리 안의 프로세스가 자기 포트에 붙은 루프백 연결은 연결 수에 넣지 않는다', () => {
+    const s = buildSnapshot({
+      ...input,
+      sample: {
+        processes: [proc(7000, 1, 'java.exe', 500, 100), proc(7001, 7000, 'java.exe', 300, 110)],
+        tcp: [
+          listen(7000, 8080),
+          est(7000, 8080, 55000),
+          est(7001, 55000, 8080),
+          est(7000, 8080, 55001),
+          est(9999, 55001, 8080)
+        ]
+      },
+      worktrees: new Map<number, WorktreeInfo>([[7000, W1]])
+    })
+    expect(s.servers[0].clientCount).toBe(1)
+  })
+
   test('연결 수는 서버의 모든 포트 연결 합', () => {
     const s = buildSnapshot(serverInput)
     expect(s.servers.find((r) => r.pid === 4100)?.clientCount).toBe(3)

@@ -1,3 +1,4 @@
+import { localEndpoints, peerPid } from './tcpPeers'
 import type { AgentRow, ServerRow, TcpEntry } from '../shared/types'
 import { agentCovers, worktreeKey } from '../shared/format'
 import { selectionKey } from '../shared/keys'
@@ -22,6 +23,7 @@ export function activityOf(
 ): { activity: Map<string, boolean>; connections: Map<string, Set<string>> } {
   const activity = new Map<string, boolean>()
   const connections = new Map<string, Set<string>>()
+  const owners = localEndpoints(tcp)
   for (const row of servers) {
     const key = selectionKey.server(row)
     const ports = new Set(row.ports)
@@ -32,8 +34,11 @@ export function activityOf(
       if (t.state === 'TimeWait') {
         if (ports.has(t.localPort) || (ports.has(t.remotePort) && LOOPBACK.test(t.remoteAddress)))
           traced = true
-      } else if (t.state === 'Established' && ports.has(t.localPort) && pids.has(t.pid))
-        peers.add(`${t.remoteAddress}:${t.remotePort}`)
+      } else if (t.state === 'Established' && ports.has(t.localPort) && pids.has(t.pid)) {
+        // 서버 트리 안의 프로세스가 자기 포트에 붙은 루프백 연결은 사용이 아니다.
+        const peer = peerPid(t, owners)
+        if (peer == null || !pids.has(peer)) peers.add(`${t.remoteAddress}:${t.remotePort}`)
+      }
     }
     const before = previous.get(key)
     if (before) for (const peer of peers) if (!before.has(peer)) traced = true
