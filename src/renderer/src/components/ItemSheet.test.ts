@@ -3,7 +3,7 @@ import { mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach } from 'vitest'
 import ItemSheet, { type Selected } from './ItemSheet.vue'
 import { MB, agentRow, diskRow, heavyJob, leftoverRow, serverRow } from '../testing/fixtures'
-import type { ClaudeHookStatus, CollectMode, Platform } from '../../../shared/types'
+import type { AgentRow, ClaudeHookStatus, CollectMode, Platform } from '../../../shared/types'
 
 let wrapper: VueWrapper | null = null
 afterEach(() => {
@@ -490,5 +490,71 @@ describe('상세 패널: 디스크 정리', () => {
     sheet({ kind: 'disk', row: diskRow() })
     expect(bodyText()).toContain('끝났다고 본 근거')
     expect(bodyText()).not.toContain('목록에 올린 근거')
+  })
+})
+
+describe('상세 패널: 토큰 카드(G6)', () => {
+  const usage = (over: Partial<NonNullable<AgentRow['usage']>> = {}): AgentRow['usage'] => ({
+    contextTokens: 132_000,
+    contextWindow: null,
+    outputTokens: 48_200,
+    totalTokens: null,
+    model: 'claude-opus-4',
+    ...over
+  })
+  const card = (): HTMLElement | null =>
+    [...document.body.querySelectorAll<HTMLElement>('[data-slot=card]')].find(
+      (c) => c.textContent?.trim().startsWith('토큰') === true
+    ) ?? null
+  const flat = (el: HTMLElement | null): string =>
+    el?.textContent?.replace(/\s+/g, ' ').trim() ?? ''
+
+  test('큰 값은 컨텍스트, 보조 줄은 아는 것만 · 로 잇고, 도움말이 붙는다', () => {
+    sheet({ kind: 'agent', row: agentRow({ usage: usage() }) })
+    const c = card()
+    expect(c).not.toBeNull()
+    expect(flat(c)).toContain('132k')
+    expect(flat(c)).toContain('출력 합 48.2k · claude-opus-4')
+    expect(flat(c)).toContain(
+      '세션 기록 파일에서 읽은 숫자예요. 출력 합에는 하위 에이전트가 쓴 것이 들어 있지 않아요.'
+    )
+  })
+
+  test('한도를 알면 132k / 258k, Codex 는 전체 합이 보조 줄에', () => {
+    sheet({
+      kind: 'agent',
+      row: agentRow({
+        tool: 'codex',
+        usage: usage({ contextWindow: 258_400, totalTokens: 668_000, model: null })
+      })
+    })
+    expect(flat(card())).toContain('132k / 258k')
+    expect(flat(card())).toContain('출력 합 48.2k · 전체 668k')
+    expect(flat(card())).not.toContain('claude')
+  })
+
+  test('usage 가 null 이거나 모든 값이 null 이면 카드가 없다', () => {
+    sheet({ kind: 'agent', row: agentRow({ usage: null }) })
+    expect(card()).toBeNull()
+    wrapper?.unmount()
+    sheet({
+      kind: 'agent',
+      row: agentRow({
+        usage: {
+          contextTokens: null,
+          contextWindow: null,
+          outputTokens: null,
+          totalTokens: null,
+          model: null
+        }
+      })
+    })
+    expect(card()).toBeNull()
+  })
+
+  test('컨텍스트만 모르면 큰 값은 —, 보조 줄은 남은 것만', () => {
+    sheet({ kind: 'agent', row: agentRow({ usage: usage({ contextTokens: null, model: null }) }) })
+    expect(flat(card())).toContain('—')
+    expect(flat(card())).toContain('출력 합 48.2k')
   })
 })

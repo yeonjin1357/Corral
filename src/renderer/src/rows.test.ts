@@ -279,6 +279,50 @@ describe('에이전트 표', () => {
     ])
   })
 
+  test('컨텍스트 칸은 아는 행이 있을 때만(CPU 칸 앞, 너비 90, 모르는 행은 —)', () => {
+    const usage = (
+      contextTokens: number | null,
+      contextWindow: number | null = null
+    ): AgentRow['usage'] => ({
+      contextTokens,
+      contextWindow,
+      outputTokens: null,
+      totalTokens: null,
+      model: null
+    })
+    const none = tableFor(
+      'agents',
+      snapshot({ agents: [agentRow(), agentRow({ pid: 2, usage: usage(null) })] })
+    )
+    expect(none.columns.map((col) => col.id)).not.toContain('context')
+    expect(none.rows[0].cells.context).toBeUndefined()
+
+    const t = tableFor(
+      'agents',
+      snapshot({
+        agents: [
+          agentRow({ pid: 1, usage: usage(132_000, 258_400) }),
+          agentRow({ pid: 2, usage: usage(113_211) }),
+          agentRow({ pid: 3, usage: usage(null) }),
+          agentRow({ pid: 4 })
+        ]
+      })
+    )
+    const ids = t.columns.map((col) => col.id)
+    expect(ids.indexOf('context')).toBe(ids.indexOf('cpu') - 1)
+    expect(t.columns.find((col) => col.id === 'context')).toEqual({
+      id: 'context',
+      label: '컨텍스트',
+      width: 90,
+      align: 'right'
+    })
+    expect(t.rows.map((r) => r.cells.context.text)).toEqual(['132k / 258k', '113k', '—', '—'])
+    expect(t.rows[0].cells.context.sort).toBe(132_000)
+    expect(t.rows[2].cells.context.sort).toBe(-1)
+    // 1280px 창에서 가로 스크롤이 생기지 않게: 칸 합(동작 칸 120 별도)이 1240 이하.
+    expect(t.columns.reduce((sum, col) => sum + col.width, 0) + 120).toBeLessThanOrEqual(1240)
+  })
+
   test('하는 일 칸: 권한 대기 > 실행 중인 도구 > 제목 > 프롬프트', () => {
     const tool = { name: 'Bash', summary: 'npm run build', since: 0 }
     const s = snapshot({

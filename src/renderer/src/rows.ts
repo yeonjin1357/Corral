@@ -24,6 +24,7 @@ import {
   displayCpuPercent,
   formatBytes,
   formatDuration,
+  formatTokens,
   portList,
   worktreeFolder,
   worktreeKey
@@ -129,6 +130,21 @@ const commitCell = (bytes: number | null | undefined): Cell =>
     ? { text: text.ui.none, sort: -1, muted: true }
     : { text: formatBytes(bytes), sort: bytes, mono: true }
 const COMMIT_COLUMN: Column = { id: 'commit', label: c.commit, width: 96, align: 'right' }
+/** 컨텍스트 칸(G6): "132k", 한도를 알면 "132k / 258k". 모르면 —(정렬에서는 맨 뒤). */
+const CONTEXT_COLUMN: Column = { id: 'context', label: c.context, width: 90, align: 'right' }
+function contextCell(usage: AgentRow['usage']): Cell {
+  const used = usage?.contextTokens
+  if (used == null) return { text: text.ui.none, sort: -1, muted: true }
+  const window = usage?.contextWindow
+  return {
+    text:
+      window != null
+        ? text.ui.agent.usageContextOf(formatTokens(used), formatTokens(window))
+        : formatTokens(used),
+    sort: used,
+    mono: true
+  }
+}
 const runtimeCell = (now: number, startedAt: number | null): Cell =>
   startedAt == null
     ? { text: text.ui.none, sort: -1, muted: true }
@@ -323,6 +339,21 @@ function dropEmptyCommit(table: Table): Table {
   }
 }
 
+/** 그 표의 모든 행이 컨텍스트를 모르면 컨텍스트 칸을 뺀다(일부만 모르면 그 칸은 —). */
+function dropEmptyContext(table: Table): Table {
+  if (!table.columns.some((col) => col.id === 'context')) return table
+  if (table.rows.some((row) => row.cells.context && row.cells.context.sort !== -1)) return table
+  return {
+    ...table,
+    columns: table.columns.filter((col) => col.id !== 'context'),
+    rows: table.rows.map((row) => {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { context: _, ...cells } = row.cells
+      return { ...row, cells }
+    })
+  }
+}
+
 // ── 항목 한 줄: 각 탭과 작업 공간 탭이 같이 쓴다(상태 문구·아이콘·검색·동작이 같게) ──
 
 function serverLine(p: ServerRow, s: DashboardSnapshot): Row {
@@ -371,6 +402,7 @@ function agentLine(a: AgentRow, s: DashboardSnapshot): Row {
       branch: branchOf(a.worktree),
       status: agentStatus(a, s.takenAt),
       activity: activityCell(a),
+      context: contextCell(a.usage),
       cpu: cpuCell(a.cpuPercent, s),
       memory: memoryCell(a.memoryBytes),
       commit: commitCell(a.commitBytes),
@@ -475,7 +507,7 @@ function workspaceRows(s: DashboardSnapshot): Row[] {
 }
 
 export function tableFor(tab: SnapshotTab, s: DashboardSnapshot): Table {
-  return dropEmptyCommit(buildTable(tab, s))
+  return dropEmptyContext(dropEmptyCommit(buildTable(tab, s)))
 }
 
 /** 작업 공간 탭의 표(G4): 구성원 한 줄씩. 머리는 groupWorkspaces 가 붙인다. */
@@ -524,6 +556,7 @@ function buildTable(tab: SnapshotTab, s: DashboardSnapshot): Table {
           { id: 'branch', label: c.branch, width: 150 },
           { id: 'status', label: c.status, width: 130 },
           { id: 'activity', label: c.activity, width: 200 },
+          CONTEXT_COLUMN,
           { id: 'cpu', label: c.cpu, width: 64, align: 'right' },
           { id: 'memory', label: c.memory, width: 88, align: 'right' },
           { ...COMMIT_COLUMN, width: 88 },

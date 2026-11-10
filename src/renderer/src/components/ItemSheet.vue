@@ -14,6 +14,7 @@ import {
   ExternalLink,
   FolderGit2,
   FolderOpen,
+  Gauge,
   HardDrive,
   Layers,
   MemoryStick,
@@ -27,6 +28,7 @@ import {
 import type { QuickKind } from '../../../shared/ipc'
 import type {
   AgentRow,
+  AgentUsage,
   ClaudeHookStatus,
   CollectMode,
   DiskRow,
@@ -40,6 +42,7 @@ import {
   displayCpuPercent,
   formatBytes,
   formatDuration,
+  formatTokens,
   portList,
   worktreeFolder
 } from '../../../shared/format'
@@ -146,6 +149,32 @@ const cpuText = (cpuPercent: number | null): string => {
 /** 메모리 카드 보조 줄에 붙일 커밋(모르면 없음). */
 const commitSub = (commitBytes: number | null | undefined): string | undefined =>
   commitBytes == null ? undefined : t.detail.commitSub(formatBytes(commitBytes))
+/** 토큰 카드(G6). 아는 값이 하나도 없으면 카드를 만들지 않는다. */
+function usageCards(usage: AgentUsage | null): View['cards'] {
+  if (!usage) return []
+  const ag = t.agent
+  const { contextTokens: used, contextWindow: window } = usage
+  const parts = [
+    usage.outputTokens != null ? ag.usageOutput(formatTokens(usage.outputTokens)) : null,
+    usage.totalTokens != null ? ag.usageTotal(formatTokens(usage.totalTokens)) : null,
+    usage.model
+  ].filter((p): p is string => !!p)
+  if (used == null && parts.length === 0) return []
+  return [
+    {
+      icon: Gauge,
+      label: ag.usage,
+      value:
+        used == null
+          ? t.none
+          : window != null
+            ? ag.usageContextOf(formatTokens(used), formatTokens(window))
+            : formatTokens(used),
+      sub: parts.length ? parts.join(' · ') : undefined,
+      help: ag.usageHelp
+    }
+  ]
+}
 const workspaceText = (ws: { name: string; root: string } | null): string =>
   ws ? `${ws.name} · ${ws.root}` : t.none
 
@@ -158,7 +187,15 @@ interface View {
   title: string
   description: string
   badge?: { text: string; variant: 'secondary' | 'destructive' } | null
-  cards: { icon: unknown; label: string; value: string; sub?: string; trend?: boolean }[]
+  cards: {
+    icon: unknown
+    label: string
+    value: string
+    sub?: string
+    trend?: boolean
+    /** 카드 아래 작은 도움말. */
+    help?: string
+  }[]
   facts: Fact[]
   command?: string | null
   note?: string | null
@@ -319,7 +356,8 @@ const view = computed<View | null>(() => {
             label: t.agent.cpu,
             value: cpuText(r.cpuPercent),
             sub: props.platform === 'win32' ? t.agent.cpuSubWindows : t.agent.cpuSub
-          }
+          },
+          ...usageCards(r.usage)
         ],
         facts: [
           { label: t.columns.tool, value: t.agent.toolNames[r.tool] },
@@ -612,6 +650,9 @@ const folderSize = (f: DiskRow['folders'][number]): string =>
               :format="formatBytes"
             />
             <p v-else-if="card.sub" class="text-xs text-muted-foreground">{{ card.sub }}</p>
+            <p v-if="card.help" class="text-[11px] leading-4 text-muted-foreground">
+              {{ card.help }}
+            </p>
           </CardContent>
         </Card>
       </div>

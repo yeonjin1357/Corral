@@ -369,6 +369,28 @@ test('설정 > 에이전트 연동에서 "에이전트가 하는 일 보기"를 
   w.unmount()
 })
 
+test('설정 > 에이전트 연동에서 "토큰 사용량 보기"를 끄고 저장한다', async () => {
+  const f = fake()
+  const w = await start(f)
+  f.navigate({ page: 'settings' })
+  await flushPromises()
+  await w
+    .findAll('button')
+    .find((b) => b.text().includes('에이전트 연동'))!
+    .trigger('click')
+  const box = w.find('#read-usage')
+  expect(box.attributes('aria-checked')).toBe('true')
+  expect(w.text()).toContain('토큰 사용량 보기')
+  expect(w.text()).toContain(
+    '세션 기록 파일에서 토큰 숫자만 읽어요. 대화 내용은 남기지 않아요. Claude 의 사용 한도는 보여 주지 않아요(상태 줄 설정을 건드려야 해서요).'
+  )
+  await box.trigger('click')
+  await w.find('form').trigger('submit')
+  await flushPromises()
+  expect(f.saved.at(-1)?.readUsage).toBe(false)
+  w.unmount()
+})
+
 test('설정 저장은 IPC 로 보낼 수 있는 값(반응형 아닌 순수 값)으로 보낸다', async () => {
   const f = fake()
   const w = await start(f)

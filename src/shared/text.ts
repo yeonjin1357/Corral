@@ -317,6 +317,19 @@ export const text = {
       agentOthers: '그 외',
       /** 셋째 칸(쉬는 중·그 외) 가운데 오래 쉬는 세션 수. */
       agentParked: (n: number): string => `오래 쉼 ${n}`,
+      /** Codex 한도 줄(G6): "Codex 한도 5시간 14% · 주간 31%". */
+      codexLimits: (windows: string): string => `Codex 한도 ${windows}`,
+      codexLimitWindow: (label: string, percent: number): string => `${label} ${percent}%`,
+      /** 풍선말의 창 하나: "5시간: 14% · 11월 10일 오후 3:00 초기화"(초기화 시각을 모르면 앞부분만). */
+      codexLimitTip: (label: string, percent: number, resetAt: string | null): string =>
+        resetAt ? `${label}: ${percent}% · ${resetAt} 초기화` : `${label}: ${percent}%`,
+      /** 풍선말 끝: 숫자를 읽은 때(ago: "3분"). */
+      codexLimitsAt: (ago: string): string => `${ago} 전 기준`,
+      /** 창 길이 이름: 주간·N일·N시간·N분. */
+      windowWeek: '주간',
+      windowDays: (n: number): string => `${n}일`,
+      windowHours: (n: number): string => `${n}시간`,
+      windowMinutes: (n: number): string => `${n}분`,
       heavy: '무거운 작업',
       heavyRunning: '실행 중',
       overlap: '겹침',
@@ -415,6 +428,7 @@ export const text = {
       cpu: 'CPU',
       runtime: '실행 시간',
       activity: '하는 일',
+      context: '컨텍스트',
       tool: '도구',
       name: '이름',
       command: '명령',
@@ -675,6 +689,9 @@ export const text = {
       showAgentActivity: '에이전트가 하는 일 보기',
       showAgentActivityHelp:
         '훅이 알려 주는 세션 제목·요청 첫 줄·도구 이름을 화면에 보여요. 메모리에만 두고 파일로 남기지 않아요.',
+      readUsage: '토큰 사용량 보기',
+      readUsageHelp:
+        '세션 기록 파일에서 토큰 숫자만 읽어요. 대화 내용은 남기지 않아요. Claude 의 사용 한도는 보여 주지 않아요(상태 줄 설정을 건드려야 해서요).',
       notifyClaudeWaiting: '에이전트 응답 대기',
       notifyClaudeWaitingHelp: '에이전트가 권한 확인이나 답을 기다리기 시작하면 알려요.',
       notifyAgentQuiet: '조용한 에이전트',
@@ -770,6 +787,13 @@ export const text = {
         file: 'Claude 세션 파일'
       },
       runtime: '실행 시간',
+      /** 상세 패널 토큰 카드(G6). */
+      usage: '토큰',
+      usageOutput: (tokens: string): string => `출력 합 ${tokens}`,
+      usageTotal: (tokens: string): string => `전체 ${tokens}`,
+      usageContextOf: (used: string, window: string): string => `${used} / ${window}`,
+      usageHelp:
+        '세션 기록 파일에서 읽은 숫자예요. 출력 합에는 하위 에이전트가 쓴 것이 들어 있지 않아요.',
       cpu: 'CPU',
       cpuSub: '코어 1개 = 100% 기준',
       cpuSubWindows: '작업 관리자처럼 전체 CPU 대비',

@@ -10,6 +10,9 @@ import {
   worktreeFolder,
   describeKillResult,
   formatDuration,
+  formatTokens,
+  formatClock,
+  limitWindowLabel,
   describeCollectError
 } from './format'
 import type { CommitSummary, MemoryLevel } from './types'
@@ -165,4 +168,34 @@ test('추이 그래프 길이 문구: 초·분·시간(분이 남으면 함께)'
   expect(text.ui.trend.window(10 * 60_000)).toBe('10분')
   expect(text.ui.trend.window(120 * 60_000)).toBe('2시간')
   expect(text.ui.trend.window(90 * 60_000)).toBe('1시간 30분')
+})
+
+test('토큰 수: 850 · 12.3k · 132k · 1.2M, 경계는 올림이 한 단계 넘어가지 않게, 음수·NaN 은 —', () => {
+  expect(formatTokens(0)).toBe('0')
+  expect(formatTokens(850)).toBe('850')
+  expect(formatTokens(999)).toBe('999')
+  expect(formatTokens(1000)).toBe('1.0k')
+  expect(formatTokens(12345)).toBe('12.3k')
+  expect(formatTokens(99_949)).toBe('99.9k')
+  expect(formatTokens(99_950)).toBe('100k')
+  expect(formatTokens(132_000)).toBe('132k')
+  expect(formatTokens(999_499)).toBe('999k')
+  expect(formatTokens(999_950)).toBe('1.0M')
+  expect(formatTokens(1_000_000)).toBe('1.0M')
+  expect(formatTokens(1_234_567)).toBe('1.2M')
+  expect(formatTokens(-1)).toBe('—')
+  expect(formatTokens(NaN)).toBe('—')
+  expect(formatTokens(Infinity)).toBe('—')
+})
+
+test('한도 창 이름: 10080분 주간 · 하루 단위 N일 · 시간 단위 N시간 · 그 밖은 N분', () => {
+  expect(limitWindowLabel(10080)).toBe('주간')
+  expect(limitWindowLabel(300)).toBe('5시간')
+  expect(limitWindowLabel(1440)).toBe('1일')
+  expect(limitWindowLabel(2880)).toBe('2일')
+  expect(limitWindowLabel(90)).toBe('90분')
+})
+
+test('시각(절대): 월·일·오전/오후 시:분', () => {
+  expect(formatClock(new Date(2026, 10, 10, 15, 0).getTime())).toBe('11월 10일 오후 3:00')
 })

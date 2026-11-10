@@ -16,7 +16,13 @@ import {
   Unplug
 } from '@lucide/vue'
 import type { DashboardSnapshot, ProcessGroup } from '../../../shared/types'
-import { formatBytes, pressureText } from '../../../shared/format'
+import {
+  formatBytes,
+  formatClock,
+  formatDuration,
+  limitWindowLabel,
+  pressureText
+} from '../../../shared/format'
 import { text } from '../../../shared/text'
 import type { Point } from '../history'
 import Card from '../ui/Card.vue'
@@ -143,6 +149,39 @@ const agentCounts = computed(() => {
       : text.ui.cards.agentOthers,
     // 오래 쉬는 세션(G2)은 작업 중·권한 대기가 아니므로 모두 셋째 칸에 든다.
     parked: rest.filter((a) => a.parked).length
+  }
+})
+/**
+ * Codex 한도 줄(G6): 이미 초기화된 창(초기화 시각이 지금 이전)은 읽은 뒤에 비워졌으므로 옛 퍼센트가 틀려 뺀다.
+ * 지금은 스냅샷 시각을 쓴다(수집 때마다 새로 오므로 이 컴포넌트가 따로 시계를 두지 않는다).
+ */
+const codexLimit = computed(() => {
+  const l = s.value.codexLimits
+  if (!l) return null
+  const now = s.value.takenAt
+  const windows = [l.primary, l.secondary].flatMap((w) =>
+    w && !(w.resetsAt != null && w.resetsAt <= now)
+      ? [
+          {
+            label: limitWindowLabel(w.windowMinutes),
+            percent: Math.min(100, Math.max(0, Math.round(w.usedPercent))),
+            resetsAt: w.resetsAt
+          }
+        ]
+      : []
+  )
+  if (windows.length === 0) return null
+  const cards = text.ui.cards
+  return {
+    line: cards.codexLimits(
+      windows.map((w) => cards.codexLimitWindow(w.label, w.percent)).join(' · ')
+    ),
+    tip: [
+      ...windows.map((w) =>
+        cards.codexLimitTip(w.label, w.percent, w.resetsAt != null ? formatClock(w.resetsAt) : null)
+      ),
+      cards.codexLimitsAt(formatDuration(Math.max(0, now - l.at)))
+    ].join('\n')
   }
 })
 const agentMemory = computed(() => groupBytes('agent'))
@@ -398,6 +437,14 @@ const diskSub = computed(() => {
           </span>
         </div>
         <StatItem :label="text.ui.cards.memorySum" :value="formatBytes(agentMemory)" />
+        <p
+          v-if="codexLimit"
+          data-codex-limits
+          class="truncate text-[11px] leading-4 tabular-nums text-muted-foreground"
+          :title="codexLimit.tip"
+        >
+          {{ codexLimit.line }}
+        </p>
         <div class="mt-auto border-t border-border/60 pt-3">
           <!-- 카드 높이(h-60)가 이미 꽉 차, 오래 쉬는 세션 수는 셋째 칸 아래 새 줄 대신 이 줄 오른쪽(셋째 칸 위)에 둔다. -->
           <div

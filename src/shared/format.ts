@@ -141,3 +141,36 @@ export function displayCpuPercent(
   const value = platform === 'win32' && cpuCount > 0 ? cpuPercent / cpuCount : cpuPercent
   return Math.round(value * 10) / 10
 }
+
+/**
+ * 토큰 수를 짧게(G6): 850 · 12.3k · 132k(10만 이상은 소수 없음) · 1.2M. 올림이 단위를 넘어가면 다음 단위로
+ * (99,950 → 100k, 999,950 → 1.0M). 음수·NaN·무한대는 —.
+ */
+export function formatTokens(n: number): string {
+  if (!Number.isFinite(n) || n < 0) return text.ui.none
+  if (n < 1000) return String(Math.floor(n))
+  const tenths = Math.round(n / 100) / 10
+  if (tenths < 100) return `${tenths.toFixed(1)}k`
+  const thousands = Math.round(n / 1000)
+  if (thousands < 1000) return `${thousands}k`
+  return `${(n / 1_000_000).toFixed(1)}M`
+}
+
+/** 한도 창 길이(분)의 이름(G6): 10080 은 주간, 하루 단위는 N일, 한 시간 단위는 N시간, 나머지는 N분. */
+export function limitWindowLabel(minutes: number): string {
+  const w = text.ui.cards
+  if (minutes === 10080) return w.windowWeek
+  if (minutes > 0 && minutes % 1440 === 0) return w.windowDays(minutes / 1440)
+  if (minutes > 0 && minutes % 60 === 0) return w.windowHours(minutes / 60)
+  return w.windowMinutes(minutes)
+}
+
+/** 절대 시각을 "11월 10일 오후 3:00"처럼. */
+export function formatClock(ms: number): string {
+  return new Date(ms).toLocaleString('ko-KR', {
+    month: 'long',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit'
+  })
+}

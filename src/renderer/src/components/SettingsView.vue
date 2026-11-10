@@ -748,6 +748,15 @@ const NOTICES_URL = `${REPO_URL}/blob/main/THIRD_PARTY_NOTICES.md`
                   </p>
                 </div>
               </div>
+              <div class="flex items-start gap-3">
+                <Checkbox id="read-usage" v-model="draft.readUsage" class="mt-0.5" />
+                <div>
+                  <Label for="read-usage">{{ S.readUsage }}</Label>
+                  <p class="mt-1 text-xs leading-relaxed text-muted-foreground">
+                    {{ S.readUsageHelp }}
+                  </p>
+                </div>
+              </div>
             </CardContent>
           </Card>
         </div>
