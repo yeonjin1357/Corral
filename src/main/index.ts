@@ -49,7 +49,7 @@ import { createClaudeUsageReader, createUsageCache } from './claudeUsage'
 import { createClaudeIntegration } from './claudeIntegration'
 import { createCodexIntegration } from './codexIntegration'
 import { createHookHub } from './hookHub'
-import { createHeavyGuard, cwdFolder, guardResponse } from './heavyGuard'
+import { createGuardAnswerer, settleHeavyGuard } from './heavyGuard'
 import { applyHookEvent, clearActivity } from './sessions'
 import type { Sessions } from './sessions'
 import { createScheduler } from './scheduler'
@@ -515,32 +515,16 @@ function scheduleRestate(): void {
   }, 200)
 }
 
-/** 무거운 작업이 겹치면 에이전트가 기다리게 하기(G7): 같은 세션·패턴을 몇 번 미루게 했는지 기억한다. */
-const heavyGuard = createHeavyGuard()
-
 /**
- * Claude 질문 훅(G7)에 답한다. 설정이 꺼져 있으면 훅이 남아 있어도 끼어들지 않는다. 마지막 스냅샷으로 그 자리에서
- * 판단하고(수집을 기다리지 않는다), 창이 닫혀 있을 때의 수집 주기 두 번(+5초)보다 오래된 스냅샷은 쓰지 않는다.
- * 미루게 하면 기록에 남긴다(작업 폴더 이름과 패턴만 — 명령 글자는 남기지 않는다).
+ * Claude 질문 훅(G7)에 답한다(설정이 꺼져 있으면 답하지 않는다). 같은 세션·패턴을 몇 번 미루게 했는지 기억하고,
+ * 미루게 하면 기록에 남긴다.
  */
-function answerGuard(event: Record<string, unknown>): string | null {
-  if (!settings.heavyGuard) return null
-  const now = Date.now()
-  const verdict = heavyGuard.decide({
-    event,
-    snapshot: scheduler.latest(),
-    patterns: settings.heavyPatterns,
-    now,
-    maxAgeMs: 2 * REFRESH_INTERVALS[settings.refresh].closedMs + 5000
-  })
-  if (verdict.kind === 'defer') {
-    const where = cwdFolder(event)
-    eventLog.add([
-      { t: now, kind: 'heavy-defer', ...(where ? { where } : {}), label: verdict.pattern }
-    ])
-  }
-  return guardResponse(verdict)
-}
+const answerGuard = createGuardAnswerer({
+  settings: () => settings,
+  latest: () => scheduler.latest(),
+  now: Date.now,
+  record: (event) => eventLog.add([event])
+})
 
 /**
  * Claude·Codex 연동이 같이 쓰는 훅 서버. 이벤트가 오면 세션 상태를 바꾸고 화면을 바로 갱신한다.
@@ -554,11 +538,6 @@ const hookHub = createHookHub({
   onGuard: answerGuard
 })
 
-/**
- * 설정을 저장하는 동안(확인 창이 떠 있는 동안) Claude 연동이 따를 heavyGuard 값. 저장이 끝나면 null(설정 값을 따른다).
- */
-let pendingHeavyGuard: boolean | null = null
-
 const claude = createClaudeIntegration({
   userData: app.getPath('userData'),
   configDir: claudeConfigDir(process.env, homedir()),
@@ -568,7 +547,7 @@ const claude = createClaudeIntegration({
   hub: hookHub,
   now: Date.now,
   confirm: confirmDialog,
-  guard: () => pendingHeavyGuard ?? settings.heavyGuard
+  guard: () => settings.heavyGuard
 })
 
 /** Codex 연동: 사용자가 켤 때만 $CODEX_HOME/hooks.json 을 바꾼다. */
@@ -651,40 +630,47 @@ function applySettings(next: Settings): void {
     mainWindow.webContents.send(IPC.settingsChanged, next)
 }
 
+/** config.json 에 저장하고 앱 전체에 반영한다. */
+async function persistSettings(next: Settings): Promise<Settings> {
+  const saved = await updateConfig(app.getPath('userData'), (c) => ({ ...c, settings: next }))
+  applySettings(saved.settings)
+  return saved.settings
+}
+
 /**
- * 무거운 작업 기다리게 하기(G7)를 바꾸면 Claude 설정 파일의 질문 훅도 맞춘다. Claude 연동이 켜져 있으면(일부 포함)
- * 연동 켜기(확인 창·백업)로 다시 넣고, 사용자가 취소하거나 실패하면 이전 값으로 둔다(저장 결과로 화면에 알린다).
- * 연동이 꺼져 있으면 값만 저장한다(나중에 연동을 켤 때 따른다).
+ * 설정 저장 중에 Claude 설정 파일을 바꾸지 못한 이유를 OS 창으로 알린다(설정 화면의 저장 결과에는 설정만 돌아가고,
+ * 연동 카드의 알림 줄은 렌더러가 연동 켜기를 눌렀을 때만 쓴다). 기다리지 않는다.
  */
-async function settleHeavyGuard(next: Settings, before: Settings): Promise<Settings> {
-  if (next.heavyGuard === before.heavyGuard) return next
-  const { state } = await claude.status()
-  if (state !== 'on' && state !== 'partial') return next
-  pendingHeavyGuard = next.heavyGuard
-  try {
-    const result = await claude.enable()
-    return result.status === 'done' ? next : { ...next, heavyGuard: before.heavyGuard }
-  } finally {
-    pendingHeavyGuard = null
-  }
+function showHookFailure(title: string, message: string): void {
+  const box = { type: 'error' as const, noLink: true, title, message }
+  void (mainWindow && !mainWindow.isDestroyed()
+    ? dialog.showMessageBox(mainWindow, box)
+    : dialog.showMessageBox(box))
 }
 
 async function saveSettings(next: unknown): Promise<Settings> {
   const before = settings
-  const normalized = await settleHeavyGuard(normalizeSettings(next), before)
-  const saved = await updateConfig(app.getPath('userData'), (c) => ({ ...c, settings: normalized }))
-  applySettings(saved.settings)
+  const normalized = normalizeSettings(next)
+  // 무거운 작업 기다리게 하기(G7)를 바꿨으면 질문 훅도 맞춘다(켜기는 설치한 뒤 저장, 끄기는 저장한 뒤 뺄지 묻는다).
+  const { saved, failure } = await settleHeavyGuard({
+    before,
+    next: normalized,
+    integration: async () => (await claude.status()).state,
+    save: persistSettings,
+    rewrite: (on) => claude.enable(on ? 'guardOn' : 'guardOff')
+  })
+  if (failure)
+    showHookFailure(
+      normalized.heavyGuard ? text.claudeHook.guardOnTitle : text.claudeHook.guardOffTitle,
+      failure
+    )
   void scheduler.refreshNow()
-  if (saved.settings.updateCheck && !before.updateCheck) void updater.check()
+  if (saved.updateCheck && !before.updateCheck) void updater.check()
   const diskChanged =
     JSON.stringify([before.dependencyDirs, before.extraRepos, before.staleWorktreeDays]) !==
-    JSON.stringify([
-      saved.settings.dependencyDirs,
-      saved.settings.extraRepos,
-      saved.settings.staleWorktreeDays
-    ])
+    JSON.stringify([saved.dependencyDirs, saved.extraRepos, saved.staleWorktreeDays])
   if (diskChanged) void disk.scan({ manual: true })
-  return saved.settings
+  return saved
 }
 
 function registerIpc(): void {

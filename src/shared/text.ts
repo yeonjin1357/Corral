@@ -147,7 +147,22 @@ export const text = {
       `${path} 에 세션 시작·프롬프트·권한 요청·알림·도구 사용·응답 끝·오류·세션 끝 이벤트를 ` +
       'pitwall 로 보내는 훅을 더해요. 다른 설정과 훅은 그대로 두고, 바꾸기 전에 백업을 남겨요. ' +
       '이미 실행 중인 Claude 세션은 다시 시작해야 반영될 수 있어요.',
+    /** 무거운 작업 기다리게 하기(G7)가 켜져 있을 때 enableDetail 뒤에 붙인다. */
+    enableGuardNote:
+      ' "겹치면 에이전트가 기다리게 하기"가 켜져 있어, Bash·PowerShell 명령 전에 pitwall 에 묻는 훅도 하나 더해요.',
     enableConfirm: '켜기',
+    /** 설정에서 무거운 작업 기다리게 하기(G7)를 켤 때: 질문 훅을 더한다. */
+    guardOnTitle: '에이전트 기다리게 하기 켜기',
+    guardOnMessage: 'Claude Code 설정 파일에 질문 훅을 더할까요?',
+    guardOnDetail: (path: string): string =>
+      `${path} 의 pitwall 훅을 다시 써서, Claude 가 Bash·PowerShell 명령을 실행하기 전에 pitwall 에 묻는 훅을 하나 더해요. 무거운 작업이 겹치고 메모리가 부족할 때만 그 명령을 잠깐 미루게 해요. 다른 설정과 훅은 그대로 두고, 바꾸기 전에 백업을 남겨요. 이미 실행 중인 Claude 세션은 다시 시작해야 반영될 수 있어요.`,
+    guardOnConfirm: '켜기',
+    /** 설정에서 끈 뒤(기능은 이미 꺼짐): 질문 훅도 뺄지. */
+    guardOffTitle: '에이전트 기다리게 하기 끄기',
+    guardOffMessage: 'Claude Code 설정 파일에서 질문 훅을 뺄까요?',
+    guardOffDetail: (path: string): string =>
+      `기능은 이미 껐어요. ${path} 에서 Bash·PowerShell 명령 전에 pitwall 에 묻는 훅도 빼요. 남겨 두면 명령마다 pitwall 에 한 번 묻기만 하고 아무것도 미루지 않아요. 다른 설정과 훅은 그대로 두고, 바꾸기 전에 백업을 남겨요.`,
+    guardOffConfirm: '빼기',
     disableTitle: 'Claude 연동 끄기',
     disableMessage: 'Claude Code 설정 파일에서 pitwall 훅을 뺄까요?',
     disableDetail: (path: string): string =>
@@ -691,11 +706,17 @@ export const text = {
       minutes: '분',
       heavyPatterns: '무거운 명령',
       heavyHelp:
-        '한 줄에 하나씩. 명령 이름(예: vue-tsc)이나 이름과 인자(예: vite build). 둘 이상 겹치고 RAM 이 경고 기준 이상이면 알려요. 막거나 기다리게 하지는 않아요.',
+        '한 줄에 하나씩. 명령 이름(예: vue-tsc)이나 이름과 인자(예: vite build). 둘 이상 겹치고 RAM 이 경고 기준 이상이면 알려요. 알리기만 해요 — 에이전트를 기다리게 하려면 아래 항목을 켜세요.',
       resetDefaults: '기본값으로',
       heavyGuard: '겹치면 에이전트가 기다리게 하기(Claude Code)',
       heavyGuardHelp:
         '켜면 Claude 가 Bash 명령을 실행하기 전에 pitwall 에 물어봐요. 무거운 작업이 이미 돌고 있고 메모리가 경고 기준을 넘었을 때만, 같은 명령을 두 번까지 1분 뒤로 미루게 해요. Claude 설정 파일에 훅을 하나 더 넣어요(확인 창·백업). pitwall 이 꺼져 있으면 아무 일도 없어요.',
+      /** 켜려고 저장했는데 메인이 켜지 않았을 때(질문 훅 설치를 취소·실패) "저장했어요" 대신. */
+      heavyGuardNotChanged:
+        '에이전트 기다리게 하기는 켜지 않았어요(훅 설치를 취소했거나 실패했어요).',
+      /** 켜져 있는데 Claude 연동이 켜져 있지 않을 때 체크 아래에. */
+      heavyGuardNeedsHook:
+        'Claude 연동이 꺼져 있어 지금은 동작하지 않아요. Claude 연동을 켜면 질문 훅도 함께 설치돼요.',
       notifyRamLow: 'RAM 부족',
       notifyRamLowHelp: 'RAM 이 위험 기준을 넘으면, 끄면 확보할 수 있는 양과 함께 알려요.',
       notifyAgentDone: '에이전트 작업 끝남',

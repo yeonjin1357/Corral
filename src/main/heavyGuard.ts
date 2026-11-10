@@ -1,6 +1,9 @@
-import { closeSync, fstatSync, openSync, readSync } from 'node:fs'
+import { closeSync, constants, fstatSync, lstatSync, openSync, readSync } from 'node:fs'
 import { isAbsolute, join, posix, win32 } from 'node:path'
-import type { DashboardSnapshot } from '../shared/types'
+import type { PitEvent } from '../shared/events'
+import type { ClaudeHookActionResult } from '../shared/ipc'
+import { REFRESH_INTERVALS, type Settings } from '../shared/settings'
+import type { ClaudeHookState, DashboardSnapshot } from '../shared/types'
 import { pressureSource } from '../shared/format'
 import { text } from '../shared/text'
 import { heavyMatch } from './heavy'
@@ -22,6 +25,9 @@ export const GUARD_WINDOW_MS = 10 * 60 * 1000
 export const GUARD_MAX_DEFERS = 2
 /** 이보다 큰 package.json 은 읽지 않는다(요청 안에서 동기로 읽으므로). */
 const PACKAGE_JSON_LIMIT = 1024 * 1024
+/** 링크를 따라가지 않고·기다리지 않고 연다(Windows 에는 없는 값이라 0). */
+const NOFOLLOW = constants.O_NOFOLLOW ?? 0
+const NONBLOCK = constants.O_NONBLOCK ?? 0
 /** 알릴 도는 작업 이름 수(나머지는 개수만). */
 const RUNNING_LABELS = 3
 /** 셸 명령을 실행하는 Claude 도구. */
@@ -52,49 +58,101 @@ function skipHeredocs(
   return at - 1
 }
 
+/** 히어독 시작: `<<EOF`·`<<-EOF`·`<<\EOF`·`<<'EOF'`·`<<"EOF"`(`<<<` 는 히어스트링이라 아니다). */
+const HEREDOC =
+  /^<<(-?)[ \t]*(?:\\([A-Za-z_][A-Za-z0-9_]*)|'([^'\n]+)'|"([^"\n]+)"|([A-Za-z_][A-Za-z0-9_]*))/
+
 /**
- * 셸 명령을 따옴표 밖의 `&&`·`||`·`;`·`|`·줄바꿈으로 나눈다(앞뒤 공백을 떼고 빈 조각은 버린다). 나누기만 하고
- * 실행하거나 풀어 쓰지 않는다. 큰따옴표 안의 `\"` 는 따옴표를 닫지 않는다. 히어독 본문은 명령이 아니라 넣지 않는다.
+ * 셸 명령을 따옴표·명령 치환 밖의 `&&`·`||`·`;`·`|`·줄바꿈으로 나눈다(앞뒤 공백을 떼고 빈 조각은 버린다). 나누기만 하고
+ * 실행하거나 풀어 쓰지 않는다.
+ * - 큰따옴표 안의 `\"` 는 따옴표를 닫지 않는다. 큰따옴표 안의 명령 치환 속 따옴표는 바깥 따옴표와 따로 센다.
+ * - 히어독은 따옴표·명령 치환 안에서도 알아보고(Claude 의 커밋 모양 `"$(cat <<'EOF' … EOF\n)"`), 본문 줄은 끝 표시까지
+ *   조각에 넣지 않는다. 끝 표시가 없으면 나머지를 모두 건너뛴다(놓칠 뿐, 본문을 명령으로 잘못 보지 않는다).
+ * - 명령 치환(`$(…)`·`` `…` ``) 안은 나누지도 들여다보지도 않는다 — 그 안의 무거운 명령은 일부러 놓친다(끼어들지 않는 쪽).
  */
 export function splitShell(command: string): string[] {
   const out: string[] = []
   let current = ''
-  let quote: '"' | "'" | null = null
+  /** 열린 따옴표·명령 치환(`"`·`'`·`` ` ``·`(` = `$(`). 비어 있을 때만 나눈다. */
+  const open: string[] = []
   const heredocs: { end: string; strip: boolean }[] = []
   const push = (): void => {
     const piece = current.trim()
     if (piece) out.push(piece)
     current = ''
   }
+  /** `\` 뒤 글자는 따옴표·괄호로 보지 않는다. */
+  const escaped = (i: number): number => {
+    current += command[i] + (command[i + 1] ?? '')
+    return i + 1
+  }
   for (let i = 0; i < command.length; i++) {
     const c = command[i]
-    if (quote) {
-      current += c
-      if (c === '\\' && quote === '"' && i + 1 < command.length) current += command[++i]
-      else if (c === quote) quote = null
-      continue
-    }
-    if (c === '"' || c === "'") {
-      quote = c
-      current += c
-      continue
-    }
+    const inside = open.at(-1)
     if (c === '<' && command.startsWith('<<<', i)) {
       current += '<<<'
       i += 2
       continue
     }
-    const heredoc =
-      c === '<' ? /^<<(-?)[ \t]*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\2/.exec(command.slice(i)) : null
+    const heredoc = c === '<' ? HEREDOC.exec(command.slice(i)) : null
     if (heredoc) {
-      heredocs.push({ end: heredoc[3], strip: heredoc[1] === '-' })
+      const end = heredoc[2] ?? heredoc[3] ?? heredoc[4] ?? heredoc[5]
+      heredocs.push({ end, strip: heredoc[1] === '-' })
       current += heredoc[0]
       i += heredoc[0].length - 1
       continue
     }
     if (c === '\n' || c === '\r') {
-      push()
+      if (open.length) current += c
+      else push()
       if (heredocs.length) i = skipHeredocs(command, i, heredocs)
+      continue
+    }
+    if (inside === "'") {
+      current += c
+      if (c === "'") open.pop()
+      continue
+    }
+    if (inside === '`') {
+      if (c === '\\') i = escaped(i)
+      else {
+        current += c
+        if (c === '`') open.pop()
+      }
+      continue
+    }
+    if (inside === '"') {
+      if (c === '\\') i = escaped(i)
+      else if (c === '$' && command[i + 1] === '(') {
+        current += '$('
+        open.push('(')
+        i++
+      } else {
+        current += c
+        if (c === '"') open.pop()
+        else if (c === '`') open.push('`')
+      }
+      continue
+    }
+    // 여기부터는 명령 치환 안이거나 맨 바깥.
+    if (c === '"' || c === "'" || c === '`') {
+      open.push(c)
+      current += c
+      continue
+    }
+    if (c === '$' && command[i + 1] === '(') {
+      current += '$('
+      open.push('(')
+      i++
+      continue
+    }
+    if (inside === '(') {
+      if (c === '\\') i = escaped(i)
+      else {
+        current += c
+        if (c === '(') open.push('(')
+        else if (c === ')') open.pop()
+      }
       continue
     }
     if (command.startsWith('&&', i) || command.startsWith('||', i)) {
@@ -201,12 +259,18 @@ export function commandSegments(
 /**
  * `<dir>/package.json` 의 scripts 가운데 문자열 값만. dir 은 절대 경로여야 하고(네트워크 공유는 느리거나 막힐 수
  * 있어 읽지 않는다), 1 MB 를 넘거나 없거나 깨졌거나 scripts 가 객체가 아니면 null. 이 파일 하나만 읽는다.
+ * 요청 안에서 동기로 읽으므로, 열기 전에 링크를 따라가지 않고 보아 보통 파일일 때만 연다 — 링크·FIFO·장치는 여는
+ * 것만으로 멈출 수 있다.
  */
 export function readPackageScripts(dir: string): Record<string, string> | null {
   if (!isAbsolute(dir) || /^[\\/]{2}/.test(dir)) return null
+  const file = join(dir, 'package.json')
   let fd: number | null = null
   try {
-    fd = openSync(join(dir, 'package.json'), 'r')
+    const entry = lstatSync(file)
+    if (!entry.isFile() || entry.size > PACKAGE_JSON_LIMIT) return null
+    // 그 사이 바뀌었어도 링크는 따라가지 않고(지원하는 OS), FIFO 를 열다 기다리지 않는다.
+    fd = openSync(file, constants.O_RDONLY | NOFOLLOW | NONBLOCK)
     const stat = fstatSync(fd)
     if (!stat.isFile() || stat.size > PACKAGE_JSON_LIMIT) return null
     const buffer = Buffer.alloc(stat.size)
@@ -344,6 +408,90 @@ export function guardResponse(v: GuardVerdict): string | null {
         }
       : { hookEventName: 'PreToolUse', additionalContext: v.note }
   return asciiJson({ hookSpecificOutput: output })
+}
+
+/**
+ * 판단에 쓸 스냅샷의 나이 한도: 창이 닫혀 있을 때의 수집 주기(그때 수집기가 그 주기로 돈다) 두 번 + 5초.
+ */
+export function guardMaxAgeMs(intervals: { closedMs: number }): number {
+  return 2 * intervals.closedMs + 5000
+}
+
+/**
+ * 질문 훅(G7)에 답하는 함수를 만든다. 설정이 꺼져 있으면 훅이 남아 있어도 판단하지 않는다(null). 마지막 스냅샷으로
+ * 그 자리에서 판단하고(수집을 기다리지 않는다), 미루게 하면 기록에 남긴다(작업 폴더 이름과 패턴만 — 명령 글자는
+ * 남기지 않는다).
+ */
+export function createGuardAnswerer(deps: {
+  settings: () => Pick<Settings, 'heavyGuard' | 'heavyPatterns' | 'refresh'>
+  latest: () => DashboardSnapshot | null
+  now: () => number
+  record: (event: Omit<PitEvent, 'id'>) => void
+  guard?: { decide(input: GuardInput): GuardVerdict }
+}): (event: Record<string, unknown>) => string | null {
+  const guard = deps.guard ?? createHeavyGuard()
+  return (event) => {
+    const settings = deps.settings()
+    if (!settings.heavyGuard) return null
+    const now = deps.now()
+    const verdict = guard.decide({
+      event,
+      snapshot: deps.latest(),
+      patterns: settings.heavyPatterns,
+      now,
+      maxAgeMs: guardMaxAgeMs(REFRESH_INTERVALS[settings.refresh])
+    })
+    if (verdict.kind === 'defer') {
+      const where = cwdFolder(event)
+      deps.record({
+        t: now,
+        kind: 'heavy-defer',
+        ...(where ? { where } : {}),
+        label: verdict.pattern
+      })
+    }
+    return guardResponse(verdict)
+  }
+}
+
+/**
+ * 설정을 저장할 때 무거운 작업 기다리게 하기(G7)를 바꿨으면 Claude 설정 파일의 질문 훅도 맞춘다. Claude 연동이
+ * 켜져 있을 때(일부 포함)만 묻고, 꺼져 있거나 상태를 모르면 값만 저장한다(나중에 연동을 켤 때 따른다).
+ * - 켜기: 먼저 질문 훅을 넣고(확인 창), 넣었을 때만 켠 값으로 저장한다. 취소·실패하면 끈 채로 저장한다.
+ * - 끄기: 되돌리지 않는다. 먼저 끈 값을 저장해 바로 끼어들지 않게 하고, 그다음 질문 훅도 뺄지 묻는다. 취소·실패하면
+ *   훅이 남지만(연동은 partial) 아무것도 미루지 않는다.
+ * 저장한 설정과, 훅을 바꾸지 못한 이유(실패일 때만, 취소는 없음)를 돌려준다.
+ */
+export async function settleHeavyGuard(o: {
+  before: Settings
+  next: Settings
+  /** Claude 연동 상태(값이 바뀔 때만 묻는다). */
+  integration: () => Promise<ClaudeHookState>
+  /** 설정을 저장하고 적용한다. */
+  save: (s: Settings) => Promise<Settings>
+  /** 질문 훅을 넣거나(true) 뺀다(false) — 확인 창·백업을 거친다. */
+  rewrite: (on: boolean) => Promise<ClaudeHookActionResult>
+}): Promise<{ saved: Settings; failure: string | null }> {
+  const { before, next } = o
+  if (next.heavyGuard === before.heavyGuard) return { saved: await o.save(next), failure: null }
+  const state = await o.integration().catch(() => null)
+  if (state !== 'on' && state !== 'partial') return { saved: await o.save(next), failure: null }
+  const rewrite = (on: boolean): Promise<ClaudeHookActionResult> =>
+    o.rewrite(on).catch((e: unknown): ClaudeHookActionResult => ({
+      status: 'failed',
+      message: text.claudeHook.errors.other(e instanceof Error ? e.message : String(e))
+    }))
+  const failure = (r: ClaudeHookActionResult): string | null =>
+    r.status === 'failed' ? r.message : null
+  if (next.heavyGuard) {
+    const result = await rewrite(true)
+    const saved = await o.save(
+      result.status === 'done' ? next : { ...next, heavyGuard: before.heavyGuard }
+    )
+    return { saved, failure: failure(result) }
+  }
+  const saved = await o.save(next)
+  return { saved, failure: failure(await rewrite(false)) }
 }
 
 /** 기록(heavy-defer)에 쓸 작업 폴더 이름: 이벤트 cwd 의 마지막 이름. 모르면 null. 전체 경로는 쓰지 않는다. */

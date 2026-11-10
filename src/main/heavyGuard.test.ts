@@ -1,15 +1,26 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { blankSnapshot } from '../shared/snapshot'
-import { DEFAULT_SETTINGS } from '../shared/settings'
-import type { CommitSummary, DashboardSnapshot, HeavyJobRow, MemoryLevel } from '../shared/types'
+import { DEFAULT_SETTINGS, REFRESH_INTERVALS, type Settings } from '../shared/settings'
+import type { ClaudeHookActionResult } from '../shared/ipc'
+import type { PitEvent } from '../shared/events'
+import type {
+  ClaudeHookState,
+  CommitSummary,
+  DashboardSnapshot,
+  HeavyJobRow,
+  MemoryLevel
+} from '../shared/types'
 import {
   commandSegments,
+  createGuardAnswerer,
   createHeavyGuard,
   cwdFolder,
+  guardMaxAgeMs,
   guardResponse,
   readPackageScripts,
+  settleHeavyGuard,
   splitShell
 } from './heavyGuard'
 
@@ -122,6 +133,34 @@ describe('셸 명령 나누기', () => {
     // 끝 표시가 없으면 끝까지 본문.
     expect(splitShell('cat <<EOF\ntsc')).toEqual(['cat <<EOF'])
   })
+
+  test('히어독은 따옴표 안에서도 알아보고(<<\\EOF·<<-EOF·따옴표 끝 표시), 본문 줄은 조각이 아니다', () => {
+    // Claude 의 커밋 모양: 큰따옴표 안 명령 치환 안의 히어독. 본문에 " 가 홀수 개여도 본문은 명령이 아니다.
+    const commit =
+      'git commit -m "$(cat <<\'EOF\'\nfix: 27" 모니터 지원\ntsc --noEmit 오류를 고침\n\nCo-Authored-By: dev\nEOF\n)"'
+    const pieces = splitShell(commit)
+    expect(pieces).toHaveLength(1)
+    expect(pieces[0]).not.toContain('tsc')
+    expect(splitShell('cat <<\\EOF\ntsc\nEOF\nls')).toEqual(['cat <<\\EOF', 'ls'])
+    expect(splitShell('cat <<"END"\nvite build\nEND\nls')).toEqual(['cat <<"END"', 'ls'])
+    expect(splitShell("echo '<<EOF'\ntsc\nEOF\nls")).toEqual(["echo '<<EOF'", 'ls'])
+    // 따옴표 안에서 끝 표시가 나오지 않으면 나머지를 모두 건너뛴다(놓칠 뿐, 잘못 알아보지 않는다).
+    const open = splitShell('git commit -m "$(cat <<\'EOF\'\nnpx tsc\n)" && npx vue-tsc')
+    expect(open).toHaveLength(1)
+    expect(open[0]).not.toContain('tsc')
+  })
+
+  test('명령 치환($(…)·`…`) 안은 나누지도 보지도 않는다(알려진 놓침)', () => {
+    expect(splitShell('x=$(cd web && npx tsc --noEmit) && echo $x')).toEqual([
+      'x=$(cd web && npx tsc --noEmit)',
+      'echo $x'
+    ])
+    expect(splitShell('echo `npx tsc; vite build` | tee out')).toEqual([
+      'echo `npx tsc; vite build`',
+      'tee out'
+    ])
+    expect(splitShell('echo "$(a ")" b; c)" ; ls')).toEqual(['echo "$(a ")" b; c)"', 'ls'])
+  })
 })
 
 describe('무거운 작업 겹침 판단', () => {
@@ -207,6 +246,41 @@ describe('무거운 작업 겹침 판단', () => {
       'echo "a && tsc --noEmit"',
       "cat > notes.md <<'EOF'\ntsc --noEmit\nEOF",
       'code tsconfig.json'
+    ])
+      expect({ command, verdict: ask(guard, bash(command)) }).toEqual({
+        command,
+        verdict: { kind: 'none' }
+      })
+  })
+
+  test('Claude 의 커밋 모양(본문에 " 가 홀수 개, 패턴 이름으로 시작하는 줄)은 무거운 명령이 아니다', () => {
+    const guard = createHeavyGuard({ readScripts: noScripts })
+    const commit =
+      'git commit -m "$(cat <<\'EOF\'\nfix: 27" 모니터 지원\ntsc --noEmit 오류를 고침\nvite build 도 확인\n\nCo-Authored-By: dev\nEOF\n)"'
+    expect(ask(guard, bash(commit))).toEqual({ kind: 'none' })
+  })
+
+  test('따옴표 안의 명령 이름·검색어·파일 이름은 무거운 명령이 아니다', () => {
+    const guard = createHeavyGuard({ readScripts: () => ({ build: 'vite build' }) })
+    for (const command of ['echo "npm run build"', 'grep -r "vite build" .', 'cat package.json'])
+      expect({ command, verdict: ask(guard, bash(command)) }).toEqual({
+        command,
+        verdict: { kind: 'none' }
+      })
+  })
+
+  test('환경 변수를 앞에 둔 명령(CI=1 npx tsc)도 알아본다', () => {
+    const guard = createHeavyGuard({ readScripts: noScripts })
+    expect(ask(guard, bash('CI=1 npx tsc'))).toMatchObject({ kind: 'defer', pattern: 'tsc' })
+  })
+
+  test('명령 치환 안의 무거운 명령은 알아보지 않는다(알려진 놓침 — 끼어들지 않는 쪽)', () => {
+    const guard = createHeavyGuard({ readScripts: noScripts })
+    for (const command of [
+      'x=$(cd web && npx tsc --noEmit)',
+      'echo "$(npx vue-tsc --noEmit)"',
+      'echo `npx tsc`',
+      '$(npx tsc)'
     ])
       expect({ command, verdict: ask(guard, bash(command)) }).toEqual({
         command,
@@ -407,6 +481,31 @@ describe('무거운 작업 겹침 판단', () => {
     }
   })
 
+  test('package.json 이 보통 파일이 아니면(링크·폴더) 열지 않는다', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'pitwall-guard-'))
+    try {
+      const real = join(root, 'real')
+      await mkdir(real)
+      await writeFile(join(real, 'package.json'), JSON.stringify({ scripts: { build: 'tsc' } }))
+      expect(readPackageScripts(real)).toEqual({ build: 'tsc' })
+      // package.json 이라는 이름의 폴더.
+      const folder = join(root, 'folder')
+      await mkdir(join(folder, 'package.json'), { recursive: true })
+      expect(readPackageScripts(folder)).toBeNull()
+      // 링크(가리키는 곳이 FIFO·장치일 수 있어 따라가지 않는다). Windows 에서 링크를 만들 권한이 없으면 건너뛴다.
+      const linked = join(root, 'linked')
+      await mkdir(linked)
+      try {
+        await symlink(join(real, 'package.json'), join(linked, 'package.json'), 'file')
+      } catch {
+        return
+      }
+      expect(readPackageScripts(linked)).toBeNull()
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   test('읽기 함수가 예외를 던져도 끼어들지 않는다(실패하면 열어 둔다)', () => {
     const guard = createHeavyGuard({
       readScripts: () => {
@@ -447,5 +546,149 @@ describe('훅 응답', () => {
     expect(cwdFolder({ cwd: '' })).toBeNull()
     expect(cwdFolder({ cwd: 42 })).toBeNull()
     expect(cwdFolder({})).toBeNull()
+  })
+})
+
+describe('질문 훅에 답하기', () => {
+  test('스냅샷 나이 한도는 창이 닫혀 있을 때의 수집 주기 두 번 + 5초', () => {
+    expect(guardMaxAgeMs(REFRESH_INTERVALS.normal)).toBe(65_000)
+    expect(guardMaxAgeMs(REFRESH_INTERVALS.fast)).toBe(25_000)
+    expect(guardMaxAgeMs(REFRESH_INTERVALS.saver)).toBe(245_000)
+  })
+
+  function answerer(o: {
+    on: boolean
+    snapshot?: DashboardSnapshot | null
+    now?: number
+    refresh?: Settings['refresh']
+  }): {
+    answer: (event: Record<string, unknown>) => string | null
+    recorded: Omit<PitEvent, 'id'>[]
+    decide: ReturnType<typeof vi.fn>
+  } {
+    const recorded: Omit<PitEvent, 'id'>[] = []
+    const real = createHeavyGuard({ readScripts: noScripts })
+    const decide = vi.fn((input: Parameters<typeof real.decide>[0]) => real.decide(input))
+    const answer = createGuardAnswerer({
+      guard: { decide },
+      settings: () => ({
+        heavyGuard: o.on,
+        heavyPatterns: PATTERNS,
+        refresh: o.refresh ?? 'normal'
+      }),
+      latest: () => (o.snapshot === undefined ? snap() : o.snapshot),
+      now: () => o.now ?? NOW,
+      record: (e) => recorded.push(e)
+    })
+    return { answer, recorded, decide }
+  }
+
+  test('설정이 꺼져 있으면 훅이 남아 있어도 판단하지도 기록하지도 않는다', () => {
+    const { answer, recorded, decide } = answerer({ on: false })
+    expect(answer(bash('npx vue-tsc --noEmit'))).toBeNull()
+    expect(decide).not.toHaveBeenCalled()
+    expect(recorded).toEqual([])
+  })
+
+  test('켜져 있으면 판단해 답하고, 미루게 할 때만 기록에 폴더 이름과 패턴을 남긴다', () => {
+    const { answer, recorded, decide } = answerer({ on: true })
+    const reply = answer(bash('npx vue-tsc --noEmit'))
+    expect(JSON.parse(reply!)).toMatchObject({
+      hookSpecificOutput: { permissionDecision: 'deny' }
+    })
+    expect(decide).toHaveBeenCalledWith(
+      expect.objectContaining({ now: NOW, maxAgeMs: 65_000, patterns: PATTERNS })
+    )
+    expect(recorded).toEqual([{ t: NOW, kind: 'heavy-defer', where: 'shop-web', label: 'vue-tsc' }])
+    // 참고 문구·끼어들지 않음은 기록하지 않는다. 작업 폴더를 모르면 where 를 넣지 않는다.
+    answer(bash('npx vue-tsc --noEmit'))
+    answer(bash('npx vue-tsc --noEmit'))
+    expect(answer(bash('git status'))).toBeNull()
+    expect(recorded).toHaveLength(2)
+    answer(bash('npx tsc', { cwd: undefined }))
+    expect(recorded.at(-1)).toEqual({ t: NOW, kind: 'heavy-defer', label: 'tsc' })
+  })
+
+  test('나이 한도는 지금 갱신 주기를 따른다', () => {
+    const old = snap({ takenAt: NOW - 65_001 })
+    expect(answerer({ on: true, snapshot: old }).answer(bash('npx tsc'))).toBeNull()
+    expect(
+      answerer({ on: true, snapshot: old, refresh: 'saver' }).answer(bash('npx tsc'))
+    ).not.toBeNull()
+  })
+})
+
+describe('설정 저장: 기다리게 하기 켜기·끄기', () => {
+  const OFF: Settings = { ...DEFAULT_SETTINGS, heavyGuard: false }
+  const ON: Settings = { ...DEFAULT_SETTINGS, heavyGuard: true }
+
+  function run(
+    before: Settings,
+    next: Settings,
+    o: { integration?: ClaudeHookState; result?: ClaudeHookActionResult } = {}
+  ): { steps: string[]; outcome: ReturnType<typeof settleHeavyGuard> } {
+    const steps: string[] = []
+    const outcome = settleHeavyGuard({
+      before,
+      next,
+      integration: async () => {
+        steps.push('status')
+        return o.integration ?? 'on'
+      },
+      save: async (s) => {
+        steps.push(`save:${s.heavyGuard}`)
+        return s
+      },
+      rewrite: async (on) => {
+        steps.push(`rewrite:${on}`)
+        return o.result ?? { status: 'done', message: 'ok' }
+      }
+    })
+    return { steps, outcome }
+  }
+
+  test('값이 그대로면 연동 상태도 묻지 않고 저장만 한다', async () => {
+    const { steps, outcome } = run(OFF, { ...OFF, ramWarnPercent: 70 })
+    expect(await outcome).toEqual({ saved: { ...OFF, ramWarnPercent: 70 }, failure: null })
+    expect(steps).toEqual(['save:false'])
+  })
+
+  test('연동이 꺼져 있으면 확인 창 없이 값만 저장한다', async () => {
+    for (const integration of ['off', 'error'] as const) {
+      const on = run(OFF, ON, { integration })
+      expect(await on.outcome).toEqual({ saved: ON, failure: null })
+      expect(on.steps).toEqual(['status', 'save:true'])
+      const off = run(ON, OFF, { integration })
+      expect(await off.outcome).toEqual({ saved: OFF, failure: null })
+      expect(off.steps).toEqual(['status', 'save:false'])
+    }
+  })
+
+  test('켜기: 먼저 질문 훅을 넣고(확인 창), 넣었으면 켠 값으로 저장한다', async () => {
+    const { steps, outcome } = run(OFF, ON, { integration: 'partial' })
+    expect(await outcome).toEqual({ saved: ON, failure: null })
+    expect(steps).toEqual(['status', 'rewrite:true', 'save:true'])
+  })
+
+  test('켜기를 취소하면 끈 채로 저장한다(알릴 것 없음)', async () => {
+    const { steps, outcome } = run(OFF, ON, { result: { status: 'cancelled' } })
+    expect(await outcome).toEqual({ saved: OFF, failure: null })
+    expect(steps).toEqual(['status', 'rewrite:true', 'save:false'])
+  })
+
+  test('켜기가 실패하면 끈 채로 저장하고 이유를 돌려준다', async () => {
+    const { outcome } = run(OFF, ON, { result: { status: 'failed', message: '읽을 수 없어요' } })
+    expect(await outcome).toEqual({ saved: OFF, failure: '읽을 수 없어요' })
+  })
+
+  test('끄기: 먼저 끈 값을 저장한 뒤 질문 훅을 뺄지 묻고, 취소·실패해도 끈 채로 둔다', async () => {
+    const done = run(ON, OFF)
+    expect(await done.outcome).toEqual({ saved: OFF, failure: null })
+    expect(done.steps).toEqual(['status', 'save:false', 'rewrite:false'])
+    const cancelled = run(ON, OFF, { result: { status: 'cancelled' } })
+    expect(await cancelled.outcome).toEqual({ saved: OFF, failure: null })
+    expect(cancelled.steps).toEqual(['status', 'save:false', 'rewrite:false'])
+    const failed = run(ON, OFF, { result: { status: 'failed', message: '바뀌고 있어요' } })
+    expect(await failed.outcome).toEqual({ saved: OFF, failure: '바뀌고 있어요' })
   })
 })

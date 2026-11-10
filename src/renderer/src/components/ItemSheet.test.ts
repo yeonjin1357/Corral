@@ -245,6 +245,16 @@ describe('상세 패널: 프로세스 목록', () => {
     expect(processRows().map((r) => r[0])).toEqual(['node.exe vue-tsc', 'cmd.exe'])
   })
 
+  test('무거운 작업 상세의 설명은 카드 설명과 같다(설정 화면의 "아래 항목"을 가리키지 않는다)', () => {
+    sheet({ kind: 'heavy', row: heavyJob() })
+    const body = document.body.textContent!.replace(/\s+/g, ' ')
+    expect(body).toContain(
+      '설정한 무거운 명령(타입 검사·빌드 등)이에요. 둘 이상 겹치고 RAM 이 경고 기준을 넘으면 알려요.'
+    )
+    expect(body).not.toContain('아래 항목')
+    expect(body).not.toContain('한 줄에 하나씩')
+  })
+
   test('디스크 정리 항목에는 프로세스 목록이 없다', () => {
     sheet({ kind: 'disk', row: diskRow() })
     expect(document.body.querySelector('[data-processes]')).toBeNull()

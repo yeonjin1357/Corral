@@ -165,6 +165,8 @@ export function hookCommand(
  *   `-s` 라 실패해도 아무것도 찍지 않고, 항상 `exit 0`. 훅 제한(timeout)은 3초.
  * - Windows 는 언제나 curl.exe 의 절대 경로(SystemRoot 를 쓸 수 없으면 기본 위치) — 출력이 Claude 에 들어가므로
  *   PATH 에서 찾은 다른 프로그램을 실행하지 않는다.
+ * - 이 훅은 `127.0.0.1:<포트>` 에서 답하는 쪽을 그대로 믿는다. pitwall 이 꺼져 있는 동안 다른 로컬 프로세스가 그 포트를
+ *   열면 이벤트를 받고 이 훅에 답할 수도 있다 — 알림 훅이 이미 가진 노출(이벤트를 읽음)이 여기서는 답하는 쪽까지 넓어진다.
  */
 export function guardCommand(
   platform: Platform,

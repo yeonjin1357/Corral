@@ -42,6 +42,9 @@ export interface ClaudeIntegrationDeps {
 
 export type HookActionResult = ClaudeHookActionResult
 
+/** 연동 켜기를 부르는 까닭: 연동 켜기 버튼, 설정에서 기다리게 하기 켜기·끄기(G7). */
+export type EnablePurpose = 'integration' | 'guardOn' | 'guardOff'
+
 /** pitwall 설정이 없을 때 settings.json 에 남은 pitwall 훅이 있는지만 보려고 쓰는 빈 목록. */
 const NO_ITEMS: HookItem[] = []
 
@@ -57,7 +60,11 @@ function settingsErrorMessage(e: unknown): string {
 export function createClaudeIntegration(deps: ClaudeIntegrationDeps): {
   start(): Promise<void>
   status(): Promise<ClaudeHookStatus>
-  enable(): Promise<HookActionResult>
+  /**
+   * 훅을 넣는다(확인 창·백업). integration: 연동 켜기(질문 훅은 설정을 따른다), guardOn·guardOff: 설정에서 무거운 작업
+   * 기다리게 하기를 켜거나 끌 때 — 그 확인 창으로 묻고 질문 훅을 넣거나 뺀다(알림 훅은 그대로 다시 쓴다).
+   */
+  enable(purpose?: EnablePurpose): Promise<HookActionResult>
   disable(): Promise<HookActionResult>
   stop(): Promise<void>
 } {
@@ -72,11 +79,47 @@ export function createClaudeIntegration(deps: ClaudeIntegrationDeps): {
     })
 
   /** 넣을 훅 목록: 알림 훅들 + (guard 면) 질문 훅. */
-  const itemsFor = (hook: HookConfig): HookItem[] =>
+  const itemsFor = (hook: HookConfig, guard = deps.guard()): HookItem[] =>
     claudeHookItems(
       hookCommand(deps.platform, hook.port, hook.token, deps.systemRoot),
-      deps.guard() ? guardCommand(deps.platform, hook.port, hook.token, deps.systemRoot) : null
+      guard ? guardCommand(deps.platform, hook.port, hook.token, deps.systemRoot) : null
     )
+
+  /** 무엇을 위해 켜는지에 따른 확인 창과 질문 훅을 넣을지. */
+  function plan(purpose: EnablePurpose): { dialog: KillConfirm; guard: boolean } {
+    const t = text.claudeHook
+    const ask = (title: string, message: string, detail: string, confirm: string): KillConfirm => ({
+      title,
+      message,
+      detail,
+      buttons: [confirm, text.kill.cancel],
+      defaultId: 1,
+      cancelId: 1
+    })
+    if (purpose === 'guardOn')
+      return {
+        dialog: ask(
+          t.guardOnTitle,
+          t.guardOnMessage,
+          t.guardOnDetail(settingsPath),
+          t.guardOnConfirm
+        ),
+        guard: true
+      }
+    if (purpose === 'guardOff')
+      return {
+        dialog: ask(
+          t.guardOffTitle,
+          t.guardOffMessage,
+          t.guardOffDetail(settingsPath),
+          t.guardOffConfirm
+        ),
+        guard: false
+      }
+    const guard = deps.guard()
+    const detail = t.enableDetail(settingsPath) + (guard ? t.enableGuardNote : '')
+    return { dialog: ask(t.enableTitle, t.enableMessage, detail, t.enableConfirm), guard }
+  }
 
   const closeServer = (): Promise<void> => hub.release('claude')
   /** 이미 같은 포트·토큰으로 열려 있으면 그대로. 실패하면 예외. */
@@ -111,16 +154,9 @@ export function createClaudeIntegration(deps: ClaudeIntegrationDeps): {
     return { state: inspection.state, problem: null, ...base }
   }
 
-  async function enable(): Promise<HookActionResult> {
-    const ok = await deps.confirm({
-      title: text.claudeHook.enableTitle,
-      message: text.claudeHook.enableMessage,
-      detail: text.claudeHook.enableDetail(settingsPath),
-      buttons: [text.claudeHook.enableConfirm, text.kill.cancel],
-      defaultId: 1,
-      cancelId: 1
-    })
-    if (!ok) return { status: 'cancelled' }
+  async function enable(purpose: EnablePurpose = 'integration'): Promise<HookActionResult> {
+    const { dialog, guard } = plan(purpose)
+    if (!(await deps.confirm(dialog))) return { status: 'cancelled' }
     try {
       let hook = await ensureHookConfig(deps.userData, { pickPort })
       try {
@@ -134,7 +170,7 @@ export function createClaudeIntegration(deps: ClaudeIntegrationDeps): {
       }
       const result = await installClaudeHooks({
         dir: deps.configDir,
-        items: itemsFor(hook),
+        items: itemsFor(hook, guard),
         now: deps.now()
       })
       if (!result.changed) return { status: 'done', message: text.claudeHook.alreadyOn }

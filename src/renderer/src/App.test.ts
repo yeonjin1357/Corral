@@ -421,6 +421,12 @@ test('설정 > 무거운 작업에서 "겹치면 에이전트가 기다리게 �
   expect(w.text()).toContain(
     '켜면 Claude 가 Bash 명령을 실행하기 전에 pitwall 에 물어봐요. 무거운 작업이 이미 돌고 있고 메모리가 경고 기준을 넘었을 때만, 같은 명령을 두 번까지 1분 뒤로 미루게 해요. Claude 설정 파일에 훅을 하나 더 넣어요(확인 창·백업). pitwall 이 꺼져 있으면 아무 일도 없어요.'
   )
+  // 위의 무거운 명령 도움말은 알리기만 한다고 말하고 아래 항목을 가리킨다.
+  expect(w.text()).toContain(
+    '한 줄에 하나씩. 명령 이름(예: vue-tsc)이나 이름과 인자(예: vite build). 둘 이상 겹치고 RAM 이 경고 기준 이상이면 알려요. 알리기만 해요 — 에이전트를 기다리게 하려면 아래 항목을 켜세요.'
+  )
+  expect(w.text()).not.toContain('막거나 기다리게 하지는 않아요')
+  const notice = (): string => w.find('.save-notice').text()
 
   await box().trigger('click')
   await w.find('form').trigger('submit')
@@ -429,6 +435,8 @@ test('설정 > 무거운 작업에서 "겹치면 에이전트가 기다리게 �
   // 확인 창에서 취소해 메인이 되돌린 값이 화면에도 보인다(저장하지 않은 변경으로 남지 않는다).
   expect(box().attributes('aria-checked')).toBe('false')
   expect(w.find('[data-action="save"]').attributes('disabled')).toBeDefined()
+  // "저장했어요" 대신 켜지 않았다고 알린다.
+  expect(notice()).toBe('에이전트 기다리게 하기는 켜지 않았어요(훅 설치를 취소했거나 실패했어요).')
 
   cancel = false
   await box().trigger('click')
@@ -436,7 +444,37 @@ test('설정 > 무거운 작업에서 "겹치면 에이전트가 기다리게 �
   await flushPromises()
   expect(saved.at(-1)?.heavyGuard).toBe(true)
   expect(box().attributes('aria-checked')).toBe('true')
+  expect(notice()).toBe('저장했어요.')
   w.unmount()
+})
+
+test('설정 > 무거운 작업: 기다리게 하기를 켰는데 Claude 연동이 켜져 있지 않으면 지금은 동작하지 않는다고 알린다', async () => {
+  const hint =
+    'Claude 연동이 꺼져 있어 지금은 동작하지 않아요. Claude 연동을 켜면 질문 훅도 함께 설치돼요.'
+  for (const state of ['off', 'partial', 'on'] as const) {
+    const f = fake({
+      getLatest: async () =>
+        snapshot({
+          hook: {
+            state,
+            problem: null,
+            allHooksDisabled: false,
+            settingsPath: 'C:\\Users\\dev\\.claude\\settings.json'
+          }
+        })
+    })
+    const w = await start(f)
+    f.navigate({ page: 'settings' })
+    await flushPromises()
+    await w
+      .findAll('button')
+      .find((b) => b.text().trim() === '무거운 작업')!
+      .trigger('click')
+    expect(w.text()).not.toContain(hint)
+    await w.find('#heavy-guard').trigger('click')
+    expect({ state, shown: w.text().includes(hint) }).toEqual({ state, shown: state !== 'on' })
+    w.unmount()
+  }
 })
 
 test('설정 저장은 IPC 로 보낼 수 있는 값(반응형 아닌 순수 값)으로 보낸다', async () => {

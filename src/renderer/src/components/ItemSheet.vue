@@ -447,7 +447,8 @@ const view = computed<View | null>(() => {
           { label: t.sheet.path, value: r.worktree?.root ?? t.tags.noWorktree }
         ],
         command: r.commandLine,
-        note: t.settings.heavyHelp
+        // 설정 화면 도움말은 "아래 항목"(설정의 기다리게 하기)을 가리키므로 카드 설명을 쓴다.
+        note: t.cards.heavyHelp
       }
     }
     case 'disk': {

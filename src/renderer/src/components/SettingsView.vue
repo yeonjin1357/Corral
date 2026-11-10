@@ -136,10 +136,14 @@ async function submit(): Promise<void> {
   saving.value = true
   notice.value = null
   try {
-    const saved = await props.save(pending())
-    // 메인이 되돌린 값(무거운 작업 기다리게 하기 — Claude 설정 파일을 바꾸는 확인 창에서 취소)은 폼도 되돌린다.
+    const sent = pending()
+    const saved = await props.save(sent)
+    // 메인이 켜지 않은 값(무거운 작업 기다리게 하기 — 질문 훅 설치를 취소·실패)은 폼도 되돌리고 그렇게 알린다.
     draft.value.heavyGuard = saved.heavyGuard
-    notice.value = { text: S.saved, failed: false }
+    notice.value =
+      saved.heavyGuard !== sent.heavyGuard
+        ? { text: S.heavyGuardNotChanged, failed: true }
+        : { text: S.saved, failed: false }
   } catch (e) {
     notice.value = {
       text: S.saveFailed(e instanceof Error ? e.message : String(e)),
@@ -179,6 +183,10 @@ function removeHidden(entry: string): void {
 }
 
 const controls = computed(() => hookControls(props.hook))
+/** 기다리게 하기(G7)를 켰는데 Claude 연동이 켜져 있지 않아 질문 훅이 없다(연동 상태를 아직 모르면 보이지 않는다). */
+const guardNeedsHook = computed(
+  () => draft.value.heavyGuard && props.hook !== null && props.hook.state !== 'on'
+)
 const codexControls = computed(() => hookControls(props.codexHook ?? null, text.ui.codexHook))
 
 const updateText = computed(() => {
@@ -464,6 +472,13 @@ const NOTICES_URL = `${REPO_URL}/blob/main/THIRD_PARTY_NOTICES.md`
                   <Label for="heavy-guard">{{ S.heavyGuard }}</Label>
                   <p class="mt-1 text-xs leading-relaxed text-muted-foreground">
                     {{ S.heavyGuardHelp }}
+                  </p>
+                  <p
+                    v-if="guardNeedsHook"
+                    class="heavy-guard-hint mt-1 text-xs leading-relaxed"
+                    :style="{ color: 'var(--peach)' }"
+                  >
+                    {{ S.heavyGuardNeedsHook }}
                   </p>
                 </div>
               </div>
