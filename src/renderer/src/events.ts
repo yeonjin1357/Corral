@@ -11,6 +11,17 @@ import type { Row, Table } from './rows'
 
 const E = text.ui.events
 
+/** 화면이 들고 있는 기록의 한도(메인이 기억하는 만큼: 300개·24시간). 오래 켜 둔 창이 더 쌓지 않게. */
+const KEEP_COUNT = 300
+const KEEP_MS = 24 * 60 * 60 * 1000
+
+/** 오래된 것부터 놓인 기록을 최신 300개, 가장 새 기록에서 24시간 안의 것으로 줄인다. */
+export function trimEvents(events: PitEvent[]): PitEvent[] {
+  if (!events.length) return events
+  const newest = Math.max(...events.map((e) => e.t))
+  return events.filter((e) => newest - e.t <= KEEP_MS).slice(-KEEP_COUNT)
+}
+
 /** 있는 값만 ` · ` 로 잇는다(모르는 값은 칸을 비운다). */
 const join = (...parts: (string | null | undefined)[]): string =>
   parts.filter((p): p is string => !!p).join(' · ')
@@ -46,7 +57,9 @@ const DESCRIBE: Record<PitEventKind, Describe> = {
     )
   ),
   'memory-level': (e) => ({
-    kind: E.memoryLevel(E.levels[e.level ?? 'normal']),
+    // 단계를 모르면 지어내지 않고 이름만.
+    kind:
+      e.level && e.level in E.levels ? E.memoryLevel(E.levels[e.level]) : E.kinds['memory-level'],
     detail: e.percent != null ? E.ram(e.percent) : ''
   }),
   cleanup: plain(E.kinds.cleanup, (e) =>

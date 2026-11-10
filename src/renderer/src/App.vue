@@ -33,7 +33,7 @@ import {
   selectionKey
 } from './history'
 import { hookControls } from './hook'
-import { awaySummary, awayText, eventsTable, type AwaySummary } from './events'
+import { awaySummary, awayText, eventsTable, trimEvents, type AwaySummary } from './events'
 import {
   TABS,
   filterRows,
@@ -129,7 +129,8 @@ function shortcut(event: KeyboardEvent): void {
 function addEvents(added: PitEvent[]): void {
   const have = new Set(events.value.map((e) => e.id))
   const fresh = added.filter((e) => !have.has(e.id))
-  if (fresh.length) events.value = [...events.value, ...fresh].sort((a, b) => a.id - b.id)
+  if (fresh.length)
+    events.value = trimEvents([...events.value, ...fresh].sort((a, b) => a.id - b.id))
 }
 
 // ── 자리 비운 사이(G3g) ──

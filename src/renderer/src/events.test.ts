@@ -1,6 +1,6 @@
 import type { PitEvent } from '../../shared/events'
 import { selectionKey } from '../../shared/keys'
-import { awaySummary, awayText, eventText, eventsTable } from './events'
+import { awaySummary, awayText, eventText, eventsTable, trimEvents } from './events'
 import { filterRows, sortRows } from './rows'
 import { MB, serverRow, snapshot } from './testing/fixtures'
 
@@ -139,4 +139,41 @@ test('꺼진 에이전트는 작업 중이던 것만 센다', () => {
   expect(
     awaySummary([ev({ kind: 'agent-end', t: since + MIN, abnormal: false })], [], since, NOW)
   ).toBeNull()
+})
+
+test('기록은 최신 300개, 가장 새 기록에서 24시간 안의 것만 둔다', () => {
+  const HOUR = 60 * MIN
+  const old = ev({ kind: 'agent-start', t: NOW - 25 * HOUR })
+  const edge = ev({ kind: 'agent-start', t: NOW - 24 * HOUR })
+  const fresh = ev({ kind: 'agent-start', t: NOW })
+  expect(trimEvents([old, edge, fresh]).map((e) => e.id)).toEqual([edge.id, fresh.id])
+  const many = Array.from({ length: 305 }, (_, i) => ev({ kind: 'agent-quiet', t: NOW - 305 + i }))
+  const kept = trimEvents(many)
+  expect(kept).toHaveLength(300)
+  expect(kept[kept.length - 1]).toBe(many[304])
+  expect(kept[0]).toBe(many[5])
+  expect(trimEvents([])).toEqual([])
+})
+
+test('level 이 없는 memory-level 은 지어내지 않는다', () => {
+  expect(eventText(ev({ kind: 'memory-level', percent: 88 }))).toEqual({
+    kind: '메모리',
+    detail: 'RAM 88%'
+  })
+  expect(eventText(ev({ kind: 'memory-level' }))).toEqual({ kind: '메모리', detail: '' })
+  const odd = ev({ kind: 'memory-level', level: 'bogus' as never })
+  expect(eventText(odd).kind).toBe('메모리')
+})
+
+test('where·label 이 없는 기록도 undefined 글자 없이 보인다', () => {
+  const s = snapshot({ takenAt: NOW })
+  const table = eventsTable(
+    [ev({ kind: 'cleanup' }), ev({ kind: 'memory-level' }), ev({ kind: 'agent-start' })],
+    s
+  )
+  for (const row of table.rows)
+    for (const cell of Object.values(row.cells)) {
+      expect(cell.text).not.toMatch(/undefined|null/)
+      expect(cell.text).not.toBe('')
+    }
 })

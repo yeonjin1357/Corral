@@ -145,3 +145,46 @@ test('오래 쉬는 에이전트 서버의 상태 칸은 짧은 문구, 쉰 기�
   const cell = w.find('span[title="확인해볼 것 · 에이전트가 3시간 12분째 쉼"]')
   expect(cell.find('.truncate').text()).toBe('확인해볼 것 · 에이전트 쉼')
 })
+
+test('첫 칸은 이름 칸이 아니어도 왼쪽 여백을 갖는다', () => {
+  const w = mount(ItemTable, {
+    props: {
+      table: {
+        columns: [
+          { id: 'time', label: '시각', width: 150 },
+          { id: 'kind', label: '종류', width: 150 }
+        ],
+        rows: [
+          {
+            key: null,
+            id: 'event:1',
+            cells: { time: { text: '오전 9:10' }, kind: { text: '시작' } },
+            actions: [],
+            search: ''
+          }
+        ],
+        sort: { id: 'time', dir: 'desc' }
+      },
+      rows: [
+        {
+          key: null,
+          id: 'event:1',
+          cells: { time: { text: '오전 9:10' }, kind: { text: '시작' } },
+          actions: [],
+          search: ''
+        }
+      ],
+      selectedKey: null,
+      searching: false,
+      emptyText: '',
+      busyKey: null,
+      sort: { id: 'time', dir: 'desc' }
+    } as TableProps
+  })
+  const heads = w.findAll('thead th')
+  expect(heads[0].classes()).toContain('pl-4')
+  expect(heads[1].classes()).not.toContain('pl-4')
+  const cells = w.findAll('tbody tr td')
+  expect(cells[0].classes()).toContain('pl-4')
+  expect(cells[1].classes()).not.toContain('pl-4')
+})

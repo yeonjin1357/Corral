@@ -150,12 +150,12 @@ const G = text.ui.group
           <thead data-slot="table-header" :class="TABLE.header">
             <tr data-slot="table-row" :class="[TABLE.row, 'hover:bg-transparent']">
               <th
-                v-for="col in table.columns"
+                v-for="(col, ci) in table.columns"
                 :key="col.id"
                 data-slot="table-head"
                 :class="[
                   TABLE.head,
-                  { 'text-right': col.align === 'right', 'pl-4': col.id === 'name' }
+                  { 'text-right': col.align === 'right', 'pl-4': ci === 0 || col.id === 'name' }
                 ]"
                 :style="{ width: `${col.width}px` }"
                 :aria-sort="
@@ -201,12 +201,12 @@ const G = text.ui.group
                 :class="[TABLE.row, 'group-head bg-muted/40']"
               >
                 <td
-                  v-for="col in table.columns"
+                  v-for="(col, ci) in table.columns"
                   :key="col.id"
                   data-slot="table-cell"
                   :class="[
                     TABLE.cell,
-                    { 'text-right': col.align === 'right', 'pl-4': col.id === 'name' }
+                    { 'text-right': col.align === 'right', 'pl-4': ci === 0 || col.id === 'name' }
                   ]"
                 >
                   <div v-if="col.id === 'name'" class="flex min-w-0 items-center gap-1.5">
@@ -331,7 +331,7 @@ const G = text.ui.group
                 :class="TABLE.row"
               >
                 <td
-                  v-for="col in table.columns"
+                  v-for="(col, ci) in table.columns"
                   :key="col.id"
                   data-slot="table-cell"
                   :class="[
@@ -339,7 +339,7 @@ const G = text.ui.group
                     {
                       'text-right': col.align === 'right',
                       'font-mono text-xs': row.cells[col.id]?.mono,
-                      'pl-4': col.id === 'name'
+                      'pl-4': ci === 0 || col.id === 'name'
                     }
                   ]"
                 >

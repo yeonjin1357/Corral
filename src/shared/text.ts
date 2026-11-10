@@ -347,6 +347,7 @@ export const text = {
     events: {
       kinds: {
         'agent-start': '시작',
+        'memory-level': '메모리',
         'agent-end': '꺼짐',
         'agent-done': '작업 끝남',
         'agent-waiting': '권한 대기',
@@ -359,7 +360,7 @@ export const text = {
         cleanup: '정리',
         'disk-remove': '디스크 정리',
         'heavy-defer': '에이전트를 기다리게 함'
-      } satisfies Partial<Record<PitEventKind, string>>,
+      } satisfies Record<PitEventKind, string>,
       memoryLevel: (level: string): string => `메모리 ${level}`,
       levels: { normal: '정상', warn: '경고', danger: '위험' } satisfies Record<
         MemoryLevel,
