@@ -29,6 +29,7 @@ import {
 import { IPC, type NavigateTarget } from '../shared/ipc'
 import { text } from '../shared/text'
 import { mkdirSync, readdirSync, rmSync } from 'fs'
+import { access, stat } from 'fs/promises'
 import { sample, toPlatform } from './collect/sample'
 import { configureWindowsSampler, nativeHelperDllName } from './collect/windows'
 import { allCwdsDarwin } from './collect/darwin'
@@ -192,6 +193,18 @@ const icons = createIconSource({
 const quickActions = createQuickActions({
   latest: () => scheduler.latest(),
   platform: platform ?? 'win32',
+  env: process.env,
+  // access 는 Windows 에서 파일 속성만 읽어 실행 별칭(WindowsApps\wt.exe)도 있다고 본다.
+  exists: (path) =>
+    access(path).then(
+      () => true,
+      () => false
+    ),
+  isDirectory: (path) =>
+    stat(path).then(
+      (s) => s.isDirectory(),
+      () => false
+    ),
   openPath: (path) => shell.openPath(path),
   writeClipboard: (value) => clipboard.writeText(value),
   spawn: (command, args, options) => spawn(command, args, options)

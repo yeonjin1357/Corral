@@ -1,3 +1,4 @@
+import { win32 } from 'path'
 import { createQuickActions, isQuickKind, knownPaths } from './quickActions'
 import { blankSnapshot } from '../shared/snapshot'
 import type {
@@ -16,6 +17,12 @@ const SHOP = 'C:\\work\\shop-web'
 /** 띄어쓰기·& 가 든 경로(셸 문자열로 만들면 명령이 갈라진다). */
 const ODD = 'C:\\work\\shop web & co'
 const MAC = '/Users/dev/shop web & co'
+/** 네트워크 공유 폴더. */
+const UNC = '\\\\server\\share\\shop'
+
+const ENV = { SystemRoot: 'C:\\Windows', LOCALAPPDATA: 'C:\\Users\\dev\\AppData\\Local' }
+const CMD = 'C:\\Windows\\System32\\cmd.exe'
+const WT = 'C:\\Users\\dev\\AppData\\Local\\Microsoft\\WindowsApps\\wt.exe'
 
 const wt = (root: string): WorktreeInfo => ({ root, branch: 'main', isLinkedWorktree: false })
 const ws = (root: string): WorkspaceInfo => ({ root, name: 'ws', branch: 'main', outer: true })
@@ -35,7 +42,10 @@ function snap(platform: Platform = 'win32'): DashboardSnapshot {
       { worktree: wt(MAC), workspace: null } as AgentRow
     ],
     leftovers: [{ worktree: wt('C:\\work\\left'), workspace: null } as LeftoverRow],
-    heavyJobs: [{ worktree: wt('C:\\work\\heavy'), workspace: null } as HeavyJobRow],
+    heavyJobs: [
+      { worktree: wt('C:\\work\\heavy'), workspace: null } as HeavyJobRow,
+      { worktree: wt(UNC), workspace: null } as HeavyJobRow
+    ],
     disk: {
       rows: [{ worktreeRoot: 'C:\\work\\old-feature' } as DiskRow],
       scannedAt: 1,
@@ -51,10 +61,16 @@ interface SpawnCall {
   options: { cwd?: string; detached: true; stdio: 'ignore' }
 }
 
-/** 실제로 띄우지 않는 가짜 의존성. failing 에 든 명령은 띄우지 못한다(없는 프로그램·없는 폴더). */
+/**
+ * 실제로 띄우지 않는 가짜 의존성. failing 에 든 프로그램은 띄우지 못하고(없는 작업 폴더 등), files 에 든 것만 있는 파일,
+ * notDirs 에 든 경로는 폴더가 아니다(없어졌거나 파일로 바뀜).
+ */
 function fakes(
   over: {
     platform?: Platform
+    env?: Record<string, string | undefined>
+    files?: string[]
+    notDirs?: string[]
     failing?: string[]
     openPathError?: string
     latest?: DashboardSnapshot | null
@@ -65,15 +81,23 @@ function fakes(
   unrefs: number[]
   clipboard: string[]
   opened: string[]
+  checked: string[]
 } {
   const spawned: SpawnCall[] = []
   const unrefs: number[] = []
   const clipboard: string[] = []
   const opened: string[] = []
+  const checked: string[] = []
   const latest = over.latest === undefined ? snap(over.platform) : over.latest
   const quick = createQuickActions({
     latest: () => latest,
     platform: over.platform ?? 'win32',
+    env: over.env ?? ENV,
+    exists: async (p) => {
+      checked.push(p)
+      return (over.files ?? [WT]).includes(p)
+    },
+    isDirectory: async (p) => !(over.notDirs ?? []).includes(p),
     openPath: async (p) => {
       opened.push(p)
       return over.openPathError ?? ''
@@ -95,8 +119,11 @@ function fakes(
       }
     }
   })
-  return { quick, spawned, unrefs, clipboard, opened }
+  return { quick, spawned, unrefs, clipboard, opened, checked }
 }
+
+/** cmd 의 start 가 새 창에서 띄우는 프로그램(빈 창 제목 다음 인자). */
+const startedBy = (call: SpawnCall): string => call.args[call.args.indexOf('start') + 2]
 
 test('스냅샷에 없는 경로는 열지 않는다', async () => {
   const f = fakes()
@@ -128,27 +155,87 @@ test('Windows 는 wt.exe -d 경로, 없으면 cmd 를 그 폴더에서', async (
   const wtOnly = fakes()
   expect(await wtOnly.quick.run('terminal', ODD)).toBe(true)
   expect(wtOnly.spawned).toEqual([
-    { command: 'wt.exe', args: ['-d', '.'], options: { cwd: ODD, detached: true, stdio: 'ignore' } }
+    { command: WT, args: ['-d', '.'], options: { cwd: ODD, detached: true, stdio: 'ignore' } }
   ])
   expect(wtOnly.unrefs).toEqual([0])
 
-  const noWt = fakes({ failing: ['wt.exe'] })
-  expect(await noWt.quick.run('terminal', ODD)).toBe(true)
-  expect(noWt.spawned.map((c) => c.command)).toEqual(['wt.exe', 'cmd.exe'])
-  // cmd 는 start 로 새 콘솔 창을 연다(인자는 고정, 경로는 cwd 로만).
-  expect(noWt.spawned[1]).toEqual({
-    command: 'cmd.exe',
-    args: ['/c', 'start', 'cmd.exe'],
+  const wtFails = fakes({ failing: [WT] })
+  expect(await wtFails.quick.run('terminal', ODD)).toBe(true)
+  expect(wtFails.spawned.map((c) => c.command)).toEqual([WT, CMD])
+  // cmd 는 start 로 새 콘솔 창을 연다(빈 창 제목, 인자는 고정, 경로는 cwd 로만).
+  expect(wtFails.spawned[1]).toEqual({
+    command: CMD,
+    args: ['/d', '/c', 'start', '', CMD],
     options: { cwd: ODD, detached: true, stdio: 'ignore' }
   })
-  for (const call of [...wtOnly.spawned, ...noWt.spawned]) {
+  for (const call of [...wtOnly.spawned, ...wtFails.spawned]) {
     expect(call.args.join(' ')).not.toContain('&')
     expect(call.args.join(' ')).not.toContain('shop web')
   }
 
-  // 폴더가 없어져 둘 다 띄우지 못하면 false(화면이 실패를 알린다).
-  const gone = fakes({ failing: ['wt.exe', 'cmd.exe'] })
+  // 둘 다 띄우지 못하면 false(화면이 실패를 알린다).
+  const gone = fakes({ failing: [WT, CMD] })
   expect(await gone.quick.run('terminal', ODD)).toBe(false)
+})
+
+test('Windows 에서 띄우는 프로그램은 모두 절대 경로다(작업 폴더의 같은 이름 파일이 실행되지 않게)', async () => {
+  const cases: Record<string, string | undefined>[] = [
+    ENV,
+    // 상대 경로·빈 값이면 쓰지 않는다(작업 폴더 기준으로 찾게 된다).
+    { SystemRoot: 'Windows', LOCALAPPDATA: 'AppData\\Local' },
+    { SystemRoot: '', LOCALAPPDATA: '' },
+    {}
+  ]
+  for (const env of cases) {
+    const f = fakes({
+      env,
+      failing: [WT],
+      files: [WT, 'AppData\\Local\\Microsoft\\WindowsApps\\wt.exe']
+    })
+    expect(await f.quick.run('terminal', SHOP)).toBe(true)
+    expect(f.spawned.length).toBeGreaterThan(0)
+    for (const call of f.spawned) {
+      expect(win32.isAbsolute(call.command)).toBe(true)
+      expect(call.command).toMatch(/^[A-Za-z]:\\/)
+      if (call.args.includes('start')) expect(win32.isAbsolute(startedBy(call))).toBe(true)
+    }
+    expect(f.spawned.at(-1)!.command).toBe(CMD)
+    expect(startedBy(f.spawned.at(-1)!)).toBe(CMD)
+  }
+})
+
+test('Windows Terminal 이 없으면 곧바로 cmd 로', async () => {
+  const missing = fakes({ files: [] })
+  expect(await missing.quick.run('terminal', SHOP)).toBe(true)
+  expect(missing.checked).toEqual([WT])
+  expect(missing.spawned.map((c) => c.command)).toEqual([CMD])
+  // LOCALAPPDATA 를 모르면 찾아보지도 않는다.
+  const noLocal = fakes({ env: { SystemRoot: 'C:\\Windows' } })
+  expect(await noLocal.quick.run('terminal', SHOP)).toBe(true)
+  expect(noLocal.checked).toEqual([])
+  expect(noLocal.spawned.map((c) => c.command)).toEqual([CMD])
+})
+
+test('SystemRoot 가 이상하면 C:\\Windows 를 쓴다', async () => {
+  const cmdFor = async (SystemRoot: string | undefined): Promise<[string, string]> => {
+    const f = fakes({ env: { SystemRoot }, files: [] })
+    await f.quick.run('terminal', SHOP)
+    return [f.spawned[0].command, startedBy(f.spawned[0])]
+  }
+  for (const odd of [
+    undefined,
+    '',
+    'Windows',
+    '..\\Windows',
+    'C:\\Win dows',
+    'C:\\x"&calc',
+    '\\\\server\\win'
+  ])
+    expect(await cmdFor(odd)).toEqual([CMD, CMD])
+  expect(await cmdFor('D:\\Win\\')).toEqual([
+    'D:\\Win\\System32\\cmd.exe',
+    'D:\\Win\\System32\\cmd.exe'
+  ])
 })
 
 test('macOS 는 open -a Terminal 경로', async () => {
@@ -166,6 +253,30 @@ test('macOS 는 open -a Terminal 경로', async () => {
   expect(
     await fakes({ platform: 'darwin', failing: ['/usr/bin/open'] }).quick.run('terminal', MAC)
   ).toBe(false)
+})
+
+test('폴더가 없어졌거나 파일로 바뀌었으면 열지 않고 false', async () => {
+  const win = fakes({ notDirs: [SHOP] })
+  expect(await win.quick.run('folder', SHOP)).toBe(false)
+  expect(await win.quick.run('terminal', SHOP)).toBe(false)
+  expect([win.opened, win.spawned]).toEqual([[], []])
+  const mac = fakes({ platform: 'darwin', notDirs: [MAC] })
+  expect(await mac.quick.run('folder', MAC)).toBe(false)
+  expect(await mac.quick.run('terminal', MAC)).toBe(false)
+  expect([mac.opened, mac.spawned]).toEqual([[], []])
+  // 경로 복사는 폴더를 열지 않으므로 그대로 된다.
+  expect(await win.quick.run('copy', SHOP)).toBe(true)
+  expect(win.clipboard).toEqual([SHOP])
+})
+
+test('네트워크 경로에서는 터미널을 열지 않는다', async () => {
+  const f = fakes()
+  expect(await f.quick.run('terminal', UNC)).toBe(false)
+  expect(f.spawned).toEqual([])
+  // 폴더 열기·경로 복사는 된다.
+  expect(await f.quick.run('folder', UNC)).toBe(true)
+  expect(await f.quick.run('copy', UNC)).toBe(true)
+  expect([f.opened, f.clipboard]).toEqual([[UNC], [UNC]])
 })
 
 test('복사는 스냅샷의 경로 그대로', async () => {
@@ -190,6 +301,7 @@ test('아는 경로: 서버(숨긴 것 포함)·에이전트·남은 프로세�
       MAC,
       'C:\\work\\left',
       'C:\\work\\heavy',
+      UNC,
       'C:\\work\\old-feature'
     ].sort()
   )
