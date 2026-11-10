@@ -23,7 +23,8 @@ import {
   SETTINGS_LIMITS,
   type RefreshSpeed,
   type Settings,
-  type ThemeChoice
+  type ThemeChoice,
+  hiddenLabel
 } from '../../../shared/settings'
 import { text } from '../../../shared/text'
 import { hookControls } from '../hook'
@@ -395,9 +396,12 @@ const NOTICES_URL = `${REPO_URL}/blob/main/THIRD_PARTY_NOTICES.md`
                   :key="entry"
                   class="hidden-server flex items-center gap-2 px-3 py-2"
                 >
-                  <span class="min-w-0 flex-1 break-all font-mono text-xs" data-selectable>{{
-                    entry
-                  }}</span>
+                  <span
+                    class="min-w-0 flex-1 break-all font-mono text-xs"
+                    :title="entry"
+                    data-selectable
+                    >{{ hiddenLabel(entry) }}</span
+                  >
                   <Button
                     variant="ghost"
                     size="xs"

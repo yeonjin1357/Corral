@@ -70,7 +70,7 @@ const props = defineProps<{
   platform: Platform | null
   cpuCount: number
 }>()
-const emit = defineEmits<{ open: []; kill: []; remove: []; hide: [] }>()
+const emit = defineEmits<{ open: [port: number]; kill: []; remove: []; hide: [] }>()
 const open = defineModel<boolean>('open', { required: true })
 
 const t = text.ui
@@ -386,15 +386,20 @@ const folderSize = (f: DiskRow['folders'][number]): string =>
         v-if="item.kind === 'server' || item.kind === 'leftover' || item.kind === 'disk'"
         class="flex flex-wrap gap-2"
       >
-        <Button
-          v-if="item.kind === 'server'"
-          variant="outline"
-          size="sm"
-          data-action="open"
-          @click="emit('open')"
-        >
-          <ExternalLink />{{ t.actions.open }}
-        </Button>
+        <template v-if="item.kind === 'server'">
+          <!-- 포트가 여럿이면 포트마다(화면을 내주는 포트가 첫 포트가 아닐 수 있다). -->
+          <Button
+            v-for="port in item.row.ports"
+            :key="port"
+            variant="outline"
+            size="sm"
+            data-action="open"
+            :title="t.detail.url(port)"
+            @click="emit('open', port)"
+          >
+            <ExternalLink />{{ item.row.ports.length > 1 ? `:${port}` : t.actions.open }}
+          </Button>
+        </template>
         <Button
           v-if="item.kind === 'server' && !item.row.unresolvable"
           variant="destructive"

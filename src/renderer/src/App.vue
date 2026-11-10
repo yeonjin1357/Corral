@@ -11,7 +11,9 @@ import {
   DEFAULT_SETTINGS,
   REFRESH_INTERVALS,
   type Settings,
-  type ThemeChoice
+  type ThemeChoice,
+  hiddenLabel,
+  hiddenMatches
 } from '../../shared/settings'
 import { describeKillResult, formatBytes } from '../../shared/format'
 import { cleanupRecommendation } from '../../shared/recommend'
@@ -277,7 +279,7 @@ async function runAction(key: string, run: () => Promise<Notice | null>): Promis
   }
 }
 
-async function act(kind: ActionKind, key: string): Promise<void> {
+async function act(kind: ActionKind, key: string, port?: number): Promise<void> {
   const s = snapshot.value
   if (!s) return
   if (kind === 'details') {
@@ -289,8 +291,9 @@ async function act(kind: ActionKind, key: string): Promise<void> {
   const disk = s.disk?.rows.find((r) => selectionKey.disk(r.worktreeRoot) === key)
   if (kind === 'open' && server) {
     try {
-      // 서버가 연 포트 가운데 첫 포트(보통 화면을 내주는 포트)를 연다.
-      if (!(await window.pitwall.openPort(server.ports[0])))
+      // 고른 포트(상세 패널), 아니면 서버가 연 포트 가운데 첫 포트(보통 화면을 내주는 포트)를 연다.
+      const target = port != null && server.ports.includes(port) ? port : server.ports[0]
+      if (!(await window.pitwall.openPort(target)))
         say('action', { text: text.openFailed, tone: 'error' })
     } catch (e) {
       say('action', { text: failureText(e), tone: 'error' })
@@ -313,8 +316,8 @@ async function act(kind: ActionKind, key: string): Promise<void> {
   }
 }
 
-function sheetAction(kind: ActionKind): void {
-  if (selectedKey.value) void act(kind, selectedKey.value)
+function sheetAction(kind: ActionKind, port?: number): void {
+  if (selectedKey.value) void act(kind, selectedKey.value, port)
 }
 
 // ── 묶음 보기·숨기기·별칭(F1·F2·F11) ──
@@ -324,11 +327,15 @@ async function updateSettings(change: (s: Settings) => Settings): Promise<void> 
   await window.pitwall.refreshNow()
 }
 
-/** 상세 패널의 숨기기: 서버의 첫 포트로 숨긴다(포트 중 하나라도 맞으면 숨김). */
+/**
+ * 상세 패널의 숨기기: 그 워크트리의 첫 포트로 숨긴다(다른 프로젝트가 같은 포트를 열면 그대로 보인다).
+ * 워크트리를 모르는 서버(판별 불가)는 포트로.
+ */
 async function hideSelected(): Promise<void> {
   const item = selected.value
   if (item?.kind !== 'server') return
-  const entry = `:${item.row.ports[0]}`
+  const port = item.row.ports[0]
+  const entry = item.row.worktree ? `${item.row.worktree.root}:${port}` : `:${port}`
   const key = selectedKey.value!
   selectedKey.value = null
   await runAction(key, async () => {
@@ -336,17 +343,16 @@ async function hideSelected(): Promise<void> {
       ...s,
       hiddenServers: s.hiddenServers.includes(entry) ? s.hiddenServers : [...s.hiddenServers, entry]
     }))
-    return { text: text.ui.group.hiddenDone(entry), tone: 'success' }
+    return { text: text.ui.group.hiddenDone(hiddenLabel(entry)), tone: 'success' }
   })
 }
 
-/** 숨김 풀기: 그 서버를 숨기게 한 항목(포트 또는 프로세스 이름)을 모두 뺀다. */
+/** 숨김 풀기: 그 서버를 숨기게 한 항목(포트·프로세스 이름·워크트리의 포트)을 모두 뺀다. */
 async function unhide(row: DashboardSnapshot['servers'][number]): Promise<Notice | null> {
-  const matches = (h: string): boolean =>
-    h.startsWith(':')
-      ? row.ports.includes(Number(h.slice(1)))
-      : h.toLowerCase() === row.processName.toLowerCase()
-  await updateSettings((s) => ({ ...s, hiddenServers: s.hiddenServers.filter((h) => !matches(h)) }))
+  await updateSettings((s) => ({
+    ...s,
+    hiddenServers: s.hiddenServers.filter((h) => !hiddenMatches(h, row))
+  }))
   return null
 }
 
@@ -792,7 +798,7 @@ const takenAt = computed(() =>
       :hook="snapshot?.hook ?? null"
       :platform="snapshot?.platform ?? null"
       :cpu-count="snapshot?.cpuCount ?? 1"
-      @open="sheetAction('open')"
+      @open="(port) => sheetAction('open', port)"
       @kill="sheetAction('kill')"
       @remove="sheetAction('remove')"
       @hide="hideSelected"

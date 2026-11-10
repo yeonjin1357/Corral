@@ -280,3 +280,33 @@ test('메모리 상세의 RAM 추이는 최근 2시간, 기록이 끊긴 구간�
   expect(sheet.props('gapMs')).toBeGreaterThanOrEqual(60_000)
   w.unmount()
 })
+
+test('상세 패널의 숨기기는 그 워크트리의 첫 포트로 숨긴다(다른 프로젝트의 같은 포트는 그대로)', async () => {
+  const f = fake()
+  const w = await start(f)
+  await w
+    .find(`tr[data-key="${selectionKey.server(api)}"] [data-action="details"]`)
+    .trigger('click')
+  await flushPromises()
+  document.body.querySelector<HTMLElement>('[data-action="hide"]')!.click()
+  await flushPromises()
+  expect(f.saved.at(-1)?.hiddenServers).toEqual(['C:\\work\\ws\\api:8081'])
+  expect(notice(w)).toContain('api :8081')
+  w.unmount()
+})
+
+test('상세 패널에서 고른 포트를 연다', async () => {
+  const multi = serverRow({ pid: 9, ports: [6176, 8081], workspace: null })
+  const f = fake({ getLatest: async () => snapshot({ servers: [multi] }) })
+  const w = await start(f)
+  await w
+    .find(`tr[data-key="${selectionKey.server(multi)}"] [data-action="details"]`)
+    .trigger('click')
+  await flushPromises()
+  ;[...document.body.querySelectorAll<HTMLElement>('[data-action="open"]')]
+    .find((b) => b.textContent!.trim() === ':8081')!
+    .click()
+  await flushPromises()
+  expect(f.api.openPort).toHaveBeenCalledWith(8081)
+  w.unmount()
+})

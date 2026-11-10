@@ -491,6 +491,15 @@ describe('숨기기·별칭(F11)', () => {
     }
   })
 
+  test('워크트리 경로:포트 항목은 그 워크트리의 서버만 숨긴다', async () => {
+    const mine = setup({ options: options([`${W1.root}:3000`]), sample: async () => idle })
+    expect((await createCollector(mine.deps).collect()).hiddenServers).toHaveLength(1)
+    const other = setup({ options: options(['C:\\work\\other:3000']), sample: async () => idle })
+    const s = await createCollector(other.deps).collect()
+    expect(s.hiddenServers).toEqual([])
+    expect(s.servers).toHaveLength(1)
+  })
+
   test('별칭이 있으면 작업 공간 이름(경로는 대소문자·끝 구분자 무시)', async () => {
     const { deps } = setup({
       options: options([], { 'c:\\WORK\\shop-web\\': '쇼핑' }),

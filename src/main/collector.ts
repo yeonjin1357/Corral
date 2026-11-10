@@ -1,3 +1,4 @@
+import { hiddenMatches } from '../shared/settings'
 import type {
   AgentRow,
   AgentState,
@@ -55,13 +56,9 @@ export interface CollectOptions {
 const CODEX_LIFE_KEEP_MS = 24 * 60 * 60 * 1000
 const CODEX_LIFE_SLACK_MS = 60 * 1000
 
-/** 숨김 항목에 맞는 서버: 포트 중 하나가 같거나 프로세스 이름이 같다(대소문자 무시). */
+/** 숨김 항목에 맞는 서버(포트·프로세스 이름·워크트리의 포트, 대소문자 무시). */
 function isHidden(row: ServerRow, hidden: string[]): boolean {
-  return hidden.some((h) =>
-    h.startsWith(':')
-      ? row.ports.includes(Number(h.slice(1)))
-      : h.toLowerCase() === row.processName.toLowerCase()
-  )
+  return hidden.some((h) => hiddenMatches(h, row))
 }
 
 export function collectOptionsFrom(s: Settings): CollectOptions {

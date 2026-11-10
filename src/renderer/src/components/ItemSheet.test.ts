@@ -36,6 +36,24 @@ const processRows = (): string[][] =>
 const processTitle = (): string | undefined =>
   document.body.querySelector('[data-processes] [data-slot=card-title]')?.textContent?.trim()
 
+describe('상세 패널: 포트별 열기', () => {
+  test('포트가 여럿이면 포트마다 열기 버튼, 누른 포트를 연다', async () => {
+    const w = sheet({ kind: 'server', row: serverRow({ ports: [6176, 8081] }) })
+    const buttons = [...document.body.querySelectorAll<HTMLElement>('[data-action="open"]')]
+    expect(buttons.map((b) => b.textContent!.trim())).toEqual([':6176', ':8081'])
+    buttons[1].click()
+    expect(w.emitted('open')).toEqual([[8081]])
+  })
+
+  test('포트가 하나면 "브라우저로 열기" 하나', () => {
+    const w = sheet({ kind: 'server', row: serverRow({ ports: [3000] }) })
+    const buttons = [...document.body.querySelectorAll<HTMLElement>('[data-action="open"]')]
+    expect(buttons.map((b) => b.textContent!.trim())).toEqual(['브라우저로 열기'])
+    buttons[0].click()
+    expect(w.emitted('open')).toEqual([[3000]])
+  })
+})
+
 describe('상세 패널: 프로세스 목록', () => {
   test('에이전트가 띄운 프로세스를 이름·무엇인지·개수·메모리로 보인다(자기 포함 개수)', () => {
     sheet({

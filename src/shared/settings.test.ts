@@ -1,4 +1,10 @@
-import { DEFAULT_SETTINGS, normalizeSettings, REFRESH_INTERVALS } from './settings'
+import {
+  DEFAULT_SETTINGS,
+  hiddenLabel,
+  hiddenMatches,
+  normalizeSettings,
+  REFRESH_INTERVALS
+} from './settings'
 
 test('값이 없거나 객체가 아니면 기본값', () => {
   for (const value of [undefined, null, 1, 'x', []])
@@ -227,4 +233,41 @@ test('예전에 저장한 지울 폴더가 예전 기본값(node_modules 하나)
     normalizeSettings({ settingsVersion: 2, dependencyDirs: ['node_modules'] }).dependencyDirs
   ).toEqual(['node_modules'])
   expect(normalizeSettings({}).settingsVersion).toBe(2)
+})
+
+test('숨긴 서버는 "워크트리 경로:포트"(그 워크트리의 그 포트 서버만)도 받는다', () => {
+  expect(
+    normalizeSettings({
+      hiddenServers: [
+        'C:\\work\\shop-web:5173',
+        '/Users/dev/shop:3000',
+        'relative/path:3000',
+        'C:\\work\\x:0',
+        'C:\\work\\x:70000',
+        'C:\\work\\x'
+      ]
+    }).hiddenServers
+  ).toEqual(['C:\\work\\shop-web:5173', '/Users/dev/shop:3000'])
+})
+
+describe('hiddenMatches·hiddenLabel', () => {
+  const row = {
+    ports: [5173, 24678],
+    processName: 'node.exe',
+    worktree: { root: 'C:\\work\\shop-web' }
+  }
+  test('포트·프로세스 이름·워크트리 경로:포트로 맞춘다(경로는 대소문자·끝 구분자 무시)', () => {
+    expect(hiddenMatches(':5173', row)).toBe(true)
+    expect(hiddenMatches('NODE.EXE', row)).toBe(true)
+    expect(hiddenMatches('c:\\WORK\\shop-web\\:24678', row)).toBe(true)
+    // 다른 프로젝트의 같은 포트는 숨기지 않는다.
+    expect(hiddenMatches('C:\\work\\other:5173', row)).toBe(false)
+    expect(hiddenMatches('C:\\work\\shop-web:3000', row)).toBe(false)
+    expect(hiddenMatches('C:\\work\\shop-web:5173', { ...row, worktree: null })).toBe(false)
+  })
+  test('보일 이름: 워크트리 항목은 폴더 이름 + 포트', () => {
+    expect(hiddenLabel('C:\\work\\shop-web:5173')).toBe('shop-web :5173')
+    expect(hiddenLabel(':3000')).toBe(':3000')
+    expect(hiddenLabel('docker.exe')).toBe('docker.exe')
+  })
 })

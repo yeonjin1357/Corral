@@ -373,7 +373,8 @@ export const text = {
       grouped: '묶음',
       hiddenToggle: (n: number): string => `숨김 ${n}개`,
       hiddenBack: '숨긴 서버 닫기',
-      hideHint: '이 서버의 첫 포트로 숨겨요. 숨긴 서버는 개수·정리 추천·알림·트레이에서 빠져요.',
+      hideHint:
+        '이 워크트리의 첫 포트로 숨겨요(다른 프로젝트가 같은 포트를 열면 그대로 보여요). 숨긴 서버는 개수·정리 추천·알림·트레이에서 빠져요.',
       hiddenDone: (entry: string): string =>
         `${entry} 서버를 숨겼어요. 표 아래 "숨김"에서 다시 볼 수 있어요.`
     },
@@ -495,7 +496,7 @@ export const text = {
         '정확한 상태를 아는 에이전트(Claude·Codex 연동, Codex 세션 기록)가 2분 넘게 일한 뒤 끝나면 알려요. 짧은 답에는 알리지 않아요.',
       hiddenServers: '숨긴 서버',
       hiddenServersHelp:
-        '목록·개수·정리 추천·알림·트레이에서 빼는 서버예요. :포트 또는 프로세스 이름으로 맞춰요. 서버 상세 패널의 "숨기기"로 더해요.',
+        '목록·개수·정리 추천·알림·트레이에서 빼는 서버예요. :포트, 프로세스 이름, 또는 워크트리의 포트로 맞춰요. 서버 상세 패널의 "숨기기"로 더해요(그 워크트리의 첫 포트).',
       noHiddenServers: '숨긴 서버가 없어요.',
       unhide: '빼기',
       notifyClaudeWaiting: '에이전트 권한 대기',

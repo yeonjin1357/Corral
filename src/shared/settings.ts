@@ -172,14 +172,62 @@ function cleanRepoPath(s: string): string | null {
   return /^[A-Za-z]:[\\/]/.test(t) || /^\/(?!\/)/.test(t) ? t : null
 }
 
-/** `:포트`(1~65535) 또는 경로가 아닌 프로세스 이름. */
-function cleanHidden(s: string): string | null {
-  const t = s.trim()
-  if (!t || t.length > SETTINGS_LIMITS.hiddenLength) return null
+/** 워크트리 항목(`<절대 경로>:<포트>`)의 경로 길이 상한. */
+const HIDDEN_PATH_LENGTH = 1024
+const validPort = (p: string): boolean => Number(p) >= 1 && Number(p) <= 65535
+
+/** 숨김 항목을 나눈다: `:포트`, `<워크트리 절대 경로>:<포트>`, 프로세스 이름. 형식이 아니면 null. */
+function parseHidden(
+  entry: string
+):
+  | { kind: 'port'; port: number }
+  | { kind: 'worktree'; root: string; port: number }
+  | { kind: 'name'; name: string }
+  | null {
+  const t = entry.trim()
+  if (!t) return null
   const port = /^:(\d{1,5})$/.exec(t)
-  if (port) return Number(port[1]) >= 1 && Number(port[1]) <= 65535 ? t : null
-  if (t.startsWith(':')) return null
-  return /[\\/]/.test(t) ? null : t
+  if (port) return validPort(port[1]) ? { kind: 'port', port: Number(port[1]) } : null
+  const scoped = /^(.+):(\d{1,5})$/.exec(t)
+  if (scoped && cleanRepoPath(scoped[1]) && scoped[1].length <= HIDDEN_PATH_LENGTH)
+    return validPort(scoped[2])
+      ? { kind: 'worktree', root: scoped[1], port: Number(scoped[2]) }
+      : null
+  if (t.startsWith(':') || t.length > SETTINGS_LIMITS.hiddenLength || /[\\/]/.test(t)) return null
+  return { kind: 'name', name: t }
+}
+
+/** `:포트`(1~65535), `<워크트리 절대 경로>:<포트>`(그 워크트리의 그 포트 서버만), 또는 경로가 아닌 프로세스 이름. */
+function cleanHidden(s: string): string | null {
+  return parseHidden(s) ? s.trim() : null
+}
+
+const pathKey = (p: string): string =>
+  p
+    .replace(/[\\/]+$/, '')
+    .replace(/\\/g, '/')
+    .toLowerCase()
+
+/** 숨김 항목이 이 서버에 맞는지(포트 중 하나, 프로세스 이름, 또는 같은 워크트리의 포트). 대소문자는 가리지 않는다. */
+export function hiddenMatches(
+  entry: string,
+  row: { ports: readonly number[]; processName: string; worktree: { root: string } | null }
+): boolean {
+  const h = parseHidden(entry)
+  if (!h) return false
+  if (h.kind === 'port') return row.ports.includes(h.port)
+  if (h.kind === 'name') return h.name.toLowerCase() === row.processName.toLowerCase()
+  return (
+    !!row.worktree && pathKey(row.worktree.root) === pathKey(h.root) && row.ports.includes(h.port)
+  )
+}
+
+/** 화면에 보일 숨김 항목 이름: 워크트리 항목은 `폴더 이름 :포트`, 나머지는 그대로. */
+export function hiddenLabel(entry: string): string {
+  const h = parseHidden(entry)
+  if (h?.kind !== 'worktree') return entry.trim()
+  const parts = h.root.split(/[\\/]+/).filter(Boolean)
+  return `${parts[parts.length - 1] ?? h.root} :${h.port}`
 }
 
 /** 별칭: 키는 로컬 절대 경로, 이름은 공백을 정리해 40자까지. 객체가 아니면 빈 값. */
