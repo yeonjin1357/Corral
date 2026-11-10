@@ -330,6 +330,11 @@ export interface CodexHookStatus {
 export type KillResult = {
   status: 'killed' | 'cancelled' | 'gone' | 'changed' | 'failed'
   message?: string
+  /**
+   * 끄거나 지운 것(성공 때만, 기록 G3g 에 쓴다). 끄기: 실제로 끈 행 수와 그 행들의 메모리·커밋 합(커밋을 모르면 null).
+   * 디스크 지우기: 지운 폴더 수, memoryBytes 는 디스크에서 확보한 크기, commitBytes 는 null, names 는 지운 폴더 이름.
+   */
+  freed?: { count: number; memoryBytes: number; commitBytes: number | null; names?: string[] }
 }
 
 export interface DashboardSnapshot {

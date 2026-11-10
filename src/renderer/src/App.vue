@@ -158,9 +158,6 @@ onUnmounted(() => {
   window.removeEventListener('keydown', shortcut)
 })
 
-const heavyKey = (j: DashboardSnapshot['heavyJobs'][number]): string =>
-  `heavy:${j.pid}:${j.startedAt ?? ''}`
-
 const selected = computed<Selected | null>(() => {
   const s = snapshot.value
   const key = selectedKey.value
@@ -171,7 +168,7 @@ const selected = computed<Selected | null>(() => {
   if (agent) return { kind: 'agent', row: agent }
   const leftover = s.leftovers.find((r) => selectionKey.leftover(r) === key)
   if (leftover) return { kind: 'leftover', row: leftover }
-  const heavy = s.heavyJobs.find((r) => heavyKey(r) === key)
+  const heavy = s.heavyJobs.find((r) => selectionKey.heavy(r) === key)
   if (heavy) return { kind: 'heavy', row: heavy }
   const disk = s.disk?.rows.find((r) => selectionKey.disk(r.worktreeRoot) === key)
   if (disk) return { kind: 'disk', row: disk }

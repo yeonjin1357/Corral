@@ -179,7 +179,7 @@ const heavyItems = computed<MiniItem[]>(() =>
     .sort((a, b) => b.memoryBytes - a.memoryBytes)
     .slice(0, MINI)
     .map((j) => ({
-      key: `heavy:${j.pid}:${j.startedAt ?? ''}`,
+      key: selectionKey.heavy(j),
       label: j.label,
       title: j.commandLine,
       bytes: j.memoryBytes,

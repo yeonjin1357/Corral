@@ -430,6 +430,7 @@ export function createDiskManager(deps: DiskDeps): {
 
     // 4) 지우기: 이름 규칙·경로·링크 여부를 한 번 더 본 뒤에만.
     const failed: string[] = []
+    const removed: string[] = []
     let freed = 0
     for (const folder of targets) {
       const path = join(row.worktreeRoot, folder.name)
@@ -452,7 +453,10 @@ export function createDiskManager(deps: DiskDeps): {
         )
       )
         failed.push(folder.name)
-      else freed += known.get(folder.name) ?? 0
+      else {
+        freed += known.get(folder.name) ?? 0
+        removed.push(folder.name)
+      }
     }
 
     // 5) 목록 갱신: 지울 것이 남지 않았으면 행을 뺀다.
@@ -470,7 +474,11 @@ export function createDiskManager(deps: DiskDeps): {
     emit()
     if (failed.length > 0)
       return { status: 'failed', message: text.disk.partial(failed.join(', ')) }
-    return { status: 'killed', message: text.disk.removed(names, formatBytes(freed)) }
+    return {
+      status: 'killed',
+      message: text.disk.removed(names, formatBytes(freed)),
+      freed: { count: removed.length, memoryBytes: freed, commitBytes: null, names: removed }
+    }
   }
 
   async function remove(worktreeRoot: string): Promise<KillResult> {

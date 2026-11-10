@@ -351,7 +351,10 @@ describe.runIf(process.platform === 'win32')('실제 Windows 에서', () => {
         wait: async () => {},
         platform: 'win32'
       })
-      expect(await killer.killLeftover(pid!)).toEqual({ status: 'killed' })
+      expect(await killer.killLeftover(pid!)).toEqual({
+        status: 'killed',
+        freed: { count: 1, memoryBytes: row!.memoryBytes, commitBytes: row!.commitBytes }
+      })
       const after = await sampleWindows()
       expect(after.processes.some((p) => p.commandLine.includes(marker))).toBe(false)
       pid = undefined

@@ -432,8 +432,8 @@ function buildTable(tab: TabKey, s: DashboardSnapshot): Table {
         ],
         sort: { id: 'memory', dir: 'desc' },
         rows: s.heavyJobs.map((j) => ({
-          key: `heavy:${j.pid}:${j.startedAt ?? ''}`,
-          id: `heavy:${j.pid}:${j.startedAt ?? ''}`,
+          key: selectionKey.heavy(j),
+          id: selectionKey.heavy(j),
           cells: {
             name: { text: j.label, title: j.commandLine, icon: heavyIcon(j, s.platform) },
             project: { text: folderOf(j.worktree), title: j.worktree?.root },

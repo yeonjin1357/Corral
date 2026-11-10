@@ -31,8 +31,11 @@ const RAM_COOLDOWN_MS = 30 * 60 * 1000
 /** 위험 아래로 이만큼 이어서 내려가 있었으면 정상까지 안 내려와도 다시 알릴 수 있다(늘 경고 근처인 PC). */
 const RAM_REARM_MS = 5 * 60 * 1000
 const HEAVY_COOLDOWN_MS = 10 * 60 * 1000
-/** 이보다 짧게 일한 뒤 끝난 것은 알리지 않는다(터미널에서 주고받는 짧은 답마다 알리면 시끄럽다). */
-const DONE_MIN_WORK_MS = 2 * 60 * 1000
+/**
+ * 이보다 짧게 일한 뒤 끝난 것은 알리지 않는다(터미널에서 주고받는 짧은 답마다 알리면 시끄럽다).
+ * 기록(G3g)의 작업 끝남도 같은 기준을 쓴다.
+ */
+export const DONE_MIN_WORK_MS = 2 * 60 * 1000
 
 const toolName = (a: Pick<AgentRow, 'tool'>): string => text.ui.agent.tools[a.tool]
 

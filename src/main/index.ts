@@ -19,7 +19,7 @@ import { join } from 'path'
 import { cpus, homedir } from 'os'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
-import type { DashboardSnapshot } from '../shared/types'
+import type { DashboardSnapshot, KillResult } from '../shared/types'
 import {
   DEFAULT_SETTINGS,
   normalizeSettings,
@@ -61,6 +61,7 @@ import { createFocuser, openNoticeTarget } from './focusWindow'
 import { backgroundFor, overlayFor, windowChrome } from './windowChrome'
 import { createIconSource } from './icons'
 import { createRamHistory, loadHistory, saveHistory } from './historyStore'
+import { cleanupEvent, createEventLog, diffEvents, diskRemoveEvent } from './events'
 import { codexHome, createCodexReader } from './codexRollout'
 import { BADGE_COLOR, createTrayController, LEVEL_COLORS } from './tray'
 import {
@@ -153,12 +154,39 @@ const HISTORY_SAVE_TIMEOUT_MS = 2000
 const historyPath = join(app.getPath('userData'), 'history.json')
 const ramHistory = createRamHistory()
 
+/** 기록(G3g): 스냅샷 변화와 정리 동작. 새 기록은 앱 창에 바로 보낸다. */
+const eventLog = createEventLog({
+  onAdded: (events) => {
+    if (mainWindow && !mainWindow.isDestroyed())
+      mainWindow.webContents.send(IPC.eventsAdded, events)
+  }
+})
+/**
+ * 기록을 견줄 지난 스냅샷. 지연된 스냅샷은 옛 데이터라 건너뛰어, 수집이 되살아나면 마지막 정상 스냅샷과 견준다.
+ * 다시 내보낸 스냅샷(훅 상태·디스크 갱신)도 여기에 들어가므로 같은 변화를 두 번 적지 않는다.
+ */
+let eventBase: DashboardSnapshot | null = null
+/** 무거운 작업별 그동안의 최대 메모리(diffEvents 가 갱신한다). */
+const heavyPeaks = new Map<string, number>()
+
+function recordSnapshot(snapshot: DashboardSnapshot): void {
+  eventLog.add(diffEvents(eventBase, snapshot, heavyPeaks))
+  if (!snapshot.stale) eventBase = snapshot
+}
+
+/** 끄기·정리(하나·한꺼번에·작업 공간)로 끈 것이 있으면 기록에 남긴다. */
+function recordCleanup(result: KillResult): void {
+  const event = cleanupEvent(result, Date.now())
+  if (event) eventLog.add([event])
+}
+
 async function restoreHistory(): Promise<void> {
   const now = Date.now()
   const loaded = await loadHistory(historyPath, now)
   if (!loaded) return
   ramHistory.import(loaded.ram, now)
   collector?.importState(loaded, now)
+  eventLog.import(loaded.events, now)
 }
 
 async function persistHistory(): Promise<void> {
@@ -168,7 +196,8 @@ async function persistHistory(): Promise<void> {
       version: 2,
       savedAt: Date.now(),
       ram: ramHistory.points(),
-      ...collector.exportState()
+      ...collector.exportState(),
+      events: eventLog.export()
     })
   } catch {
     // 기록을 못 남겨도 앱 동작에는 지장이 없다(다음에 처음부터 센다).
@@ -181,6 +210,7 @@ const scheduler = createScheduler({
   onSnapshot: (snapshot) => {
     if (!snapshot.stale && snapshot.memory.totalBytes > 0)
       ramHistory.record(snapshot.takenAt, snapshot.memory.usedPercent)
+    recordSnapshot(snapshot)
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.snapshot, snapshot)
     if (trayWindow && !trayWindow.isDestroyed() && trayWindow.isVisible())
       trayWindow.webContents.send(IPC.snapshot, snapshot)
@@ -591,27 +621,32 @@ function registerIpc(): void {
   ipcMain.handle(IPC.historyRam, (event) =>
     fromMainWindow(event.sender) ? ramHistory.points() : []
   )
+  ipcMain.handle(IPC.eventsGet, (event) => (fromMainWindow(event.sender) ? eventLog.list() : []))
   ipcMain.handle(IPC.killServer, async (event, pid: unknown) => {
     if (!fromMainWindow(event.sender)) return { status: 'failed', message: text.killResult.invalid }
     const result = await killer.killServer(Number(pid))
+    recordCleanup(result)
     void scheduler.refreshNow()
     return result
   })
   ipcMain.handle(IPC.killLeftover, async (event, pid: unknown) => {
     if (!fromMainWindow(event.sender)) return { status: 'failed', message: text.killResult.invalid }
     const result = await killer.killLeftover(Number(pid))
+    recordCleanup(result)
     void scheduler.refreshNow()
     return result
   })
   ipcMain.handle(IPC.killMany, async (event, keys: unknown) => {
     if (!fromMainWindow(event.sender)) return { status: 'failed', message: text.killResult.invalid }
     const result = await killer.killMany(keys as string[])
+    recordCleanup(result)
     void scheduler.refreshNow()
     return result
   })
   ipcMain.handle(IPC.cleanupWorkspace, async (event, root: unknown) => {
     if (!fromMainWindow(event.sender)) return { status: 'failed', message: text.killResult.invalid }
     const result = await killer.cleanupWorkspace(root as string)
+    recordCleanup(result)
     void scheduler.refreshNow()
     return result
   })
@@ -620,7 +655,10 @@ function registerIpc(): void {
   )
   ipcMain.handle(IPC.diskRemove, async (event, root: unknown) => {
     if (!fromMainWindow(event.sender)) return { status: 'failed', message: text.killResult.invalid }
-    const result = await disk.remove(typeof root === 'string' ? root : '')
+    const target = typeof root === 'string' ? root : ''
+    const result = await disk.remove(target)
+    const removed = diskRemoveEvent(target, result, Date.now())
+    if (removed) eventLog.add([removed])
     void scheduler.refreshNow()
     return result
   })

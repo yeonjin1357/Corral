@@ -156,12 +156,21 @@ function validId(n: number): boolean {
   return Number.isInteger(n) && n > 0
 }
 
+/** 항목들의 메모리 합(RAM, 커밋은 아는 것만 — 하나도 모르면 null). */
+function bytesOf(items: Pick<RecommendItem, 'memoryBytes' | 'commitBytes'>[]): {
+  memoryBytes: number
+  commitBytes: number | null
+} {
+  return {
+    memoryBytes: items.reduce((sum, i) => sum + i.memoryBytes, 0),
+    commitBytes: commitSum(items)
+  }
+}
+
 /** 항목들을 끄면 확보할 메모리 문구(RAM 합, 커밋을 알면 커밋 합도). */
 function freedOf(items: RecommendItem[]): string {
-  return formatFreed(
-    items.reduce((sum, i) => sum + i.memoryBytes, 0),
-    commitSum(items)
-  )
+  const { memoryBytes, commitBytes } = bytesOf(items)
+  return formatFreed(memoryBytes, commitBytes)
 }
 
 /**
@@ -283,10 +292,19 @@ export function createKiller(deps: KillDeps): {
     return { status: 'killed' }
   }
 
-  /** find 가 최신 스냅샷에서 대상을 찾아 돌려준다(없으면 gone, 문자열이면 그 이유로 실패). */
+  /**
+   * find 가 최신 스냅샷에서 대상 행을 찾아 돌려준다(없으면 gone, 결과면 그 이유로 실패).
+   * 끄면 그 행의 메모리·커밋을 확보한 것으로 돌려준다(기록 G3g).
+   */
   async function run(
     pid: number,
-    find: () => { target: KillTarget; confirm: KillConfirm } | 'gone' | KillResult
+    find: () =>
+      | {
+          target: KillTarget & Pick<ServerRow, 'memoryBytes' | 'commitBytes'>
+          confirm: KillConfirm
+        }
+      | 'gone'
+      | KillResult
   ): Promise<KillResult> {
     if (busy.has(pid)) return { status: 'failed', message: text.killResult.busy }
     busy.add(pid)
@@ -304,9 +322,9 @@ export function createKiller(deps: KillDeps): {
       const after = await freshPlan(found.target, spare)
       if (!after.plan.ok) return planFailure(after.plan.reason)
       const result = terminate(after.plan.pids)
-      if (result.status === 'killed' && deps.platform === 'darwin')
-        await escalateOnDarwin(after.plan.pids, after.sample)
-      return result
+      if (result.status !== 'killed') return result
+      if (deps.platform === 'darwin') await escalateOnDarwin(after.plan.pids, after.sample)
+      return { ...result, freed: { count: 1, ...bytesOf([found.target]) } }
     } catch (e) {
       return { status: 'failed', message: errorMessage(e) }
     } finally {
@@ -422,7 +440,8 @@ export function createKiller(deps: KillDeps): {
       if (busyCount > 0) parts.push(text.killMany.busy(busyCount))
       if (failed > 0) parts.push(text.killMany.failed(failed))
       const message = parts.join(' ')
-      if (killed > 0) return { status: 'killed', message }
+      if (killed > 0)
+        return { status: 'killed', message, freed: { count: killed, ...bytesOf(killedItems) } }
       if (failed > 0) return { status: 'failed', message }
       return { status: 'changed' }
     } catch (e) {

@@ -1,5 +1,6 @@
 import { readFile, rename, rm, writeFile } from 'fs/promises'
 import type { AgentState, TrendPoint } from '../shared/types'
+import type { PitEvent } from '../shared/events'
 import type { ServerHistoryData } from './serverHistory'
 
 const MIN = 60_000
@@ -34,6 +35,8 @@ export interface HistoryFile {
   agentStates: AgentStateData
   /** 나중에 더한 값이라 예전에 저장한 파일에는 없다. */
   agentSeen?: AgentSeenData
+  /** 기록(G3g). 나중에 더한 값이라 예전에 저장한 파일에는 없다. */
+  events?: PitEvent[]
 }
 
 export interface LoadedHistory {
@@ -43,6 +46,11 @@ export interface LoadedHistory {
   serverMemo: ServerMemoData | null
   agentStates: AgentStateData | null
   agentSeen: AgentSeenData | null
+  /**
+   * 기록(G3g). 꺼져 있던 시간과 상관없이 돌려준다(지난 일이라 판단 기억과 달리 버릴 까닭이 없다).
+   * 항목 모양·24시간 확인은 기록이 불러올 때 한다(createEventLog().import). 없으면 빈 목록.
+   */
+  events: unknown[]
 }
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
@@ -117,7 +125,8 @@ export async function loadHistory(path: string, now: number): Promise<LoadedHist
     servers: isRecord(raw.servers) ? (raw.servers as ServerHistoryData) : {},
     serverMemo: resume ? validServerMemo(raw.serverMemo) : null,
     agentStates: resume ? validStates(raw.agentStates, AGENT_STATES) : null,
-    agentSeen: resume ? validSeen(raw.agentSeen) : null
+    agentSeen: resume ? validSeen(raw.agentSeen) : null,
+    events: Array.isArray(raw.events) ? raw.events : []
   }
 }
 

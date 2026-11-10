@@ -63,7 +63,10 @@ describe.runIf(process.platform === 'win32')('실제 Windows 에서', () => {
         wait: async () => {},
         platform: 'win32'
       })
-      await expect(killer.killServer(child.pid!)).resolves.toEqual({ status: 'killed' })
+      await expect(killer.killServer(child.pid!)).resolves.toEqual({
+        status: 'killed',
+        freed: { count: 1, memoryBytes: row!.memoryBytes, commitBytes: row!.commitBytes }
+      })
       await exited
       expect(child.exitCode !== null || child.signalCode !== null).toBe(true)
     } finally {
@@ -113,6 +116,9 @@ const freshSample: RawSample = {
   processes: [proc(4000, 1, 'cmd.exe', 'cmd', 100), vite, esbuild],
   tcp: []
 }
+
+/** 표본 행(2 MB, 커밋 모름) 하나를 끈 결과. */
+const KILLED = { status: 'killed', freed: { count: 1, memoryBytes: 2 * MB, commitBytes: null } }
 
 function snapshotWith(servers: ServerRow[], leftovers: LeftoverRow[] = []): DashboardSnapshot {
   return { ...blankSnapshot(1), servers, leftovers }
@@ -256,7 +262,7 @@ describe('killServer', () => {
       latest: () => snapshotWith([api]),
       resample: async () => ({ processes: [parent, jvm, conhost], tcp: [] })
     })
-    await expect(createKiller(d).killServer(6100)).resolves.toEqual({ status: 'killed' })
+    await expect(createKiller(d).killServer(6100)).resolves.toEqual(KILLED)
     expect(d.signal.mock.calls).toEqual([
       [6100, 'SIGTERM'],
       [6101, 'SIGTERM'],
@@ -293,7 +299,7 @@ describe('killServer', () => {
       latest: () => snapshotWith([rowA, rowB]),
       resample: async () => ({ processes: [a, shell, b, bChild], tcp: [] })
     })
-    await expect(createKiller(d).killServer(7000)).resolves.toEqual({ status: 'killed' })
+    await expect(createKiller(d).killServer(7000)).resolves.toEqual(KILLED)
     expect(d.signal.mock.calls).toEqual([
       [7000, 'SIGTERM'],
       [7001, 'SIGTERM']
@@ -302,11 +308,25 @@ describe('killServer', () => {
 
   test('Windows: 확인 후 루트와 자손을 각각 종료', async () => {
     const d = deps()
-    await expect(createKiller(d).killServer(4100)).resolves.toEqual({ status: 'killed' })
+    await expect(createKiller(d).killServer(4100)).resolves.toEqual(KILLED)
     expect(d.signal.mock.calls).toEqual([
       [4100, 'SIGTERM'],
       [4101, 'SIGTERM']
     ])
+  })
+
+  test('끄면 끈 개수와 그 행의 메모리·커밋을 함께 돌려준다(기록에 쓴다)', async () => {
+    const d = deps({
+      latest: () => snapshotWith([{ ...row, memoryBytes: 900 * MB, commitBytes: 3 * 1024 * MB }])
+    })
+    expect(await createKiller(d).killServer(4100)).toEqual({
+      status: 'killed',
+      freed: { count: 1, memoryBytes: 900 * MB, commitBytes: 3 * 1024 * MB }
+    })
+    // 끄지 못했으면 없다.
+    expect(await createKiller(deps({ confirm: async () => false })).killServer(4100)).toEqual({
+      status: 'cancelled'
+    })
   })
 
   test('macOS: SIGTERM 후 3초 기다려 같은 프로세스로 남아 있는 것만 SIGKILL', async () => {
@@ -315,7 +335,7 @@ describe('killServer', () => {
     let call = 0
     const resample = vi.fn(async () => samples[Math.min(call++, 2)])
     const d = deps({ platform: 'darwin', wait, resample })
-    await expect(createKiller(d).killServer(4100)).resolves.toEqual({ status: 'killed' })
+    await expect(createKiller(d).killServer(4100)).resolves.toEqual(KILLED)
     expect(wait).toHaveBeenCalledWith(3000)
     expect(d.signal.mock.calls).toEqual([
       [4100, 'SIGTERM'],
@@ -403,7 +423,7 @@ describe('killServer', () => {
         if (pid === 4101) throw Object.assign(new Error('x'), { code: 'ESRCH' })
       })
     })
-    expect(await createKiller(d).killServer(4100)).toEqual({ status: 'killed' })
+    expect(await createKiller(d).killServer(4100)).toEqual(KILLED)
   })
 
   test('같은 pid 를 두 번 동시에 누르면 두 번째는 확인 창 없이 거절', async () => {
@@ -415,7 +435,7 @@ describe('killServer', () => {
     expect(second).toEqual({ status: 'failed', message: '이미 처리 중이에요.' })
     await vi.waitFor(() => expect(confirm).toHaveBeenCalled())
     release(true)
-    expect(await first).toEqual({ status: 'killed' })
+    expect(await first).toEqual(KILLED)
     expect(confirm).toHaveBeenCalledTimes(1)
   })
 })
@@ -473,7 +493,7 @@ describe('남은 프로세스 끄기', () => {
   test('확인 후 루트와 최신 샘플의 자손을 종료', async () => {
     const confirm = vi.fn<(o: KillConfirm) => Promise<boolean>>(async () => true)
     const d = deps({ confirm })
-    await expect(createKiller(d).killLeftover(4100)).resolves.toEqual({ status: 'killed' })
+    await expect(createKiller(d).killLeftover(4100)).resolves.toEqual(KILLED)
     expect(confirm.mock.calls[0]?.[0].title).toBe('남은 프로세스 끄기')
     expect(d.signal.mock.calls).toEqual([
       [4100, 'SIGTERM'],

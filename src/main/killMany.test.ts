@@ -96,7 +96,11 @@ test('확인 창 하나에 목록과 합계를 보이고, 확인하면 모두(�
     [4100, 'SIGTERM'],
     [4101, 'SIGTERM']
   ])
-  expect(result).toEqual({ status: 'killed', message: '2개를 껐어요. 약 1.9 GB 를 확보했어요.' })
+  expect(result).toEqual({
+    status: 'killed',
+    message: '2개를 껐어요. 약 1.9 GB 를 확보했어요.',
+    freed: { count: 2, memoryBytes: 1900 * MB, commitBytes: null }
+  })
 })
 
 test('추천에 없는 키는 무시하고, 남는 것이 없으면 확인 창 없이 gone', async () => {
@@ -126,7 +130,8 @@ test('확인 창을 띄운 사이 바뀐 것은 건너뛰고 결과에 알린다
   expect(d.signal.mock.calls.map((c) => c[0])).toEqual([4100, 4101])
   expect(result).toEqual({
     status: 'killed',
-    message: '1개를 껐어요. 약 800 MB 를 확보했어요. 1개는 그 사이 바뀌거나 끝나서 건너뛰었어요.'
+    message: '1개를 껐어요. 약 800 MB 를 확보했어요. 1개는 그 사이 바뀌거나 끝나서 건너뛰었어요.',
+    freed: { count: 1, memoryBytes: 800 * MB, commitBytes: null }
   })
 })
 
@@ -143,7 +148,8 @@ test('커밋을 알면 확인 창·결과에 RAM·커밋을 둘 다, 결과는 �
   )
   expect(result).toEqual({
     status: 'killed',
-    message: '2개를 껐어요. RAM 약 1.9 GB · 커밋 약 3.9 GB 를 확보했어요.'
+    message: '2개를 껐어요. RAM 약 1.9 GB · 커밋 약 3.9 GB 를 확보했어요.',
+    freed: { count: 2, memoryBytes: 1900 * MB, commitBytes: 4000 * MB }
   })
 
   // Gradle 데몬이 확인 창 사이에 바뀌어 건너뛰면 서버의 몫만.
@@ -153,9 +159,11 @@ test('커밋을 알면 확인 창·결과에 RAM·커밋을 둘 다, 결과는 �
   }
   const samples = [fresh, changed]
   const some = deps({ latest, resample: async () => samples.shift() ?? changed })
-  expect((await createKiller(some).killMany(KEYS)).message).toBe(
+  const partial = await createKiller(some).killMany(KEYS)
+  expect(partial.message).toBe(
     '1개를 껐어요. RAM 약 800 MB · 커밋 약 2.9 GB 를 확보했어요. 1개는 그 사이 바뀌거나 끝나서 건너뛰었어요.'
   )
+  expect(partial.freed).toEqual({ count: 1, memoryBytes: 800 * MB, commitBytes: 3000 * MB })
 })
 
 test('처음 확인에서 모두 바뀌었거나 끝났으면 확인 창 없이 gone', async () => {
@@ -270,7 +278,11 @@ describe('작업 공간 한 번에 정리(F2)', () => {
     expect(box.detail).toContain('• :3000 (shop-web · develop) — 800 MB')
     expect(box.buttons).toEqual(['모두 끄기', '취소'])
     expect(d.signal.mock.calls.map((c) => c[0])).toEqual([7100, 4100, 4101])
-    expect(result).toEqual({ status: 'killed', message: '2개를 껐어요. 약 1.9 GB 를 확보했어요.' })
+    expect(result).toEqual({
+      status: 'killed',
+      message: '2개를 껐어요. 약 1.9 GB 를 확보했어요.',
+      freed: { count: 2, memoryBytes: 1900 * MB, commitBytes: null }
+    })
   })
 
   test('무거운 작업·에이전트·다른 작업 공간·숨긴 서버는 끄지 않는다', async () => {

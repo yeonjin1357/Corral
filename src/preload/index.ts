@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import { IPC, type NavigateTarget, type PitwallApi } from '../shared/ipc'
 import type { DashboardSnapshot, UpdateStatus } from '../shared/types'
 import type { Settings } from '../shared/settings'
+import type { PitEvent } from '../shared/events'
 
 /** 렌더러에는 pitwall 이 쓰는 동작만 노출한다(ipcRenderer 전체를 넘기지 않음). */
 const api: PitwallApi = {
@@ -29,6 +30,16 @@ const api: PitwallApi = {
       ipcRenderer.on(IPC.updateChanged, handler)
       return () => {
         ipcRenderer.removeListener(IPC.updateChanged, handler)
+      }
+    }
+  },
+  events: {
+    get: () => ipcRenderer.invoke(IPC.eventsGet),
+    onAdded(callback) {
+      const handler = (_event: IpcRendererEvent, events: PitEvent[]): void => callback(events)
+      ipcRenderer.on(IPC.eventsAdded, handler)
+      return () => {
+        ipcRenderer.removeListener(IPC.eventsAdded, handler)
       }
     }
   },

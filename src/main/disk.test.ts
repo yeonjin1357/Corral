@@ -186,6 +186,13 @@ describe('createDiskManager (실제 git)', () => {
     expect(row.totalBytes).toBe(500)
     const result = await manager.remove(gone)
     expect(result.status).toBe('killed')
+    // 링크인 node_modules 는 지우지 않아 지운 것은 .venv 하나다.
+    expect(result.freed).toEqual({
+      count: 1,
+      memoryBytes: 500,
+      commitBytes: null,
+      names: ['.venv']
+    })
     expect(await exists(join(store, 'keep.bin'))).toBe(true)
     expect(await exists(join(gone, 'node_modules'))).toBe(true)
     expect(await exists(join(gone, '.venv'))).toBe(false)
@@ -198,7 +205,8 @@ describe('createDiskManager (실제 git)', () => {
     const result = await manager.remove(gone)
     expect(result).toEqual({
       status: 'killed',
-      message: 'node_modules 를 지웠어요. 약 3 KB 를 확보했어요.'
+      message: 'node_modules 를 지웠어요. 약 3 KB 를 확보했어요.',
+      freed: { count: 1, memoryBytes: 3000, commitBytes: null, names: ['node_modules'] }
     })
     const box = d.confirm.mock.calls[0][0] as KillConfirm
     expect(box.title).toBe('의존성 폴더 지우기')

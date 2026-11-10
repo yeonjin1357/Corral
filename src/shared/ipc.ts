@@ -8,6 +8,7 @@ import type {
   UpdateStatus
 } from './types'
 import type { Settings } from './settings'
+import type { PitEvent } from './events'
 
 /** 메인 ↔ 렌더러 IPC 채널 이름. */
 export const IPC = {
@@ -41,7 +42,9 @@ export const IPC = {
   updateGet: 'pitwall:update-get',
   updateCheck: 'pitwall:update-check',
   updateInstall: 'pitwall:update-install',
-  updateChanged: 'pitwall:update-changed'
+  updateChanged: 'pitwall:update-changed',
+  eventsGet: 'pitwall:events-get',
+  eventsAdded: 'pitwall:events-added'
 } as const
 
 /** 바로 가기(G3f): 경로 복사·폴더 열기·터미널 열기. */
@@ -116,6 +119,12 @@ export interface PitwallApi {
     /** Windows: 받아 둔 새 버전을 설치하려고 다시 시작한다. */
     install(): Promise<void>
     onChange(callback: (status: UpdateStatus) => void): () => void
+  }
+  /** 기록(G3g): 메인이 기억한 일어난 일(최근 300개·24시간, 다시 켜도 이어짐). */
+  events: {
+    get(): Promise<PitEvent[]>
+    /** 새 기록이 생길 때마다 호출된다. 반환 함수로 구독을 끊는다. */
+    onAdded(callback: (events: PitEvent[]) => void): () => void
   }
   /** 알림·트레이에서 특정 화면으로 가라고 할 때 호출된다. 반환 함수로 구독을 끊는다. */
   onNavigate(callback: (target: NavigateTarget) => void): () => void
