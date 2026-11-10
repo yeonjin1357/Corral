@@ -335,6 +335,7 @@ export const text = {
     /** 표 위 탭(NeoHtop ToolBar). */
     tabs: {
       label: '보기',
+      workspaces: '작업 공간',
       ports: '개발 서버',
       agents: '에이전트',
       leftovers: '남은 프로세스',
@@ -492,6 +493,21 @@ export const text = {
         '이 워크트리의 첫 포트로 숨겨요(다른 프로젝트가 같은 포트를 열면 그대로 보여요). 숨긴 서버는 개수·정리 추천·알림·트레이에서 빠져요.',
       hiddenDone: (entry: string): string =>
         `${entry} 서버를 숨겼어요. 표 아래 "숨김"에서 다시 볼 수 있어요.`
+    },
+    /** 작업 공간 탭(G4): 한 작업의 에이전트·서버·무거운 작업·남은 프로세스를 한 묶음에. */
+    workspaces: {
+      /** 종류 칸과 머리 요약("서버 3 · 무거운 작업 1"). */
+      kinds: {
+        server: '서버',
+        agent: '에이전트',
+        heavy: '무거운 작업',
+        leftover: '남은 프로세스'
+      },
+      /** 머리 요약의 커밋 안 한 변경 수("변경 12"). */
+      changed: '변경',
+      members: (n: number): string => `항목 ${n}개`,
+      memoryHint: '작업 공간 전체 메모리 합(프로세스마다 한 번)',
+      commitHint: '작업 공간 전체 커밋 합(프로세스마다 한 번)'
     },
     actions: {
       hide: '숨기기',
@@ -701,6 +717,7 @@ export const text = {
       emptyHeavy: '돌고 있는 무거운 작업이 없어요.',
       emptyApps: '메모리를 많이 쓰는 다른 앱이 없어요.',
       emptyEvents: '아직 기록이 없어요.',
+      emptyWorkspaces: '실행 중인 작업이 없어요.',
       noMatch: '찾는 항목이 없어요.',
       groups: {
         ports: '개발 서버 포트',

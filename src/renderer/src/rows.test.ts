@@ -1,13 +1,16 @@
 import {
   filterRows,
   groupServers,
+  groupWorkspaces,
   hiddenServerTable,
   sortRows,
   tableFor,
   TABS,
   type SnapshotTab,
-  workspaceSummary
+  workspaceSummary,
+  workspaceTable
 } from './rows'
+import { selectionKey } from '../../shared/keys'
 import {
   GB,
   MB,
@@ -16,7 +19,8 @@ import {
   heavyJob,
   leftoverRow,
   serverRow,
-  snapshot
+  snapshot,
+  workspaceRow
 } from './testing/fixtures'
 
 const MIN = 60_000
@@ -543,10 +547,13 @@ describe('작업 공간 묶음(F1)', () => {
     expect(ws).toMatchObject({
       key: 'group:c:\\work\\ws',
       root: 'C:\\work\\ws',
-      serverCount: 2,
-      memoryBytes: 300 * MB + 2 * GB
+      count: 2,
+      memoryBytes: 300 * MB + 2 * GB,
+      actions: ['rename', 'cleanup']
     })
-    expect(ws.agents.map((a) => a.pid)).toEqual([claude.pid])
+    // 개발 서버 탭의 머리는 서버만 보인다(작업 공간 탭의 요약은 없다).
+    expect(ws.summary).toBeUndefined()
+    expect(ws.agentBadges.map((b) => b.key)).toEqual([selectionKey.agent(claude)])
     expect(ws.status).toEqual({ text: '정리 후보 1 · 사용 중 1', dot: 'stopped' })
   })
 
@@ -554,7 +561,7 @@ describe('작업 공간 묶음(F1)', () => {
     const filtered = rows.filter((r) => r.key === 'server:1:200')
     const groups = groupServers(filtered, s.servers, s.agents)
     const ws = groups.find((g) => g.group)?.group
-    expect(ws).toMatchObject({ serverCount: 2, memoryBytes: 300 * MB + 2 * GB })
+    expect(ws).toMatchObject({ count: 2, memoryBytes: 300 * MB + 2 * GB })
     expect(ws!.status).toEqual({ text: '정리 후보 1 · 사용 중 1', dot: 'stopped' })
     expect(groups.find((g) => g.group)!.rows.map((r) => r.key)).toEqual(['server:1:200'])
   })
@@ -578,6 +585,264 @@ describe('작업 공간 묶음(F1)', () => {
     const groups = groupServers(byMemory, s.servers, s.agents)
     expect(groups.map((g) => g.group?.name ?? null)).toEqual(['ws', null])
     expect(groups[0].rows.map((r) => r.key)).toEqual(['server:2:200', 'server:1:200'])
+  })
+})
+
+describe('작업 공간 탭(G4)', () => {
+  const now = 10 * 60 * MIN
+  const SHOP = { root: 'C:\\work\\shop', name: 'shop', branch: 'main', outer: true }
+  const front = serverRow({
+    pid: 1,
+    ports: [5173],
+    memoryBytes: 300 * MB,
+    worktree: { root: 'C:\\work\\shop\\front', branch: 'main', isLinkedWorktree: false },
+    workspace: SHOP
+  })
+  const api = serverRow({
+    pid: 2,
+    ports: [8081],
+    memoryBytes: 900 * MB,
+    cpuPercent: 40,
+    worktree: { root: 'C:\\work\\shop\\api', branch: 'feat/api', isLinkedWorktree: false },
+    workspace: SHOP
+  })
+  const claude = agentRow({
+    pid: 10,
+    worktree: { root: 'C:\\work\\shop', branch: 'main', isLinkedWorktree: false },
+    workspace: SHOP,
+    state: 'working',
+    stateSince: now - 12 * MIN
+  })
+  const build = heavyJob({ pid: 20, memoryBytes: 2 * GB, workspace: SHOP })
+  const gradle = leftoverRow({
+    pid: 30,
+    label: 'Gradle 데몬',
+    memoryBytes: 500 * MB,
+    workspace: SHOP
+  })
+  const lone = serverRow({ pid: 3, ports: [3000], memoryBytes: 100 * MB })
+  const shop = workspaceRow({
+    key: 'ws:c:\\work\\shop',
+    root: 'C:\\work\\shop',
+    name: 'shop',
+    outer: true,
+    // 행 값의 합이 아니라 메인이 pid 마다 한 번 센 값.
+    memoryBytes: 3 * GB,
+    commitBytes: 4 * GB,
+    processCount: 9,
+    agentKeys: [selectionKey.agent(claude)],
+    serverKeys: [selectionKey.server(front), selectionKey.server(api)],
+    heavyKeys: [selectionKey.heavy(build)],
+    leftoverKeys: [selectionKey.leftover(gradle)],
+    changedFiles: 12,
+    lastActiveAt: now - 3 * 60 * MIN
+  })
+  const unknown = workspaceRow({
+    key: 'ws:?',
+    root: null,
+    name: '작업 폴더 모름',
+    memoryBytes: 100 * MB,
+    processCount: 1,
+    serverKeys: [selectionKey.server(lone)]
+  })
+  const s = snapshot({
+    takenAt: now,
+    servers: [front, api, lone],
+    agents: [claude],
+    heavyJobs: [build],
+    leftovers: [gradle],
+    workspaces: [shop, unknown]
+  })
+
+  test('작업 공간 표: 에이전트·서버·무거운 작업·남은 프로세스가 한 표에, 머리의 합은 스냅샷의 workspaces 값', () => {
+    const t = workspaceTable(s)
+    expect(tableFor('workspaces', s)).toEqual(t)
+    // 커밋을 아는 행이 없으면 커밋 칸은 뺀다(다른 탭과 같은 규칙).
+    expect(t.columns.map((col) => [col.id, col.label, col.width])).toEqual([
+      ['name', '이름', 220],
+      ['kind', '종류', 100],
+      ['status', '상태', 170],
+      ['port', '포트', 124],
+      ['cpu', 'CPU', 64],
+      ['memory', '메모리', 88]
+    ])
+    expect(t.sort).toEqual({ id: 'memory', dir: 'desc' })
+
+    const row = (key: string): (typeof t.rows)[number] => t.rows.find((r) => r.key === key)!
+    const own = (tab: SnapshotTab, key: string): (typeof t.rows)[number] =>
+      tableFor(tab, s).rows.find((r) => r.key === key)!
+    const cases: [SnapshotTab, string, string, string][] = [
+      ['ports', selectionKey.server(api), 'api', '서버'],
+      ['agents', selectionKey.agent(claude), 'shop', '에이전트'],
+      ['heavy', selectionKey.heavy(build), 'vue-tsc', '무거운 작업'],
+      ['leftovers', selectionKey.leftover(gradle), 'Gradle 데몬', '남은 프로세스']
+    ]
+    for (const [tab, key, name, kind] of cases) {
+      const r = row(key)
+      expect(r.cells.name.text, key).toBe(name)
+      expect(r.cells.name.icon, key).toEqual(own(tab, key).cells.name.icon)
+      expect(r.cells.kind.text, key).toBe(kind)
+      // 상태 문구·동작은 각 탭과 같다(상태 칸이 없는 무거운 작업은 —).
+      expect(r.cells.status, key).toEqual(
+        own(tab, key).cells.status ?? { text: '—', sort: -1, muted: true }
+      )
+      expect(r.actions, key).toEqual(own(tab, key).actions)
+    }
+    expect(row(selectionKey.server(api)).cells.port).toMatchObject({ text: ':8081', sort: 8081 })
+    expect(row(selectionKey.server(api)).cells.cpu).toMatchObject({ text: '5.0%', sort: 5 })
+    expect(row(selectionKey.agent(claude)).cells.status.text).toBe('작업 중 · 12분')
+    expect(row(selectionKey.heavy(build)).cells.port.text).toBe('—')
+    expect(row(selectionKey.leftover(gradle)).cells.memory.text).toBe('500 MB')
+
+    const groups = groupWorkspaces(sortRows(t.rows, 'memory', 'desc'), s, now)
+    expect(groups.map((g) => [g.group?.key, g.rows.map((r) => r.key)])).toEqual([
+      [
+        'ws:c:\\work\\shop',
+        [
+          selectionKey.heavy(build),
+          selectionKey.server(api),
+          selectionKey.agent(claude),
+          selectionKey.leftover(gradle),
+          selectionKey.server(front)
+        ]
+      ],
+      ['ws:?', [selectionKey.server(lone)]]
+    ])
+    expect(groups[0].group).toMatchObject({
+      root: 'C:\\work\\shop',
+      name: 'shop',
+      outer: true,
+      count: 5,
+      memoryBytes: 3 * GB,
+      commitBytes: 4 * GB,
+      status: { text: '작업 중', dot: 'running' },
+      summary: '서버 2 · 무거운 작업 1 · 남은 프로세스 1 · 변경 12',
+      actions: ['rename', 'folder', 'cleanup']
+    })
+    expect(groups[0].group!.agentBadges.map((b) => [b.key, b.title])).toEqual([
+      [selectionKey.agent(claude), 'Claude Code · 작업 중 · 12분']
+    ])
+    // 작업 공간을 모르는 줄은 이름을 바꾸거나 정리하거나 열 수 없다.
+    expect(groups[1].group).toMatchObject({
+      root: null,
+      name: '작업 폴더 모름',
+      count: 1,
+      memoryBytes: 100 * MB,
+      actions: []
+    })
+  })
+
+  test('묶음 순서는 스냅샷 순서이고, 정렬은 묶음 안 줄만 바꾼다', () => {
+    const groups = groupWorkspaces(sortRows(workspaceTable(s).rows, 'memory', 'asc'), s, now)
+    expect(groups.map((g) => g.group?.key)).toEqual(['ws:c:\\work\\shop', 'ws:?'])
+    expect(groups[0].rows.map((r) => r.key)[0]).toBe(selectionKey.server(front))
+  })
+
+  test('검색에 맞는 구성원이 없는 작업 공간은 보이지 않고, 머리의 수치는 작업 공간 전체', () => {
+    const rows = workspaceTable(s).rows
+    // 종류 이름·브랜치·포트로도 찾는다.
+    expect(filterRows(rows, '남은 프로세스').map((r) => r.key)).toEqual([
+      selectionKey.leftover(gradle)
+    ])
+    expect(filterRows(rows, 'feat/api').map((r) => r.key)).toEqual([selectionKey.server(api)])
+    const groups = groupWorkspaces(filterRows(rows, ':3000'), s, now)
+    expect(groups.map((g) => [g.group?.key, g.rows.length])).toEqual([['ws:?', 1]])
+    const shopOnly = groupWorkspaces(filterRows(rows, 'gradle'), s, now)
+    expect(shopOnly.map((g) => g.group?.key)).toEqual(['ws:c:\\work\\shop'])
+    expect(shopOnly[0].group).toMatchObject({ count: 5, memoryBytes: 3 * GB })
+  })
+
+  test('스냅샷에 없는 구성원은 건너뛴다', () => {
+    const stale = snapshot({
+      takenAt: now,
+      servers: [front],
+      workspaces: [
+        workspaceRow({
+          key: 'ws:c:\\work\\shop',
+          root: 'C:\\work\\shop',
+          name: 'shop',
+          serverKeys: [selectionKey.server(front), 'server:999:1']
+        })
+      ]
+    })
+    const groups = groupWorkspaces(workspaceTable(stale).rows, stale, now)
+    expect(groups[0].rows.map((r) => r.key)).toEqual([selectionKey.server(front)])
+    expect(groups[0].group).toMatchObject({ count: 1, summary: '서버 1' })
+  })
+
+  test('머리 요약에서 0 과 모르는 값은 뺀다', () => {
+    const idle = agentRow({
+      pid: 40,
+      workspace: SHOP,
+      state: 'idle',
+      stateSince: now - 3 * 60 * MIN,
+      lastActiveAt: now - 3 * 60 * MIN
+    })
+    const head = (
+      agents: ReturnType<typeof agentRow>[],
+      over: Parameters<typeof workspaceRow>[0]
+    ): unknown => {
+      const t = snapshot({
+        takenAt: now,
+        servers: [],
+        agents,
+        workspaces: [
+          workspaceRow({
+            key: 'ws:c:\\work\\shop',
+            root: 'C:\\work\\shop',
+            name: 'shop',
+            serverKeys: [],
+            agentKeys: agents.map((a) => selectionKey.agent(a)),
+            ...over
+          })
+        ]
+      })
+      return groupWorkspaces(workspaceTable(t).rows, t, now)[0].group?.summary
+    }
+    // 서버·무거운 작업·남은 프로세스가 0 이고 변경 수가 0 이면 빼고, 쉬는 에이전트뿐이면 마지막 활동.
+    expect(head([idle], { changedFiles: 0, lastActiveAt: now - 3 * 60 * MIN })).toBe(
+      '마지막 활동 3시간 전'
+    )
+    // 변경 수·마지막 활동을 모르면 뺀다.
+    expect(head([idle], { changedFiles: null, lastActiveAt: null })).toBe('')
+    // 작업 중이거나 권한 대기인 에이전트가 있으면 마지막 활동은 보이지 않는다.
+    const working = agentRow({ ...idle, pid: 41, state: 'working' })
+    const waiting = agentRow({ ...idle, pid: 42, state: 'waiting' })
+    expect(head([idle, working], { changedFiles: 3, lastActiveAt: now - MIN })).toBe('변경 3')
+    expect(head([waiting], { changedFiles: null, lastActiveAt: now - MIN })).toBe('')
+  })
+
+  test('권한 대기 에이전트가 있으면 머리 상태가 권한 대기', () => {
+    const status = (agents: ReturnType<typeof agentRow>[], servers = [front]): unknown => {
+      const t = snapshot({
+        takenAt: now,
+        servers,
+        agents,
+        workspaces: [
+          workspaceRow({
+            key: 'ws:c:\\work\\shop',
+            root: 'C:\\work\\shop',
+            name: 'shop',
+            serverKeys: servers.map((r) => selectionKey.server(r)),
+            agentKeys: agents.map((a) => selectionKey.agent(a))
+          })
+        ]
+      })
+      return groupWorkspaces(workspaceTable(t).rows, t, now)[0].group?.status
+    }
+    const working = agentRow({ pid: 50, workspace: SHOP, state: 'working', stateSince: now })
+    const quiet = agentRow({ ...working, pid: 51, quietSince: now - 16 * MIN })
+    const waiting = agentRow({ pid: 52, workspace: SHOP, state: 'waiting', stateSince: now })
+    const idle = agentRow({ pid: 53, workspace: SHOP, state: 'idle' })
+    // 권한 대기 > 조용함 > 작업 중 > 서버 요약.
+    expect(status([working, quiet, waiting])).toEqual({ text: '권한 대기', dot: 'warn' })
+    expect(status([working, quiet])).toEqual({ text: '조용함', dot: 'warn' })
+    expect(status([idle, working])).toEqual({ text: '작업 중', dot: 'running' })
+    expect(status([idle])).toEqual({ text: '사용 중 1', dot: 'running' })
+    const candidate = serverRow({ ...front, judgement: 'candidate', clientCount: 0 })
+    expect(status([], [candidate])).toEqual({ text: '정리 후보 1', dot: 'stopped' })
+    // 서버도 바쁜 에이전트도 없으면 상태는 비운다("연결 없음"은 서버의 말이라).
+    expect(status([idle], [])).toEqual({ text: '' })
   })
 })
 
@@ -705,27 +970,38 @@ describe('커밋 칸', () => {
 })
 
 test('커밋 칸이 있어도 표의 칸 너비 합은 기본 창 너비(1280px)에 들어간다', () => {
+  const server = serverRow({ commitBytes: GB })
+  const agent = agentRow({
+    commitBytes: GB,
+    activity: {
+      title: '로그인 버그',
+      prompt: null,
+      tool: { name: 'Bash', summary: 'npm run build', since: 0 },
+      waiting: null
+    }
+  })
+  const leftover = leftoverRow({ commitBytes: GB })
+  const heavy = heavyJob({ commitBytes: GB })
   const s = snapshot({
-    servers: [serverRow({ commitBytes: GB })],
+    servers: [server],
     // 하는 일 칸까지 있는 에이전트 표.
-    agents: [
-      agentRow({
-        commitBytes: GB,
-        activity: {
-          title: '로그인 버그',
-          prompt: null,
-          tool: { name: 'Bash', summary: 'npm run build', since: 0 },
-          waiting: null
-        }
+    agents: [agent],
+    leftovers: [leftover],
+    heavyJobs: [heavy],
+    workspaces: [
+      workspaceRow({
+        serverKeys: [selectionKey.server(server)],
+        agentKeys: [selectionKey.agent(agent)],
+        leftoverKeys: [selectionKey.leftover(leftover)],
+        heavyKeys: [selectionKey.heavy(heavy)]
       })
-    ],
-    leftovers: [leftoverRow({ commitBytes: GB })],
-    heavyJobs: [heavyJob({ commitBytes: GB })]
+    ]
   })
   expect(tableFor('agents', s).columns.map((col) => col.id)).toEqual(
     expect.arrayContaining(['activity', 'commit'])
   )
-  for (const tab of ['ports', 'agents', 'leftovers', 'heavy'] as const) {
+  expect(tableFor('workspaces', s).columns.find((col) => col.id === 'commit')?.width).toBe(88)
+  for (const tab of ['workspaces', 'ports', 'agents', 'leftovers', 'heavy'] as const) {
     const sum = tableFor(tab, s).columns.reduce((n, col) => n + col.width, 0)
     // 120 은 ItemTable 이 더하는 동작 칸 너비, 1240 은 세로 스크롤바·테두리 여유.
     expect(sum + 120, tab).toBeLessThanOrEqual(1240)

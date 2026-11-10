@@ -1,8 +1,9 @@
 <!--
   NeoHtop (MIT) process/ProcessTable.svelte · TableHeader.svelte · ProcessRow.svelte · ActionButtons.svelte.
   바꾼 점: 프로세스 하나 대신 pitwall 의 항목(서버·에이전트·…) 한 줄. 고정 줄은 없다.
-  트리 보기는 NeoHtop 의 family 줄(펼치기 화살표·들여쓰기·묶음 합계)을 작업 공간 묶음에 쓴다.
-  동작 칸: 브라우저로 열기 · 자세히 · 내리기(끄기)/지우기 · 숨김 풀기, 묶음 머리는 이름 바꾸기 · 작업 공간 정리.
+  트리 보기는 NeoHtop 의 family 줄(펼치기 화살표·들여쓰기·묶음 합계)을 작업 공간 묶음에 쓴다
+  (개발 서버 탭의 묶음 보기, 작업 공간 탭).
+  동작 칸: 브라우저로 열기 · 자세히 · 내리기(끄기)/지우기 · 숨김 풀기, 묶음 머리는 이름 바꾸기 · 폴더 열기 · 작업 공간 정리.
   끄고 지우는 것은 모두 OS 확인 창을 거친다.
 -->
 <script setup lang="ts">
@@ -18,13 +19,14 @@ import {
   ExternalLink,
   Eye,
   FolderGit2,
+  FolderOpen,
   Info,
   Pencil,
   Search,
   Trash2,
   X
 } from '@lucide/vue'
-import type { ActionKind, Column, GroupedRows, Row, ServerGroup, Table, Tone } from '../rows'
+import type { ActionKind, Column, GroupHead, GroupedRows, Row, Table, Tone } from '../rows'
 import { sortRows } from '../rows'
 import type { SortState } from '../sortState'
 import { formatBytes } from '../../../shared/format'
@@ -51,8 +53,8 @@ const emit = defineEmits<{
   select: [key: string]
   action: [kind: ActionKind, key: string]
   clearSearch: []
-  /** 묶음 머리 동작: 작업 공간 정리. */
-  groupAction: [kind: 'cleanup', root: string]
+  /** 묶음 머리 동작: 작업 공간 정리·폴더 열기. */
+  groupAction: [kind: 'cleanup' | 'folder', root: string]
   /** 작업 공간 이름 바꾸기(빈 글자면 원래 이름으로). */
   rename: [root: string, name: string]
 }>()
@@ -74,7 +76,7 @@ const sorted = computed(() => sortRows(props.rows, sort.value.id, sort.value.dir
 
 interface Block {
   key: string
-  group: ServerGroup | null
+  group: GroupHead | null
   open: boolean
   rows: Row[]
 }
@@ -108,7 +110,7 @@ const width = computed(
 const renaming = ref<string | null>(null)
 const draftName = ref('')
 const nameInput = ref<HTMLInputElement[] | HTMLInputElement | null>(null)
-async function startRename(group: ServerGroup): Promise<void> {
+async function startRename(group: GroupHead): Promise<void> {
   renaming.value = group.key
   draftName.value = group.name
   await nextTick()
@@ -116,11 +118,44 @@ async function startRename(group: ServerGroup): Promise<void> {
   el?.focus()
   el?.select()
 }
-function finishRename(group: ServerGroup, save: boolean): void {
+function finishRename(group: GroupHead, save: boolean): void {
   if (renaming.value !== group.key) return
   renaming.value = null
-  if (save) emit('rename', group.root, draftName.value.trim())
+  if (save && group.root) emit('rename', group.root, draftName.value.trim())
 }
+function groupAct(kind: 'cleanup' | 'folder', group: GroupHead): void {
+  if (group.root) emit('groupAction', kind, group.root)
+}
+
+// ── 묶음 머리 줄 ──
+/** 머리가 채우는 칸. 나머지(종류·포트·CPU 등)는 머리에서 비어 있다. */
+const HEAD_FILLED = ['name', 'memory', 'commit', 'branch']
+/**
+ * 머리 줄의 칸. 요약이 있는 머리(작업 공간 탭)는 상태 칸이 뒤따르는 빈 칸(포트·CPU)까지 차지해
+ * 한 줄 요약이 덜 잘린다. 개발 서버 탭의 머리는 칸마다 그대로.
+ */
+function headCells(group: GroupHead): { col: Column; first: boolean; span: number }[] {
+  const columns = props.table.columns
+  const cells: { col: Column; first: boolean; span: number }[] = []
+  let i = 0
+  while (i < columns.length) {
+    let span = 1
+    if (group.summary != null && columns[i].id === 'status')
+      while (i + span < columns.length && !HEAD_FILLED.includes(columns[i + span].id)) span++
+    cells.push({ col: columns[i], first: i === 0, span })
+    i += span
+  }
+  return cells
+}
+/** 작업 공간 탭 머리(요약이 있음)는 구성원·작업 공간 전체 합계, 개발 서버 탭 머리는 서버 수·서버 합계. */
+const countTitle = (group: GroupHead): string =>
+  group.summary != null ? text.ui.workspaces.members(group.count) : G.servers(group.count)
+const memoryHint = (group: GroupHead): string =>
+  group.summary != null ? text.ui.workspaces.memoryHint : G.memoryHint
+const commitHint = (group: GroupHead): string =>
+  group.summary != null ? text.ui.workspaces.commitHint : G.commitHint
+const statusTitle = (group: GroupHead): string =>
+  [group.status.text, group.summary].filter(Boolean).join(' · ')
 
 const TONE: Record<Tone, string> = {
   running: 'var(--status-running)',
@@ -193,7 +228,7 @@ const G = text.ui.group
           </thead>
           <tbody data-slot="table-body" :class="TABLE.body">
             <template v-for="block in blocks" :key="block.key">
-              <!-- 작업 공간 머리(NeoHtop family 줄): 펼치기 · 이름 · 서버 수 · 에이전트 · 합계 -->
+              <!-- 작업 공간 머리(NeoHtop family 줄): 펼치기 · 이름 · 구성원 수 · 에이전트 · 상태·요약 · 합계 -->
               <tr
                 v-if="block.group"
                 data-slot="table-row"
@@ -201,12 +236,13 @@ const G = text.ui.group
                 :class="[TABLE.row, 'group-head bg-muted/40']"
               >
                 <td
-                  v-for="(col, ci) in table.columns"
+                  v-for="{ col, first, span } in headCells(block.group)"
                   :key="col.id"
                   data-slot="table-cell"
+                  :colspan="span > 1 ? span : undefined"
                   :class="[
                     TABLE.cell,
-                    { 'text-right': col.align === 'right', 'pl-4': ci === 0 || col.id === 'name' }
+                    { 'text-right': col.align === 'right', 'pl-4': first || col.id === 'name' }
                   ]"
                 >
                   <div v-if="col.id === 'name'" class="flex min-w-0 items-center gap-1.5">
@@ -242,14 +278,14 @@ const G = text.ui.group
                     <span
                       v-else
                       class="truncate text-[13px] font-medium"
-                      :title="block.group.root"
+                      :title="block.group.root ?? block.group.name"
                       >{{ block.group.name }}</span
                     >
                     <Badge
                       variant="secondary"
                       class="shrink-0 px-1.5 text-[10px] font-normal"
-                      :title="G.servers(block.group.serverCount)"
-                      >{{ block.group.serverCount }}</Badge
+                      :title="countTitle(block.group)"
+                      >{{ block.group.count }}</Badge
                     >
                     <span
                       v-for="agent in block.group.agentBadges.slice(0, 3)"
@@ -262,25 +298,36 @@ const G = text.ui.group
                   </div>
                   <span
                     v-else-if="col.id === 'status'"
-                    class="flex items-center gap-1.5 text-xs text-muted-foreground"
-                    :title="block.group.status.text"
+                    class="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground"
+                    :title="statusTitle(block.group)"
                   >
+                    <template v-if="block.group.status.text">
+                      <span
+                        class="size-1.5 shrink-0 rounded-full"
+                        :style="{ background: TONE[block.group.status.dot ?? 'idle'] }"
+                      ></span>
+                      <span :class="block.group.summary ? 'shrink-0' : 'truncate'">{{
+                        block.group.status.text
+                      }}</span>
+                    </template>
+                    <!-- 작업 공간 탭: 서버 3 · 무거운 작업 1 · 변경 12 · 마지막 활동(한 줄, 넘치면 잘리고 title 에 전부) -->
                     <span
-                      class="size-1.5 shrink-0 rounded-full"
-                      :style="{ background: TONE[block.group.status.dot ?? 'idle'] }"
-                    ></span>
-                    <span class="truncate">{{ block.group.status.text }}</span>
+                      v-if="block.group.summary"
+                      data-summary
+                      class="ml-1 min-w-0 truncate opacity-80"
+                      >{{ block.group.summary }}</span
+                    >
                   </span>
                   <span
                     v-else-if="col.id === 'memory'"
                     class="font-mono text-xs"
-                    :title="G.memoryHint"
+                    :title="memoryHint(block.group)"
                     >{{ formatBytes(block.group.memoryBytes) }}</span
                   >
                   <span
                     v-else-if="col.id === 'commit' && block.group.commitBytes != null"
                     class="font-mono text-xs"
-                    :title="G.commitHint"
+                    :title="commitHint(block.group)"
                     >{{ formatBytes(block.group.commitBytes) }}</span
                   >
                   <span
@@ -294,8 +341,10 @@ const G = text.ui.group
                   data-slot="table-cell"
                   :class="[TABLE.cell, 'actions-cell w-28 pr-3']"
                 >
+                  <!-- 작업 공간을 모르는 묶음(ws:?)은 동작이 없다(actions 가 비어 있음). -->
                   <div class="flex items-center justify-end gap-1">
                     <Button
+                      v-if="block.group.actions.includes('rename')"
                       variant="ghost"
                       size="icon-xs"
                       class="text-muted-foreground"
@@ -307,6 +356,19 @@ const G = text.ui.group
                       <Pencil />
                     </Button>
                     <Button
+                      v-if="block.group.actions.includes('folder')"
+                      variant="ghost"
+                      size="icon-xs"
+                      class="text-muted-foreground"
+                      :aria-label="text.ui.quick.folder"
+                      :title="text.ui.quick.folder"
+                      data-action="folder"
+                      @click="groupAct('folder', block.group)"
+                    >
+                      <FolderOpen />
+                    </Button>
+                    <Button
+                      v-if="block.group.actions.includes('cleanup')"
                       variant="ghost"
                       size="icon-xs"
                       class="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
@@ -314,7 +376,7 @@ const G = text.ui.group
                       :title="text.ui.actions.cleanup"
                       data-action="cleanup"
                       :disabled="busyKey === `group:${block.group.root}`"
-                      @click="emit('groupAction', 'cleanup', block.group.root)"
+                      @click="groupAct('cleanup', block.group)"
                     >
                       <Eraser />
                     </Button>

@@ -8,7 +8,7 @@ import type { NavigateTarget, PitwallApi } from '../../shared/ipc'
 import type { PitEvent } from '../../shared/events'
 import type { DashboardSnapshot } from '../../shared/types'
 import { selectionKey } from '../../shared/keys'
-import { MB, agentRow, diskRow, serverRow, snapshot } from './testing/fixtures'
+import { MB, agentRow, diskRow, serverRow, snapshot, workspaceRow } from './testing/fixtures'
 
 const WS = { root: 'C:\\work\\ws', name: 'ws', branch: 'main', outer: true }
 const front = serverRow({ pid: 1, ports: [5173], workspace: WS, memoryBytes: 300 * MB })
@@ -26,7 +26,26 @@ function snap(): DashboardSnapshot {
   return snapshot({
     servers: [front, api, solo],
     agents: [agent],
-    disk: { rows: [diskRow()], scannedAt: 1, scanning: false, error: null }
+    disk: { rows: [diskRow()], scannedAt: 1, scanning: false, error: null },
+    workspaces: [
+      workspaceRow({
+        key: 'ws:c:\\work\\ws',
+        root: 'C:\\work\\ws',
+        name: 'ws',
+        outer: true,
+        memoryBytes: 1200 * MB,
+        serverKeys: [selectionKey.server(front), selectionKey.server(api)]
+      }),
+      // 작업 공간을 모르는 서버·에이전트.
+      workspaceRow({
+        key: 'ws:?',
+        root: null,
+        name: '작업 폴더 모름',
+        memoryBytes: 700 * MB,
+        serverKeys: [selectionKey.server(solo)],
+        agentKeys: [selectionKey.agent(agent)]
+      })
+    ]
   })
 }
 
@@ -97,13 +116,88 @@ async function start(f: Fake): Promise<VueWrapper> {
 const notice = (w: VueWrapper, slot = 'action'): string =>
   w.find(`[data-notice="${slot}"]`).exists() ? w.find(`[data-notice="${slot}"]`).text() : ''
 
+/** 탭을 고른다(처음 탭은 작업 공간). */
+async function openTab(w: VueWrapper, tab: string): Promise<void> {
+  await w.find(`[data-slot="toggle-group-item"][data-value="${tab}"]`).trigger('click')
+}
+
+const pressedTab = (w: VueWrapper): string | undefined =>
+  w.find('[data-slot="toggle-group-item"][aria-pressed="true"]').attributes('data-value')
+
 afterEach(() => {
   document.body.innerHTML = ''
+})
+
+test('처음 탭은 작업 공간', async () => {
+  const w = await start(fake())
+  expect(pressedTab(w)).toBe('workspaces')
+  expect(w.findAll('tbody tr[data-group]').map((tr) => tr.attributes('data-group'))).toEqual([
+    'ws:c:\\work\\ws',
+    'ws:?'
+  ])
+  expect(w.find('footer').text()).toContain('작업 공간 2개')
+  w.unmount()
+})
+
+test('작업 공간이 없으면 빈 화면 문구', async () => {
+  const w = await start(fake({ getLatest: async () => snapshot({ servers: [], workspaces: [] }) }))
+  expect(w.find('tbody').text()).toContain('실행 중인 작업이 없어요.')
+  w.unmount()
+})
+
+test('작업 공간 탭에서 서버를 누르면 탭은 그대로, 상세 패널이 열린다', async () => {
+  const f = fake()
+  const w = await start(f)
+  await w.find(`tr[data-key="${selectionKey.server(api)}"] td button`).trigger('click')
+  await flushPromises()
+  expect(pressedTab(w)).toBe('workspaces')
+  expect(document.body.textContent).toContain('node.exe · PID 2')
+  expect(w.find(`tr[data-key="${selectionKey.server(api)}"]`).attributes('data-selected')).toBe(
+    'true'
+  )
+  // 동작 칸의 자세히도 같다.
+  await w
+    .find(`tr[data-key="${selectionKey.agent(agent)}"] [data-action="details"]`)
+    .trigger('click')
+  await flushPromises()
+  expect(pressedTab(w)).toBe('workspaces')
+  expect(document.body.textContent).toContain('Claude Code · PID 5000')
+  w.unmount()
+})
+
+test('머리의 정리는 그 작업 공간 루트로 cleanupWorkspace 를 부른다', async () => {
+  const f = fake()
+  const w = await start(f)
+  // 작업 공간을 모르는 줄에는 정리·폴더 열기가 없다.
+  expect(w.find('tr[data-group="ws:?"] [data-action]').exists()).toBe(false)
+  await w.find('tr[data-group="ws:c:\\\\work\\\\ws"] [data-action="cleanup"]').trigger('click')
+  await flushPromises()
+  expect(f.api.cleanupWorkspace).toHaveBeenCalledWith('C:\\work\\ws')
+  expect(notice(w)).toContain('2개를 껐어요.')
+  await w.find('tr[data-group="ws:c:\\\\work\\\\ws"] [data-action="folder"]').trigger('click')
+  await flushPromises()
+  expect(f.api.quick).toHaveBeenCalledWith('folder', 'C:\\work\\ws')
+  w.unmount()
+})
+
+test('작업 공간 탭의 검색: 맞는 구성원이 있는 작업 공간만, 개수도 작업 공간으로 센다', async () => {
+  const w = await start(fake())
+  await w.find('input[placeholder^="이름"]').setValue(':8081')
+  expect(w.findAll('tbody tr[data-group]').map((tr) => tr.attributes('data-group'))).toEqual([
+    'ws:c:\\work\\ws'
+  ])
+  expect(w.findAll('tbody tr[data-key]').map((tr) => tr.attributes('data-key'))).toEqual([
+    selectionKey.server(api)
+  ])
+  expect(w.text()).toContain('2개 중 1개')
+  expect(w.find('footer').text()).toContain('작업 공간 1개')
+  w.unmount()
 })
 
 test('서버를 끄면 그 서버(맨 위 pid)를 끄고, 실패하면 결과 알림이 제목줄 아래에', async () => {
   const f = fake()
   const w = await start(f)
+  await openTab(w, 'ports')
   const row = w.find(`tr[data-key="${selectionKey.server(solo)}"]`)
   await row.find('[data-action="kill"]').trigger('click')
   await flushPromises()
@@ -285,6 +379,7 @@ test('검색·탭·정렬', async () => {
   const w = await start(f)
   const keys = (): string[] =>
     w.findAll('tbody tr[data-key]').map((tr) => tr.attributes('data-key')!)
+  await openTab(w, 'ports')
   // 목록 보기로 바꿔 서버 줄만 본다.
   await w
     .findAll('button')
@@ -307,6 +402,9 @@ test('검색·탭·정렬', async () => {
 test('묶음 정리 버튼은 작업 공간 정리를 부르고 결과를 알린다', async () => {
   const f = fake()
   const w = await start(f)
+  await openTab(w, 'ports')
+  // 개발 서버 탭의 묶음 머리는 그대로(서버 수, 폴더 열기 없음).
+  expect(w.find('tr[data-group] [data-action="folder"]').exists()).toBe(false)
   await w.find('tr[data-group] [data-action="cleanup"]').trigger('click')
   await flushPromises()
   expect(f.api.cleanupWorkspace).toHaveBeenCalledWith('C:\\work\\ws')
@@ -317,6 +415,7 @@ test('묶음 정리 버튼은 작업 공간 정리를 부르고 결과를 알린
 test('작업 공간 이름을 바꾸면 별칭으로 저장하고 다시 수집한다', async () => {
   const f = fake()
   const w = await start(f)
+  await openTab(w, 'ports')
   await w.find('tr[data-group] [data-action="rename"]').trigger('click')
   const input = w.find('tr[data-group] input')
   await input.setValue('쇼핑')
@@ -343,6 +442,7 @@ test('저장 안 한 설정 화면이 대시보드에서 바꾼 숨기기·별�
     .trigger('click')
   await flushPromises()
   // 대시보드에서 작업 공간 이름 바꾸기(바로 저장된다).
+  await openTab(w, 'ports')
   await w.find('tr[data-group] [data-action="rename"]').trigger('click')
   await w.find('tr[data-group] input').setValue('쇼핑')
   await w.find('tr[data-group] input').trigger('keydown', { key: 'Enter' })
@@ -402,6 +502,7 @@ test('메모리 상세의 RAM 추이는 쌓인 기록만큼(최소 작은 그래
 test('상세 패널의 숨기기는 그 워크트리의 첫 포트로 숨긴다(다른 프로젝트의 같은 포트는 그대로)', async () => {
   const f = fake()
   const w = await start(f)
+  await openTab(w, 'ports')
   await w
     .find(`tr[data-key="${selectionKey.server(api)}"] [data-action="details"]`)
     .trigger('click')
@@ -416,6 +517,7 @@ test('상세 패널의 숨기기는 그 워크트리의 첫 포트로 숨긴다(
 test('상세 패널의 바로 가기: 경로를 복사하면 알리고, 열지 못하면 실패를 한 줄로 알린다', async () => {
   const f = fake()
   const w = await start(f)
+  await openTab(w, 'ports')
   await w
     .find(`tr[data-key="${selectionKey.server(api)}"] [data-action="details"]`)
     .trigger('click')
@@ -461,6 +563,7 @@ test('상세 패널에서 고른 포트를 연다', async () => {
   const multi = serverRow({ pid: 9, ports: [6176, 8081], workspace: null })
   const f = fake({ getLatest: async () => snapshot({ servers: [multi] }) })
   const w = await start(f)
+  await openTab(w, 'ports')
   await w
     .find(`tr[data-key="${selectionKey.server(multi)}"] [data-action="details"]`)
     .trigger('click')

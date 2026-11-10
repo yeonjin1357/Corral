@@ -18,6 +18,27 @@ test('개발 서버 탭에서만 목록/묶음 전환을 보이고, 누르면 �
   expect(w.find('[aria-label="개발 서버 보기"]').exists()).toBe(false)
 })
 
+test('작업 공간이 탭의 맨 앞에 있고 숫자는 작업 공간 수다', () => {
+  const w = mount(ToolBar, {
+    props: { tab: 'workspaces', query: '', counts: { ...counts, workspaces: 3 }, matching: 3 }
+  })
+  const items = w.findAll('[data-slot="toggle-group-item"]')
+  expect(items.map((b) => b.attributes('data-value'))).toEqual([
+    'workspaces',
+    'ports',
+    'agents',
+    'leftovers',
+    'heavy',
+    'disk',
+    'apps',
+    'events'
+  ])
+  expect(items[0].text()).toBe('작업 공간 3')
+  expect(items[0].attributes('aria-pressed')).toBe('true')
+  // 목록/묶음 전환은 개발 서버 탭에만.
+  expect(w.find('[aria-label="개발 서버 보기"]').exists()).toBe(false)
+})
+
 test('기록이 탭의 맨 끝에 있고 숫자는 기록 수다', () => {
   const w = mount(ToolBar, {
     props: { tab: 'ports', query: '', counts: { ...counts, events: 7 }, matching: 1, view: 'group' }

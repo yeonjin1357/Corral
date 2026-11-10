@@ -38,6 +38,7 @@ import {
   TABS,
   filterRows,
   groupServers,
+  groupWorkspaces,
   hiddenServerTable,
   leftoverIcon,
   serverIcon,
@@ -77,7 +78,8 @@ type SettingsPage =
 const settingsPage = ref<SettingsPage>('general')
 const version = ref<string | null>(null)
 const update = ref<UpdateStatus | null>(null)
-const tab = ref<TabKey>('ports')
+/** 처음 켰을 때는 작업 공간 탭(G4). */
+const tab = ref<TabKey>('workspaces')
 const query = ref('')
 const intervals = computed(() => REFRESH_INTERVALS[settings.value.refresh])
 /** 추이 그래프 가로축: 창이 열려 있을 때 기록 한도만큼(보통 5초 × 120 = 10분). */
@@ -243,6 +245,7 @@ const TAB_OF: Record<string, TabKey> = {
   heavy: 'heavy',
   disk: 'disk'
 }
+/** 다른 곳(알림·트레이·추천 칩·자원 카드·기록 탭)에서 온 이동: 그 항목의 탭으로 옮기고 상세를 연다. */
 function select(key: string): void {
   const kind = key.split(':', 1)[0]
   if (TAB_OF[kind] && tab.value !== TAB_OF[kind]) {
@@ -250,6 +253,12 @@ function select(key: string): void {
     query.value = ''
   }
   selectedKey.value = key
+}
+
+/** 표에서 고른 항목: 작업 공간 탭에서는 탭을 그대로 두고 상세 패널만 연다. */
+function pick(key: string): void {
+  if (tab.value === 'workspaces') selectedKey.value = key
+  else select(key)
 }
 
 /** 메모리 상세의 묶음에서 그 탭으로(숨긴 서버 보기·검색은 풀어 묶음 전체가 보이게). */
@@ -333,7 +342,7 @@ async function act(kind: ActionKind, key: string, port?: number): Promise<void> 
   const s = snapshot.value
   if (!s) return
   if (kind === 'details') {
-    select(key)
+    pick(key)
     return
   }
   const server = s.servers.find((r) => selectionKey.server(r) === key)
@@ -438,6 +447,12 @@ async function cleanupWorkspace(root: string): Promise<void> {
   )
 }
 
+/** 묶음 머리 동작: 작업 공간 정리, 폴더 열기(작업 공간 탭). */
+function groupAction(kind: 'cleanup' | 'folder', root: string): void {
+  if (kind === 'folder') void quick('folder', root)
+  else void cleanupWorkspace(root)
+}
+
 async function renameWorkspace(root: string, name: string): Promise<void> {
   try {
     await updateSettings((s) => {
@@ -531,9 +546,21 @@ watch(serverView, (v) => writeServerView(storage, v))
 const collapsedGroups = ref<string[]>([])
 const grouping = computed<((rows: Row[]) => GroupedRows[]) | null>(() => {
   const s = snapshot.value
-  if (!s || tab.value !== 'ports' || showHidden.value || serverView.value !== 'group') return null
+  if (!s) return null
+  // 작업 공간 탭은 늘 묶음(작업 공간 하나에 머리 하나).
+  if (tab.value === 'workspaces') return (rows) => groupWorkspaces(rows, s, s.takenAt)
+  if (tab.value !== 'ports' || showHidden.value || serverView.value !== 'group') return null
   return (rows) => groupServers(rows, s.servers, s.agents, s.takenAt, s.leftovers)
 })
+/**
+ * 검색에 맞는 수(도구줄의 "n개 중 m개"·바닥 줄). 작업 공간 탭은 탭 숫자처럼 작업 공간으로 센다
+ * (맞는 구성원이 있는 작업 공간).
+ */
+const shown = computed(() =>
+  tab.value === 'workspaces' && grouping.value
+    ? grouping.value(rows.value).length
+    : rows.value.length
+)
 const NO_SORT: SortState = { id: 'name', dir: 'asc' }
 const sort = computed<SortState>({
   get: () => (table.value ? resolveSort(sorts.value[tab.value], table.value) : NO_SORT),
@@ -548,6 +575,7 @@ const counts = computed<Record<TabKey, number>>(() => {
   zero.events = events.value.length
   if (!s) return zero
   return {
+    workspaces: s.workspaces.length,
     ports: s.servers.length,
     agents: s.agents.length,
     leftovers: s.leftovers.length,
@@ -560,6 +588,8 @@ const counts = computed<Record<TabKey, number>>(() => {
 const emptyText = computed(() => {
   const L = text.ui.list
   switch (tab.value) {
+    case 'workspaces':
+      return L.emptyWorkspaces
     case 'ports':
       return L.empty
     case 'agents':
@@ -818,7 +848,7 @@ const takenAt = computed(() =>
           v-model:query="query"
           v-model:view="serverView"
           :counts="counts"
-          :matching="rows.length"
+          :matching="shown"
         >
           <template #actions>
             <Button
@@ -857,10 +887,10 @@ const takenAt = computed(() =>
           :empty-text="emptyText"
           :busy-key="busyKey"
           :group="grouping"
-          @select="select"
+          @select="pick"
           @action="act"
           @clear-search="query = ''"
-          @group-action="(_, root) => cleanupWorkspace(root)"
+          @group-action="groupAction"
           @rename="renameWorkspace"
         />
 
@@ -868,7 +898,7 @@ const takenAt = computed(() =>
           class="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-border bg-card px-4 py-3"
         >
           <span class="flex items-center gap-2 text-xs text-muted-foreground">
-            {{ text.ui.footer.count(text.ui.tabs[tab], rows.length) }}
+            {{ text.ui.footer.count(text.ui.tabs[tab], shown) }}
             <Button
               v-if="tab === 'ports' && hiddenCount > 0"
               variant="ghost"

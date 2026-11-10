@@ -13,6 +13,7 @@ import type {
   Platform,
   ServerRow,
   AgentState,
+  WorkspaceRow,
   WorktreeInfo
 } from '../../shared/types'
 import { selectionKey } from '../../shared/keys'
@@ -32,8 +33,18 @@ import { appBrand, devServerBrand, heavyBrand, leftoverBrand, type Brand } from 
 import claudeCodeLogo from './assets/brands/claude-code.svg'
 import codexLogo from './assets/brands/codex.svg'
 
-export type TabKey = 'ports' | 'agents' | 'leftovers' | 'heavy' | 'disk' | 'apps' | 'events'
-export const TABS: TabKey[] = ['ports', 'agents', 'leftovers', 'heavy', 'disk', 'apps', 'events']
+export type TabKey =
+  'workspaces' | 'ports' | 'agents' | 'leftovers' | 'heavy' | 'disk' | 'apps' | 'events'
+export const TABS: TabKey[] = [
+  'workspaces',
+  'ports',
+  'agents',
+  'leftovers',
+  'heavy',
+  'disk',
+  'apps',
+  'events'
+]
 /** 스냅샷으로 표를 만드는 탭(기록은 따로 `eventsTable`). */
 export type SnapshotTab = Exclude<TabKey, 'events'>
 
@@ -289,13 +300,183 @@ function dropEmptyCommit(table: Table): Table {
   }
 }
 
+// ── 항목 한 줄: 각 탭과 작업 공간 탭이 같이 쓴다(상태 문구·아이콘·검색·동작이 같게) ──
+
+function serverLine(p: ServerRow, s: DashboardSnapshot): Row {
+  const key = selectionKey.server(p)
+  return {
+    key,
+    id: key,
+    cells: {
+      name: {
+        text: folderOf(p.worktree),
+        title: p.worktree?.root,
+        icon: serverIcon(p, s.platform)
+      },
+      // 서버가 연 포트를 한 칸에. 정렬은 첫 포트로.
+      port: { text: portList(p.ports), sort: p.ports[0], mono: true },
+      branch: branchOf(p.worktree),
+      status: serverStatus(p, s.takenAt),
+      clients: { text: String(p.clientCount), sort: p.clientCount, mono: true },
+      cpu: cpuCell(p.cpuPercent, s),
+      memory: memoryCell(p.memoryBytes),
+      commit: commitCell(p.commitBytes),
+      process: { text: p.processName, mono: true, muted: true }
+    },
+    actions: [
+      { kind: 'open', label: ACTIONS.open },
+      { kind: 'details', label: ACTIONS.details },
+      ...(p.unresolvable ? [] : [{ kind: 'kill' as const, label: ACTIONS.kill }])
+    ],
+    search: searchOf(
+      folderOf(p.worktree),
+      p.worktree?.branch,
+      p.processName,
+      portList(p.ports),
+      p.ports.join(' ')
+    )
+  }
+}
+
+function agentLine(a: AgentRow, s: DashboardSnapshot): Row {
+  const key = selectionKey.agent(a)
+  return {
+    key,
+    id: key,
+    cells: {
+      name: { text: folderOf(a.worktree), title: a.worktree?.root, icon: agentIcon(a) },
+      branch: branchOf(a.worktree),
+      status: agentStatus(a, s.takenAt),
+      activity: activityCell(a),
+      cpu: cpuCell(a.cpuPercent, s),
+      memory: memoryCell(a.memoryBytes),
+      commit: commitCell(a.commitBytes),
+      runtime: runtimeCell(s.takenAt, a.startedAt)
+    },
+    actions: [{ kind: 'details', label: ACTIONS.details }],
+    search: searchOf(
+      folderOf(a.worktree),
+      a.worktree?.branch,
+      text.ui.agent.toolNames[a.tool],
+      text.ui.agent.states[a.state],
+      a.activity?.title
+    )
+  }
+}
+
+function leftoverLine(l: LeftoverRow, s: DashboardSnapshot): Row {
+  const key = selectionKey.leftover(l)
+  return {
+    key,
+    id: key,
+    cells: {
+      name: { text: l.label, title: l.commandLine, icon: leftoverIcon(l, s.platform) },
+      project: { text: folderOf(l.worktree), title: l.worktree?.root },
+      status: l.agentInWorktree
+        ? { text: st.leftoverAgent, dot: 'idle' as const }
+        : { text: st.leftoverFree, dot: 'warn' as const },
+      memory: memoryCell(l.memoryBytes),
+      commit: commitCell(l.commitBytes),
+      runtime: runtimeCell(s.takenAt, l.startedAt),
+      process: { text: l.processName, mono: true, muted: true }
+    },
+    actions: [
+      { kind: 'details', label: ACTIONS.details },
+      { kind: 'kill', label: ACTIONS.killLeftover }
+    ],
+    search: searchOf(l.label, l.processName, folderOf(l.worktree), l.worktree?.branch)
+  }
+}
+
+function heavyLine(j: HeavyJobRow, s: DashboardSnapshot): Row {
+  const key = selectionKey.heavy(j)
+  return {
+    key,
+    id: key,
+    cells: {
+      name: { text: j.label, title: j.commandLine, icon: heavyIcon(j, s.platform) },
+      project: { text: folderOf(j.worktree), title: j.worktree?.root },
+      memory: memoryCell(j.memoryBytes),
+      commit: commitCell(j.commitBytes),
+      runtime: runtimeCell(s.takenAt, j.startedAt),
+      process: { text: j.processName, mono: true, muted: true }
+    },
+    actions: [{ kind: 'details', label: ACTIONS.details }],
+    search: searchOf(j.label, j.processName, folderOf(j.worktree), j.worktree?.branch)
+  }
+}
+
+// ── 작업 공간 탭(G4) ──
+
+type MemberKind = keyof typeof text.ui.workspaces.kinds
+const NONE: Cell = { text: text.ui.none, sort: -1, muted: true }
+
+/**
+ * 작업 공간 탭의 한 줄: 그 항목의 탭과 같은 줄(이름·상태·아이콘·동작·검색)에서 칸을 골라 종류 칸을 더한다.
+ * 그 탭에 없는 칸(무거운 작업의 상태, 서버가 아닌 것의 포트, 서버·에이전트가 아닌 것의 CPU)은 —.
+ */
+function memberLine(line: Row, kind: MemberKind): Row {
+  const label = text.ui.workspaces.kinds[kind]
+  const pick = (id: string): Cell => line.cells[id] ?? NONE
+  return {
+    ...line,
+    cells: {
+      name: line.cells.name,
+      kind: { text: label, muted: true },
+      status: pick('status'),
+      port: pick('port'),
+      cpu: pick('cpu'),
+      memory: line.cells.memory,
+      commit: line.cells.commit
+    },
+    search: searchOf(line.search, label)
+  }
+}
+
+/** 작업 공간 줄에 든 구성원만(스냅샷에 없는 키는 건너뛰고, 어느 작업 공간에도 없는 항목은 넣지 않는다). */
+function workspaceRows(s: DashboardSnapshot): Row[] {
+  const members = new Set(
+    s.workspaces.flatMap((w) => [
+      ...w.agentKeys,
+      ...w.serverKeys,
+      ...w.heavyKeys,
+      ...w.leftoverKeys
+    ])
+  )
+  return [
+    ...s.agents.map((a) => memberLine(agentLine(a, s), 'agent')),
+    ...s.servers.map((p) => memberLine(serverLine(p, s), 'server')),
+    ...s.heavyJobs.map((j) => memberLine(heavyLine(j, s), 'heavy')),
+    ...s.leftovers.map((l) => memberLine(leftoverLine(l, s), 'leftover'))
+  ].filter((row) => row.key != null && members.has(row.key))
+}
+
 export function tableFor(tab: SnapshotTab, s: DashboardSnapshot): Table {
   return dropEmptyCommit(buildTable(tab, s))
 }
 
+/** 작업 공간 탭의 표(G4): 구성원 한 줄씩. 머리는 groupWorkspaces 가 붙인다. */
+export function workspaceTable(s: DashboardSnapshot): Table {
+  return tableFor('workspaces', s)
+}
+
 function buildTable(tab: SnapshotTab, s: DashboardSnapshot): Table {
-  const now = s.takenAt
   switch (tab) {
+    case 'workspaces':
+      // 동작 칸(120px)까지 기본 창(1280px)에 들어가게.
+      return {
+        columns: [
+          { id: 'name', label: c.name, width: 220 },
+          { id: 'kind', label: c.kind, width: 100 },
+          { id: 'status', label: c.status, width: 170 },
+          { id: 'port', label: c.port, width: 124 },
+          { id: 'cpu', label: c.cpu, width: 64, align: 'right' },
+          { id: 'memory', label: c.memory, width: 88, align: 'right' },
+          { ...COMMIT_COLUMN, width: 88 }
+        ],
+        sort: { id: 'memory', dir: 'desc' },
+        rows: workspaceRows(s)
+      }
     case 'ports':
       return {
         columns: [
@@ -310,38 +491,7 @@ function buildTable(tab: SnapshotTab, s: DashboardSnapshot): Table {
           { id: 'process', label: c.process, width: 110 }
         ],
         sort: { id: 'port', dir: 'asc' },
-        rows: s.servers.map((p) => ({
-          key: selectionKey.server(p),
-          id: selectionKey.server(p),
-          cells: {
-            name: {
-              text: folderOf(p.worktree),
-              title: p.worktree?.root,
-              icon: serverIcon(p, s.platform)
-            },
-            // 서버가 연 포트를 한 칸에. 정렬은 첫 포트로.
-            port: { text: portList(p.ports), sort: p.ports[0], mono: true },
-            branch: branchOf(p.worktree),
-            status: serverStatus(p, now),
-            clients: { text: String(p.clientCount), sort: p.clientCount, mono: true },
-            cpu: cpuCell(p.cpuPercent, s),
-            memory: memoryCell(p.memoryBytes),
-            commit: commitCell(p.commitBytes),
-            process: { text: p.processName, mono: true, muted: true }
-          },
-          actions: [
-            { kind: 'open', label: ACTIONS.open },
-            { kind: 'details', label: ACTIONS.details },
-            ...(p.unresolvable ? [] : [{ kind: 'kill' as const, label: ACTIONS.kill }])
-          ],
-          search: searchOf(
-            folderOf(p.worktree),
-            p.worktree?.branch,
-            p.processName,
-            portList(p.ports),
-            p.ports.join(' ')
-          )
-        }))
+        rows: s.servers.map((p) => serverLine(p, s))
       }
     case 'agents':
       // 하는 일 칸을 더해도 기본 창(1280px)에 들어가게 다른 칸을 줄였다.
@@ -357,34 +507,7 @@ function buildTable(tab: SnapshotTab, s: DashboardSnapshot): Table {
           { id: 'runtime', label: c.runtime, width: 90, align: 'right' }
         ],
         sort: { id: 'name', dir: 'asc' },
-        rows: s.agents.map((a) => {
-          const cpu = displayCpuPercent(a.cpuPercent, s.platform, s.cpuCount)
-          return {
-            key: selectionKey.agent(a),
-            id: selectionKey.agent(a),
-            cells: {
-              name: { text: folderOf(a.worktree), title: a.worktree?.root, icon: agentIcon(a) },
-              branch: branchOf(a.worktree),
-              status: agentStatus(a, now),
-              activity: activityCell(a),
-              cpu:
-                cpu == null
-                  ? { text: text.ui.none, sort: -1, muted: true }
-                  : { text: `${cpu.toFixed(1)}%`, sort: cpu, mono: true },
-              memory: memoryCell(a.memoryBytes),
-              commit: commitCell(a.commitBytes),
-              runtime: runtimeCell(now, a.startedAt)
-            },
-            actions: [{ kind: 'details', label: ACTIONS.details }],
-            search: searchOf(
-              folderOf(a.worktree),
-              a.worktree?.branch,
-              text.ui.agent.toolNames[a.tool],
-              text.ui.agent.states[a.state],
-              a.activity?.title
-            )
-          }
-        })
+        rows: s.agents.map((a) => agentLine(a, s))
       }
     case 'leftovers':
       return {
@@ -398,29 +521,7 @@ function buildTable(tab: SnapshotTab, s: DashboardSnapshot): Table {
           { id: 'process', label: c.process, width: 160 }
         ],
         sort: { id: 'memory', dir: 'desc' },
-        rows: s.leftovers.map((l) => {
-          const key = selectionKey.leftover(l)
-          return {
-            key,
-            id: key,
-            cells: {
-              name: { text: l.label, title: l.commandLine, icon: leftoverIcon(l, s.platform) },
-              project: { text: folderOf(l.worktree), title: l.worktree?.root },
-              status: l.agentInWorktree
-                ? { text: st.leftoverAgent, dot: 'idle' as const }
-                : { text: st.leftoverFree, dot: 'warn' as const },
-              memory: memoryCell(l.memoryBytes),
-              commit: commitCell(l.commitBytes),
-              runtime: runtimeCell(now, l.startedAt),
-              process: { text: l.processName, mono: true, muted: true }
-            },
-            actions: [
-              { kind: 'details', label: ACTIONS.details },
-              { kind: 'kill', label: ACTIONS.killLeftover }
-            ],
-            search: searchOf(l.label, l.processName, folderOf(l.worktree), l.worktree?.branch)
-          }
-        })
+        rows: s.leftovers.map((l) => leftoverLine(l, s))
       }
     case 'heavy':
       return {
@@ -433,20 +534,7 @@ function buildTable(tab: SnapshotTab, s: DashboardSnapshot): Table {
           { id: 'process', label: c.process, width: 160 }
         ],
         sort: { id: 'memory', dir: 'desc' },
-        rows: s.heavyJobs.map((j) => ({
-          key: selectionKey.heavy(j),
-          id: selectionKey.heavy(j),
-          cells: {
-            name: { text: j.label, title: j.commandLine, icon: heavyIcon(j, s.platform) },
-            project: { text: folderOf(j.worktree), title: j.worktree?.root },
-            memory: memoryCell(j.memoryBytes),
-            commit: commitCell(j.commitBytes),
-            runtime: runtimeCell(now, j.startedAt),
-            process: { text: j.processName, mono: true, muted: true }
-          },
-          actions: [{ kind: 'details', label: ACTIONS.details }],
-          search: searchOf(j.label, j.processName, folderOf(j.worktree), j.worktree?.branch)
-        }))
+        rows: s.heavyJobs.map((j) => heavyLine(j, s))
       }
     case 'disk':
       return {
@@ -546,30 +634,49 @@ export function sortRows(rows: Row[], id: string, dir: 'asc' | 'desc'): Row[] {
   })
 }
 
-/** 작업 공간 묶음 머리(F1). */
-export interface ServerGroup {
-  /** 화면 키(`group:<작업 공간 키>`). */
+export type GroupAction = 'rename' | 'cleanup' | 'folder'
+
+/** 묶음 머리: 개발 서버 탭의 작업 공간 묶음(F1)과 작업 공간 탭의 작업 공간(G4). */
+export interface GroupHead {
+  /**
+   * 화면 키. 개발 서버 탭은 `group:<작업 공간 키>`, 작업 공간 탭은 WorkspaceRow.key(`ws:…`)라 서로 겹치지 않는다.
+   * 접은 묶음을 이 키로 기억한다.
+   */
   key: string
-  root: string
+  /** 작업 공간 경로. 작업 공간을 모르는 묶음(`ws:?`)은 null. */
+  root: string | null
   name: string
   outer: boolean
-  serverCount: number
-  /** 서버 메모리 합(서버마다 한 번). */
+  /** 구성원 수(개발 서버 탭은 서버 수). */
+  count: number
+  /** 메모리 합(개발 서버 탭은 서버마다 한 번, 작업 공간 탭은 프로세스마다 한 번). */
   memoryBytes: number
-  /** 서버 커밋 합. 하나도 모르면 null. */
+  /** 커밋 합. 하나도 모르면 null. */
   commitBytes: number | null
-  /** 그 작업 공간에서 실행 중인 에이전트. */
-  agents: AgentRow[]
   /** 머리에 보일 에이전트 로고와 설명(도구 · 상태 · 경과 시간). */
   agentBadges: { key: string; icon: RowIcon; title: string }[]
-  /** 서버 상태 요약. */
+  /** 상태 요약. 보일 것이 없으면 글자가 비어 있다. */
   status: Cell
+  /** 작업 공간 탭 머리의 요약("서버 3 · 무거운 작업 1 · 변경 12"). 개발 서버 탭 머리에는 없다. */
+  summary?: string
+  /** 머리 동작. 작업 공간을 모르는 묶음은 없다. */
+  actions: GroupAction[]
 }
+/** 개발 서버 탭의 작업 공간 묶음 머리(F1). */
+export type ServerGroup = GroupHead
 
 export interface GroupedRows {
-  /** null 이면 머리 없이 서버 줄만(혼자인 작업 공간·작업 공간을 모르는 서버). */
-  group: ServerGroup | null
+  /** null 이면 머리 없이 서버 줄만(개발 서버 탭에서 혼자인 작업 공간·작업 공간을 모르는 서버). */
+  group: GroupHead | null
   rows: Row[]
+}
+
+function agentBadge(a: AgentRow, now: number): GroupHead['agentBadges'][number] {
+  return {
+    key: selectionKey.agent(a),
+    icon: agentIcon(a),
+    title: `${text.ui.agent.toolNames[a.tool]} · ${agentStatus(a, now).text}`
+  }
 }
 
 /**
@@ -622,20 +729,86 @@ export function groupServers(
         root: ws.root,
         name: ws.name,
         outer: ws.outer,
-        serverCount: all.length,
+        count: all.length,
         memoryBytes: all.reduce((sum, r) => sum + r.memoryBytes, 0),
         commitBytes: commitSum(all),
-        agents: inside,
-        agentBadges: inside.map((a) => ({
-          key: selectionKey.agent(a),
-          icon: agentIcon(a),
-          title: `${text.ui.agent.toolNames[a.tool]} · ${agentStatus(a, now).text}`
-        })),
-        status: groupStatus(all)
+        agentBadges: inside.map((a) => agentBadge(a, now)),
+        status: groupStatus(all),
+        actions: ['rename', 'cleanup']
       },
       rows: bucket.rows
     }
   })
+}
+
+/**
+ * 작업 공간 탭(G4): 정렬·검색을 거친 구성원 줄을 작업 공간별로 묶는다. 묶음 순서는 스냅샷의 workspaces 순서(메모리 큰 순,
+ * 작업 폴더 모름은 맨 끝)이고 정렬은 묶음 안 줄의 순서만 바꾼다. 구성원이 하나여도 머리를 두고, 보일 줄이 없는 작업 공간
+ * (검색에 맞는 구성원이 없음)은 뺀다. 머리의 수치는 걸러진 줄이 아니라 작업 공간 전체다.
+ * 작업 공간끼리는 더하지 않는다(드물게 한 프로세스가 두 작업 공간에 든다).
+ */
+export function groupWorkspaces(rows: Row[], s: DashboardSnapshot, now: number): GroupedRows[] {
+  const agents = new Map(s.agents.map((a) => [selectionKey.agent(a), a]))
+  const servers = new Map(s.servers.map((r) => [selectionKey.server(r), r]))
+  const heavy = new Set(s.heavyJobs.map((j) => selectionKey.heavy(j)))
+  const leftovers = new Set(s.leftovers.map((l) => selectionKey.leftover(l)))
+  return s.workspaces.flatMap((ws) => {
+    const keys = new Set([...ws.agentKeys, ...ws.serverKeys, ...ws.heavyKeys, ...ws.leftoverKeys])
+    const mine = rows.filter((r) => r.key != null && keys.has(r.key))
+    if (mine.length === 0) return []
+    const members = {
+      agents: ws.agentKeys.flatMap((k) => agents.get(k) ?? []),
+      servers: ws.serverKeys.flatMap((k) => servers.get(k) ?? []),
+      heavy: ws.heavyKeys.filter((k) => heavy.has(k)).length,
+      leftovers: ws.leftoverKeys.filter((k) => leftovers.has(k)).length
+    }
+    return [{ group: workspaceHead(ws, members, now), rows: mine }]
+  })
+}
+
+/** 작업 공간 탭의 머리. 구성원은 스냅샷에 있는 것만(없는 키는 건너뛴다), 합계는 메인이 pid 마다 한 번 센 값. */
+function workspaceHead(
+  ws: WorkspaceRow,
+  m: { agents: AgentRow[]; servers: ServerRow[]; heavy: number; leftovers: number },
+  now: number
+): GroupHead {
+  const K = text.ui.workspaces.kinds
+  const counts: [string, number][] = [
+    [K.server, m.servers.length],
+    [K.heavy, m.heavy],
+    [K.leftover, m.leftovers],
+    [text.ui.workspaces.changed, ws.changedFiles ?? 0]
+  ]
+  const parts = counts.filter(([, n]) => n > 0).map(([label, n]) => st.groupCount(label, n))
+  // 작업 중·권한 대기인 에이전트가 있으면 마지막 활동은 "지금"이라 붙이지 않는다.
+  const busy = m.agents.some((a) => a.state === 'working' || a.state === 'waiting')
+  if (!busy && ws.lastActiveAt != null)
+    parts.push(st.lastActive(formatDuration(Math.max(0, now - ws.lastActiveAt))))
+  return {
+    key: ws.key,
+    root: ws.root,
+    name: ws.name,
+    outer: ws.outer,
+    count: m.agents.length + m.servers.length + m.heavy + m.leftovers,
+    memoryBytes: ws.memoryBytes,
+    commitBytes: ws.commitBytes,
+    agentBadges: m.agents.map((a) => agentBadge(a, now)),
+    status: workspaceStatus(m.agents, m.servers),
+    summary: parts.join(' · '),
+    actions: ws.root ? ['rename', 'folder', 'cleanup'] : []
+  }
+}
+
+/**
+ * 작업 공간 머리 상태: 에이전트가 권한 대기 > 조용함 > 작업 중, 아니면 서버 요약.
+ * 서버가 없으면 비운다(서버 요약의 "연결 없음"은 서버가 있을 때의 말이라).
+ */
+function workspaceStatus(agents: AgentRow[], servers: ServerRow[]): Cell {
+  const states = text.ui.agent.states
+  if (agents.some((a) => a.state === 'waiting')) return { text: states.waiting, dot: 'warn' }
+  if (agents.some((a) => a.quietSince != null)) return { text: st.quiet, dot: 'warn' }
+  if (agents.some((a) => a.state === 'working')) return { text: states.working, dot: 'running' }
+  return servers.length ? groupStatus(servers) : { text: '' }
 }
 
 /** 묶음 상태 요약: 정리 후보·확인해볼 것·사용 중 수, 점 색은 가장 급한 것. */

@@ -1,9 +1,10 @@
 // @vitest-environment happy-dom
 import { mount } from '@vue/test-utils'
 import ItemTable from './ItemTable.vue'
-import { groupServers, tableFor } from '../rows'
-import { MB, serverRow, snapshot } from '../testing/fixtures'
+import { groupServers, groupWorkspaces, tableFor } from '../rows'
+import { MB, heavyJob, serverRow, snapshot, workspaceRow } from '../testing/fixtures'
 import type { DashboardSnapshot } from '../../../shared/types'
+import { selectionKey } from '../../../shared/keys'
 
 function ports(memories: number[]): DashboardSnapshot {
   return snapshot({
@@ -123,6 +124,88 @@ describe('작업 공간 묶음 보기', () => {
     })
     const w = mount(ItemTable, { props: props(s, { id: 'port', dir: 'asc' }) })
     expect(w.find('[data-slot="badge"]').text()).toBe('메모리 증가')
+  })
+})
+
+describe('작업 공간 탭 묶음', () => {
+  const WS = { root: 'C:\\work\\shop', name: 'shop', branch: 'main', outer: false }
+  const server = serverRow({ pid: 1, ports: [5173], workspace: WS, memoryBytes: 300 * MB })
+  const build = heavyJob({ pid: 2, workspace: WS })
+  const lone = serverRow({ pid: 3, ports: [3000], memoryBytes: 100 * MB })
+  const s = snapshot({
+    servers: [server, lone],
+    heavyJobs: [build],
+    workspaces: [
+      workspaceRow({
+        key: 'ws:c:\\work\\shop',
+        root: 'C:\\work\\shop',
+        name: 'shop',
+        memoryBytes: 7 * 1024 * MB,
+        serverKeys: [selectionKey.server(server)],
+        heavyKeys: [selectionKey.heavy(build)],
+        changedFiles: 4
+      }),
+      workspaceRow({
+        key: 'ws:?',
+        root: null,
+        name: '작업 폴더 모름',
+        memoryBytes: 100 * MB,
+        serverKeys: [selectionKey.server(lone)]
+      })
+    ]
+  })
+  function wsProps(): TableProps {
+    const table = tableFor('workspaces', s)
+    return {
+      table,
+      rows: table.rows,
+      selectedKey: null,
+      searching: false,
+      emptyText: '',
+      busyKey: null,
+      sort: table.sort,
+      group: (rows) => groupWorkspaces(rows, s, s.takenAt)
+    }
+  }
+
+  test('머리에 구성원 수·요약·작업 공간 합계, 요약은 상태 칸에서 빈 포트·CPU 칸까지 쓴다', () => {
+    const w = mount(ItemTable, { props: wsProps() })
+    const heads = w.findAll('tbody tr[data-group]')
+    expect(heads.map((h) => h.attributes('data-group'))).toEqual(['ws:c:\\work\\shop', 'ws:?'])
+    const shop = heads[0]
+    expect(shop.find('[data-slot="badge"]').text()).toBe('2')
+    expect(shop.find('[data-slot="badge"]').attributes('title')).toBe('항목 2개')
+    expect(shop.text()).toContain('서버 1 · 무거운 작업 1 · 변경 4')
+    expect(shop.text()).toContain('7.0 GB')
+    // 상태(170) + 포트 + CPU 를 한 칸으로: 머리 줄의 칸 수는 표의 칸 수보다 둘 적다.
+    const status = shop.find('td[colspan="3"]')
+    expect(status.exists()).toBe(true)
+    expect(status.find('[title]').attributes('title')).toBe(
+      '사용 중 1 · 서버 1 · 무거운 작업 1 · 변경 4'
+    )
+    // 구성원은 머리 아래 들여쓰기로(메모리 큰 순).
+    expect(order(w)).toEqual([
+      selectionKey.heavy(build),
+      selectionKey.server(server),
+      selectionKey.server(lone)
+    ])
+  })
+
+  test('머리 동작: 이름 바꾸기·폴더 열기·정리, 작업 폴더 모름은 동작이 없다', async () => {
+    const w = mount(ItemTable, { props: wsProps() })
+    const shop = w.find('tr[data-group="ws:c:\\\\work\\\\shop"]')
+    expect(shop.findAll('[data-action]').map((b) => b.attributes('data-action'))).toEqual([
+      'rename',
+      'folder',
+      'cleanup'
+    ])
+    await shop.find('[data-action="folder"]').trigger('click')
+    await shop.find('[data-action="cleanup"]').trigger('click')
+    expect(w.emitted('groupAction')).toEqual([
+      ['folder', 'C:\\work\\shop'],
+      ['cleanup', 'C:\\work\\shop']
+    ])
+    expect(w.find('tr[data-group="ws:?"]').findAll('[data-action]')).toHaveLength(0)
   })
 })
 
