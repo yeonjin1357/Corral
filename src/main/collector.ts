@@ -559,7 +559,8 @@ export function createCollector(deps: CollectorDeps): {
       devServerPids,
       previousCpu,
       now: sampledAt,
-      hookFor: hookFor(roots)
+      hookFor: hookFor(roots),
+      selfPid: deps.selfPid
     })
     previousCpu = cpu
     // 훅 상태가 없거나 파일이 더 늦은 근거인 Claude 에이전트는 세션 파일의 상태를 쓴다.

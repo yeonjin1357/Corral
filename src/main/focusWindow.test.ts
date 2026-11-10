@@ -118,13 +118,30 @@ describe('스크립트', () => {
       )
   })
 
-  test('보조 코드는 수집 스크립트와 같은 방법으로 불러오고(DLL 경로의 작은따옴표는 이스케이프), JSON 은 UTF-8 바이트로 낸다', () => {
+  test('보조 코드는 수집이 만든 DLL 을 불러오고(경로의 작은따옴표는 이스케이프), 못 쓰면 메모리에서 컴파일하며, JSON 은 UTF-8 바이트로 낸다', () => {
     const script = focusScript("C:\\Users\\김'개발\\pitwall-native-1.dll", [1], 'find')
     expect(script).toContain("$dll = 'C:\\Users\\김''개발\\pitwall-native-1.dll'")
     expect(script).toContain('Add-Type -Path $dll')
+    expect(script).toMatch(/catch \{ Add-Type -ErrorAction Stop -TypeDefinition \$src \}/)
     expect(script).toContain('public static class PitwallWindow')
     expect(script).toContain('[Console]::OpenStandardOutput()')
     expect(focusScript(null, [1], 'find')).not.toContain('$dll')
+    expect(focusScript(null, [1], 'find')).toContain(
+      'Add-Type -ErrorAction Stop -TypeDefinition $src'
+    )
+  })
+
+  test('창으로 가기 스크립트는 DLL 을 만들거나 지우지 않는다', () => {
+    // 업데이트 뒤 수집이 처음 컴파일하는 사이에 끼어들어 DLL 을 만들거나 지우면 수집이 경쟁에 져 그 세션 내내 메모리 컴파일로 간다.
+    for (const mode of ['find', 'focus'] as const) {
+      const script = focusScript(
+        'C:\\Users\\dev\\AppData\\Roaming\\pitwall\\pitwall-native-1.dll',
+        [1],
+        mode
+      )
+      expect(script).not.toContain('-OutputAssembly')
+      expect(script).not.toContain('Remove-Item')
+    }
   })
 })
 

@@ -28,6 +28,7 @@ import type { QuickKind } from '../../../shared/ipc'
 import type {
   AgentRow,
   ClaudeHookStatus,
+  CollectMode,
   DiskRow,
   HeavyJobRow,
   LeftoverRow,
@@ -74,6 +75,8 @@ const props = defineProps<{
   busy: boolean
   hook: ClaudeHookStatus | null
   platform: Platform | null
+  /** 수집 방식. 보조 코드를 못 쓰는 방식(basic·safe)이면 창으로 가기를 보이지 않는다. */
+  collectMode?: CollectMode | null
   cpuCount: number
 }>()
 const emit = defineEmits<{
@@ -90,14 +93,17 @@ const open = defineModel<boolean>('open', { required: true })
 const t = text.ui
 
 /**
- * 창으로 가기(G3f)를 보일 에이전트의 선택 키. 찾아볼 곳이 없으면(Windows 는 조상 pid, macOS 는 .app 번들을 모름) null 이고
- * 버튼을 보이지 않는다.
+ * 창으로 가기(G3f)를 보일 에이전트의 선택 키. 찾아볼 곳이 없거나(Windows 는 창 후보 pid, macOS 는 .app 번들을 모름)
+ * 보조 코드를 못 쓰는 수집 방식(basic·safe — 창을 찾을 수 없다)이면 null 이고 버튼을 보이지 않는다.
  */
 const focusKey = computed(() => {
   const item = props.item
   if (item?.kind !== 'agent') return null
   const { host } = item.row
-  const canTry = props.platform === 'darwin' ? host.app != null : host.pids.length > 0
+  const canTry =
+    props.platform === 'darwin'
+      ? host.app != null
+      : host.pids.length > 0 && props.collectMode !== 'basic' && props.collectMode !== 'safe'
   return canTry ? selectionKey.agent(item.row) : null
 })
 

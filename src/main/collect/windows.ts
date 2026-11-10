@@ -26,9 +26,10 @@ import { runCommand, type CommandResult, type Runner } from './runCommand'
  *   프로세스 메모리의 PEB → ProcessParameters → CurrentDirectory 를 읽는다(같은 사용자 프로세스만, 64비트만).
  *   오프셋: PEB.ProcessParameters = 0x20, RTL_USER_PROCESS_PARAMETERS.CurrentDirectory.DosPath = 0x38.
  * - PitwallWindow: 에이전트가 떠 있는 창 찾기·앞으로 가져오기(G3f 창으로 가기, focusWindow.ts). 수집 스크립트는 부르지 않는다.
- *   Find: 주어진 pid 순서(가까운 조상부터)에서 보이는·소유자 없는(GW_OWNER=4)·제목 있는 최상위 창을 가진 첫 pid 와
+ *   Find: 주어진 pid 순서(창 후보 순)에서 보이는·소유자 없는(GW_OWNER=4)·제목 있는 최상위 창을 가진 첫 pid 와
  *   그 창(EnumWindows 는 Z 순서라 그 프로세스의 맨 앞 창). 없으면 null. 제목은 앞 255자까지만 읽는다.
- *   Focus: 최소화돼 있으면 되살리고(SW_RESTORE=9) 앞으로. OS 가 거절할 수 있어(앞 창 제한) 실제로 앞에 왔는지 돌려준다.
+ *   Focus: 최소화돼 있을 때만 되살리고(SW_RESTORE=9, 응답 없는 창에 막히지 않게 ShowWindowAsync) 앞으로.
+ *   OS 가 거절할 수 있어(앞 창 제한) 실제로 앞에 왔는지 돌려준다.
  * 이 원본 전체가 수집 스크립트에 들어가 명령줄 길이 제한(32767자)을 나눠 쓰므로 주석은 여기에 둔다.
  */
 const NATIVE_HELPERS = `using System;
@@ -179,7 +180,7 @@ public static class PitwallWindow {
   [DllImport(U)] static extern IntPtr GetWindow(IntPtr h, uint cmd);
   [DllImport(U, CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr h, System.Text.StringBuilder s, int n);
   [DllImport(U)] static extern bool IsIconic(IntPtr h);
-  [DllImport(U)] static extern bool ShowWindow(IntPtr h, int cmd);
+  [DllImport(U)] static extern bool ShowWindowAsync(IntPtr h, int cmd);
   [DllImport(U)] static extern bool SetForegroundWindow(IntPtr h);
   [DllImport(U)] static extern IntPtr GetForegroundWindow();
   public static PitwallWindowRow Find(int[] pids) {
@@ -199,7 +200,7 @@ public static class PitwallWindow {
   }
   public static bool Focus(long hwnd) {
     var h = new IntPtr(hwnd);
-    if (IsIconic(h)) ShowWindow(h, 9);
+    if (IsIconic(h)) ShowWindowAsync(h, 9);
     SetForegroundWindow(h);
     return GetForegroundWindow() == h;
   }
@@ -210,21 +211,25 @@ export function nativeHelperDllName(): string {
   return `pitwall-native-${createHash('sha256').update(NATIVE_HELPERS).digest('hex').slice(0, 12)}.dll`
 }
 
-/** 보조 코드의 C# 원본을 `$src` 에 담는 줄들(helperLoadLines 앞에 둔다). */
+/** 보조 코드의 C# 원본을 `$src` 에 담는 줄들(helperLoadLines·helperUseLines 앞에 둔다). */
 export function helperSourceLines(): string[] {
   return ["$src = @'", NATIVE_HELPERS, "'@"]
 }
 
+/** `$dll` 에 DLL 경로를 담는 줄(작은따옴표 문자열이라 `'` 만 두 번 쓴다). */
+const dllLine = (dllPath: string): string => `$dll = '${dllPath.replace(/'/g, "''")}'`
+const COMPILE_IN_MEMORY = 'Add-Type -ErrorAction Stop -TypeDefinition $src'
+
 /**
- * 보조 코드를 불러오는 줄들. DLL 경로가 있으면 처음 한 번만 컴파일해 두고 다음부터는 불러오기만 한다
+ * 보조 코드를 불러오는 줄들(수집용). DLL 경로가 있으면 처음 한 번만 컴파일해 두고 다음부터는 불러오기만 한다
  * (매번 컴파일하면 csc.exe 가 뜬다). DLL 이 깨졌거나 쓸 수 없으면 지우고 메모리에서 컴파일한다.
  */
 export function helperLoadLines(dllPath: string | null): string[] {
   // $helperMode: 불러오기에 성공한 방법을 남긴다(없으면 'none'). Node 는 이것을 보고 DLL 재시도를 그만둔다.
-  const inMemory = ['Add-Type -ErrorAction Stop -TypeDefinition $src', "$helperMode = 'memory'"]
+  const inMemory = [COMPILE_IN_MEMORY, "$helperMode = 'memory'"]
   if (!dllPath) return inMemory
   return [
-    `$dll = '${dllPath.replace(/'/g, "''")}'`,
+    dllLine(dllPath),
     'try {',
     '  if (-not (Test-Path -LiteralPath $dll)) { Add-Type -ErrorAction Stop -OutputType Library -OutputAssembly $dll -TypeDefinition $src }',
     '  Add-Type -Path $dll -ErrorAction Stop',
@@ -233,6 +238,19 @@ export function helperLoadLines(dllPath: string | null): string[] {
     '  Remove-Item -LiteralPath $dll -Force -ErrorAction SilentlyContinue',
     ...inMemory.map((line) => `  ${line}`),
     '}'
+  ]
+}
+
+/**
+ * 보조 코드를 쓰기만 하는 줄들(창으로 가기 등 수집 밖). 수집이 만든 DLL 이 있으면 불러오고, 없거나 못 쓰면 메모리에서
+ * 컴파일한다. DLL 은 수집만 만들고 지운다 — 수집이 처음 컴파일하는 사이에 끼어들어 만들거나 지우면 수집이 경쟁에 져
+ * 그 세션 내내 메모리 컴파일로 간다.
+ */
+export function helperUseLines(dllPath: string | null): string[] {
+  if (!dllPath) return [COMPILE_IN_MEMORY]
+  return [
+    dllLine(dllPath),
+    `try { Add-Type -Path $dll -ErrorAction Stop } catch { ${COMPILE_IN_MEMORY} }`
   ]
 }
 

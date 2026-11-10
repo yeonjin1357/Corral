@@ -3,7 +3,7 @@ import { mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach } from 'vitest'
 import ItemSheet, { type Selected } from './ItemSheet.vue'
 import { MB, agentRow, diskRow, heavyJob, leftoverRow, serverRow } from '../testing/fixtures'
-import type { ClaudeHookStatus, Platform } from '../../../shared/types'
+import type { ClaudeHookStatus, CollectMode, Platform } from '../../../shared/types'
 
 let wrapper: VueWrapper | null = null
 afterEach(() => {
@@ -15,7 +15,8 @@ afterEach(() => {
 function sheet(
   item: Selected,
   hook: ClaudeHookStatus | null = null,
-  platform: Platform = 'win32'
+  platform: Platform = 'win32',
+  collectMode: CollectMode | null = 'helper-dll'
 ): VueWrapper {
   wrapper = mount(ItemSheet, {
     attachTo: document.body,
@@ -27,6 +28,7 @@ function sheet(
       busy: false,
       hook,
       platform,
+      collectMode,
       cpuCount: 8,
       open: true
     }
@@ -161,6 +163,22 @@ describe('상세 패널: 창으로 가기(G3f)', () => {
     wrapper?.unmount()
     sheet({ kind: 'server', row: serverRow() })
     expect(focusButton()).toBeNull()
+  })
+
+  test('보조 코드를 못 쓰는 수집 방식에서는 창으로 가기 단추가 없다', () => {
+    const agent: Selected = { kind: 'agent', row: agentRow({ host }) }
+    for (const collectMode of ['basic', 'safe'] as const) {
+      sheet(agent, null, 'win32', collectMode)
+      expect(focusButton()).toBeNull()
+      // 바로 가기는 그대로 있다.
+      expect(actionRow()).toEqual(['경로 복사', '폴더 열기', '터미널 열기'])
+      wrapper?.unmount()
+    }
+    for (const collectMode of ['helper-dll', 'helper-memory', null] as const) {
+      sheet(agent, null, 'win32', collectMode)
+      expect(focusButton()).not.toBeNull()
+      wrapper?.unmount()
+    }
   })
 })
 

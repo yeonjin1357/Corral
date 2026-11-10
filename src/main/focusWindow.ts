@@ -5,8 +5,8 @@ import type { Runner } from './collect/runCommand'
 import { appBundleOf } from './agents'
 import {
   buildPowerShellArgs,
-  helperLoadLines,
   helperSourceLines,
+  helperUseLines,
   powershellPath,
   WRITE_JSON_LINES
 } from './collect/windows'
@@ -32,8 +32,9 @@ function pidList(pids: readonly unknown[]): string {
 }
 
 /**
- * 창 찾기(find)·앞으로 가져오기(focus) 스크립트. 보조 코드는 수집 스크립트와 같은 방법(DLL, 안 되면 메모리 컴파일)으로
- * 불러오고, `{ pid, title, focused }`(창을 못 찾았으면 null) JSON 한 줄을 UTF-8 로 낸다. find 는 Focus 를 부르지 않는다.
+ * 창 찾기(find)·앞으로 가져오기(focus) 스크립트. 보조 코드는 수집이 만든 DLL 이 있으면 불러오고 없거나 못 쓰면 메모리에서
+ * 컴파일한다(DLL 을 만들거나 지우지 않는다). pids 순서에서 창을 가진 첫 pid 를 쓰고, `{ pid, title, focused }`
+ * (창을 못 찾았으면 null) JSON 한 줄을 UTF-8 로 낸다. find 는 Focus 를 부르지 않는다.
  */
 export function focusScript(
   helperDllPath: string | null,
@@ -46,7 +47,7 @@ export function focusScript(
     ...helperSourceLines(),
     '$r = $null',
     'try {',
-    ...helperLoadLines(helperDllPath),
+    ...helperUseLines(helperDllPath),
     `$w = [PitwallWindow]::Find([int[]]@(${pidList(pids)}))`,
     `if ($w) { $r = @{ pid = $w.Pid; title = $w.Title; focused = ${focused} } }`,
     '} catch {}',

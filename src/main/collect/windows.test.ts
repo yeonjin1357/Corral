@@ -4,9 +4,9 @@ import { tmpdir, totalmem } from 'os'
 import { join } from 'path'
 import { existsSync, writeFileSync } from 'fs'
 import { runCommand, type CommandResult } from './runCommand'
-import { buildTree } from '../processTree'
-import { hostOf } from '../agents'
-import { createFocuser } from '../focusWindow'
+import { buildTree, classifyAgent } from '../processTree'
+import { hostFinder } from '../agents'
+import { createFocuser, focusScript } from '../focusWindow'
 import { blankSnapshot } from '../../shared/snapshot'
 import { selectionKey } from '../../shared/keys'
 import type { AgentRow } from '../../shared/types'
@@ -559,7 +559,7 @@ test('보조 코드에 창 찾기·앞으로 가져오기(PitwallWindow)가 있�
     'IsWindowVisible',
     'GetWindow(h, 4) == IntPtr.Zero',
     'GetWindowText(h, title, 256) > 0',
-    'IsIconic(h)) ShowWindow(h, 9)',
+    'IsIconic(h)) ShowWindowAsync(h, 9)',
     'SetForegroundWindow(h)',
     'GetForegroundWindow() == h'
   ])
@@ -710,16 +710,18 @@ describe.runIf(process.platform === 'win32')('실제 Windows 에서', () => {
   // 읽기 전용: find 만 실제로 돌린다(focus 는 사용자의 앞 창을 가져가므로 실제 창에 실행하지 않는다).
   test('find 는 이 테스트 프로세스의 조상 가운데 창을 가진 프로세스를 찾거나 null 을 돌려주고 예외를 내지 않는다', async () => {
     const s = await sampleWindows()
-    const self = s.processes.find((p) => p.pid === process.pid)!
-    const host = hostOf(buildTree(s.processes), process.pid)
-    expect(host.pids.length).toBeGreaterThan(0)
+    const tree = buildTree(s.processes)
+    // 이 테스트를 띄운 에이전트(Claude Code 등)가 조상에 있으면 그것의, 없으면 이 프로세스의 창 후보.
+    const agent =
+      tree.ancestors(process.pid, 64).find(classifyAgent) ?? tree.byPid.get(process.pid)!
+    const host = hostFinder(s.processes, tree)(agent.pid)
     const row: AgentRow = {
-      pid: process.pid,
+      pid: agent.pid,
       tool: 'claude',
       worktree: null,
       workspace: null,
-      startedAt: self.startedAt,
-      memoryBytes: self.memoryBytes,
+      startedAt: agent.startedAt,
+      memoryBytes: agent.memoryBytes,
       commitBytes: null,
       descendantCount: 0,
       processes: [],
@@ -757,12 +759,46 @@ describe.runIf(process.platform === 'win32')('실제 Windows 에서', () => {
       expect(host.pids).toContain(found.pid)
       expect(found.title.length).toBeGreaterThan(0)
     } else expect(found).toBeNull()
-    expect(scripts).toHaveLength(1)
-    expect(scripts[0]).not.toContain('[PitwallWindow]::Focus(')
+    // 후보가 없으면 실행하지 않는다.
+    expect(scripts).toHaveLength(host.pids.length > 0 ? 1 : 0)
+    for (const script of scripts) expect(script).not.toContain('[PitwallWindow]::Focus(')
     // 못 찾았을 때도 오류 없이 JSON 한 줄(null)을 낸다.
-    expect(results[0]).toMatchObject({ exitCode: 0, stderr: '' })
-    expect(() => JSON.parse(results[0].stdout)).not.toThrow()
+    for (const result of results) {
+      expect(result).toMatchObject({ exitCode: 0, stderr: '' })
+      expect(() => JSON.parse(result.stdout)).not.toThrow()
+    }
   }, 60000)
+
+  test('find 는 실제 샘플의 모든 pid 가운데 보이는 창이 하나라도 있으면 찾는다(보조 코드를 불러와 Find 가 동작한다)', async () => {
+    const s = await sampleWindows()
+    // 따로 세는 기준: .NET 의 MainWindowTitle(보이고 소유자 없는 최상위 창의 제목)이 있는 프로세스 수.
+    const titled = await runCommand(
+      [
+        powershellPath(),
+        ...buildPowerShellArgs('@(Get-Process | Where-Object { $_.MainWindowTitle }).Count')
+      ],
+      { timeoutMs: 30000 }
+    )
+    const anyWindow = Number(titled.stdout.trim()) > 0
+    const pids = s.processes.map((p) => p.pid).filter((pid) => pid > 0)
+    // 명령줄 길이 제한 때문에 나눠서 찾는다(앱의 창 후보는 24개까지라 한 번이면 된다).
+    let found: { pid: number; title: string; focused: boolean } | null = null
+    for (let i = 0; i < pids.length && !found; i += 200) {
+      const script = focusScript(null, pids.slice(i, i + 200), 'find')
+      expect(script).not.toContain('[PitwallWindow]::Focus(')
+      const r = await runCommand([powershellPath(), ...buildPowerShellArgs(script)], {
+        timeoutMs: 30000
+      })
+      expect(r).toMatchObject({ exitCode: 0, stderr: '' })
+      found = JSON.parse(r.stdout)
+    }
+    if (anyWindow) {
+      expect(found).not.toBeNull()
+      expect(pids).toContain(found!.pid)
+      expect(found!.title.length).toBeGreaterThan(0)
+      expect(found!.focused).toBe(false)
+    }
+  }, 120000)
 
   test('상대 경로로 띄운 서버도 작업 폴더(한글 포함)를 읽는다', async () => {
     const dir = await mkdtemp(join(tmpdir(), '김개발-cwd-'))

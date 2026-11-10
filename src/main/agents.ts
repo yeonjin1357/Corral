@@ -84,12 +84,20 @@ export function measureTreeCpu(
 
 /** 창을 찾아볼 조상 수(가까운 것부터). */
 const HOST_MAX_DEPTH = 12
+/** 창 후보 pid 수 상한(스크립트 명령줄 길이 때문에, 앞의 것을 남긴다). */
+const HOST_MAX_PIDS = 24
 
 /**
  * Windows 셸. 시작 메뉴·작업 표시줄로 띄운 것은 모두 이 아래라 조상에 흔히 있지만, 그 창(바탕 화면·탐색기)은
- * 에이전트의 창이 아니다. 여기까지 왔으면 에이전트를 띄운 창은 조상에 없는 것이다(Windows Terminal 로 넘긴 콘솔 등).
+ * 에이전트의 창이 아니다. 여기서 조상 따라가기를 멈춘다.
  */
 const WINDOWS_SHELL = /^explorer\.exe$/i
+/** 콘솔 창의 주인(클래식 콘솔은 conhost, Windows Terminal·ConPTY 는 OpenConsole). 셸·에이전트의 자식이다. */
+const CONSOLE_HOST = /^(conhost|openconsole)\.exe$/i
+/** 셸·런타임·콘솔 호스트: 창을 띄우는 앱이 아니다(같은 이름의 다른 프로세스로 찾아볼 앱에서 뺀다). */
+const NOT_APP =
+  /^(cmd|powershell|pwsh|bash|sh|zsh|fish|dash|wsl|node|conhost|openconsole)(\.exe)?$/i
+const WINDOWS_TERMINAL_NAME = 'WindowsTerminal.exe'
 
 /** 절대 경로의 `.app` 번들 실행 파일(`/…/<이름>.app/Contents/MacOS/…`)에서 앞의 `.app` 경로. */
 const APP_BUNDLE = /^(\/.*?\.app)\/Contents\/MacOS\//
@@ -103,15 +111,51 @@ export function appBundleOf(commandLine: string): string | null {
   return app && !app.includes('.app/') ? app : null
 }
 
-/** 에이전트(pid)가 떠 있는 창을 찾을 단서: 가까운 조상 pid 들과 그 가운데 첫 `.app` 번들. */
-export function hostOf(tree: ProcessTree, pid: number): AgentHost {
-  const ancestors: ProcessInfo[] = []
-  for (const p of tree.ancestors(pid, HOST_MAX_DEPTH)) {
-    if (WINDOWS_SHELL.test(p.name)) break
-    ancestors.push(p)
+/**
+ * 에이전트가 떠 있는 창을 찾을 단서를 만드는 함수(샘플 하나에 한 번 만들어 에이전트마다 쓴다).
+ * pids 는 창 후보를 고를 순서대로 담는다(창 찾기는 이 순서에서 창을 가진 첫 pid 를 쓴다). 창의 주인은 조상이 아닐 때가 많다:
+ * 1. 에이전트 자신과 조상(가까운 것부터, explorer.exe·pitwall 자신에서 멈춤)마다 그 자식 콘솔 호스트(conhost·OpenConsole —
+ *    클래식 콘솔 창의 주인), 그다음 그 조상 자신. 에이전트 자신은 후보가 아니다.
+ * 2. 조상 가운데 가장 바깥의 앱(셸·런타임·콘솔 호스트가 아닌 것) 이름과 같은 다른 프로세스(pid 오름차순) — 여러 에이전트
+ *    도구는 창 없는 pty 데몬이 셸을 띄우고, 창은 같은 실행 파일의 다른 프로세스가 갖는다.
+ * 3. 그런 앱 조상이 하나도 없으면 WindowsTerminal.exe(기본 터미널로 넘긴 콘솔은 셸의 부모가 explorer 다).
+ * 중복 없이 24개까지. app 은 조상 가운데 첫 `.app` 번들(macOS).
+ */
+export function hostFinder(
+  processes: ProcessInfo[],
+  tree: ProcessTree,
+  selfPid?: number
+): (pid: number) => AgentHost {
+  const add = <K>(map: Map<K, number[]>, key: K, pid: number): void => {
+    const list = map.get(key)
+    if (list) list.push(pid)
+    else map.set(key, [pid])
   }
-  const app = ancestors.map((p) => appBundleOf(p.commandLine)).find((a) => a !== null) ?? null
-  return { pids: ancestors.map((p) => p.pid), app }
+  /** 부모 pid → 자식 콘솔 호스트 pid. */
+  const consoleHostsOf = new Map<number, number[]>()
+  /** 소문자 이름 → pid. */
+  const byName = new Map<string, number[]>()
+  for (const p of processes) {
+    add(byName, p.name.toLowerCase(), p.pid)
+    const parent = CONSOLE_HOST.test(p.name) ? tree.parentOf(p.pid) : undefined
+    if (parent) add(consoleHostsOf, parent.pid, p.pid)
+  }
+  const named = (name: string): number[] =>
+    [...(byName.get(name.toLowerCase()) ?? [])].sort((a, b) => a - b)
+
+  return (pid) => {
+    const ancestors: ProcessInfo[] = []
+    for (const p of tree.ancestors(pid, HOST_MAX_DEPTH)) {
+      if (WINDOWS_SHELL.test(p.name) || p.pid === selfPid) break
+      ancestors.push(p)
+    }
+    const candidates = [...(consoleHostsOf.get(pid) ?? [])]
+    for (const p of ancestors) candidates.push(...(consoleHostsOf.get(p.pid) ?? []), p.pid)
+    const outerApp = ancestors.filter((p) => !NOT_APP.test(p.name)).pop()
+    candidates.push(...named(outerApp ? outerApp.name : WINDOWS_TERMINAL_NAME))
+    const app = ancestors.map((p) => appBundleOf(p.commandLine)).find((a) => a !== null) ?? null
+    return { pids: [...new Set(candidates)].slice(0, HOST_MAX_PIDS), app }
+  }
 }
 
 /** 에이전트별 지금 상태와 그 상태를 처음 본 시각. 키는 agentKey. */
@@ -163,6 +207,8 @@ export function buildAgents(input: {
     worktreeRoot: string | null
     tool: AgentTool
   }) => HookView | null
+  /** pitwall 자신의 pid. 창 후보를 찾을 때 여기서 멈춘다(pitwall 창은 에이전트의 창이 아니다). */
+  selfPid?: number
 }): {
   agents: AgentRow[]
   cpu: CpuMemo
@@ -171,6 +217,7 @@ export function buildAgents(input: {
 } {
   const { sample, worktrees, devServerPids, previousCpu, now } = input
   const tree = buildTree(sample.processes)
+  const hostOf = hostFinder(sample.processes, tree, input.selfPid)
   const cpu: CpuMemo = new Map()
   const agents: AgentRow[] = []
   const memberPids = new Map<string, number[]>()
@@ -214,7 +261,7 @@ export function buildAgents(input: {
       activity: null,
       // 조용함(G3c)은 조용한 조건이 이어진 시각을 기억하는 수집기가 채운다.
       quietSince: null,
-      host: hostOf(tree, pid)
+      host: hostOf(pid)
     })
   }
 

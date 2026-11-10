@@ -52,6 +52,7 @@ function run(
       worktreeRoot: string | null
       tool: AgentTool
     }) => HookView | null
+    selfPid?: number
   } = {}
 ): ReturnType<typeof buildAgents> {
   const sample: RawSample = { processes, tcp: [] }
@@ -61,7 +62,8 @@ function run(
     devServerPids: new Set(opts.devServerPids ?? []),
     previousCpu: opts.previousCpu ?? new Map(),
     now: opts.now ?? 10_000,
-    hookFor: opts.hookFor
+    hookFor: opts.hookFor,
+    selfPid: opts.selfPid
   })
 }
 
@@ -195,9 +197,11 @@ describe('에이전트 행', () => {
 })
 
 describe('에이전트가 떠 있는 창(G3f 창으로 가기)', () => {
-  test('host.pids 는 가까운 조상부터 최대 12개', () => {
-    // 100 ← 101 ← … ← 115 ← claude(5000): 조상 16개 가운데 가까운 12개.
-    const chain = Array.from({ length: 16 }, (_, i) => proc(100 + i, i === 0 ? 1 : 99 + i, 'x.exe'))
+  test('host.pids 는 가까운 것부터의 창 후보', () => {
+    // 100 ← 101 ← … ← 115 ← claude(5000): 조상 16개 가운데 가까운 12개(이름이 모두 달라 같은 이름 후보는 없다).
+    const chain = Array.from({ length: 16 }, (_, i) =>
+      proc(100 + i, i === 0 ? 1 : 99 + i, `app${i}.exe`)
+    )
     const { agents } = run([...chain, proc(5000, 115, 'claude.exe')])
     expect(agents[0].host).toEqual({
       pids: [115, 114, 113, 112, 111, 110, 109, 108, 107, 106, 105, 104],
@@ -206,6 +210,75 @@ describe('에이전트가 떠 있는 창(G3f 창으로 가기)', () => {
     // 부모를 모르면(목록에 없음·pid 재사용) 빈 목록.
     const orphan = run([proc(7, 1, 'cmd.exe', { startedAt: 900 }), proc(5000, 7, 'claude.exe')])
     expect(orphan.agents[0].host).toEqual({ pids: [], app: null })
+  })
+
+  test('창 후보: 셸의 콘솔 호스트 자식이 그 셸보다 먼저', () => {
+    // 클래식 콘솔: 창의 주인은 셸(또는 바로 띄운 에이전트)의 자식 conhost 다. 에이전트 자신은 후보가 아니다.
+    const { agents } = run([
+      proc(10, 1, 'explorer.exe'),
+      proc(20, 10, 'cmd.exe'),
+      proc(21, 20, 'conhost.exe'),
+      proc(22, 20, 'git.exe'),
+      proc(5000, 20, 'claude.exe'),
+      proc(5001, 5000, 'OpenConsole.exe'),
+      proc(5002, 5000, 'node.exe')
+    ])
+    expect(agents[0].host.pids).toEqual([5001, 21, 20])
+  })
+
+  test('창 후보: 조상 앱에 창이 없을 수 있어 같은 이름의 다른 프로세스를 뒤에 더한다', () => {
+    // 여러 에이전트 도구: 창 없는 pty 데몬(부모는 이미 끝남)이 셸을 띄우고, 창은 같은 실행 파일의 본 프로세스가 갖는다.
+    const { agents } = run([
+      proc(10, 1, 'explorer.exe'),
+      proc(200, 10, 'Agents.exe'),
+      proc(201, 200, 'agents.EXE'),
+      proc(202, 200, 'Agents.exe'),
+      proc(300, 299, 'Agents.exe'),
+      proc(301, 300, 'powershell.exe'),
+      proc(302, 301, 'conhost.exe'),
+      proc(5000, 301, 'claude.exe'),
+      proc(600, 10, 'WindowsTerminal.exe')
+    ])
+    // 앱 조상이 있으니 WindowsTerminal 은 더하지 않는다.
+    expect(agents[0].host.pids).toEqual([302, 301, 300, 200, 201, 202])
+  })
+
+  test('창 후보: 앱 조상이 없으면 WindowsTerminal 을 더한다', () => {
+    // 기본 터미널로 넘긴 콘솔: 셸의 부모는 explorer, 창은 WindowsTerminal 의 것.
+    const { agents } = run([
+      proc(10, 1, 'explorer.exe'),
+      proc(20, 10, 'pwsh.exe'),
+      proc(21, 20, 'OpenConsole.exe'),
+      proc(5000, 20, 'claude.exe'),
+      proc(700, 10, 'WindowsTerminal.exe'),
+      proc(650, 10, 'windowsterminal.exe')
+    ])
+    expect(agents[0].host.pids).toEqual([21, 20, 650, 700])
+  })
+
+  test('창 후보는 pitwall 자신에서 멈추고 24개를 넘지 않는다', () => {
+    // pitwall 이 띄운 셸이라도 pitwall 창은 후보가 아니다(그 위 조상·같은 이름 프로세스도 보지 않는다).
+    const fromPitwall = run(
+      [
+        proc(10, 1, 'explorer.exe'),
+        proc(900, 10, 'pitwall.exe'),
+        proc(901, 900, 'pitwall.exe'),
+        proc(950, 900, 'cmd.exe'),
+        proc(5000, 950, 'claude.exe')
+      ],
+      { selfPid: 900 }
+    )
+    expect(fromPitwall.agents[0].host.pids).toEqual([950])
+    // 같은 이름 프로세스가 많아도 앞의 24개만.
+    const many = Array.from({ length: 40 }, (_, i) => proc(1000 + i, 10, 'Agents.exe'))
+    const capped = run([
+      ...many,
+      proc(300, 299, 'Agents.exe'),
+      proc(301, 300, 'powershell.exe'),
+      proc(5000, 301, 'claude.exe')
+    ])
+    expect(capped.agents[0].host.pids).toHaveLength(24)
+    expect(capped.agents[0].host.pids.slice(0, 4)).toEqual([301, 300, 1000, 1001])
   })
 
   test('Windows 셸(explorer.exe)과 그 위는 넣지 않는다(바탕 화면·탐색기 창은 에이전트의 창이 아니다)', () => {

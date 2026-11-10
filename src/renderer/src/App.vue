@@ -837,6 +837,7 @@ const takenAt = computed(() =>
       :busy="busyKey != null && busyKey === selectedKey"
       :hook="snapshot?.hook ?? null"
       :platform="snapshot?.platform ?? null"
+      :collect-mode="snapshot?.collectMode ?? null"
       :cpu-count="snapshot?.cpuCount ?? 1"
       @open="(port) => sheetAction('open', port)"
       @kill="sheetAction('kill')"
