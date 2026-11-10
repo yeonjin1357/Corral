@@ -4,7 +4,7 @@ import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createClaudeIntegration, type ClaudeIntegrationDeps } from './claudeIntegration'
-import { inspectPitwallHooks, hookCommand } from './claudeHooks'
+import { claudeHookItems, guardCommand, hookCommand, inspectPitwallHooks } from './claudeHooks'
 import { loadConfig, pickFreePort, saveConfig, updateConfig } from './config'
 import { DEFAULT_SETTINGS } from '../shared/settings'
 import type { Sessions } from './sessions'
@@ -54,6 +54,7 @@ function setup(over: Partial<ClaudeIntegrationDeps> = {}): {
     confirm,
     onEvent,
     pickPort: () => pickFreePort(),
+    guard: () => false,
     ...over
   }
   return { deps, sessions, confirm, onEvent }
@@ -92,7 +93,9 @@ test('켜기: 설정 파일 경로를 보여 주는 확인 창 → 훅 설치 �
 
   const { hook } = await loadConfig(userData)
   const entry = hookCommand('win32', hook!.port, hook!.token, 'C:\\Windows')
-  expect(inspectPitwallHooks(await readFile(settingsPath(), 'utf8'), entry).state).toBe('on')
+  expect(
+    inspectPitwallHooks(await readFile(settingsPath(), 'utf8'), claudeHookItems(entry)).state
+  ).toBe('on')
   expect((await integration.status()).state).toBe('on')
 
   const status = await post(
@@ -191,7 +194,9 @@ test('저장된 포트를 다른 프로그램이 쓰고 있으면 상태는 erro
     // 포트를 바꿔 저장할 때 다른 설정을 지우지 않는다.
     expect((await loadConfig(userData)).settings.refresh).toBe('saver')
     const entry = hookCommand('win32', moved.port, moved.token, 'C:\\Windows')
-    expect(inspectPitwallHooks(await readFile(settingsPath(), 'utf8'), entry).state).toBe('on')
+    expect(
+      inspectPitwallHooks(await readFile(settingsPath(), 'utf8'), claudeHookItems(entry)).state
+    ).toBe('on')
     expect(await second.status()).toMatchObject({ state: 'on', problem: null })
     await second.stop()
   } finally {
@@ -212,6 +217,39 @@ test('pitwall 설정이 없는데 settings.json 에 pitwall 훅이 남아 있으
   const again = createClaudeIntegration(deps)
   expect((await again.status()).state).toBe('partial')
   await again.stop()
+})
+
+test('무거운 작업 기다리게 하기(guard)가 켜져 있으면 켜기가 질문 훅도 넣고, 설정과 파일이 다르면 partial', async () => {
+  let guard = true
+  const { deps } = setup({ guard: () => guard })
+  const original = '{\n  "model": "opus"\n}\n'
+  await writeFile(settingsPath(), original)
+  const integration = createClaudeIntegration(deps)
+  expect((await integration.enable()).status).toBe('done')
+  const { hook } = await loadConfig(userData)
+  const entry = hookCommand('win32', hook!.port, hook!.token, 'C:\\Windows')
+  const withGuard = claudeHookItems(
+    entry,
+    guardCommand('win32', hook!.port, hook!.token, 'C:\\Windows')
+  )
+  const text = await readFile(settingsPath(), 'utf8')
+  expect(inspectPitwallHooks(text, withGuard).state).toBe('on')
+  expect(text).toContain(`/pitwall-hook/claude/guard?t=${hook!.token}`)
+  expect((await integration.status()).state).toBe('on')
+
+  // 설정을 끄면 파일과 달라 partial, 다시 켜기(확인 창·백업)로 질문 훅을 뺀다.
+  guard = false
+  expect((await integration.status()).state).toBe('partial')
+  expect((await integration.enable()).status).toBe('done')
+  expect(await readFile(settingsPath(), 'utf8')).not.toContain('/pitwall-hook/claude/guard')
+  expect((await integration.status()).state).toBe('on')
+
+  // 연동 끄기는 질문 훅까지 모두 뺀다.
+  guard = true
+  await integration.enable()
+  await integration.disable()
+  expect(await readFile(settingsPath(), 'utf8')).toBe(original)
+  await integration.stop()
 })
 
 test('disableAllHooks 를 알려 준다', async () => {

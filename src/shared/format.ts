@@ -68,17 +68,26 @@ export function formatFreed(memoryBytes: number, commitBytes: number | null): st
 
 const LEVEL_RANK: Record<MemoryLevel, number> = { normal: 0, warn: 1, danger: 2 }
 
+type PressureMemory = Pick<MemorySummary, 'usedPercent' | 'ramLevel' | 'commit'>
+
 /**
- * 메모리 압박의 원인(알림 제목 등): 커밋 단계가 RAM 단계보다 높으면 "커밋 86%", 아니면 "RAM 85%".
+ * 메모리 압박의 원인: 커밋 단계가 RAM 단계보다 높으면 커밋 사용률, 아니면 RAM 사용률(내림한 %).
  * 메모리 단계(level)는 둘 중 높은 쪽이라, RAM % 만 보이면 왜 경고인지 모를 수 있다.
  */
-export function pressureText(
-  memory: Pick<MemorySummary, 'usedPercent' | 'ramLevel' | 'commit'>
-): string {
+export function pressureSource(memory: PressureMemory): {
+  source: 'ram' | 'commit'
+  percent: number
+} {
   const { commit } = memory
   return commit && LEVEL_RANK[commit.level] > LEVEL_RANK[memory.ramLevel]
-    ? text.pressure.commit(Math.floor(commit.percent))
-    : text.pressure.ram(Math.floor(memory.usedPercent))
+    ? { source: 'commit', percent: Math.floor(commit.percent) }
+    : { source: 'ram', percent: Math.floor(memory.usedPercent) }
+}
+
+/** 메모리 압박의 원인(알림 제목 등): "커밋 86%" 또는 "RAM 85%"(pressureSource). */
+export function pressureText(memory: PressureMemory): string {
+  const { source, percent } = pressureSource(memory)
+  return text.pressure[source](percent)
 }
 
 /** 실행 시간 같은 길이를 짧게: 30초, 45분, 3시간 12분, 2일 5시간. 알 수 없으면 —. */

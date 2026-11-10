@@ -129,6 +129,14 @@ test('알림을 누르면 그 에이전트의 창으로(notifyClickFocus)는 기
   expect(normalizeSettings({ notifyClickFocus: 0 }).notifyClickFocus).toBe(true)
 })
 
+test('무거운 작업이 겹치면 에이전트가 기다리게 하기(heavyGuard)는 기본 끔, 불린이 아니면 기본값', () => {
+  expect(DEFAULT_SETTINGS.heavyGuard).toBe(false)
+  expect(normalizeSettings({}).heavyGuard).toBe(false)
+  expect(normalizeSettings({ heavyGuard: true }).heavyGuard).toBe(true)
+  expect(normalizeSettings({ heavyGuard: 'yes' }).heavyGuard).toBe(false)
+  expect(normalizeSettings({ heavyGuard: 1 }).heavyGuard).toBe(false)
+})
+
 test('오래 쉬는 세션 기준은 10~10080분, 기본 180분', () => {
   expect(DEFAULT_SETTINGS.agentParkedMinutes).toBe(180)
   expect(normalizeSettings({}).agentParkedMinutes).toBe(180)

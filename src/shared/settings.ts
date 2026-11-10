@@ -73,6 +73,12 @@ export interface Settings {
    * 창을 찾지 못하거나 OS 가 거절하면 pitwall 을 연다.
    */
   notifyClickFocus: boolean
+  /**
+   * 무거운 작업이 겹치면 에이전트가 기다리게 하기(G7, Claude Code 만). 켜면 Claude 연동이 Bash·PowerShell 도구
+   * 실행 전에 pitwall 에 묻는 동기 훅을 하나 더 넣고, 무거운 작업이 이미 돌고 메모리가 경고 기준을 넘었을 때만
+   * 같은 명령을 두 번까지 미루게 한다. 기본 끔.
+   */
+  heavyGuard: boolean
 }
 
 export const SETTINGS_VERSION = 3
@@ -152,7 +158,8 @@ export const DEFAULT_SETTINGS: Settings = {
   workspaceAliases: {},
   showAgentActivity: true,
   readUsage: true,
-  notifyClickFocus: true
+  notifyClickFocus: true,
+  heavyGuard: false
 }
 
 function oneOf<T extends string>(value: unknown, choices: readonly T[], fallback: T): T {
@@ -384,6 +391,7 @@ export function normalizeSettings(value: unknown): Settings {
     workspaceAliases: aliases(v.workspaceAliases),
     showAgentActivity: bool(v.showAgentActivity, d.showAgentActivity),
     readUsage: bool(v.readUsage, d.readUsage),
-    notifyClickFocus: bool(v.notifyClickFocus, d.notifyClickFocus)
+    notifyClickFocus: bool(v.notifyClickFocus, d.notifyClickFocus),
+    heavyGuard: bool(v.heavyGuard, d.heavyGuard)
   }
 }

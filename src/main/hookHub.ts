@@ -16,6 +16,8 @@ export interface HookHub {
 
 export function createHookHub(opts: {
   onEvent: (event: Record<string, unknown>, tool: AgentTool) => void
+  /** Claude 질문 훅(G7)에 줄 답. 없으면 질문에는 늘 아무 답도 하지 않는다(204). */
+  onGuard?: (event: Record<string, unknown>) => string | null
   open?: typeof createHookServer
 }): HookHub {
   const open = opts.open ?? createHookServer
@@ -42,7 +44,12 @@ export function createHookHub(opts: {
       return serial(async () => {
         if (!(server && serverHook?.port === hook.port && serverHook.token === hook.token)) {
           await close()
-          server = await open({ port: hook.port, token: hook.token, onEvent: opts.onEvent })
+          server = await open({
+            port: hook.port,
+            token: hook.token,
+            onEvent: opts.onEvent,
+            onGuard: opts.onGuard
+          })
           serverHook = hook
         }
         owners.add(owner)

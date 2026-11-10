@@ -5,6 +5,7 @@ import {
   displayCpuPercent,
   formatBytes,
   formatFreed,
+  pressureSource,
   pressureText,
   worktreeLabel,
   worktreeFolder,
@@ -98,6 +99,13 @@ test('pressureText 는 커밋 단계가 더 높을 때만 커밋을, 아니면 R
   expect(pressureText({ usedPercent: 93.6, ramLevel: 'danger', commit: commit(88, 'warn') })).toBe(
     'RAM 93%'
   )
+  // 같은 고르기를 숫자로(G7 의 에이전트 안내 문구가 쓴다).
+  expect(
+    pressureSource({ usedPercent: 85.7, ramLevel: 'warn', commit: commit(96.1, 'danger') })
+  ).toEqual({ source: 'commit', percent: 96 })
+  expect(
+    pressureSource({ usedPercent: 85.7, ramLevel: 'warn', commit: commit(88, 'warn') })
+  ).toEqual({ source: 'ram', percent: 85 })
 })
 
 test('커밋 합: 아는 것만 더하고, 하나도 모르면 null', () => {

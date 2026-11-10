@@ -3,12 +3,14 @@ import type { ClaudeHookStatus, Platform } from '../shared/types'
 import type { ClaudeHookActionResult } from '../shared/ipc'
 import { text } from '../shared/text'
 import {
+  claudeHookItems,
   ClaudeSettingsError,
+  guardCommand,
   hookCommand,
   installClaudeHooks,
   readClaudeHookState,
   uninstallClaudeHooks,
-  type ClaudeHookEntry
+  type HookItem
 } from './claudeHooks'
 import { ensureHookConfig, loadConfig, pickFreePort, updateConfig, type HookConfig } from './config'
 import { createHookHub, type HookHub } from './hookHub'
@@ -31,12 +33,17 @@ export interface ClaudeIntegrationDeps {
   pickPort?: () => Promise<number>
   /** Codex 연동과 같이 쓰는 훅 서버. 없으면 혼자 쓰는 것을 만든다. */
   hub?: HookHub
+  /**
+   * 무거운 작업 기다리게 하기(G7, 설정 heavyGuard)를 켰는지. 켜면 알림 훅에 더해 PreToolUse 질문 훅을 넣고,
+   * 상태도 그 목록과 견준다(설정과 파일이 다르면 partial — 다시 켜기로 맞춘다).
+   */
+  guard: () => boolean
 }
 
 export type HookActionResult = ClaudeHookActionResult
 
-/** pitwall 설정이 없을 때 settings.json 에 남은 pitwall 훅이 있는지만 보려고 쓰는 빈 명령. */
-const NO_ENTRY: ClaudeHookEntry = { type: 'command', command: '', async: true, timeout: 5 }
+/** pitwall 설정이 없을 때 settings.json 에 남은 pitwall 훅이 있는지만 보려고 쓰는 빈 목록. */
+const NO_ITEMS: HookItem[] = []
 
 function settingsErrorMessage(e: unknown): string {
   if (e instanceof ClaudeSettingsError) return text.claudeHook.errors[e.code]
@@ -64,8 +71,12 @@ export function createClaudeIntegration(deps: ClaudeIntegrationDeps): {
       }
     })
 
-  const entryFor = (hook: HookConfig): ClaudeHookEntry =>
-    hookCommand(deps.platform, hook.port, hook.token, deps.systemRoot)
+  /** 넣을 훅 목록: 알림 훅들 + (guard 면) 질문 훅. */
+  const itemsFor = (hook: HookConfig): HookItem[] =>
+    claudeHookItems(
+      hookCommand(deps.platform, hook.port, hook.token, deps.systemRoot),
+      deps.guard() ? guardCommand(deps.platform, hook.port, hook.token, deps.systemRoot) : null
+    )
 
   const closeServer = (): Promise<void> => hub.release('claude')
   /** 이미 같은 포트·토큰으로 열려 있으면 그대로. 실패하면 예외. */
@@ -74,7 +85,7 @@ export function createClaudeIntegration(deps: ClaudeIntegrationDeps): {
   async function start(): Promise<void> {
     const { hook } = await loadConfig(deps.userData)
     if (!hook) return
-    const inspection = await readClaudeHookState(deps.configDir, entryFor(hook))
+    const inspection = await readClaudeHookState(deps.configDir, itemsFor(hook))
     if (inspection.state !== 'on' && inspection.state !== 'partial') return
     try {
       await openServer(hook)
@@ -85,7 +96,7 @@ export function createClaudeIntegration(deps: ClaudeIntegrationDeps): {
 
   async function status(): Promise<ClaudeHookStatus> {
     const { hook } = await loadConfig(deps.userData)
-    const inspection = await readClaudeHookState(deps.configDir, hook ? entryFor(hook) : NO_ENTRY)
+    const inspection = await readClaudeHookState(deps.configDir, hook ? itemsFor(hook) : NO_ITEMS)
     const base = { allHooksDisabled: inspection.allHooksDisabled, settingsPath }
     if (inspection.state === 'error') return { state: 'error', problem: 'settings', ...base }
     if (!hook)
@@ -123,7 +134,7 @@ export function createClaudeIntegration(deps: ClaudeIntegrationDeps): {
       }
       const result = await installClaudeHooks({
         dir: deps.configDir,
-        entry: entryFor(hook),
+        items: itemsFor(hook),
         now: deps.now()
       })
       if (!result.changed) return { status: 'done', message: text.claudeHook.alreadyOn }

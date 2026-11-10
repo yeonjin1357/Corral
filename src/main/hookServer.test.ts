@@ -4,10 +4,18 @@ import { createHookServer, HOOK_BODY_LIMIT, type HookServer } from './hookServer
 
 const TOKEN = 'a'.repeat(64)
 
-function send(
+interface SendOptions {
+  method?: string
+  path?: string
+  body?: string | Buffer
+  headers?: Record<string, string>
+}
+
+/** 요청을 보내고 상태·Content-Type·본문을 받는다. */
+function exchange(
   port: number,
-  opts: { method?: string; path?: string; body?: string | Buffer; headers?: Record<string, string> }
-): Promise<number> {
+  opts: SendOptions
+): Promise<{ status: number; type: string | undefined; body: string }> {
   return new Promise((resolve, reject) => {
     const req = request(
       {
@@ -18,14 +26,29 @@ function send(
         headers: opts.headers
       },
       (res) => {
-        res.resume()
-        res.on('end', () => resolve(res.statusCode ?? 0))
+        let body = ''
+        res.on('data', (c: Buffer) => (body += c.toString('utf8')))
+        res.on('end', () =>
+          resolve({ status: res.statusCode ?? 0, type: res.headers['content-type'], body })
+        )
       }
     )
     req.on('error', reject)
     req.end(opts.body ?? '')
   })
 }
+
+async function send(port: number, opts: SendOptions): Promise<number> {
+  return (await exchange(port, opts)).status
+}
+
+const GUARD = `/pitwall-hook/claude/guard?t=${TOKEN}`
+const PRE_TOOL = JSON.stringify({
+  session_id: 's1',
+  hook_event_name: 'PreToolUse',
+  tool_name: 'Bash',
+  tool_input: { command: 'npx vue-tsc --noEmit' }
+})
 
 describe('훅 서버', () => {
   let server: HookServer
@@ -136,6 +159,85 @@ describe('훅 서버', () => {
     })
     expect(raw.startsWith('HTTP/1.1 400')).toBe(true)
     expect(await send(server.port, { body: '{}' })).toBe(204)
+  })
+
+  test('guard 경로는 답이 있으면 200 과 JSON, 없으면 204', async () => {
+    let answer: string | null = '{"hookSpecificOutput":{"hookEventName":"PreToolUse"}}'
+    const asked: unknown[] = []
+    const guarded = await createHookServer({
+      port: 0,
+      token: TOKEN,
+      onEvent: (e) => events.push(e),
+      onGuard: (e) => {
+        asked.push(e)
+        if (answer === 'throw') throw new Error('boom')
+        return answer
+      }
+    })
+    try {
+      expect(await exchange(guarded.port, { path: GUARD, body: PRE_TOOL })).toEqual({
+        status: 200,
+        type: 'application/json',
+        body: answer
+      })
+      answer = null
+      expect(await exchange(guarded.port, { path: GUARD, body: PRE_TOOL })).toEqual({
+        status: 204,
+        type: undefined,
+        body: ''
+      })
+      // 받는 쪽이 실패해도 훅에는 아무 말 없이(204) 넘어간다.
+      answer = 'throw'
+      expect(await exchange(guarded.port, { path: GUARD, body: PRE_TOOL })).toMatchObject({
+        status: 204,
+        body: ''
+      })
+      expect(asked).toEqual([JSON.parse(PRE_TOOL), JSON.parse(PRE_TOOL), JSON.parse(PRE_TOOL)])
+      // 질문은 알림 이벤트가 아니다(상태는 따로 오는 비동기 PreToolUse 훅이 알린다).
+      expect(events).toEqual([])
+      // JSON 이 아니면 400(본문 없음).
+      expect(await exchange(guarded.port, { path: GUARD, body: '{not json' })).toMatchObject({
+        status: 400,
+        body: ''
+      })
+    } finally {
+      await guarded.close()
+    }
+    // 답하는 쪽이 없는 서버는 204.
+    expect(await exchange(server.port, { path: GUARD, body: PRE_TOOL })).toMatchObject({
+      status: 204,
+      body: ''
+    })
+    expect(events).toEqual([])
+  })
+
+  test('guard 경로도 토큰이 틀리면 403', async () => {
+    const onGuard = vi.fn(() => '{}')
+    const guarded = await createHookServer({ port: 0, token: TOKEN, onEvent: () => {}, onGuard })
+    try {
+      const path = '/pitwall-hook/claude/guard'
+      expect(await send(guarded.port, { path: `${path}?t=wrong`, body: PRE_TOOL })).toBe(403)
+      expect(await send(guarded.port, { path, body: PRE_TOOL })).toBe(403)
+      expect(
+        await send(guarded.port, {
+          path: GUARD,
+          body: PRE_TOOL,
+          headers: { Origin: 'https://example.com' }
+        })
+      ).toBe(403)
+      expect(await send(guarded.port, { path: GUARD, method: 'GET' })).toBe(404)
+      expect(await send(guarded.port, { path: `${path}/x?t=${TOKEN}`, body: PRE_TOOL })).toBe(404)
+      // 본문 상한도 같다.
+      const big = Buffer.alloc(HOOK_BODY_LIMIT + 1, 0x20)
+      expect(
+        await send(guarded.port, { path: GUARD, body: big }).catch(
+          (e: NodeJS.ErrnoException) => e.code
+        )
+      ).toBe(413)
+      expect(onGuard).not.toHaveBeenCalled()
+    } finally {
+      await guarded.close()
+    }
   })
 
   test('onEvent 가 예외를 던져도 204 로 답하고 서버는 계속 동작한다', async () => {

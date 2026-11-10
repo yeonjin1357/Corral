@@ -19,10 +19,11 @@ import {
   type ParseError
 } from 'jsonc-parser'
 import type { Platform } from '../shared/types'
-import { HOOK_PATH } from './hookServer'
+import { GUARD_PATH, HOOK_PATH } from './hookServer'
 
 /**
- * pitwall 이 넣은 훅인지 알아보는 표시: 명령 안의 `127.0.0.1:<포트>/pitwall-hook/<도구>` 주소.
+ * pitwall 이 넣은 훅인지 알아보는 표시: 명령 안의 `127.0.0.1:<포트>/pitwall-hook/<도구>` 주소(그 아래 경로 —
+ * 질문 훅의 `/pitwall-hook/claude/guard` — 도 포함).
  * 'pitwall-hook' 글자만 보면 다른 도구의 훅(예: 이름이 비슷한 스크립트)을 pitwall 것으로 알고 지울 수 있다.
  */
 function hookUrlPattern(path: string): RegExp {
@@ -50,19 +51,47 @@ export interface ClaudeHookEntry {
   command: string
   /** Windows 에서 대신 쓸 명령(Codex). */
   commandWindows?: string
-  async: true
+  /** 알림 훅은 비동기(도구 실행을 기다리게 하지 않는다). 질문 훅(G7)은 답을 받아야 해서 없음(동기). */
+  async?: true
   timeout: number
 }
 
 /**
  * pitwall 훅을 넣는 설정 파일(Claude `settings.json`, Codex `hooks.json`). 둘 다
- * `{ "hooks": { "<이벤트>": [ { "hooks": [ { "type": "command", ... } ] } ] } }` 모양이다.
+ * `{ "hooks": { "<이벤트>": [ { "matcher"?: …, "hooks": [ { "type": "command", ... } ] } ] } }` 모양이다.
  */
 export interface HookFileSpec {
   file: string
-  events: readonly string[]
   /** 훅 서버 경로(`/pitwall-hook/claude` 등). pitwall 항목을 알아보는 표시. */
   path: string
+}
+
+/**
+ * 넣을 훅 하나: 그 이벤트에 `{ matcher?, hooks: [entry] }` 그룹 하나로 들어간다. matcher 가 없으면 모든 도구
+ * (알림 훅 — 예전과 같은 모양).
+ */
+export interface HookItem {
+  event: string
+  entry: ClaudeHookEntry
+  matcher?: string
+}
+
+/** 질문 훅(G7)이 묻는 도구: 셸 명령을 실행하는 도구만. */
+export const GUARD_MATCHER = 'Bash|PowerShell'
+
+/** 이벤트마다 같은 명령 하나(알림 훅). */
+export function hookItems(events: readonly string[], entry: ClaudeHookEntry): HookItem[] {
+  return events.map((event) => ({ event, entry }))
+}
+
+/** Claude 알림 훅들과, guard 가 있으면(G7 을 켰으면) PreToolUse 의 질문 훅 하나. */
+export function claudeHookItems(
+  entry: ClaudeHookEntry,
+  guard: ClaudeHookEntry | null = null
+): HookItem[] {
+  const items = hookItems(CLAUDE_HOOK_EVENTS, entry)
+  if (guard) items.push({ event: 'PreToolUse', matcher: GUARD_MATCHER, entry: guard })
+  return items
 }
 
 /**
@@ -81,7 +110,6 @@ export class ClaudeSettingsError extends Error {
 
 export const CLAUDE_HOOK_FILE: HookFileSpec = {
   file: 'settings.json',
-  events: CLAUDE_HOOK_EVENTS,
   path: HOOK_PATH
 }
 
@@ -93,6 +121,20 @@ export function claudeConfigDir(env: Record<string, string | undefined>, home: s
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]+$/
 /** 공백·따옴표·셸 특수 문자가 없는 Windows 폴더 경로만 그대로 쓴다. */
 const SAFE_WINDOWS_DIR = /^[A-Za-z]:\\[A-Za-z0-9_.\\-]*$/
+
+/** 포트·토큰을 확인하고(따옴표를 깨는 값 차단) 따옴표로 감싼 훅 서버 주소를 만든다. */
+function hookUrl(port: number, token: string, path: string): string {
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error(`invalid port ${port}`)
+  if (!TOKEN_PATTERN.test(token)) throw new Error('invalid hook token')
+  return `'http://127.0.0.1:${port}${path}?t=${token}'`
+}
+
+/** Windows 의 curl.exe 경로(SystemRoot 가 공백·특수 문자 없는 경로일 때). 쓸 수 없으면 null. */
+function windowsCurl(systemRoot?: string): string | null {
+  return systemRoot && SAFE_WINDOWS_DIR.test(systemRoot)
+    ? `${systemRoot.replace(/\\/g, '/').replace(/\/$/, '')}/System32/curl.exe`
+    : null
+}
 
 /**
  * 셸 형식(문자열 하나)으로 만든다. Claude Code 는 이 문자열을 macOS 에서 `sh -c`, Windows 에서 Git Bash
@@ -108,20 +150,38 @@ export function hookCommand(
   token: string,
   systemRoot?: string
 ): ClaudeHookEntry {
-  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error(`invalid port ${port}`)
-  if (!TOKEN_PATTERN.test(token)) throw new Error('invalid hook token')
-  const url = `'http://127.0.0.1:${port}${HOOK_PATH}?t=${token}'`
-  let command: string
-  if (platform === 'win32') {
-    const curl =
-      systemRoot && SAFE_WINDOWS_DIR.test(systemRoot)
-        ? `${systemRoot.replace(/\\/g, '/').replace(/\/$/, '')}/System32/curl.exe`
-        : 'curl.exe'
-    command = `${curl} -s -m 2 -o NUL --data-binary '@-' ${url}; exit 0`
-  } else {
-    command = `/usr/bin/curl -s -m 2 -o /dev/null --data-binary '@-' ${url}; exit 0`
-  }
+  const url = hookUrl(port, token, HOOK_PATH)
+  const command =
+    platform === 'win32'
+      ? `${windowsCurl(systemRoot) ?? 'curl.exe'} -s -m 2 -o NUL --data-binary '@-' ${url}; exit 0`
+      : `/usr/bin/curl -s -m 2 -o /dev/null --data-binary '@-' ${url}; exit 0`
   return { type: 'command', command, async: true, timeout: 5 }
+}
+
+/**
+ * 질문 훅(G7): Claude 가 Bash·PowerShell 명령을 실행하기 전에 동기로 돌아 pitwall 의 답을 표준출력으로 넘긴다
+ * (답이 없으면 아무것도 찍지 않는다 — 명령은 그대로 실행된다). hookCommand 와 같은 한 줄이되 출력을 버리지 않는다.
+ * - 연결 0.3초·전체 2초 제한: pitwall 이 꺼져 있으면 Windows 는 닫힌 로컬 포트 연결에 2초쯤 걸리므로 0.3초에 끊는다.
+ *   `-s` 라 실패해도 아무것도 찍지 않고, 항상 `exit 0`. 훅 제한(timeout)은 3초.
+ * - Windows 는 언제나 curl.exe 의 절대 경로(SystemRoot 를 쓸 수 없으면 기본 위치) — 출력이 Claude 에 들어가므로
+ *   PATH 에서 찾은 다른 프로그램을 실행하지 않는다.
+ */
+export function guardCommand(
+  platform: Platform,
+  port: number,
+  token: string,
+  systemRoot?: string
+): ClaudeHookEntry {
+  const url = hookUrl(port, token, GUARD_PATH)
+  const curl =
+    platform === 'win32'
+      ? (windowsCurl(systemRoot) ?? 'C:/Windows/System32/curl.exe')
+      : '/usr/bin/curl'
+  return {
+    type: 'command',
+    command: `${curl} -s --connect-timeout 0.3 -m 2 --data-binary '@-' ${url}; exit 0`,
+    timeout: 3
+  }
 }
 
 function isPitwallHook(hook: unknown, url: RegExp): boolean {
@@ -302,31 +362,42 @@ export function removePitwallHooks(text: string, spec: HookFileSpec = CLAUDE_HOO
   return next
 }
 
-/** 기존 pitwall 훅을 빼고 각 이벤트 끝에 새 그룹을 더한다(두 번 켜도 하나, 포트가 바뀌면 교체). */
+/** 항목 하나의 그룹. matcher 가 없으면 예전과 같은 `{ hooks: [entry] }` 모양. */
+function groupOf(item: HookItem): Record<string, unknown> {
+  return item.matcher === undefined
+    ? { hooks: [item.entry] }
+    : { matcher: item.matcher, hooks: [item.entry] }
+}
+
+/**
+ * 기존 pitwall 훅을 모두 빼고 항목마다 그 이벤트 끝에 새 그룹을 더한다(두 번 켜도 하나, 포트가 바뀌면 교체,
+ * 목록에서 빠진 항목은 사라진다).
+ */
 export function addPitwallHooks(
   text: string,
-  entry: ClaudeHookEntry,
+  items: readonly HookItem[],
   spec: HookFileSpec = CLAUDE_HOOK_FILE
 ): string {
   const base = removePitwallHooks(text, spec)
   const style = styleOf(text)
   let next = base.trim() ? base : '{}' + style.eol
-  const group = { hooks: [entry] }
-  for (const event of spec.events) {
+  for (const item of items) {
     const root = treeOf(next)
     const hooks = findNodeAtLocation(root, ['hooks'])
     if (!hooks) {
-      const value = Object.fromEntries(spec.events.map((e) => [e, [group]]))
+      // hooks 가 아직 없으면 모든 항목을 이벤트별로 묶어 한 번에 쓴다.
+      const value: Record<string, unknown[]> = {}
+      for (const each of items) (value[each.event] ??= []).push(groupOf(each))
       next = appendChild(next, root, (i) => `"hooks": ${serialize(value, i, style)}`, style)
       break
     }
-    const groups = findNodeAtLocation(hooks, [event])
+    const groups = findNodeAtLocation(hooks, [item.event])
     next = groups
-      ? appendChild(next, groups, (i) => serialize(group, i, style), style)
+      ? appendChild(next, groups, (i) => serialize(groupOf(item), i, style), style)
       : appendChild(
           next,
           hooks,
-          (i) => `${JSON.stringify(event)}: ${serialize([group], i, style)}`,
+          (i) => `${JSON.stringify(item.event)}: ${serialize([groupOf(item)], i, style)}`,
           style
         )
   }
@@ -335,7 +406,11 @@ export function addPitwallHooks(
 }
 
 export interface PitwallHookInspection {
-  /** on: 모든 이벤트에 지금 명령이 있음, partial: 일부만 있거나 다른 포트·토큰, off: 없음, error: 파일을 읽을 수 없음. */
+  /**
+   * on: 항목마다 그 이벤트에 같은 matcher·명령의 pitwall 훅이 정확히 하나 있고 다른 pitwall 훅이 없음,
+   * partial: 일부만 있거나 다른 포트·토큰이거나 남는 pitwall 훅이 있음(G7 설정과 파일이 다를 때 포함),
+   * off: pitwall 훅이 없음, error: 파일을 읽을 수 없음.
+   */
   state: 'on' | 'partial' | 'off' | 'error'
   /** 사용자가 disableAllHooks 로 훅을 모두 끈 상태. 켜져 있어도 이벤트가 오지 않는다. */
   allHooksDisabled: boolean
@@ -343,7 +418,7 @@ export interface PitwallHookInspection {
 
 export function inspectPitwallHooks(
   text: string,
-  entry: ClaudeHookEntry,
+  items: readonly HookItem[],
   spec: HookFileSpec = CLAUDE_HOOK_FILE
 ): PitwallHookInspection {
   const url = hookUrlPattern(spec.path)
@@ -355,19 +430,25 @@ export function inspectPitwallHooks(
   }
   const allHooksDisabled = settings.disableAllHooks === true
   const hooks = (settings.hooks ?? {}) as Record<string, unknown[]>
-  let found = 0
-  let current = 0
-  for (const event of spec.events) {
-    const ours = (hooks[event] ?? []).flatMap((group) => {
-      const list = (group as { hooks?: unknown } | null)?.hooks
-      return Array.isArray(list) ? list.filter((h) => isPitwallHook(h, url)) : []
-    })
-    if (ours.length) found++
-    if (ours.some((h) => (h as { command?: unknown }).command === entry.command)) current++
-  }
-  const state =
-    found === 0 ? 'off' : current === spec.events.length && found === current ? 'on' : 'partial'
-  return { state, allHooksDisabled }
+  // 파일의 모든 pitwall 훅(어느 이벤트에 있든): 이벤트, 그룹의 matcher, 명령.
+  const ours: { event: string; matcher: unknown; command: unknown }[] = []
+  for (const [event, groups] of Object.entries(hooks))
+    for (const group of groups) {
+      const g = group as { matcher?: unknown; hooks?: unknown } | null
+      if (!Array.isArray(g?.hooks)) continue
+      for (const h of g.hooks)
+        if (isPitwallHook(h, url))
+          ours.push({ event, matcher: g.matcher, command: (h as { command?: unknown }).command })
+    }
+  if (ours.length === 0) return { state: 'off', allHooksDisabled }
+  const exact = items.every(
+    (item) =>
+      ours.filter(
+        (o) =>
+          o.event === item.event && o.matcher === item.matcher && o.command === item.entry.command
+      ).length === 1
+  )
+  return { state: exact && ours.length === items.length ? 'on' : 'partial', allHooksDisabled }
 }
 
 const BOM = String.fromCharCode(0xfeff)
@@ -494,13 +575,13 @@ async function rewriteSettings(
 
 export function installPitwallHooks(opts: {
   dir: string
-  entry: ClaudeHookEntry
+  items: readonly HookItem[]
   now: number
   spec: HookFileSpec
 }): Promise<HookFileResult> {
   return rewriteSettings(
     opts.dir,
-    (text) => addPitwallHooks(text, opts.entry, opts.spec),
+    (text) => addPitwallHooks(text, opts.items, opts.spec),
     opts.now,
     opts.spec.file
   )
@@ -521,13 +602,13 @@ export function uninstallPitwallHooks(opts: {
 
 export async function readPitwallHookState(
   dir: string,
-  entry: ClaudeHookEntry,
+  items: readonly HookItem[],
   spec: HookFileSpec
 ): Promise<PitwallHookInspection> {
   try {
     const bytes = await readBytes(join(dir, spec.file))
     const text = bytes === null ? '' : decodeUtf8(bytes, spec.file)
-    return inspectPitwallHooks(text.startsWith(BOM) ? text.slice(1) : text, entry, spec)
+    return inspectPitwallHooks(text.startsWith(BOM) ? text.slice(1) : text, items, spec)
   } catch {
     return { state: 'error', allHooksDisabled: false }
   }
@@ -535,19 +616,20 @@ export async function readPitwallHookState(
 
 export function installClaudeHooks(opts: {
   dir: string
-  entry: ClaudeHookEntry
+  items: readonly HookItem[]
   now: number
 }): Promise<HookFileResult> {
   return installPitwallHooks({ ...opts, spec: CLAUDE_HOOK_FILE })
 }
 
+/** pitwall 이 넣은 Claude 훅을 모두 뺀다(질문 훅 포함). */
 export function uninstallClaudeHooks(opts: { dir: string; now: number }): Promise<HookFileResult> {
   return uninstallPitwallHooks({ ...opts, spec: CLAUDE_HOOK_FILE })
 }
 
 export function readClaudeHookState(
   dir: string,
-  entry: ClaudeHookEntry
+  items: readonly HookItem[]
 ): Promise<PitwallHookInspection> {
-  return readPitwallHookState(dir, entry, CLAUDE_HOOK_FILE)
+  return readPitwallHookState(dir, items, CLAUDE_HOOK_FILE)
 }

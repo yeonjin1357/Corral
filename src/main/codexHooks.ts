@@ -1,5 +1,6 @@
 import type { Platform } from '../shared/types'
 import {
+  hookItems,
   installPitwallHooks,
   readPitwallHookState,
   uninstallPitwallHooks,
@@ -29,7 +30,6 @@ export const CODEX_HOOK_EVENTS = [
 
 export const CODEX_HOOK_FILE: HookFileSpec = {
   file: 'hooks.json',
-  events: CODEX_HOOK_EVENTS,
   path: CODEX_HOOK_PATH
 }
 
@@ -75,7 +75,12 @@ export function installCodexHooks(opts: {
   entry: ClaudeHookEntry
   now: number
 }): Promise<HookFileResult> {
-  return installPitwallHooks({ ...opts, spec: CODEX_HOOK_FILE })
+  return installPitwallHooks({
+    dir: opts.dir,
+    items: hookItems(CODEX_HOOK_EVENTS, opts.entry),
+    now: opts.now,
+    spec: CODEX_HOOK_FILE
+  })
 }
 
 export function uninstallCodexHooks(opts: { dir: string; now: number }): Promise<HookFileResult> {
@@ -86,5 +91,5 @@ export function readCodexHookState(
   dir: string,
   entry: ClaudeHookEntry
 ): Promise<PitwallHookInspection> {
-  return readPitwallHookState(dir, entry, CODEX_HOOK_FILE)
+  return readPitwallHookState(dir, hookItems(CODEX_HOOK_EVENTS, entry), CODEX_HOOK_FILE)
 }

@@ -136,7 +136,9 @@ async function submit(): Promise<void> {
   saving.value = true
   notice.value = null
   try {
-    await props.save(pending())
+    const saved = await props.save(pending())
+    // 메인이 되돌린 값(무거운 작업 기다리게 하기 — Claude 설정 파일을 바꾸는 확인 창에서 취소)은 폼도 되돌린다.
+    draft.value.heavyGuard = saved.heavyGuard
     notice.value = { text: S.saved, failed: false }
   } catch (e) {
     notice.value = {
@@ -456,6 +458,15 @@ const NOTICES_URL = `${REPO_URL}/blob/main/THIRD_PARTY_NOTICES.md`
               <Button variant="outline" size="sm" class="self-start" @click="resetHeavy">
                 {{ S.resetDefaults }}
               </Button>
+              <div class="flex items-start gap-3">
+                <Checkbox id="heavy-guard" v-model="draft.heavyGuard" class="mt-0.5" />
+                <div>
+                  <Label for="heavy-guard">{{ S.heavyGuard }}</Label>
+                  <p class="mt-1 text-xs leading-relaxed text-muted-foreground">
+                    {{ S.heavyGuardHelp }}
+                  </p>
+                </div>
+              </div>
             </CardContent>
           </Card>
         </div>

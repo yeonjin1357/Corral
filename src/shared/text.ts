@@ -28,6 +28,20 @@ export const text = {
     ram: (percent: number): string => `RAM ${percent}%`,
     commit: (percent: number): string => `커밋 ${percent}%`
   },
+  /**
+   * 무거운 작업이 겹치고 메모리가 부족할 때 Claude 에게 돌려주는 말(G7, 에이전트가 읽는다).
+   * running: 도는 무거운 작업의 패턴 이름(guard.running), percent: 메모리 압박 원인의 사용률(pressureSource).
+   * 명령·경로·프로세스 이름은 넣지 않는다.
+   */
+  guard: {
+    defer: (running: string, percent: number): string =>
+      `pitwall: 지금 다른 무거운 작업(${running})이 돌고 있고 메모리 사용률이 ${percent}% 예요. 이 명령은 지금 실행하지 말고 1분쯤 뒤에 같은 명령을 다시 실행해 주세요. 그동안 다른 일을 먼저 해도 돼요. 검사를 건너뛰지는 마세요.`,
+    note: (running: string, percent: number): string =>
+      `pitwall 참고: 다른 무거운 작업(${running})과 겹쳐 실행됐고 메모리 사용률이 ${percent}% 예요.`,
+    /** 패턴 이름 몇 개와 나머지 개수: "vite build, tsc, webpack 외 2개". */
+    running: (labels: string[], rest: number): string =>
+      rest > 0 ? `${labels.join(', ')} 외 ${rest}개` : labels.join(', ')
+  },
   cleanupWorkspace: {
     title: '작업 공간 정리',
     /** freed: formatFreed 결과("약 1.2 GB" 또는 "RAM 약 1.2 GB · 커밋 약 4.2 GB"). */
@@ -679,6 +693,9 @@ export const text = {
       heavyHelp:
         '한 줄에 하나씩. 명령 이름(예: vue-tsc)이나 이름과 인자(예: vite build). 둘 이상 겹치고 RAM 이 경고 기준 이상이면 알려요. 막거나 기다리게 하지는 않아요.',
       resetDefaults: '기본값으로',
+      heavyGuard: '겹치면 에이전트가 기다리게 하기(Claude Code)',
+      heavyGuardHelp:
+        '켜면 Claude 가 Bash 명령을 실행하기 전에 pitwall 에 물어봐요. 무거운 작업이 이미 돌고 있고 메모리가 경고 기준을 넘었을 때만, 같은 명령을 두 번까지 1분 뒤로 미루게 해요. Claude 설정 파일에 훅을 하나 더 넣어요(확인 창·백업). pitwall 이 꺼져 있으면 아무 일도 없어요.',
       notifyRamLow: 'RAM 부족',
       notifyRamLowHelp: 'RAM 이 위험 기준을 넘으면, 끄면 확보할 수 있는 양과 함께 알려요.',
       notifyAgentDone: '에이전트 작업 끝남',

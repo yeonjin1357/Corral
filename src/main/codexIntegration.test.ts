@@ -147,7 +147,8 @@ test('Claude 연동과 훅 서버를 같이 쓴다: 한쪽을 꺼도 다른 쪽 
     hub: deps.hub,
     now: deps.now,
     confirm: async () => true,
-    pickPort: () => pickFreePort()
+    pickPort: () => pickFreePort(),
+    guard: () => false
   })
   await claude.enable()
   await codex.enable()

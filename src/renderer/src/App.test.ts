@@ -391,6 +391,54 @@ test('설정 > 에이전트 연동에서 "토큰 사용량 보기"를 끄고 저
   w.unmount()
 })
 
+test('설정 > 무거운 작업에서 "겹치면 에이전트가 기다리게 하기"를 켜고 저장한다(메인이 되돌리면 체크도 되돌린다)', async () => {
+  const saved: Settings[] = []
+  // 메인은 Claude 연동이 켜져 있으면 확인 창을 띄우고, 취소하면 이전 값으로 저장해 돌려준다.
+  let cancel = true
+  const f = fake({
+    settings: {
+      get: async () => structuredClone(DEFAULT_SETTINGS),
+      save: vi.fn(async (next: Settings) => {
+        saved.push(next)
+        return { ...structuredClone(next), heavyGuard: cancel ? false : next.heavyGuard }
+      }),
+      pickFolder: async () => null,
+      onChange: () => () => {}
+    }
+  } as Partial<PitwallApi>)
+  const w = await start(f)
+  f.navigate({ page: 'settings' })
+  await flushPromises()
+  await w
+    .findAll('button')
+    .find((b) => b.text().trim() === '무거운 작업')!
+    .trigger('click')
+  const box = (): ReturnType<VueWrapper['find']> => w.find('#heavy-guard')
+  expect(box().attributes('aria-checked')).toBe('false')
+  expect(w.find('label[for="heavy-guard"]').text()).toBe(
+    '겹치면 에이전트가 기다리게 하기(Claude Code)'
+  )
+  expect(w.text()).toContain(
+    '켜면 Claude 가 Bash 명령을 실행하기 전에 pitwall 에 물어봐요. 무거운 작업이 이미 돌고 있고 메모리가 경고 기준을 넘었을 때만, 같은 명령을 두 번까지 1분 뒤로 미루게 해요. Claude 설정 파일에 훅을 하나 더 넣어요(확인 창·백업). pitwall 이 꺼져 있으면 아무 일도 없어요.'
+  )
+
+  await box().trigger('click')
+  await w.find('form').trigger('submit')
+  await flushPromises()
+  expect(saved.at(-1)?.heavyGuard).toBe(true)
+  // 확인 창에서 취소해 메인이 되돌린 값이 화면에도 보인다(저장하지 않은 변경으로 남지 않는다).
+  expect(box().attributes('aria-checked')).toBe('false')
+  expect(w.find('[data-action="save"]').attributes('disabled')).toBeDefined()
+
+  cancel = false
+  await box().trigger('click')
+  await w.find('form').trigger('submit')
+  await flushPromises()
+  expect(saved.at(-1)?.heavyGuard).toBe(true)
+  expect(box().attributes('aria-checked')).toBe('true')
+  w.unmount()
+})
+
 test('설정 저장은 IPC 로 보낼 수 있는 값(반응형 아닌 순수 값)으로 보낸다', async () => {
   const f = fake()
   const w = await start(f)

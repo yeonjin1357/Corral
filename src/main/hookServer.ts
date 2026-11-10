@@ -6,6 +6,11 @@ import type { AgentTool } from '../shared/types'
 export const HOOK_BODY_LIMIT = 1024 * 1024
 export const HOOK_PATH = '/pitwall-hook/claude'
 export const CODEX_HOOK_PATH = '/pitwall-hook/codex'
+/**
+ * Claude 의 동기 PreToolUse 훅(G7)이 명령을 실행해도 되는지 묻는 경로. 알림 이벤트가 아니다(상태는 같은 이벤트의
+ * 비동기 훅이 HOOK_PATH 로 따로 알린다). 주소가 HOOK_PATH 로 시작해 설정 파일에서 pitwall 훅으로 알아본다.
+ */
+export const GUARD_PATH = `${HOOK_PATH}/guard`
 /** 경로로 어느 도구의 훅인지 안다. */
 const TOOL_OF_PATH: Record<string, AgentTool> = {
   [HOOK_PATH]: 'claude',
@@ -32,15 +37,28 @@ function reply(res: ServerResponse, status: number): void {
   res.end()
 }
 
+/** 질문 훅의 답: 본문이 있으면 200 JSON(훅이 표준출력으로 Claude 에 넘긴다), 없으면 204(아무 말 없음). */
+function replyGuard(res: ServerResponse, body: string | null): void {
+  if (res.headersSent) return
+  if (!body) return reply(res, 204)
+  res.writeHead(200, {
+    'Content-Type': 'application/json',
+    'Content-Length': String(Buffer.byteLength(body))
+  })
+  res.end(body)
+}
+
 /**
  * Claude Code·Codex 훅이 curl 로 보내는 이벤트를 받는 로컬 서버(경로로 도구를 구분한다).
  * 127.0.0.1 에만 열고 무작위 토큰이 맞을 때만 받는다. 브라우저가 보낸 요청(Origin 헤더가 있음)은
  * 토큰이 맞아도 거절한다 — 다른 웹페이지가 로컬 포트로 요청을 보내는 것을 막는다.
+ * GUARD_PATH 는 onGuard 의 답을 그 요청 안에서 돌려준다(없거나 실패하면 204 — 훅은 아무 일도 하지 않는다).
  */
 export function createHookServer(opts: {
   port: number
   token: string
   onEvent: (event: Record<string, unknown>, tool: AgentTool) => void
+  onGuard?: (event: Record<string, unknown>) => string | null
 }): Promise<HookServer> {
   if (!opts.token) return Promise.reject(new Error('hook token is empty'))
 
@@ -52,8 +70,9 @@ export function createHookServer(opts: {
     } catch {
       return reply(res, 400)
     }
+    const guard = url.pathname === GUARD_PATH
     const tool = Object.hasOwn(TOOL_OF_PATH, url.pathname) ? TOOL_OF_PATH[url.pathname] : null
-    if (req.method !== 'POST' || !tool) return reply(res, 404)
+    if (req.method !== 'POST' || (!tool && !guard)) return reply(res, 404)
     if (req.headers.origin !== undefined || !sameToken(url.searchParams.get('t'), opts.token))
       return reply(res, 403)
 
@@ -81,8 +100,17 @@ export function createHookServer(opts: {
         return reply(res, 400)
       }
       if (!event || typeof event !== 'object' || Array.isArray(event)) return reply(res, 400)
+      if (guard) {
+        let answer: string | null = null
+        try {
+          answer = opts.onGuard?.(event as Record<string, unknown>) ?? null
+        } catch {
+          // 판단이 실패하면 끼어들지 않는다(명령은 그대로 실행된다).
+        }
+        return replyGuard(res, answer)
+      }
       try {
-        opts.onEvent(event as Record<string, unknown>, tool)
+        opts.onEvent(event as Record<string, unknown>, tool!)
       } catch {
         // 받은 쪽 문제는 훅(Claude)에 알릴 필요가 없다.
       }
