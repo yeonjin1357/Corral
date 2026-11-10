@@ -213,7 +213,7 @@ describe('메모리 카드: 남은 메모리와 커밋', () => {
   })
 })
 
-describe('Codex 한도 줄(G6)', () => {
+describe('Codex 한도(G6): 에이전트 카드의 설명 줄', () => {
   const NOW = 10 * 60 * 60_000
   type Win = { usedPercent: number; windowMinutes: number; resetsAt: number | null }
   const win = (usedPercent: number, windowMinutes: number, resetsAt: number | null): Win => ({
@@ -223,25 +223,18 @@ describe('Codex 한도 줄(G6)', () => {
   })
   const limits = (
     primary: Win | null,
-    secondary: Win | null
-  ): DashboardSnapshot['codexLimits'] => ({
-    primary,
-    secondary,
-    planType: 'plus',
-    at: NOW - 3 * 60_000
-  })
-  const withLimits = (l: DashboardSnapshot['codexLimits']): DashboardSnapshot =>
-    snapshot({ takenAt: NOW, agents: [agentRow({ tool: 'codex' })], codexLimits: l })
-  const line = (s: DashboardSnapshot): DOMWrapper<Element> | undefined => {
-    const el = bar(s).find('[data-codex-limits]')
-    return el.exists() ? el : undefined
+    secondary: Win | null,
+    at = NOW - 3 * 60_000
+  ): DashboardSnapshot['codexLimits'] => ({ primary, secondary, planType: 'plus', at })
+  const caption = (l: DashboardSnapshot['codexLimits']): DOMWrapper<Element> => {
+    const w = bar(snapshot({ takenAt: NOW, agents: [agentRow({ tool: 'codex' })], codexLimits: l }))
+    return w.find('[data-codex-limits]')
   }
 
-  test('Codex 한도 줄', () => {
-    const el = line(
-      withLimits(limits(win(14.2, 300, NOW + 3_600_000), win(30.6, 10080, NOW + 86_400_000)))
-    )!
-    expect(el.text()).toBe('Codex 한도 5시간 14% · 주간 31%')
+  test('가장 높은 창 하나를 설명 줄에, 풍선말에는 모든 창과 기준 시각', () => {
+    const el = caption(limits(win(14.2, 300, NOW + 3_600_000), win(30.6, 10080, NOW + 86_400_000)))
+    expect(el.text()).toBe('Codex 한도 주간 31%')
+    expect(el.classes()).toContain('truncate')
     const tip = el.attributes('title')!
     expect(tip).toContain('5시간: 14% · ')
     expect(tip).toContain('주간: 31% · ')
@@ -249,20 +242,39 @@ describe('Codex 한도 줄(G6)', () => {
     expect(tip.endsWith('3분 전 기준')).toBe(true)
   })
 
-  test('이미 초기화된 창은 뺀다, 모두 빠지면 줄이 없다', () => {
-    const el = line(withLimits(limits(win(14, 300, NOW - 1), win(31, 10080, NOW + 1000))))!
-    expect(el.text()).toBe('Codex 한도 주간 31%')
-    expect(line(withLimits(limits(win(14, 300, NOW), win(31, 10080, NOW - 5))))).toBeUndefined()
+  test('비슷하면 긴 창, 5시간이 더 높으면 5시간', () => {
+    expect(caption(limits(win(50, 300, null), win(50, 10080, null))).text()).toBe(
+      'Codex 한도 주간 50%'
+    )
+    expect(caption(limits(win(100, 300, null), win(31, 10080, null))).text()).toBe(
+      'Codex 한도 5시간 100%'
+    )
   })
 
-  test('초기화 시각을 모르는 창은 보이고, 퍼센트는 0–100 으로 맞춘다', () => {
-    const el = line(withLimits(limits(win(140, 120, null), win(-5, 2880, null))))!
-    expect(el.text()).toBe('Codex 한도 2시간 100% · 2일 0%')
-    expect(el.attributes('title')).not.toContain('초기화')
+  test('한도가 없거나 모든 창이 초기화됐으면 "실행 중" 그대로', () => {
+    const none = bar(snapshot({ agents: [agentRow({ tool: 'codex' })] }))
+    expect(none.find('[data-codex-limits]').exists()).toBe(false)
+    expect(none.text()).toContain('실행 중')
+    const reset = bar(
+      snapshot({
+        takenAt: NOW,
+        agents: [agentRow({ tool: 'codex' })],
+        codexLimits: limits(win(14, 300, NOW - 1), win(31, 10080, NOW))
+      })
+    )
+    expect(reset.find('[data-codex-limits]').exists()).toBe(false)
+    expect(reset.text()).toContain('실행 중')
+    expect(reset.text()).not.toContain('Codex 한도')
   })
 
-  test('한도가 없으면 줄이 없다', () => {
-    expect(line(withLimits(null))).toBeUndefined()
-    expect(line(withLimits(limits(null, null)))).toBeUndefined()
+  test('사용률이 숫자가 아닌 창은 뺀다', () => {
+    expect(caption(limits(win(NaN, 300, null), win(31, 10080, null))).text()).toBe(
+      'Codex 한도 주간 31%'
+    )
+  })
+
+  test('읽은 때가 스냅샷보다 뒤여도 "0초 전 기준"', () => {
+    const el = caption(limits(win(10, 300, null), null, NOW + 60_000))
+    expect(el.attributes('title')!.endsWith('0초 전 기준')).toBe(true)
   })
 })

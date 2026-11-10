@@ -1,4 +1,11 @@
-import type { KillResult, MemoryLevel, MemorySummary, Platform, WorktreeInfo } from './types'
+import type {
+  CodexLimits,
+  KillResult,
+  MemoryLevel,
+  MemorySummary,
+  Platform,
+  WorktreeInfo
+} from './types'
 import { text } from './text'
 
 /** 수집 실패 이유를 화면·트레이에 보일 한국어 문장으로 바꾼다(이미 한국어면 그대로). */
@@ -165,6 +172,14 @@ export function limitWindowLabel(minutes: number): string {
   return w.windowMinutes(minutes)
 }
 
+/** 컨텍스트 글(G6): "132k", 한도가 0 보다 큰 유한한 수일 때만 "132k / 258k". 컨텍스트를 모르면 —. */
+export function formatContext(tokens: number | null, window: number | null): string {
+  if (tokens == null) return text.ui.none
+  return window != null && Number.isFinite(window) && window > 0
+    ? text.ui.agent.usageContextOf(formatTokens(tokens), formatTokens(window))
+    : formatTokens(tokens)
+}
+
 /** 절대 시각을 "11월 10일 오후 3:00"처럼. */
 export function formatClock(ms: number): string {
   return new Date(ms).toLocaleString('ko-KR', {
@@ -173,4 +188,68 @@ export function formatClock(ms: number): string {
     hour: 'numeric',
     minute: '2-digit'
   })
+}
+
+/** 한도 창 하나(보이는 것). */
+export interface ShownLimit {
+  label: string
+  percent: number
+  minutes: number
+  resetsAt: number | null
+}
+
+/** Codex 한도를 화면에 보일 모양으로(에이전트 카드 설명 줄·풍선말·상세 패널 카드가 같이 쓴다). */
+export interface CodexLimitView {
+  windows: ShownLimit[]
+  /** 에이전트 카드 설명 줄: 가장 높은 창 하나. */
+  caption: string
+  /** "5시간 14% · 주간 31%" */
+  value: string
+  /** 풍선말(줄바꿈): 창마다 사용률·초기화 시각, 끝에 읽은 때. */
+  tip: string
+  /** 한 줄: 초기화 시각들 · 읽은 때. */
+  detail: string
+}
+
+/**
+ * Codex 한도(G6)를 보일 창만 골라 글로 만든다. 이미 초기화된 창(초기화 시각이 now 이전)은 읽은 뒤에 비워졌으므로,
+ * 사용률이 숫자가 아닌 창은 지어낼 수 없으므로 뺀다. 남은 창이 없으면 null. 사용률은 반올림해 0–100 으로 맞춘다.
+ * 가장 높은 창(같으면 긴 창)이 caption. 읽은 때가 now 보다 뒤여도 기간은 0 이상.
+ */
+export function codexLimitView(limits: CodexLimits | null, now: number): CodexLimitView | null {
+  if (!limits) return null
+  const windows: ShownLimit[] = []
+  for (const w of [limits.primary, limits.secondary]) {
+    if (!w || !Number.isFinite(w.usedPercent)) continue
+    if (w.resetsAt != null && w.resetsAt <= now) continue
+    windows.push({
+      label: limitWindowLabel(w.windowMinutes),
+      percent: Math.min(100, Math.max(0, Math.round(w.usedPercent))),
+      minutes: w.windowMinutes,
+      resetsAt: w.resetsAt
+    })
+  }
+  if (windows.length === 0) return null
+  const c = text.ui.cards
+  const top = windows.reduce((a, b) =>
+    b.percent > a.percent || (b.percent === a.percent && b.minutes > a.minutes) ? b : a
+  )
+  const ago = c.codexLimitsAt(formatDuration(Math.max(0, now - limits.at)))
+  return {
+    windows,
+    caption: c.codexLimitCaption(top.label, top.percent),
+    value: windows.map((w) => c.codexLimitWindow(w.label, w.percent)).join(' · '),
+    tip: [
+      ...windows.map((w) =>
+        c.codexLimitTip(w.label, w.percent, w.resetsAt != null ? formatClock(w.resetsAt) : null)
+      ),
+      ago
+    ].join('\n'),
+    detail: [
+      ...windows.flatMap((w) =>
+        w.resetsAt != null ? [c.codexLimitReset(w.label, formatClock(w.resetsAt))] : []
+      ),
+      ago
+    ].join(' · ')
+  }
 }

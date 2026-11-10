@@ -16,13 +16,7 @@ import {
   Unplug
 } from '@lucide/vue'
 import type { DashboardSnapshot, ProcessGroup } from '../../../shared/types'
-import {
-  formatBytes,
-  formatClock,
-  formatDuration,
-  limitWindowLabel,
-  pressureText
-} from '../../../shared/format'
+import { formatBytes, codexLimitView, pressureText } from '../../../shared/format'
 import { text } from '../../../shared/text'
 import type { Point } from '../history'
 import Card from '../ui/Card.vue'
@@ -151,39 +145,8 @@ const agentCounts = computed(() => {
     parked: rest.filter((a) => a.parked).length
   }
 })
-/**
- * Codex 한도 줄(G6): 이미 초기화된 창(초기화 시각이 지금 이전)은 읽은 뒤에 비워졌으므로 옛 퍼센트가 틀려 뺀다.
- * 지금은 스냅샷 시각을 쓴다(수집 때마다 새로 오므로 이 컴포넌트가 따로 시계를 두지 않는다).
- */
-const codexLimit = computed(() => {
-  const l = s.value.codexLimits
-  if (!l) return null
-  const now = s.value.takenAt
-  const windows = [l.primary, l.secondary].flatMap((w) =>
-    w && !(w.resetsAt != null && w.resetsAt <= now)
-      ? [
-          {
-            label: limitWindowLabel(w.windowMinutes),
-            percent: Math.min(100, Math.max(0, Math.round(w.usedPercent))),
-            resetsAt: w.resetsAt
-          }
-        ]
-      : []
-  )
-  if (windows.length === 0) return null
-  const cards = text.ui.cards
-  return {
-    line: cards.codexLimits(
-      windows.map((w) => cards.codexLimitWindow(w.label, w.percent)).join(' · ')
-    ),
-    tip: [
-      ...windows.map((w) =>
-        cards.codexLimitTip(w.label, w.percent, w.resetsAt != null ? formatClock(w.resetsAt) : null)
-      ),
-      cards.codexLimitsAt(formatDuration(Math.max(0, now - l.at)))
-    ].join('\n')
-  }
-})
+/** Codex 한도(G6): 카드 설명 줄과 풍선말. 지금은 스냅샷 시각(수집 때마다 새로 오므로 따로 시계를 두지 않는다). */
+const codexLimit = computed(() => codexLimitView(s.value.codexLimits, s.value.takenAt))
 const agentMemory = computed(() => groupBytes('agent'))
 const hookOn = computed(() => s.value.hook?.state === 'on')
 /** "상태 · …" 줄의 출처: 훅이 켜져 있으면 훅, 아니고 세션 파일로 아는 에이전트가 있으면 세션 파일, 아니면 CPU 추정. */
@@ -424,7 +387,17 @@ const diskSub = computed(() => {
               text.ui.cards.count
             }}</span>
           </div>
-          <p class="text-xs leading-4 text-muted-foreground">{{ text.ui.cards.agentsSub }}</p>
+          <p
+            v-if="codexLimit"
+            data-codex-limits
+            class="truncate text-xs leading-4 text-muted-foreground"
+            :title="codexLimit.tip"
+          >
+            {{ codexLimit.caption }}
+          </p>
+          <p v-else class="text-xs leading-4 text-muted-foreground">
+            {{ text.ui.cards.agentsSub }}
+          </p>
         </div>
         <div v-if="agentLogos.length" class="flex h-4 items-center gap-2.5 whitespace-nowrap">
           <span
@@ -437,14 +410,6 @@ const diskSub = computed(() => {
           </span>
         </div>
         <StatItem :label="text.ui.cards.memorySum" :value="formatBytes(agentMemory)" />
-        <p
-          v-if="codexLimit"
-          data-codex-limits
-          class="truncate text-[11px] leading-4 tabular-nums text-muted-foreground"
-          :title="codexLimit.tip"
-        >
-          {{ codexLimit.line }}
-        </p>
         <div class="mt-auto border-t border-border/60 pt-3">
           <!-- 카드 높이(h-60)가 이미 꽉 차, 오래 쉬는 세션 수는 셋째 칸 아래 새 줄 대신 이 줄 오른쪽(셋째 칸 위)에 둔다. -->
           <div

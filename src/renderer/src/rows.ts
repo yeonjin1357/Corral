@@ -24,7 +24,7 @@ import {
   displayCpuPercent,
   formatBytes,
   formatDuration,
-  formatTokens,
+  formatContext,
   portList,
   worktreeFolder,
   worktreeKey
@@ -135,12 +135,8 @@ const CONTEXT_COLUMN: Column = { id: 'context', label: c.context, width: 90, ali
 function contextCell(usage: AgentRow['usage']): Cell {
   const used = usage?.contextTokens
   if (used == null) return { text: text.ui.none, sort: -1, muted: true }
-  const window = usage?.contextWindow
   return {
-    text:
-      window != null
-        ? text.ui.agent.usageContextOf(formatTokens(used), formatTokens(window))
-        : formatTokens(used),
+    text: formatContext(used, usage?.contextWindow ?? null),
     sort: used,
     mono: true
   }

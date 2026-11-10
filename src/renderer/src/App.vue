@@ -1012,6 +1012,7 @@ const takenAt = computed(() =>
       :platform="snapshot?.platform ?? null"
       :collect-mode="snapshot?.collectMode ?? null"
       :cpu-count="snapshot?.cpuCount ?? 1"
+      :codex-limits="snapshot?.codexLimits ?? null"
       @open="(port) => sheetAction('open', port)"
       @kill="sheetAction('kill')"
       @remove="sheetAction('remove')"

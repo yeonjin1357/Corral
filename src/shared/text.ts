@@ -317,13 +317,16 @@ export const text = {
       agentOthers: '그 외',
       /** 셋째 칸(쉬는 중·그 외) 가운데 오래 쉬는 세션 수. */
       agentParked: (n: number): string => `오래 쉼 ${n}`,
-      /** Codex 한도 줄(G6): "Codex 한도 5시간 14% · 주간 31%". */
-      codexLimits: (windows: string): string => `Codex 한도 ${windows}`,
+      /** 에이전트 카드 설명 줄(G6): 가장 높은 창 하나, "Codex 한도 주간 31%". */
+      codexLimitCaption: (label: string, percent: number): string =>
+        `Codex 한도 ${label} ${percent}%`,
       codexLimitWindow: (label: string, percent: number): string => `${label} ${percent}%`,
       /** 풍선말의 창 하나: "5시간: 14% · 11월 10일 오후 3:00 초기화"(초기화 시각을 모르면 앞부분만). */
       codexLimitTip: (label: string, percent: number, resetAt: string | null): string =>
         resetAt ? `${label}: ${percent}% · ${resetAt} 초기화` : `${label}: ${percent}%`,
       /** 풍선말 끝: 숫자를 읽은 때(ago: "3분"). */
+      /** 상세 패널 사용 한도 카드의 초기화 시각: "5시간 오후 9:21 초기화". */
+      codexLimitReset: (label: string, at: string): string => `${label} ${at} 초기화`,
       codexLimitsAt: (ago: string): string => `${ago} 전 기준`,
       /** 창 길이 이름: 주간·N일·N시간·N분. */
       windowWeek: '주간',
@@ -789,6 +792,7 @@ export const text = {
       runtime: '실행 시간',
       /** 상세 패널 토큰 카드(G6). */
       usage: '토큰',
+      limitsCard: '사용 한도',
       usageOutput: (tokens: string): string => `출력 합 ${tokens}`,
       usageTotal: (tokens: string): string => `전체 ${tokens}`,
       usageContextOf: (used: string, window: string): string => `${used} / ${window}`,

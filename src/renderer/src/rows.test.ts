@@ -323,6 +323,30 @@ describe('에이전트 표', () => {
     expect(t.columns.reduce((sum, col) => sum + col.width, 0) + 120).toBeLessThanOrEqual(1240)
   })
 
+  test('컨텍스트 칸: 한도가 0·NaN 이면 " / 한도" 없이, 빈 표에는 칸이 없다', () => {
+    const u = (contextWindow: number | null): AgentRow['usage'] => ({
+      contextTokens: 132_000,
+      contextWindow,
+      outputTokens: null,
+      totalTokens: null,
+      model: null
+    })
+    const t = tableFor(
+      'agents',
+      snapshot({
+        agents: [
+          agentRow({ pid: 1, usage: u(0) }),
+          agentRow({ pid: 2, usage: u(NaN) }),
+          agentRow({ pid: 3, usage: u(258_400) })
+        ]
+      })
+    )
+    expect(t.rows.map((r) => r.cells.context.text)).toEqual(['132k', '132k', '132k / 258k'])
+    expect(tableFor('agents', snapshot({ agents: [] })).columns.map((c) => c.id)).not.toContain(
+      'context'
+    )
+  })
+
   test('하는 일 칸: 권한 대기 > 실행 중인 도구 > 제목 > 프롬프트', () => {
     const tool = { name: 'Bash', summary: 'npm run build', since: 0 }
     const s = snapshot({

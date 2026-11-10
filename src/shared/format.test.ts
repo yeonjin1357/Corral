@@ -13,9 +13,11 @@ import {
   formatTokens,
   formatClock,
   limitWindowLabel,
+  formatContext,
+  codexLimitView,
   describeCollectError
 } from './format'
-import type { CommitSummary, MemoryLevel } from './types'
+import type { CodexLimits, CommitSummary, LimitWindow, MemoryLevel } from './types'
 
 test('수집 오류를 한국어로: 시간 초과·결과 해석 실패·macOS 명령 실패·실행 불가, 이미 한국어면 그대로', () => {
   expect(describeCollectError('timeout')).toBe('수집 명령이 시간 안에 끝나지 않았어요.')
@@ -198,4 +200,66 @@ test('한도 창 이름: 10080분 주간 · 하루 단위 N일 · 시간 단위 
 
 test('시각(절대): 월·일·오전/오후 시:분', () => {
   expect(formatClock(new Date(2026, 10, 10, 15, 0).getTime())).toBe('11월 10일 오후 3:00')
+})
+
+test('토큰 수: 반올림 경계 999,500 은 1.0M, 소수 입력은 내림·반올림이 같은 규칙', () => {
+  expect(formatTokens(999_500)).toBe('1.0M')
+  expect(formatTokens(850.7)).toBe('850')
+  expect(formatTokens(12_345.6)).toBe('12.3k')
+})
+
+test('컨텍스트 글: 한도가 0 보다 큰 유한한 수일 때만 " / 한도", 컨텍스트를 모르면 —', () => {
+  expect(formatContext(132_000, 258_400)).toBe('132k / 258k')
+  expect(formatContext(132_000, null)).toBe('132k')
+  expect(formatContext(132_000, 0)).toBe('132k')
+  expect(formatContext(132_000, -5)).toBe('132k')
+  expect(formatContext(132_000, NaN)).toBe('132k')
+  expect(formatContext(132_000, Infinity)).toBe('132k')
+  expect(formatContext(null, 258_400)).toBe('—')
+})
+
+describe('Codex 한도 보기(codexLimitView)', () => {
+  const NOW = 10 * 3_600_000
+  const w = (
+    usedPercent: number,
+    windowMinutes: number,
+    resetsAt: number | null = null
+  ): LimitWindow => ({
+    usedPercent,
+    windowMinutes,
+    resetsAt
+  })
+  const lim = (
+    primary: ReturnType<typeof w> | null,
+    secondary: ReturnType<typeof w> | null,
+    at = NOW - 3 * 60_000
+  ): CodexLimits => ({ primary, secondary, planType: null, at })
+
+  test('가장 높은 창이 설명 줄, 같으면 긴 창, 풍선말·값·상세는 모든 창', () => {
+    const v = codexLimitView(lim(w(14.2, 300, NOW + 3_600_000), w(30.6, 10080, null)), NOW)!
+    expect(v.caption).toBe('Codex 한도 주간 31%')
+    expect(v.value).toBe('5시간 14% · 주간 31%')
+    expect(v.tip.split('\n')).toHaveLength(3)
+    expect(v.tip.endsWith('3분 전 기준')).toBe(true)
+    expect(v.detail).toContain('5시간 ')
+    expect(v.detail).toContain(' 초기화')
+    expect(v.detail).not.toContain('주간 ')
+    expect(v.detail.endsWith('3분 전 기준')).toBe(true)
+    expect(codexLimitView(lim(w(50, 300), w(50, 10080)), NOW)!.caption).toBe('Codex 한도 주간 50%')
+    expect(codexLimitView(lim(w(80, 300), w(50, 10080)), NOW)!.caption).toBe('Codex 한도 5시간 80%')
+  })
+
+  test('초기화된 창·사용률이 숫자가 아닌 창은 빼고, 남은 것이 없으면 null', () => {
+    expect(codexLimitView(lim(w(14, 300, NOW), w(31, 10080, NOW + 1)), NOW)!.value).toBe('주간 31%')
+    expect(codexLimitView(lim(w(NaN, 300), w(31, 10080)), NOW)!.value).toBe('주간 31%')
+    expect(codexLimitView(lim(w(Infinity, 300), null), NOW)).toBeNull()
+    expect(codexLimitView(lim(w(14, 300, NOW - 1), w(31, 10080, NOW)), NOW)).toBeNull()
+    expect(codexLimitView(lim(null, null), NOW)).toBeNull()
+    expect(codexLimitView(null, NOW)).toBeNull()
+  })
+
+  test('사용률은 0–100 으로 맞추고, 읽은 때가 지금보다 뒤여도 음수 기간이 없다', () => {
+    expect(codexLimitView(lim(w(140, 300), w(-5, 10080)), NOW)!.value).toBe('5시간 100% · 주간 0%')
+    expect(codexLimitView(lim(w(10, 300), null, NOW + 60_000), NOW)!.tip).toMatch(/0초 전 기준$/)
+  })
 })

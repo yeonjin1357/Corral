@@ -30,6 +30,7 @@ import type {
   AgentRow,
   AgentUsage,
   ClaudeHookStatus,
+  CodexLimits,
   CollectMode,
   DiskRow,
   HeavyJobRow,
@@ -42,6 +43,9 @@ import {
   displayCpuPercent,
   formatBytes,
   formatDuration,
+  codexLimitView,
+  formatClock,
+  formatContext,
   formatTokens,
   portList,
   worktreeFolder
@@ -89,6 +93,8 @@ const props = defineProps<{
   /** 수집 방식. 보조 코드를 못 쓰는 방식(basic·safe)이면 창으로 가기를 보이지 않는다. */
   collectMode?: CollectMode | null
   cpuCount: number
+  /** Codex 사용 한도(없으면 사용 한도 카드를 만들지 않는다). */
+  codexLimits?: CodexLimits | null
 }>()
 const emit = defineEmits<{
   open: [port: number]
@@ -130,13 +136,7 @@ const QUICK: { kind: QuickKind; icon: unknown; label: string }[] = [
   { kind: 'terminal', icon: SquareTerminal, label: t.quick.terminal }
 ]
 /** 11월 9일 오전 9:10 */
-const time = (ms: number): string =>
-  new Date(ms).toLocaleString('ko-KR', {
-    month: 'long',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit'
-  })
+const time = formatClock
 const folder = (w: WorktreeInfo | null): string => (w ? worktreeFolder(w) : t.tags.noWorktree)
 const branchKind = (w: WorktreeInfo | null): string =>
   w?.isLinkedWorktree ? t.sheet.linked : t.sheet.main
@@ -153,7 +153,7 @@ const commitSub = (commitBytes: number | null | undefined): string | undefined =
 function usageCards(usage: AgentUsage | null): View['cards'] {
   if (!usage) return []
   const ag = t.agent
-  const { contextTokens: used, contextWindow: window } = usage
+  const used = usage.contextTokens
   const parts = [
     usage.outputTokens != null ? ag.usageOutput(formatTokens(usage.outputTokens)) : null,
     usage.totalTokens != null ? ag.usageTotal(formatTokens(usage.totalTokens)) : null,
@@ -164,15 +164,18 @@ function usageCards(usage: AgentUsage | null): View['cards'] {
     {
       icon: Gauge,
       label: ag.usage,
-      value:
-        used == null
-          ? t.none
-          : window != null
-            ? ag.usageContextOf(formatTokens(used), formatTokens(window))
-            : formatTokens(used),
+      value: formatContext(used, usage.contextWindow),
       sub: parts.length ? parts.join(' · ') : undefined,
       help: ag.usageHelp
     }
+  ]
+}
+/** 사용 한도 카드(Codex, G6): 모든 창의 사용률 · 초기화 시각·읽은 때. 한도가 없거나 보일 창이 없으면 만들지 않는다. */
+function limitsCards(row: AgentRow): View['cards'] {
+  const view = row.tool === 'codex' ? codexLimitView(props.codexLimits ?? null, props.now) : null
+  if (!view) return []
+  return [
+    { icon: Gauge, label: t.agent.limitsCard, value: view.value, sub: view.detail, oneLine: true }
   ]
 }
 const workspaceText = (ws: { name: string; root: string } | null): string =>
@@ -195,6 +198,8 @@ interface View {
     trend?: boolean
     /** 카드 아래 작은 도움말. */
     help?: string
+    /** 보조 줄을 한 줄로(길면 자른다, 전체는 title). */
+    oneLine?: boolean
   }[]
   facts: Fact[]
   command?: string | null
@@ -357,7 +362,8 @@ const view = computed<View | null>(() => {
             value: cpuText(r.cpuPercent),
             sub: props.platform === 'win32' ? t.agent.cpuSubWindows : t.agent.cpuSub
           },
-          ...usageCards(r.usage)
+          ...usageCards(r.usage),
+          ...limitsCards(r)
         ],
         facts: [
           { label: t.columns.tool, value: t.agent.toolNames[r.tool] },
@@ -649,7 +655,14 @@ const folderSize = (f: DiskRow['folders'][number]): string =>
               :label="card.label"
               :format="formatBytes"
             />
-            <p v-else-if="card.sub" class="text-xs text-muted-foreground">{{ card.sub }}</p>
+            <p
+              v-else-if="card.sub"
+              class="text-xs text-muted-foreground"
+              :class="{ truncate: card.oneLine }"
+              :title="card.oneLine ? card.sub : undefined"
+            >
+              {{ card.sub }}
+            </p>
             <p v-if="card.help" class="text-[11px] leading-4 text-muted-foreground">
               {{ card.help }}
             </p>

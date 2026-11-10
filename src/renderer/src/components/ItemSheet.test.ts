@@ -3,7 +3,13 @@ import { mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach } from 'vitest'
 import ItemSheet, { type Selected } from './ItemSheet.vue'
 import { MB, agentRow, diskRow, heavyJob, leftoverRow, serverRow } from '../testing/fixtures'
-import type { AgentRow, ClaudeHookStatus, CollectMode, Platform } from '../../../shared/types'
+import type {
+  AgentRow,
+  ClaudeHookStatus,
+  CodexLimits,
+  CollectMode,
+  Platform
+} from '../../../shared/types'
 
 let wrapper: VueWrapper | null = null
 afterEach(() => {
@@ -16,7 +22,8 @@ function sheet(
   item: Selected,
   hook: ClaudeHookStatus | null = null,
   platform: Platform = 'win32',
-  collectMode: CollectMode | null = 'helper-dll'
+  collectMode: CollectMode | null = 'helper-dll',
+  codexLimits: CodexLimits | null = null
 ): VueWrapper {
   wrapper = mount(ItemSheet, {
     attachTo: document.body,
@@ -30,6 +37,7 @@ function sheet(
       platform,
       collectMode,
       cpuCount: 8,
+      codexLimits,
       open: true
     }
   })
@@ -556,5 +564,64 @@ describe('상세 패널: 토큰 카드(G6)', () => {
     sheet({ kind: 'agent', row: agentRow({ usage: usage({ contextTokens: null, model: null }) }) })
     expect(flat(card())).toContain('—')
     expect(flat(card())).toContain('출력 합 48.2k')
+  })
+})
+
+describe('상세 패널: 사용 한도 카드(Codex, G6)', () => {
+  const NOW = 10_000_000
+  const limits: CodexLimits = {
+    primary: { usedPercent: 14.2, windowMinutes: 300, resetsAt: NOW + 3_600_000 },
+    secondary: { usedPercent: 30.6, windowMinutes: 10080, resetsAt: null },
+    planType: null,
+    at: NOW - 180_000
+  }
+  const card = (): HTMLElement | null =>
+    [...document.body.querySelectorAll<HTMLElement>('[data-slot=card]')].find((c) =>
+      c.textContent?.trim().startsWith('사용 한도')
+    ) ?? null
+  const flat = (el: HTMLElement | null): string => el?.textContent?.replace(/s+/g, ' ').trim() ?? ''
+
+  test('Codex 행에 한도가 있으면 모든 창과 초기화 시각·기준 시각', () => {
+    sheet({ kind: 'agent', row: agentRow({ tool: 'codex' }) }, null, 'win32', 'helper-dll', limits)
+    expect(flat(card())).toContain('5시간 14% · 주간 31%')
+    expect(flat(card())).toContain('5시간 ')
+    expect(flat(card())).toContain('초기화')
+    expect(flat(card())).toContain('3분 전 기준')
+  })
+
+  test('Claude 행·한도 없음·모든 창이 초기화됐으면 카드가 없다', () => {
+    sheet({ kind: 'agent', row: agentRow({ tool: 'claude' }) }, null, 'win32', 'helper-dll', limits)
+    expect(card()).toBeNull()
+    wrapper?.unmount()
+    sheet({ kind: 'agent', row: agentRow({ tool: 'codex' }) }, null, 'win32', 'helper-dll', null)
+    expect(card()).toBeNull()
+    wrapper?.unmount()
+    const gone: CodexLimits = {
+      ...limits,
+      primary: { usedPercent: 5, windowMinutes: 300, resetsAt: NOW },
+      secondary: null
+    }
+    sheet({ kind: 'agent', row: agentRow({ tool: 'codex' }) }, null, 'win32', 'helper-dll', gone)
+    expect(card()).toBeNull()
+  })
+})
+
+describe('상세 패널: 컨텍스트 한도가 0 이면', () => {
+  test('132k / 0 이 아니라 132k', () => {
+    sheet({
+      kind: 'agent',
+      row: agentRow({
+        usage: {
+          contextTokens: 132_000,
+          contextWindow: 0,
+          outputTokens: null,
+          totalTokens: null,
+          model: null
+        }
+      })
+    })
+    const t = document.body.textContent!
+    expect(t).toContain('132k')
+    expect(t).not.toContain('132k / 0')
   })
 })
