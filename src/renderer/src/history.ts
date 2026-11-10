@@ -27,6 +27,32 @@ export interface History {
 
 export const BEAT_LIMIT = 60
 export const POINT_LIMIT = 120
+/** RAM 추이 보관 시간(메모리 상세의 그래프 가로축). 앱(메인)이 기억하는 기록과 같다. */
+export const RAM_KEEP_MS = 2 * 60 * 60 * 1000
+/** 최근 POINT_LIMIT 점보다 오래된 RAM 기록은 이 간격에 하나만 둔다(메인 기록과 같은 30초). */
+const RAM_BUCKET_MS = 30_000
+
+/**
+ * RAM 기록을 줄인다: 가장 새 점에서 2시간 안의 것만, 최근 POINT_LIMIT 점은 그대로(작은 그래프의 가로축),
+ * 그보다 오래된 것은 30초 칸마다 첫 점 하나. 시간 순이어야 한다.
+ */
+function thinRam(points: Point[]): Point[] {
+  if (points.length === 0) return points
+  const cutoff = points[points.length - 1].t - RAM_KEEP_MS
+  const fineFrom = Math.max(0, points.length - POINT_LIMIT)
+  const out: Point[] = []
+  let lastBucket: number | null = null
+  for (let i = 0; i < fineFrom; i++) {
+    const p = points[i]
+    if (p.t < cutoff) continue
+    const bucket = Math.floor(p.t / RAM_BUCKET_MS)
+    if (bucket === lastBucket) continue
+    lastBucket = bucket
+    out.push(p)
+  }
+  for (let i = fineFrom; i < points.length; i++) if (points[i].t >= cutoff) out.push(points[i])
+  return out
+}
 
 export { agentKey, selectionKey } from '../../shared/keys'
 
@@ -44,14 +70,14 @@ export function emptyHistory(): History {
 
 /**
  * 앱(메인)이 기억한 RAM 기록으로 추이를 채운다. 창을 다시 열거나 앱을 다시 켰을 때 그래프가 빈 채로 시작하지 않게.
- * 같은 시각은 이미 있는 점(방금 받은 스냅샷)을 쓰고, 시간 순으로 최근 POINT_LIMIT 개만 둔다.
+ * 같은 시각은 이미 있는 점(방금 받은 스냅샷)을 쓰고, 시간 순으로 2시간까지 둔다(thinRam).
  */
 export function seedRam(history: History, points: Point[]): History {
   if (points.length === 0) return history
   const byTime = new Map<number, Point>()
   for (const p of points) byTime.set(p.t, { t: p.t, value: p.value })
   for (const p of history.ram) byTime.set(p.t, p)
-  const ram = [...byTime.values()].sort((a, b) => a.t - b.t).slice(-POINT_LIMIT)
+  const ram = thinRam([...byTime.values()].sort((a, b) => a.t - b.t))
   return { ...history, ram }
 }
 
@@ -85,7 +111,7 @@ export function appendSnapshot(history: History, s: DashboardSnapshot): History 
   }
   return {
     lastTakenAt: s.takenAt,
-    ram: keep(history.ram, { t: s.takenAt, value: s.memory.usedPercent }, POINT_LIMIT),
+    ram: thinRam([...history.ram, { t: s.takenAt, value: s.memory.usedPercent }]),
     servers,
     agents
   }

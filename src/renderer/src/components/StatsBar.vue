@@ -38,6 +38,8 @@ const props = defineProps<{
   ramHistory: Point[]
   /** 추이 그래프 가로축(ms). */
   windowMs: number
+  /** 기록이 이보다 끊기면 그래프를 잇지 않는다(앱이 꺼져 있었음). */
+  gapMs?: number | null
 }>()
 const emit = defineEmits<{
   memory: []
@@ -244,6 +246,7 @@ const diskSub = computed(() =>
         <ResourceTrend
           :points="ramHistory"
           :window-ms="windowMs"
+          :gap-ms="gapMs"
           :max="100"
           color="var(--chart-3)"
           :label="text.ui.cards.memory"

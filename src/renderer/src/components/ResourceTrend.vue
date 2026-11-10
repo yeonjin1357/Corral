@@ -23,8 +23,10 @@ const props = withDefaults(
     format: (value: number) => string
     /** 세로축 범위 문구(예: 0–100%). 없으면 0–(최댓값). */
     range?: string | null
+    /** 이웃한 기록이 이보다 벌어지면(앱이 꺼져 있었음) 그 사이를 잇지 않고 비운다. 없으면 모두 잇는다. */
+    gapMs?: number | null
   }>(),
-  { max: null, color: 'var(--chart-1)', expanded: false, range: null }
+  { max: null, color: 'var(--chart-1)', expanded: false, range: null, gapMs: null }
 )
 
 const box = ref<HTMLElement | null>(null)
@@ -59,16 +61,29 @@ const y = (v: number): number =>
   PAD.top +
   (1 - Math.max(0, Math.min(1, v / ceiling.value))) * (height.value - PAD.top - PAD.bottom)
 
-const line = computed(() =>
-  visible.value
-    .map((p, i) => `${i ? 'L' : 'M'}${x(p.t).toFixed(1)},${y(p.value).toFixed(1)}`)
-    .join('')
-)
+/** 끊긴 곳(gapMs 초과)에서 나눈 이어진 구간들. */
+const segments = computed(() => {
+  const out: Point[][] = []
+  for (const p of visible.value) {
+    const seg = out[out.length - 1]
+    const prev = seg?.[seg.length - 1]
+    if (!seg || (props.gapMs != null && prev && p.t - prev.t > props.gapMs)) out.push([p])
+    else seg.push(p)
+  }
+  return out
+})
+const pathOf = (seg: Point[]): string =>
+  seg.map((p, i) => `${i ? 'L' : 'M'}${x(p.t).toFixed(1)},${y(p.value).toFixed(1)}`).join('')
+const line = computed(() => segments.value.map(pathOf).join(''))
 const area = computed(() => {
-  const pts = visible.value
-  if (pts.length < 2) return ''
   const bottom = height.value - PAD.bottom
-  return `${line.value}L${x(pts[pts.length - 1].t).toFixed(1)},${bottom}L${x(pts[0].t).toFixed(1)},${bottom}Z`
+  return segments.value
+    .filter((seg) => seg.length >= 2)
+    .map(
+      (seg) =>
+        `${pathOf(seg)}L${x(seg[seg.length - 1].t).toFixed(1)},${bottom}L${x(seg[0].t).toFixed(1)},${bottom}Z`
+    )
+    .join('')
 })
 
 const hovered = ref<number | null>(null)

@@ -2,6 +2,7 @@
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { isProxy } from 'vue'
 import App from './App.vue'
+import MemorySheet from './components/MemorySheet.vue'
 import { DEFAULT_SETTINGS, type Settings } from '../../shared/settings'
 import type { NavigateTarget, PitwallApi } from '../../shared/ipc'
 import type { DashboardSnapshot } from '../../shared/types'
@@ -266,5 +267,16 @@ test('메모리 상세의 묶음을 누르면 상세를 닫고 그 탭으로 간
     w.find('[data-slot="toggle-group-item"][data-value="agents"]').attributes('data-state')
   ).toBe('on')
   expect((w.find('input[type="search"], input').element as HTMLInputElement).value).toBe('')
+  w.unmount()
+})
+
+test('메모리 상세의 RAM 추이는 최근 2시간, 기록이 끊긴 구간은 비운다', async () => {
+  const f = fake()
+  const w = await start(f)
+  await w.find('[aria-label="메모리 자세히 보기"]').trigger('click')
+  await flushPromises()
+  const sheet = w.findComponent(MemorySheet)
+  expect(sheet.props('windowMs')).toBe(2 * 60 * 60 * 1000)
+  expect(sheet.props('gapMs')).toBeGreaterThanOrEqual(60_000)
   w.unmount()
 })

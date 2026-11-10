@@ -235,7 +235,11 @@ export const text = {
     },
     trend: {
       window: (ms: number): string =>
-        ms >= 60_000 ? `${Math.round(ms / 60_000)}분` : `${Math.round(ms / 1000)}초`,
+        ms >= 3_600_000 && ms % 3_600_000 === 0
+          ? `${ms / 3_600_000}시간`
+          : ms >= 60_000
+            ? `${Math.round(ms / 60_000)}분`
+            : `${Math.round(ms / 1000)}초`,
       collecting: '기록을 모으는 중…'
     },
     /** 맨 위 카드 줄(NeoHtop StatsBar). */

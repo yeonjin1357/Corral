@@ -63,6 +63,8 @@ const props = defineProps<{
   now: number
   memoryHistory: Point[]
   windowMs: number
+  /** 기록이 이보다 끊기면 그래프를 잇지 않는다(앱이 꺼져 있었음). */
+  gapMs?: number | null
   busy: boolean
   hook: ClaudeHookStatus | null
   platform: Platform | null
@@ -448,6 +450,7 @@ const folderSize = (f: DiskRow['folders'][number]): string =>
               v-if="card.trend"
               :points="memoryHistory"
               :window-ms="windowMs"
+              :gap-ms="gapMs"
               color="var(--chart-3)"
               :label="card.label"
               :format="formatBytes"

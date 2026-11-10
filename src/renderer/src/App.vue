@@ -21,6 +21,7 @@ import { toIpc } from './ipc'
 import { readSorts, resolveSort, writeSorts, type SortState, type Sorts } from './sortState'
 import {
   POINT_LIMIT,
+  RAM_KEEP_MS,
   agentKey,
   appendSnapshot,
   emptyHistory,
@@ -74,6 +75,8 @@ const query = ref('')
 const intervals = computed(() => REFRESH_INTERVALS[settings.value.refresh])
 /** 추이 그래프 가로축: 창이 열려 있을 때 기록 한도만큼(보통 5초 × 120 = 10분). */
 const windowMs = computed(() => intervals.value.openMs * POINT_LIMIT)
+/** 기록 사이가 이보다 벌어지면 그래프를 잇지 않는다: 창을 닫아 둔 동안의 수집 간격(의 3배)보다 길면 앱이 꺼져 있던 것. */
+const gapMs = computed(() => Math.max(60_000, 3 * intervals.value.closedMs))
 const isMac = navigator.userAgent.includes('Mac')
 
 /** 제목줄 아래 한 줄 알림(NeoHtop TitleBar 의 actionError 줄). */
@@ -630,6 +633,7 @@ const takenAt = computed(() =>
           :snapshot="snapshot"
           :ram-history="history.ram"
           :window-ms="windowMs"
+          :gap-ms="gapMs"
           @memory="memoryOpen = true"
           @tab="(key) => ((tab = key), (query = ''))"
           @disk-scan="diskScan"
@@ -783,6 +787,7 @@ const takenAt = computed(() =>
       :now="snapshot?.takenAt ?? 0"
       :memory-history="sheetHistory"
       :window-ms="windowMs"
+      :gap-ms="gapMs"
       :busy="busyKey != null && busyKey === selectedKey"
       :hook="snapshot?.hook ?? null"
       :platform="snapshot?.platform ?? null"
@@ -797,7 +802,8 @@ const takenAt = computed(() =>
       v-model:open="memoryOpen"
       :snapshot="snapshot"
       :ram-history="history.ram"
-      :window-ms="windowMs"
+      :window-ms="RAM_KEEP_MS"
+      :gap-ms="gapMs"
       :refreshing="refreshing"
       @refresh="refresh"
       @go="goToTab"

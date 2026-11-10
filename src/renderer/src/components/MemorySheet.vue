@@ -27,6 +27,8 @@ const props = defineProps<{
   snapshot: DashboardSnapshot
   ramHistory: Point[]
   windowMs: number
+  /** 기록이 이보다 끊기면 그래프를 잇지 않는다(앱이 꺼져 있었음). */
+  gapMs?: number | null
   refreshing: boolean
 }>()
 const emit = defineEmits<{ refresh: []; go: [tab: TabKey] }>()
@@ -125,6 +127,7 @@ const groups = computed(() =>
         <ResourceTrend
           :points="ramHistory"
           :window-ms="windowMs"
+          :gap-ms="gapMs"
           :max="100"
           color="var(--chart-3)"
           expanded
