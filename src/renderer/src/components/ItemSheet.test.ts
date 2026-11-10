@@ -584,9 +584,13 @@ describe('상세 패널: 사용 한도 카드(Codex, G6)', () => {
   test('Codex 행에 한도가 있으면 모든 창과 초기화 시각·기준 시각', () => {
     sheet({ kind: 'agent', row: agentRow({ tool: 'codex' }) }, null, 'win32', 'helper-dll', limits)
     expect(flat(card())).toContain('5시간 14% · 주간 31%')
-    expect(flat(card())).toContain('5시간 ')
-    expect(flat(card())).toContain('초기화')
-    expect(flat(card())).toContain('3분 전 기준')
+    // 초기화 시각은 창마다 한 줄(시각을 모르는 주간 창은 줄이 없다), 마지막 줄이 읽은 때.
+    const lines = [...card()!.querySelectorAll('[data-limit-line]')].map((p) =>
+      p.textContent!.trim()
+    )
+    expect(lines).toHaveLength(2)
+    expect(lines[0]).toMatch(/^5시간 · .+ 초기화$/)
+    expect(lines[1]).toBe('3분 전 기준')
   })
 
   test('Claude 행·한도 없음·모든 창이 초기화됐으면 카드가 없다', () => {

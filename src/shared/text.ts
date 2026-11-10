@@ -326,7 +326,7 @@ export const text = {
         resetAt ? `${label}: ${percent}% · ${resetAt} 초기화` : `${label}: ${percent}%`,
       /** 풍선말 끝: 숫자를 읽은 때(ago: "3분"). */
       /** 상세 패널 사용 한도 카드의 초기화 시각: "5시간 오후 9:21 초기화". */
-      codexLimitReset: (label: string, at: string): string => `${label} ${at} 초기화`,
+      codexLimitReset: (label: string, at: string): string => `${label} · ${at} 초기화`,
       codexLimitsAt: (ago: string): string => `${ago} 전 기준`,
       /** 창 길이 이름: 주간·N일·N시간·N분. */
       windowWeek: '주간',

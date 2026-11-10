@@ -174,9 +174,7 @@ function usageCards(usage: AgentUsage | null): View['cards'] {
 function limitsCards(row: AgentRow): View['cards'] {
   const view = row.tool === 'codex' ? codexLimitView(props.codexLimits ?? null, props.now) : null
   if (!view) return []
-  return [
-    { icon: Gauge, label: t.agent.limitsCard, value: view.value, sub: view.detail, oneLine: true }
-  ]
+  return [{ icon: Gauge, label: t.agent.limitsCard, value: view.value, lines: view.lines }]
 }
 const workspaceText = (ws: { name: string; root: string } | null): string =>
   ws ? `${ws.name} · ${ws.root}` : t.none
@@ -198,8 +196,8 @@ interface View {
     trend?: boolean
     /** 카드 아래 작은 도움말. */
     help?: string
-    /** 보조 줄을 한 줄로(길면 자른다, 전체는 title). */
-    oneLine?: boolean
+    /** 보조 줄 여러 개(줄마다 한 줄). */
+    lines?: string[]
   }[]
   facts: Fact[]
   command?: string | null
@@ -655,13 +653,14 @@ const folderSize = (f: DiskRow['folders'][number]): string =>
               :label="card.label"
               :format="formatBytes"
             />
+            <p v-else-if="card.sub" class="text-xs text-muted-foreground">{{ card.sub }}</p>
             <p
-              v-else-if="card.sub"
+              v-for="line in card.lines"
+              :key="line"
+              data-limit-line
               class="text-xs text-muted-foreground"
-              :class="{ truncate: card.oneLine }"
-              :title="card.oneLine ? card.sub : undefined"
             >
-              {{ card.sub }}
+              {{ line }}
             </p>
             <p v-if="card.help" class="text-[11px] leading-4 text-muted-foreground">
               {{ card.help }}

@@ -207,8 +207,8 @@ export interface CodexLimitView {
   value: string
   /** 풍선말(줄바꿈): 창마다 사용률·초기화 시각, 끝에 읽은 때. */
   tip: string
-  /** 한 줄: 초기화 시각들 · 읽은 때. */
-  detail: string
+  /** 상세 패널: 초기화 시각을 아는 창마다 한 줄, 마지막 줄은 읽은 때. */
+  lines: string[]
 }
 
 /**
@@ -245,11 +245,11 @@ export function codexLimitView(limits: CodexLimits | null, now: number): CodexLi
       ),
       ago
     ].join('\n'),
-    detail: [
+    lines: [
       ...windows.flatMap((w) =>
         w.resetsAt != null ? [c.codexLimitReset(w.label, formatClock(w.resetsAt))] : []
       ),
       ago
-    ].join(' · ')
+    ]
   }
 }
