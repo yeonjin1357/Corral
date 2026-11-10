@@ -662,6 +662,26 @@ const NOTICES_URL = `${REPO_URL}/blob/main/THIRD_PARTY_NOTICES.md`
               </div>
             </CardContent>
           </Card>
+          <Card size="sm">
+            <CardHeader
+              ><CardTitle>{{ S.groups.look }}</CardTitle></CardHeader
+            >
+            <CardContent>
+              <div class="flex items-start gap-3">
+                <Checkbox
+                  id="show-agent-activity"
+                  v-model="draft.showAgentActivity"
+                  class="mt-0.5"
+                />
+                <div>
+                  <Label for="show-agent-activity">{{ S.showAgentActivity }}</Label>
+                  <p class="mt-1 text-xs leading-relaxed text-muted-foreground">
+                    {{ S.showAgentActivityHelp }}
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
         </div>
 
         <div v-else-if="page === 'about'" class="space-y-5">

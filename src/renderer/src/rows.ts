@@ -169,7 +169,7 @@ function cpuCell(cpuPercent: number | null, s: DashboardSnapshot): Cell {
 
 /**
  * 에이전트 상태 칸: "작업 중 · 12분"(F3). 아직 모르는 상태는 시간 없이.
- * 오래 쉬는 세션(G2)은 120px 칸에 배지까지 넣으면 기간이 잘려, 쉬는 중·확인 중이면 글자 자체를
+ * 오래 쉬는 세션(G2)은 130px 칸에 배지까지 넣으면 기간이 잘려, 쉬는 중·확인 중이면 글자 자체를
  * "오래 쉼 · 3시간"(마지막 활동부터)으로 하고(오류는 "오류 · 기간" 그대로), title 에 마지막 활동 시각.
  */
 function agentStatus(a: AgentRow, now: number): Cell {
@@ -186,6 +186,22 @@ function agentStatus(a: AgentRow, now: number): Cell {
     ...(parkedAt != null ? { title: st.lastActive(ago(parkedAt)) } : {}),
     dot: AGENT_TONE[a.state]
   }
+}
+
+/**
+ * 하는 일 칸(G3b): 권한 대기면 "권한: Bash · npm run build", 도구 실행 중이면 "Bash · npm run build", 아니면 세션 제목,
+ * 없으면 마지막 요청, 없으면 —. 칸이 좁아 잘리므로 전체 글은 title 에.
+ */
+function activityCell(a: AgentRow): Cell {
+  const act = a.activity
+  const ag = text.ui.agent
+  const waiting = act?.waiting ? ag.activityTool(act.waiting.tool, act.waiting.summary) : ''
+  const label = waiting
+    ? ag.activityWaiting(waiting)
+    : act?.tool
+      ? ag.activityTool(act.tool.name, act.tool.summary)
+      : (act?.title ?? act?.prompt ?? null)
+  return label ? { text: label, title: label } : { text: text.ui.none, muted: true }
 }
 
 const TOOL_LOGO: Record<AgentTool, string> = { claude: claudeCodeLogo, codex: codexLogo }
@@ -316,15 +332,17 @@ function buildTable(tab: TabKey, s: DashboardSnapshot): Table {
         }))
       }
     case 'agents':
+      // 하는 일 칸을 더해도 기본 창(1280px)에 들어가게 다른 칸을 줄였다.
       return {
         columns: [
-          { id: 'name', label: c.project, width: 220 },
-          { id: 'branch', label: c.branch, width: 240 },
-          { id: 'status', label: c.status, width: 120 },
-          { id: 'cpu', label: c.cpu, width: 72, align: 'right' },
-          { id: 'memory', label: c.memory, width: 96, align: 'right' },
-          COMMIT_COLUMN,
-          { id: 'runtime', label: c.runtime, width: 110, align: 'right' }
+          { id: 'name', label: c.project, width: 200 },
+          { id: 'branch', label: c.branch, width: 150 },
+          { id: 'status', label: c.status, width: 130 },
+          { id: 'activity', label: c.activity, width: 200 },
+          { id: 'cpu', label: c.cpu, width: 64, align: 'right' },
+          { id: 'memory', label: c.memory, width: 88, align: 'right' },
+          { ...COMMIT_COLUMN, width: 88 },
+          { id: 'runtime', label: c.runtime, width: 90, align: 'right' }
         ],
         sort: { id: 'name', dir: 'asc' },
         rows: s.agents.map((a) => {
@@ -336,6 +354,7 @@ function buildTable(tab: TabKey, s: DashboardSnapshot): Table {
               name: { text: folderOf(a.worktree), title: a.worktree?.root, icon: agentIcon(a) },
               branch: branchOf(a.worktree),
               status: agentStatus(a, now),
+              activity: activityCell(a),
               cpu:
                 cpu == null
                   ? { text: text.ui.none, sort: -1, muted: true }
@@ -349,7 +368,8 @@ function buildTable(tab: TabKey, s: DashboardSnapshot): Table {
               folderOf(a.worktree),
               a.worktree?.branch,
               text.ui.agent.toolNames[a.tool],
-              text.ui.agent.states[a.state]
+              text.ui.agent.states[a.state],
+              a.activity?.title
             )
           }
         })

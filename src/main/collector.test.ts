@@ -86,7 +86,8 @@ function setup(over: Partial<CollectorDeps> = {}): {
       thresholds: { ramWarnPercent: 80, ramDangerPercent: 90 },
       idlePortMs: 20 * MIN,
       agentParkedMs: 180 * MIN,
-      heavyPatterns: ['tsc']
+      heavyPatterns: ['tsc'],
+      showAgentActivity: true
     }),
     selfPid: 999,
     cpuCount: 8,
@@ -311,7 +312,8 @@ describe('마지막 활동·오래 쉬는 세션(G2)', () => {
         thresholds: { ramWarnPercent: 80, ramDangerPercent: 90 },
         idlePortMs: 20 * MIN,
         agentParkedMs: 30 * MIN,
-        heavyPatterns: []
+        heavyPatterns: [],
+        showAgentActivity: true
       })
     })
     const stoppedAt = clock.now - 1
@@ -350,7 +352,8 @@ describe('마지막 활동·오래 쉬는 세션(G2)', () => {
         thresholds: { ramWarnPercent: 80, ramDangerPercent: 90 },
         idlePortMs: 20 * MIN,
         agentParkedMs: 30 * MIN,
-        heavyPatterns: []
+        heavyPatterns: [],
+        showAgentActivity: true
       })
     })
     const stoppedAt = clock.now - 1
@@ -712,6 +715,184 @@ describe('Claude 세션 파일(G3a)', () => {
   })
 })
 
+describe('하는 일(G3b)', () => {
+  const fileOf = (over: Partial<ClaudeSessionFile> = {}): ClaudeSessionFile => ({
+    pid: 5000,
+    sessionId: 'f1',
+    status: null,
+    statusUpdatedAt: null,
+    name: null,
+    ...over
+  })
+  /** 수집기에 넘길 세션 파일 읽기. current 를 바꾸면 다음 수집부터 반영된다. */
+  const filesFrom =
+    (current: { files: ClaudeSessionFile[] }): NonNullable<CollectorDeps['claudeSessionFiles']> =>
+    async () =>
+      new Map(current.files.map((f) => [f.pid, f]))
+  const event = (
+    sessions: Sessions,
+    id: string,
+    name: string,
+    at: number,
+    extra: Record<string, unknown> = {}
+  ): void => {
+    applyHookEvent(sessions, { session_id: id, cwd: W1.root, hook_event_name: name, ...extra }, at)
+  }
+
+  test('같은 워크트리의 두 세션은 각자의 하는 일을 본다', async () => {
+    // shop-web 에 Claude 둘(5000·5001). 세션 파일이 각자의 세션(a·b)을 알려 준다.
+    const twoClaudes: RawSample = {
+      ...sampleAt(0),
+      processes: [...sampleAt(0).processes, { ...proc(5001, 1, 'claude.exe', 0), startedAt: 200 }],
+      cwds: { 5000: W1.root, 5001: W1.root, 6000: W2.root }
+    }
+    const { deps, sessions, clock } = setup({
+      sample: async () => twoClaudes,
+      resolveProcessWorktrees: async (processes) =>
+        new Map(processes.map((p) => [p.pid, p.pid === 6000 ? W2 : W1])),
+      claudeSessionFiles: filesFrom({
+        files: [fileOf({ pid: 5000, sessionId: 'a' }), fileOf({ pid: 5001, sessionId: 'b' })]
+      })
+    })
+    const t = clock.now
+    event(sessions, 'a', 'UserPromptSubmit', t - 4000, {
+      prompt: '로그인 버그 고쳐 줘',
+      session_title: '로그인 버그'
+    })
+    event(sessions, 'a', 'PreToolUse', t - 3000, {
+      tool_name: 'Bash',
+      tool_input: { command: 'npm test' }
+    })
+    event(sessions, 'b', 'UserPromptSubmit', t - 2000, { prompt: '문서 정리' })
+    event(sessions, 'b', 'PermissionRequest', t - 1000, {
+      tool_name: 'Write',
+      tool_input: { file_path: 'C:\\work\\shop-web\\README.md', content: '본문' }
+    })
+    const collector = createCollector(deps)
+    const s = await collector.collect()
+    const doing = (snap: typeof s): unknown[] =>
+      snap.agents.filter((a) => a.tool === 'claude').map((a) => [a.pid, a.state, a.activity])
+    const b = {
+      title: null,
+      prompt: '문서 정리',
+      tool: null,
+      waiting: { tool: 'Write', summary: 'README.md' }
+    }
+    expect(doing(s)).toEqual([
+      [
+        5000,
+        'working',
+        {
+          title: '로그인 버그',
+          prompt: '로그인 버그 고쳐 줘',
+          tool: { name: 'Bash', summary: 'npm test', since: t - 3000 },
+          waiting: null
+        }
+      ],
+      [5001, 'waiting', b]
+    ])
+    // 훅이 없는 Codex 는 하는 일을 모른다.
+    expect(s.agents.find((a) => a.pid === 6000)?.activity).toBeNull()
+
+    // 수집 사이에 온 훅 소식은 그 세션의 행만 바꾼다.
+    event(sessions, 'a', 'PostToolUse', t + 1000, { tool_name: 'Bash' })
+    expect(doing(await collector.restate(s))).toEqual([
+      [
+        5000,
+        'working',
+        { title: '로그인 버그', prompt: '로그인 버그 고쳐 줘', tool: null, waiting: null }
+      ],
+      [5001, 'waiting', b]
+    ])
+  })
+
+  test('훅 제목이 없으면 세션 파일의 이름(한 줄 80자)을 제목으로 쓴다(훅 세션이 없어도)', async () => {
+    const current = {
+      files: [fileOf({ status: 'busy', statusUpdatedAt: 9 * MIN, name: '결제 리팩터링\n둘째 줄' })]
+    }
+    const { deps, sessions, clock } = setup({ claudeSessionFiles: filesFrom(current) })
+    const collector = createCollector(deps)
+    // 훅 없이 세션 파일로만 아는 에이전트도 제목은 안다.
+    const s = await collector.collect()
+    expect(s.agents[0]).toMatchObject({
+      pid: 5000,
+      stateSource: 'file',
+      activity: { title: '결제 리팩터링', prompt: null, tool: null, waiting: null }
+    })
+    // 훅 세션에 제목이 없으면 파일의 이름.
+    event(sessions, 'f1', 'UserPromptSubmit', clock.now, { prompt: '테스트 추가' })
+    const hooked = await collector.restate(s)
+    expect(hooked.agents[0]).toMatchObject({
+      stateSource: 'hook',
+      activity: { title: '결제 리팩터링', prompt: '테스트 추가', tool: null, waiting: null }
+    })
+    // 훅이 제목을 알려 주면 그것.
+    event(sessions, 'f1', 'UserPromptSubmit', clock.now + 1, {
+      prompt: '테스트 추가',
+      session_title: '결제 테스트'
+    })
+    expect((await collector.restate(hooked)).agents[0].activity?.title).toBe('결제 테스트')
+
+    // 긴 이름은 80자로 자른다. 이름도 내용도 없으면 null.
+    const fresh = setup({
+      claudeSessionFiles: filesFrom({ files: [fileOf({ name: 'n'.repeat(100) })] })
+    })
+    expect((await createCollector(fresh.deps).collect()).agents[0].activity?.title).toBe(
+      'n'.repeat(79) + '…'
+    )
+    const none = setup({ claudeSessionFiles: filesFrom({ files: [fileOf({ name: '  ' })] }) })
+    expect((await createCollector(none.deps).collect()).agents[0].activity).toBeNull()
+  })
+
+  test('실행 중인 도구는 작업 중·권한 대기일 때만(더 늦은 근거로 쉬는 중이면 옛 도구를 보이지 않는다)', async () => {
+    const current = { files: [] as ClaudeSessionFile[] }
+    const { deps, sessions, clock } = setup({ claudeSessionFiles: filesFrom(current) })
+    clock.now = 60 * MIN
+    event(sessions, 'f1', 'UserPromptSubmit', clock.now - 10 * MIN, { prompt: '빌드해 줘' })
+    event(sessions, 'f1', 'PreToolUse', clock.now - 9 * MIN, {
+      tool_name: 'Bash',
+      tool_input: { command: 'npm run build' }
+    })
+    // 훅 전달이 끊긴 뒤 세션 파일이 더 늦게 idle 이 됐다.
+    current.files = [fileOf({ status: 'idle', statusUpdatedAt: clock.now - MIN })]
+    const s = await createCollector(deps).collect()
+    expect(s.agents[0]).toMatchObject({
+      state: 'idle',
+      stateSource: 'file',
+      activity: { title: null, prompt: '빌드해 줘', tool: null, waiting: null }
+    })
+  })
+
+  test('showAgentActivity 를 끄면 행의 하는 일은 null(세션 파일 이름도 쓰지 않는다), 기억(history.json)에는 담지 않는다', async () => {
+    const options = {
+      thresholds: { ramWarnPercent: 80, ramDangerPercent: 90 },
+      idlePortMs: 20 * MIN,
+      agentParkedMs: 180 * MIN,
+      heavyPatterns: [],
+      showAgentActivity: true
+    }
+    const { deps, sessions, clock } = setup({
+      options: () => options,
+      claudeSessionFiles: filesFrom({ files: [fileOf({ name: '비밀 세션 이름' })] })
+    })
+    event(sessions, 'f1', 'UserPromptSubmit', clock.now - 1, { prompt: '비밀 요청' })
+    const collector = createCollector(deps)
+    const s = await collector.collect()
+    expect(s.agents[0].activity).toEqual({
+      title: '비밀 세션 이름',
+      prompt: '비밀 요청',
+      tool: null,
+      waiting: null
+    })
+    expect(JSON.stringify(collector.exportState())).not.toContain('비밀')
+
+    options.showAgentActivity = false
+    expect((await collector.restate(s)).agents[0].activity).toBeNull()
+    clock.now += 5000
+    expect((await collector.collect()).agents.map((a) => a.activity)).toEqual([null, null])
+  })
+})
+
 test('네트워크 경로(UNC·WSL)에서 연 세션은 워크트리를 찾아보지 않는다(응답 없는 공유에 수집이 묶이지 않게)', async () => {
   const resolveWorktree = vi.fn<CollectorDeps['resolveWorktree']>(async () => W1)
   const { deps, sessions, clock } = setup({ resolveWorktree })
@@ -735,7 +916,8 @@ test('설정(기준값)을 바꾸면 다음 수집부터 반영된다', async ()
     thresholds: { ramWarnPercent: 80, ramDangerPercent: 90 },
     idlePortMs: 20 * MIN,
     agentParkedMs: 180 * MIN,
-    heavyPatterns: []
+    heavyPatterns: [],
+    showAgentActivity: true
   }
   const { deps, clock } = setup({ options: () => options })
   const noAgents: RawSample = {
@@ -761,7 +943,8 @@ test('설정에서 수집 기준값을 만든다(분 → ms)', () => {
       ramWarnPercent: 70,
       ramDangerPercent: 85,
       idlePortMinutes: 45,
-      agentParkedMinutes: 240
+      agentParkedMinutes: 240,
+      showAgentActivity: false
     })
   ).toEqual({
     thresholds: { ramWarnPercent: 70, ramDangerPercent: 85 },
@@ -769,7 +952,8 @@ test('설정에서 수집 기준값을 만든다(분 → ms)', () => {
     agentParkedMs: 240 * MIN,
     heavyPatterns: DEFAULT_SETTINGS.heavyPatterns,
     hiddenServers: [],
-    workspaceAliases: {}
+    workspaceAliases: {},
+    showAgentActivity: false
   })
 })
 
@@ -941,7 +1125,8 @@ describe('숨기기·별칭(F11)', () => {
       agentParkedMs: 180 * MIN,
       heavyPatterns: [],
       hiddenServers,
-      workspaceAliases
+      workspaceAliases,
+      showAgentActivity: true
     })
 
   test('숨긴 서버는 목록·추천·트레이에서 빠지고 숨김 목록에 있다', async () => {

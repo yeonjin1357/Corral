@@ -212,6 +212,25 @@ const view = computed<View | null>(() => {
                 ? t.agent.noHookNote
                 : null
       const state = t.agent.states[r.state]
+      // 하는 일(G3b): 아는 줄만. 실행 중인 도구는 시작한 지 얼마나 됐는지 붙인다.
+      const act = r.activity
+      const ag = t.agent
+      const waiting = act?.waiting ? ag.activityTool(act.waiting.tool, act.waiting.summary) : ''
+      const activityLines: (Fact | null)[] = [
+        act?.title ? { label: ag.activityFacts.title, value: act.title } : null,
+        act?.prompt ? { label: ag.activityFacts.prompt, value: act.prompt } : null,
+        act?.tool
+          ? {
+              label: ag.activityFacts.tool,
+              value: t.rowStatus.withTime(
+                ag.activityTool(act.tool.name, act.tool.summary),
+                formatDuration(Math.max(0, props.now - act.tool.since))
+              )
+            }
+          : null,
+        waiting ? { label: ag.activityFacts.waiting, value: waiting } : null
+      ]
+      const activityFacts = activityLines.filter((f): f is Fact => f !== null)
       return {
         icon: agentIcon(r),
         title: folder(r.worktree),
@@ -247,9 +266,11 @@ const view = computed<View | null>(() => {
           },
           { label: t.sheet.path, value: r.worktree?.root ?? t.tags.noWorktree },
           { label: t.sheet.workspace, value: workspaceText(r.workspace) },
-          { label: t.sheet.runtime, value: runtime(r.startedAt) }
+          { label: t.sheet.runtime, value: runtime(r.startedAt) },
+          ...activityFacts
         ],
-        note
+        // 하는 일을 보이면 그것이 어디서 왔고 어디에 두는지(메모리에만) 알린다.
+        note: [note, act ? ag.activityNote : null].filter(Boolean).join(' ') || null
       }
     }
     case 'leftover': {

@@ -68,7 +68,8 @@ function agent(pid: number, state: AgentRow['state'], root = 'C:\\work\\shop-web
     stateSince: null,
     cpuPercent: 0,
     lastActiveAt: null,
-    parked: false
+    parked: false,
+    activity: null
   }
 }
 

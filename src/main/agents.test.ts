@@ -69,7 +69,8 @@ const hookView = (state: AgentState): HookView => ({
   state,
   since: 1,
   lastActivityAt: 1,
-  sessionId: 's1'
+  sessionId: 's1',
+  activity: null
 })
 
 describe('에이전트 행', () => {
@@ -397,6 +398,7 @@ describe('상태 시작 시각(F3)', () => {
     cpuPercent: 10,
     lastActiveAt: null,
     parked: false,
+    activity: null,
     ...over
   })
 

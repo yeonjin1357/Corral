@@ -29,9 +29,14 @@ function hookUrlPattern(path: string): RegExp {
   return new RegExp(`127\\.0\\.0\\.1:\\d{1,5}${path.replace(/\//g, '\\/')}(?![\\w-])`)
 }
 
+/**
+ * pitwall 이 받는 Claude 훅 이벤트. PreToolUse 는 지금 실행 중인 도구(G3b)를 알려고 넣는다(비동기라 도구 실행을 기다리게
+ * 하지 않는다). 이벤트가 늘면 예전에 켠 설정은 partial(다시 켜 주세요)이 된다 — 자동으로 고치지 않는다.
+ */
 export const CLAUDE_HOOK_EVENTS = [
   'SessionStart',
   'UserPromptSubmit',
+  'PreToolUse',
   'PermissionRequest',
   'Notification',
   'PostToolUse',

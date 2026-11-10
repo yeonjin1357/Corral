@@ -167,6 +167,77 @@ describe('상세 패널: 서버 판단과 에이전트(G2)', () => {
   })
 })
 
+describe('상세 패널: 하는 일(G3b)', () => {
+  const NOTE =
+    '에이전트 연동이 알려 준 내용이에요. pitwall 은 이것을 메모리에만 두고 파일로 남기지 않아요. 설정 > 에이전트 연동에서 끌 수 있어요.'
+  const HOOK_ON: ClaudeHookStatus = {
+    state: 'on',
+    problem: null,
+    allHooksDisabled: false,
+    settingsPath: 'C:\\Users\\dev\\.claude\\settings.json'
+  }
+  const bodyText = (): string => document.body.textContent!.replace(/\s+/g, ' ')
+  /** 정보 카드의 칸 이름 → 값. */
+  const facts = (): Record<string, string> =>
+    Object.fromEntries(
+      [...document.body.querySelectorAll('[data-slot=card-content] > div')].map((div) => {
+        const [label, value] = [...div.querySelectorAll('p')].map((p) => p.textContent!.trim())
+        return [label, value]
+      })
+    )
+
+  test('제목·마지막 요청·실행 중인 도구를 정보에 보이고, 메모리에만 둔다고 알린다', () => {
+    sheet(
+      {
+        kind: 'agent',
+        row: agentRow({
+          activity: {
+            title: '로그인 버그',
+            prompt: '로그인할 때 500 이 나요',
+            tool: { name: 'Bash', summary: 'npm test', since: 10_000_000 - 3 * 60_000 },
+            waiting: null
+          }
+        })
+      },
+      HOOK_ON
+    )
+    expect(facts()).toMatchObject({
+      제목: '로그인 버그',
+      '마지막 요청': '로그인할 때 500 이 나요',
+      '실행 중인 도구': 'Bash · npm test · 3분'
+    })
+    expect(bodyText()).toContain(NOTE)
+  })
+
+  test('권한을 기다리는 도구도 보이고, 모르는 값의 줄은 숨긴다', () => {
+    sheet(
+      {
+        kind: 'agent',
+        row: agentRow({
+          state: 'waiting',
+          activity: {
+            title: null,
+            prompt: null,
+            tool: null,
+            waiting: { tool: 'Bash', summary: 'rm -rf dist' }
+          }
+        })
+      },
+      HOOK_ON
+    )
+    expect(facts()['권한을 기다리는 도구']).toBe('Bash · rm -rf dist')
+    expect(Object.keys(facts())).not.toContain('제목')
+    expect(Object.keys(facts())).not.toContain('마지막 요청')
+    expect(Object.keys(facts())).not.toContain('실행 중인 도구')
+  })
+
+  test('하는 일을 모르면(설정에서 끔 등) 줄도 설명도 없다', () => {
+    sheet({ kind: 'agent', row: agentRow({ activity: null }) }, HOOK_ON)
+    expect(Object.keys(facts())).not.toContain('제목')
+    expect(bodyText()).not.toContain(NOTE)
+  })
+})
+
 describe('상세 패널: 세션 파일로 안 에이전트', () => {
   const FILE_NOTE =
     'Claude Code 가 남기는 세션 파일로 작업 중·쉬는 중을 알아요. 권한 대기는 Claude 연동을 켜야 알 수 있어요.'

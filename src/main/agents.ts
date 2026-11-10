@@ -176,7 +176,9 @@ export function buildAgents(input: {
       stateSince: null,
       cpuPercent,
       lastActiveAt: null,
-      parked: false
+      parked: false,
+      // 하는 일(G3b)은 최종 상태·세션 파일·설정을 아는 수집기가 채운다.
+      activity: null
     })
   }
 

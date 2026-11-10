@@ -174,7 +174,7 @@ describe('에이전트 표', () => {
     const s = snapshot({
       takenAt: now,
       agents: [
-        // 기간은 상태 시작이 아니라 마지막 활동부터. 120px 칸이라 배지 없이 글자로만.
+        // 기간은 상태 시작이 아니라 마지막 활동부터. 130px 칸이라 배지 없이 글자로만.
         agentRow({
           state: 'idle',
           stateSince: now - 3 * 60 * MIN,
@@ -218,6 +218,87 @@ describe('에이전트 표', () => {
     ])
     // 에이전트는 끄지 않는다.
     expect(rows[0].actions.map((a) => a.kind)).toEqual(['details'])
+  })
+
+  test('칸: 이름·브랜치·상태·하는 일·CPU·메모리·커밋·실행 시간', () => {
+    const t = tableFor('agents', snapshot({ agents: [agentRow({ commitBytes: GB })] }))
+    expect(t.columns.map((col) => [col.id, col.label, col.width])).toEqual([
+      ['name', '프로젝트', 200],
+      ['branch', '브랜치', 150],
+      ['status', '상태', 130],
+      ['activity', '하는 일', 200],
+      ['cpu', 'CPU', 64],
+      ['memory', '메모리', 88],
+      ['commit', '커밋', 88],
+      ['runtime', '실행 시간', 90]
+    ])
+  })
+
+  test('하는 일 칸: 권한 대기 > 실행 중인 도구 > 제목 > 프롬프트', () => {
+    const tool = { name: 'Bash', summary: 'npm run build', since: 0 }
+    const s = snapshot({
+      agents: [
+        agentRow({
+          pid: 1,
+          activity: {
+            title: '로그인 버그',
+            prompt: '고쳐 줘',
+            tool,
+            waiting: { tool: 'Bash', summary: 'rm -rf dist' }
+          }
+        }),
+        agentRow({
+          pid: 2,
+          activity: { title: '로그인 버그', prompt: '고쳐 줘', tool, waiting: null }
+        }),
+        agentRow({
+          pid: 3,
+          activity: { title: '로그인 버그', prompt: '고쳐 줘', tool: null, waiting: null }
+        }),
+        agentRow({
+          pid: 4,
+          activity: { title: null, prompt: '고쳐 줘', tool: null, waiting: null }
+        }),
+        agentRow({ pid: 5, activity: null }),
+        // 요약을 모르는 도구는 이름만.
+        agentRow({
+          pid: 6,
+          activity: {
+            title: null,
+            prompt: null,
+            tool: { name: 'TodoWrite', summary: null, since: 0 },
+            waiting: null
+          }
+        }),
+        agentRow({
+          pid: 7,
+          activity: {
+            title: null,
+            prompt: null,
+            tool: null,
+            waiting: { tool: 'WebFetch', summary: null }
+          }
+        })
+      ]
+    })
+    const rows = tableFor('agents', s).rows
+    expect(rows.map((r) => r.cells.activity.text)).toEqual([
+      '권한: Bash · rm -rf dist',
+      'Bash · npm run build',
+      '로그인 버그',
+      '고쳐 줘',
+      '—',
+      'TodoWrite',
+      '권한: WebFetch'
+    ])
+    // 칸이 좁아 잘리므로 전체 글은 title 에. 모르면 흐리게.
+    expect(rows[0].cells.activity.title).toBe('권한: Bash · rm -rf dist')
+    expect(rows[4].cells.activity).toMatchObject({ text: '—', muted: true })
+    // 검색은 제목으로도 찾는다(프롬프트·명령은 검색하지 않는다).
+    expect(filterRows(rows, '로그인').map((r) => r.key)).toEqual(
+      [rows[0], rows[1], rows[2]].map((r) => r.key)
+    )
+    expect(filterRows(rows, 'rm -rf')).toEqual([])
   })
 
   test('작업 폴더를 모르면 그렇게 보이고, 동작은 자세히만(에이전트는 끄지 않는다)', () => {
@@ -587,10 +668,24 @@ describe('커밋 칸', () => {
 test('커밋 칸이 있어도 표의 칸 너비 합은 기본 창 너비(1280px)에 들어간다', () => {
   const s = snapshot({
     servers: [serverRow({ commitBytes: GB })],
-    agents: [agentRow({ commitBytes: GB })],
+    // 하는 일 칸까지 있는 에이전트 표.
+    agents: [
+      agentRow({
+        commitBytes: GB,
+        activity: {
+          title: '로그인 버그',
+          prompt: null,
+          tool: { name: 'Bash', summary: 'npm run build', since: 0 },
+          waiting: null
+        }
+      })
+    ],
     leftovers: [leftoverRow({ commitBytes: GB })],
     heavyJobs: [heavyJob({ commitBytes: GB })]
   })
+  expect(tableFor('agents', s).columns.map((col) => col.id)).toEqual(
+    expect.arrayContaining(['activity', 'commit'])
+  )
   for (const tab of ['ports', 'agents', 'leftovers', 'heavy'] as const) {
     const sum = tableFor(tab, s).columns.reduce((n, col) => n + col.width, 0)
     // 120 은 ItemTable 이 더하는 동작 칸 너비, 1240 은 세로 스크롤바·테두리 여유.

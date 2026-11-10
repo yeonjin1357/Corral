@@ -1,4 +1,4 @@
-import type { AgentState, AgentTool } from '../shared/types'
+import type { AgentActivity, AgentState, AgentTool } from '../shared/types'
 import type { ClaudeSessionFile } from './claudeSessionFiles'
 
 /**
@@ -30,6 +30,11 @@ export interface ClaudeSession {
   tool?: AgentTool
   /** Codex 세션 기록 파일(훅 이벤트의 transcript_path). 그 프로세스의 기록을 정확히 고르는 데 쓴다. */
   transcriptPath?: string | null
+  /**
+   * 하는 일(G3b): 훅이 알려 준 세션 제목·마지막 요청 첫 줄·실행 중인 도구·권한을 기다리는 도구. 메모리에만 둔다.
+   * 아는 것이 하나도 없거나 설정(showAgentActivity)이 꺼져 있으면 없다.
+   */
+  activity?: AgentActivity
 }
 
 /** 수집 때 본 최상위 에이전트 프로세스(Claude·Codex). */
@@ -99,7 +104,7 @@ function nextState(
       return ev.source === 'compact' && current ? current : 'idle'
     case 'UserPromptSubmit':
       return 'working'
-    // PreToolUse 는 Codex 훅에만 넣는다(도구를 쓰기 시작함 = 작업 중).
+    // PreToolUse: 도구를 쓰기 시작함 = 작업 중.
     case 'PreToolUse':
     case 'PostToolUse':
       if (
@@ -108,9 +113,12 @@ function nextState(
         now - session.stoppedAt < LATE_TOOL_EVENT_MS
       )
         return null
-      // 권한을 기다리는 동안 병렬로 돌던 다른 도구가 끝나도 대기는 그대로다. 요청한 그 도구가 끝나야 승인된 것.
-      if (current === 'waiting' && session?.waitingTool && ev.tool_name !== session.waitingTool)
-        return 'waiting'
+      if (current === 'waiting' && session?.waitingTool) {
+        // 권한을 기다리는 동안 병렬로 돌던 다른 도구가 끝나도 대기는 그대로다. 요청한 그 도구가 끝나야 승인된 것.
+        // 도구의 시작(PreToolUse)은 승인이 아니다 — 그 도구의 PreToolUse 가 PermissionRequest 보다 늦게 도착할 수도 있다.
+        if (ev.hook_event_name === 'PreToolUse' || ev.tool_name !== session.waitingTool)
+          return 'waiting'
+      }
       return 'working'
     case 'PermissionRequest':
       return 'waiting'
@@ -140,12 +148,145 @@ function waitingToolOf(
   return existing?.state === 'waiting' ? (existing.waitingTool ?? null) : null
 }
 
-/** 훅 이벤트 하나를 반영한다. 바뀐 것이 있으면 true. 형식이 이상한 입력은 무시한다. */
+/** 하는 일(G3b)의 길이: 마지막 요청, Bash·PowerShell 명령, 그 밖(제목·도구 이름·파일 이름·패턴·설명·호스트). */
+const PROMPT_MAX = 200
+const COMMAND_MAX = 160
+const SHORT_MAX = 80
+
+/** 줄의 끝으로 보는 글자: 줄바꿈과 제어 문자(탭은 공백으로 본다), 유니코드 줄·문단 구분자. */
+function isLineBreak(code: number): boolean {
+  return (
+    (code < 0x20 && code !== 0x09) ||
+    (code >= 0x7f && code <= 0x9f) ||
+    code === 0x2028 ||
+    code === 0x2029
+  )
+}
+
+/** 앞의 공백·빈 줄을 건너뛴 첫 줄(줄바꿈·제어 문자 앞까지). 공백은 하나로 줄인다. */
+function firstLine(value: string): string {
+  const text = value.trimStart()
+  let end = 0
+  while (end < text.length && !isLineBreak(text.charCodeAt(end))) end++
+  return text.slice(0, end).replace(/\s+/g, ' ').trim()
+}
+
+/** max 자까지(넘으면 끝을 … 로). 빈 글은 null. 서로게이트 쌍(이모지 등)을 반으로 자르지 않는다. */
+function clip(line: string, max: number): string | null {
+  if (!line) return null
+  if (line.length <= max) return line
+  let cut = line.slice(0, max - 1)
+  const last = cut.charCodeAt(cut.length - 1)
+  if (last >= 0xd800 && last <= 0xdbff) cut = cut.slice(0, -1)
+  return cut.trimEnd() + '…'
+}
+
+/**
+ * 화면에 보일 한 줄. 문자열이 아니면 null, 줄바꿈·제어 문자 뒤는 버리고(첫 줄만 — 앞의 빈 줄은 건너뛴다) 공백을 정리해
+ * max 자로 자른다(넘으면 끝에 …). 빈 글은 null.
+ */
+export function oneLine(value: unknown, max: number): string | null {
+  return typeof value === 'string' ? clip(firstLine(value), max) : null
+}
+
+/** 경로의 파일 이름(끝의 구분자는 무시). 큰 입력에서도 정규식 되짚기 없이 끝에서 찾는다. */
+function fileNameOf(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const path = firstLine(value)
+  let end = path.length
+  while (end > 0 && (path[end - 1] === '/' || path[end - 1] === '\\')) end--
+  const start = Math.max(path.lastIndexOf('/', end - 1), path.lastIndexOf('\\', end - 1)) + 1
+  return clip(path.slice(start, end), SHORT_MAX)
+}
+
+/** URL 의 호스트(포트 포함, 사용자 정보·경로·쿼리는 빼고). URL 이 아니면 null. */
+function hostOf(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  try {
+    return clip(new URL(firstLine(value)).host, SHORT_MAX)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 도구 입력의 짧은 요약(G3b). Bash·PowerShell: 명령 첫 줄 160자, 파일 도구: 파일 이름, Grep·Glob: 패턴 80자,
+ * WebFetch: 호스트, Task·Agent: 설명 80자. 그 밖의 도구·형식이 다른 입력은 null(내용을 지어내지 않는다).
+ */
+export function toolSummary(name: string, input: unknown): string | null {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return null
+  const o = input as Record<string, unknown>
+  switch (name) {
+    case 'Bash':
+    case 'PowerShell':
+      return oneLine(o.command, COMMAND_MAX)
+    case 'Read':
+    case 'Edit':
+    case 'Write':
+    case 'MultiEdit':
+    case 'NotebookEdit':
+      return fileNameOf(o.file_path ?? o.notebook_path)
+    case 'Grep':
+    case 'Glob':
+      return oneLine(o.pattern, SHORT_MAX)
+    case 'WebFetch':
+      return hostOf(o.url)
+    case 'Task':
+    case 'Agent':
+      return oneLine(o.description, SHORT_MAX)
+    default:
+      return null
+  }
+}
+
+/** 실행 중인 도구를 비우는 이벤트(같은 이름의 PostToolUse 와 함께): 응답 끝·오류·중단·새 입력. */
+const ENDS_TOOL = new Set(['Stop', 'StopFailure', 'Interrupt', 'UserPromptSubmit'])
+
+/**
+ * 이벤트를 반영한 하는 일(G3b). 제목은 session_title 이 오면 덮어쓰고, 마지막 요청은 UserPromptSubmit 마다 새로 정한다
+ * (프롬프트가 없으면 모름). 실행 중인 도구는 PreToolUse 에 담고(상태에 반영하지 않은 늦은 이벤트는 빼고) 같은 이름의
+ * PostToolUse·응답 끝·오류·중단·새 입력에 비운다. 권한을 기다리는 도구는 PermissionRequest 에 담고 권한 대기를 벗어나면
+ * 비운다. 아는 것이 하나도 없으면 undefined.
+ */
+function nextActivity(
+  ev: Record<string, unknown>,
+  prev: AgentActivity | undefined,
+  state: AgentState | null,
+  next: AgentState,
+  now: number
+): AgentActivity | undefined {
+  const event = ev.hook_event_name as string
+  const toolName = oneLine(ev.tool_name, SHORT_MAX)
+  const title = oneLine(ev.session_title, SHORT_MAX) ?? prev?.title ?? null
+  const prompt =
+    event === 'UserPromptSubmit' ? oneLine(ev.prompt, PROMPT_MAX) : (prev?.prompt ?? null)
+  let tool = prev?.tool ?? null
+  if (event === 'PreToolUse') {
+    if (state !== null)
+      tool = toolName
+        ? { name: toolName, summary: toolSummary(toolName, ev.tool_input), since: now }
+        : null
+  } else if (
+    ENDS_TOOL.has(event) ||
+    (event === 'PostToolUse' && toolName && tool?.name === toolName)
+  )
+    tool = null
+  let waiting = next === 'waiting' ? (prev?.waiting ?? null) : null
+  if (event === 'PermissionRequest')
+    waiting = toolName ? { tool: toolName, summary: toolSummary(toolName, ev.tool_input) } : null
+  return title || prompt || tool || waiting ? { title, prompt, tool, waiting } : undefined
+}
+
+/**
+ * 훅 이벤트 하나를 반영한다. 바뀐 것이 있으면 true. 형식이 이상한 입력은 무시한다.
+ * opts.activity 가 false 면(설정 showAgentActivity 끔) 하는 일 내용을 담지 않고, 그 세션이 들고 있던 것도 버린다.
+ */
 export function applyHookEvent(
   sessions: Sessions,
   input: unknown,
   now: number,
-  tool: AgentTool = 'claude'
+  tool: AgentTool = 'claude',
+  opts: { activity: boolean } = { activity: true }
 ): boolean {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return false
   const ev = input as Record<string, unknown>
@@ -169,6 +310,9 @@ export function applyHookEvent(
   if (!cwd || (!existing && !state)) return false
 
   const next = state ?? existing!.state
+  const activity = opts.activity
+    ? nextActivity(ev, existing?.activity, state, next, now)
+    : undefined
   // 최근 소식 순서를 유지해 넘칠 때 가장 오래된 것부터 버린다.
   sessions.delete(id)
   sessions.set(id, {
@@ -192,7 +336,8 @@ export function applyHookEvent(
         ? now
         : ev.hook_event_name === 'UserPromptSubmit'
           ? null
-          : (existing?.stoppedAt ?? null)
+          : (existing?.stoppedAt ?? null),
+    ...(activity ? { activity } : {})
   })
   while (sessions.size > MAX_SESSIONS) {
     const oldest = sessions.keys().next().value
@@ -200,6 +345,11 @@ export function applyHookEvent(
     sessions.delete(oldest)
   }
   return true
+}
+
+/** 들고 있던 하는 일(G3b)을 모두 지운다(설정 showAgentActivity 를 끌 때). 상태는 그대로다. */
+export function clearActivity(sessions: Sessions): void {
+  for (const s of sessions.values()) delete s.activity
 }
 
 /**
@@ -309,6 +459,8 @@ export interface HookView {
   lastActivityAt: number
   /** 상태를 보인 세션. */
   sessionId: string
+  /** 상태를 보인 세션의 하는 일(G3b). 모르면 null. */
+  activity: AgentActivity | null
 }
 
 /**
@@ -350,7 +502,15 @@ export function hookViewForAgent(
     )
       best = s
   }
-  return best && { state: best.state, since: sinceOf(best), lastActivityAt, sessionId: best.id }
+  return (
+    best && {
+      state: best.state,
+      since: sinceOf(best),
+      lastActivityAt,
+      sessionId: best.id,
+      activity: best.activity ?? null
+    }
+  )
 }
 
 /**

@@ -55,6 +55,7 @@ function agent(
     cpuPercent: 0,
     lastActiveAt: null,
     parked: false,
+    activity: null,
     ...overrides
   }
 }

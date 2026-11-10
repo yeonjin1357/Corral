@@ -341,6 +341,7 @@ export const text = {
       commit: '커밋',
       cpu: 'CPU',
       runtime: '실행 시간',
+      activity: '하는 일',
       tool: '도구',
       name: '이름',
       command: '명령',
@@ -555,6 +556,9 @@ export const text = {
         '목록·개수·정리 추천·알림·트레이에서 빼는 서버예요. :포트, 프로세스 이름, 또는 워크트리의 포트로 맞춰요. 서버 상세 패널의 "숨기기"로 더해요(그 워크트리의 첫 포트).',
       noHiddenServers: '숨긴 서버가 없어요.',
       unhide: '빼기',
+      showAgentActivity: '에이전트가 하는 일 보기',
+      showAgentActivityHelp:
+        '훅이 알려 주는 세션 제목·요청 첫 줄·도구 이름을 화면에 보여요. 메모리에만 두고 파일로 남기지 않아요.',
       notifyClaudeWaiting: '에이전트 권한 대기',
       notifyClaudeWaitingHelp:
         'Claude·Codex 연동을 켜 두었을 때, 세션이 권한을 기다리기 시작하면 알려요.',
@@ -644,7 +648,21 @@ export const text = {
         'Codex 세션 기록으로 상태를 알아요. 권한 대기는 Codex 연동을 켜야 알 수 있어요.',
       noHookNote: 'Claude 연동을 켜면 권한 대기까지 정확히 알 수 있어요.',
       fileNote:
-        'Claude Code 가 남기는 세션 파일로 작업 중·쉬는 중을 알아요. 권한 대기는 Claude 연동을 켜야 알 수 있어요.'
+        'Claude Code 가 남기는 세션 파일로 작업 중·쉬는 중을 알아요. 권한 대기는 Claude 연동을 켜야 알 수 있어요.',
+      /** 하는 일(G3b)의 도구 한 줄: "Bash · npm run build"(요약을 모르면 이름만). */
+      activityTool: (name: string | null, summary: string | null): string =>
+        [name, summary].filter(Boolean).join(' · '),
+      /** 하는 일 칸의 권한 대기: "권한: Bash · npm run build". */
+      activityWaiting: (tool: string): string => `권한: ${tool}`,
+      /** 상세 패널 정보의 하는 일 줄 이름. */
+      activityFacts: {
+        title: '제목',
+        prompt: '마지막 요청',
+        tool: '실행 중인 도구',
+        waiting: '권한을 기다리는 도구'
+      },
+      activityNote:
+        '에이전트 연동이 알려 준 내용이에요. pitwall 은 이것을 메모리에만 두고 파일로 남기지 않아요. 설정 > 에이전트 연동에서 끌 수 있어요.'
     },
     disk: {
       empty: '정리할 끝난 워크트리가 없어요.',

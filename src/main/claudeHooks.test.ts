@@ -80,7 +80,8 @@ describe('설정 글 고치기', () => {
     ''
   ].join('\n')
 
-  test('빈 글이면 8개 이벤트에 pitwall 훅 그룹을 하나씩 만든다', () => {
+  test('빈 글이면 9개 이벤트에 pitwall 훅 그룹을 하나씩 만든다', () => {
+    expect(CLAUDE_HOOK_EVENTS).toHaveLength(9)
     const next = parse(addPitwallHooks('', ENTRY))
     expect(Object.keys(next.hooks as object)).toEqual([...CLAUDE_HOOK_EVENTS])
     for (const event of CLAUDE_HOOK_EVENTS)
@@ -100,6 +101,17 @@ describe('설정 글 고치기', () => {
       'hooks',
       'permissions'
     ])
+  })
+
+  test('PreToolUse 에도 훅을 넣는다', () => {
+    expect(CLAUDE_HOOK_EVENTS).toContain('PreToolUse')
+    // 모든 도구(matcher 없음), 비동기 — 도구 실행을 기다리게 하지 않는다.
+    const empty = parse(addPitwallHooks('', ENTRY)).hooks as Record<string, unknown>
+    expect(empty.PreToolUse).toEqual([{ hooks: [ENTRY] }])
+    expect(ENTRY.async).toBe(true)
+    // 다른 도구의 PreToolUse 그룹(matcher 포함)은 그대로 두고 뒤에 더한다.
+    const next = removeComments(addPitwallHooks(withOthers, ENTRY))
+    expect(next.hooks.PreToolUse).toEqual([{ matcher: 'Bash', hooks: [OTHER] }, { hooks: [ENTRY] }])
   })
 
   test('두 번 켜도 한 번만 들어가고, 포트·토큰이 바뀌면 바꿔 넣는다', () => {
@@ -186,6 +198,19 @@ describe('설치 상태 읽기', () => {
     expect(inspectPitwallHooks(JSON.stringify(json), ENTRY).state).toBe('partial')
     expect(inspectPitwallHooks('{}', ENTRY).state).toBe('off')
     expect(inspectPitwallHooks('', ENTRY).state).toBe('off')
+  })
+
+  test('PreToolUse 가 없는 예전 설정은 partial', () => {
+    // 4단계까지 넣던 8개 이벤트(PreToolUse 없음)만 있는 설정.
+    const old = Object.fromEntries(
+      CLAUDE_HOOK_EVENTS.filter((e) => e !== 'PreToolUse').map((e) => [e, [{ hooks: [ENTRY] }]])
+    )
+    expect(Object.keys(old)).toHaveLength(8)
+    expect(inspectPitwallHooks(JSON.stringify({ hooks: old }), ENTRY).state).toBe('partial')
+    // 다시 켜면 on.
+    expect(
+      inspectPitwallHooks(addPitwallHooks(JSON.stringify({ hooks: old }), ENTRY), ENTRY).state
+    ).toBe('on')
   })
 
   test('disableAllHooks 가 켜져 있으면 알려 준다', () => {

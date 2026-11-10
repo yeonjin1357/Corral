@@ -184,6 +184,28 @@ test('설정 > 기준값에서 오래 쉬는 세션 기준(분)을 바꿔 저장
   w.unmount()
 })
 
+test('설정 > 에이전트 연동에서 "에이전트가 하는 일 보기"를 끄고 저장한다', async () => {
+  const f = fake()
+  const w = await start(f)
+  f.navigate({ page: 'settings' })
+  await flushPromises()
+  await w
+    .findAll('button')
+    .find((b) => b.text().includes('에이전트 연동'))!
+    .trigger('click')
+  const box = w.find('#show-agent-activity')
+  expect(box.attributes('aria-checked')).toBe('true')
+  expect(w.text()).toContain('에이전트가 하는 일 보기')
+  expect(w.text()).toContain(
+    '훅이 알려 주는 세션 제목·요청 첫 줄·도구 이름을 화면에 보여요. 메모리에만 두고 파일로 남기지 않아요.'
+  )
+  await box.trigger('click')
+  await w.find('form').trigger('submit')
+  await flushPromises()
+  expect(f.saved.at(-1)?.showAgentActivity).toBe(false)
+  w.unmount()
+})
+
 test('설정 저장은 IPC 로 보낼 수 있는 값(반응형 아닌 순수 값)으로 보낸다', async () => {
   const f = fake()
   const w = await start(f)

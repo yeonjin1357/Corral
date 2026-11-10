@@ -1,10 +1,13 @@
 import {
   applyHookEvent,
+  clearActivity,
   codexTranscriptFor,
   hookViewForAgent,
+  oneLine,
   pairBySessionFile,
   reconcileSessions,
   SESSION_EXPIRE_MS,
+  toolSummary,
   type ClaudeSession,
   type HookView,
   type LiveClaude,
@@ -60,6 +63,25 @@ describe('훅 이벤트 → 세션 상태', () => {
     expect(sessions.get('s1')?.state).toBe('waiting')
     applyHookEvent(sessions, ev('PostToolUse', { tool_name: 'Bash' }), 1004)
     expect(sessions.get('s1')?.state).toBe('working')
+  })
+
+  test('권한 대기 중에 온 PreToolUse 는(같은 도구가 늦게 도착한 것이어도) 대기를 풀지 않는다', () => {
+    // 훅은 따로따로 비동기로 와서 PreToolUse 가 그 도구의 PermissionRequest 보다 늦게 도착할 수 있다.
+    expect(
+      stateAfter(
+        ev('UserPromptSubmit'),
+        ev('PermissionRequest', { tool_name: 'Bash' }),
+        ev('PreToolUse', { tool_name: 'Bash' })
+      )
+    ).toBe('waiting')
+    // 승인은 그 도구의 PostToolUse 로 안다.
+    expect(
+      stateAfter(
+        ev('PermissionRequest', { tool_name: 'Bash' }),
+        ev('PreToolUse', { tool_name: 'Bash' }),
+        ev('PostToolUse', { tool_name: 'Bash' })
+      )
+    ).toBe('working')
   })
 
   test('어떤 도구가 기다리는지 모르면(알림만 옴) 다음 도구가 끝날 때 작업 중으로 본다', () => {
@@ -426,13 +448,35 @@ describe('프로세스 단위 상태(G3a)', () => {
       state: 'waiting',
       since: 1000,
       lastActivityAt: 1000,
-      sessionId: 'a'
+      sessionId: 'a',
+      activity: null
     })
     expect(hookViewForAgent(sessions, agent('p2'), rootOfCwd)).toEqual({
       state: 'idle',
       since: 1100,
       lastActivityAt: 1100,
-      sessionId: 'b'
+      sessionId: 'b',
+      activity: null
+    })
+  })
+
+  test('하는 일은 상태를 보인 그 세션의 것(G3b)', () => {
+    const sessions: Sessions = new Map()
+    const event = (id: string, name: string, extra: Record<string, unknown>, at: number): void => {
+      applyHookEvent(sessions, { ...ev(name, extra), session_id: id }, at)
+    }
+    event('a', 'UserPromptSubmit', { prompt: '쉬던 요청' }, 1000)
+    event('a', 'Stop', {}, 2000)
+    event('b', 'PermissionRequest', { tool_name: 'Bash', tool_input: { command: 'npm i' } }, 3000)
+    // 짝 없는 두 세션 가운데 권한 대기(b)를 보이고, 하는 일도 b 의 것이다(쉬는 a 의 요청을 섞지 않는다).
+    expect(hookViewForAgent(sessions, agent('free'), rootOfCwd)).toMatchObject({
+      sessionId: 'b',
+      activity: {
+        title: null,
+        prompt: null,
+        tool: null,
+        waiting: { tool: 'Bash', summary: 'npm i' }
+      }
     })
   })
 
@@ -524,7 +568,8 @@ describe('프로세스 단위 상태(G3a)', () => {
       state: 'waiting',
       since: 300,
       lastActivityAt: 9000,
-      sessionId: 'waiting-old'
+      sessionId: 'waiting-old',
+      activity: null
     })
   })
 })
@@ -704,7 +749,8 @@ describe('상태 시작 시각(F3)', () => {
       state: 'working',
       since: 3000,
       lastActivityAt: 5000,
-      sessionId: 'b'
+      sessionId: 'b',
+      activity: null
     })
   })
 })
@@ -739,7 +785,40 @@ describe('Codex 훅 세션(F7)', () => {
       state: 'idle',
       since: 8000,
       lastActivityAt: 8000,
-      sessionId: 'c1'
+      sessionId: 'c1',
+      activity: null
+    })
+  })
+
+  test('Codex 훅도 같은 이름의 값이 오면 하는 일에 쓰고, 없으면 null', () => {
+    const sessions: Sessions = new Map()
+    const activity = (): unknown => sessions.get('c1')?.activity ?? null
+    applyHookEvent(sessions, codexEv('UserPromptSubmit'), 1000, 'codex')
+    expect(activity()).toBeNull()
+    applyHookEvent(
+      sessions,
+      codexEv('UserPromptSubmit', { prompt: '테스트 고쳐 줘' }),
+      2000,
+      'codex'
+    )
+    applyHookEvent(
+      sessions,
+      codexEv('PreToolUse', { tool_name: 'Bash', tool_input: { command: 'npm test' } }),
+      3000,
+      'codex'
+    )
+    expect(activity()).toEqual({
+      title: null,
+      prompt: '테스트 고쳐 줘',
+      tool: { name: 'Bash', summary: 'npm test', since: 3000 },
+      waiting: null
+    })
+    // 요약을 모르는 도구는 이름만.
+    applyHookEvent(sessions, codexEv('PreToolUse', { tool_name: 'apply_patch' }), 4000, 'codex')
+    expect(sessions.get('c1')?.activity?.tool).toEqual({
+      name: 'apply_patch',
+      summary: null,
+      since: 4000
     })
   })
 
@@ -834,5 +913,215 @@ describe('Codex 세션 기록 파일(transcript_path)', () => {
     expect(codexTranscriptFor(sessions, '10:100')).toBe(PATH_A)
     expect(codexTranscriptFor(sessions, '20:4000')).toBe(PATH_B)
     expect(codexTranscriptFor(sessions, '30:1')).toBeNull()
+  })
+})
+
+describe('하는 일(G3b)', () => {
+  const activityOf = (sessions: Sessions, id = 's1'): ClaudeSession['activity'] =>
+    sessions.get(id)?.activity
+  const bash = (command: unknown): Record<string, unknown> => ({
+    tool_name: 'Bash',
+    tool_input: { command }
+  })
+
+  test('PreToolUse 에 실행 중인 도구를 담고 같은 도구의 PostToolUse 에 비운다', () => {
+    const sessions: Sessions = new Map()
+    applyHookEvent(sessions, ev('UserPromptSubmit'), 1000)
+    applyHookEvent(sessions, ev('PreToolUse', bash('npm run build\necho done')), 2000)
+    expect(activityOf(sessions)?.tool).toEqual({
+      name: 'Bash',
+      summary: 'npm run build',
+      since: 2000
+    })
+    // 병렬로 돌던 다른 도구가 끝나도 그대로다.
+    applyHookEvent(sessions, ev('PostToolUse', { tool_name: 'Read' }), 3000)
+    expect(activityOf(sessions)?.tool?.name).toBe('Bash')
+    applyHookEvent(sessions, ev('PostToolUse', bash('npm run build')), 4000)
+    expect(activityOf(sessions)?.tool ?? null).toBeNull()
+
+    // 응답 끝·오류·중단·새 입력에도 비운다.
+    for (const end of ['Stop', 'StopFailure', 'Interrupt', 'UserPromptSubmit']) {
+      const s: Sessions = new Map()
+      applyHookEvent(s, ev('UserPromptSubmit'), 1000)
+      applyHookEvent(
+        s,
+        ev('PreToolUse', { tool_name: 'Grep', tool_input: { pattern: 'TODO' } }),
+        2000
+      )
+      expect(activityOf(s)?.tool?.summary, end).toBe('TODO')
+      applyHookEvent(s, ev(end), 3000)
+      expect(activityOf(s)?.tool ?? null, end).toBeNull()
+    }
+
+    // 응답이 끝난 직후 늦게 도착한(상태에 반영하지 않는) 도구 이벤트는 담지 않는다.
+    applyHookEvent(sessions, ev('Stop'), 5000)
+    applyHookEvent(sessions, ev('PreToolUse', bash('ls')), 5500)
+    expect(sessions.get('s1')?.state).toBe('idle')
+    expect(activityOf(sessions)?.tool ?? null).toBeNull()
+  })
+
+  test('PermissionRequest 의 도구와 명령 요약을 담고, 승인되면 비운다', () => {
+    const sessions: Sessions = new Map()
+    applyHookEvent(sessions, ev('UserPromptSubmit'), 1000)
+    applyHookEvent(sessions, ev('PreToolUse', bash('rm -rf dist')), 2000)
+    applyHookEvent(sessions, ev('PermissionRequest', bash('rm -rf dist')), 2100)
+    const waiting = { tool: 'Bash', summary: 'rm -rf dist' }
+    expect(activityOf(sessions)?.waiting).toEqual(waiting)
+    // 권한 알림·다른 도구의 끝은 대기를 풀지 않는다.
+    applyHookEvent(sessions, ev('Notification', { notification_type: 'permission_prompt' }), 2200)
+    applyHookEvent(sessions, ev('PostToolUse', { tool_name: 'Read' }), 2300)
+    expect(sessions.get('s1')?.state).toBe('waiting')
+    expect(activityOf(sessions)?.waiting).toEqual(waiting)
+    // 승인되어 그 도구가 끝나면 작업 중 — 기다리던 도구를 비운다.
+    applyHookEvent(sessions, ev('PostToolUse', bash('rm -rf dist')), 3000)
+    expect(sessions.get('s1')?.state).toBe('working')
+    expect(activityOf(sessions)?.waiting ?? null).toBeNull()
+    // 응답이 끝나 권한 대기를 벗어나도 비운다.
+    applyHookEvent(sessions, ev('PermissionRequest', { tool_name: 'WebFetch' }), 4000)
+    expect(activityOf(sessions)?.waiting).toEqual({ tool: 'WebFetch', summary: null })
+    applyHookEvent(sessions, ev('Stop'), 5000)
+    expect(activityOf(sessions)?.waiting ?? null).toBeNull()
+  })
+
+  test('프롬프트는 첫 줄 200자, 제목은 80자', () => {
+    const sessions: Sessions = new Map()
+    applyHookEvent(sessions, ev('SessionStart', { session_title: 'T'.repeat(100) }), 1000)
+    expect(activityOf(sessions)?.title).toBe('T'.repeat(79) + '…')
+    applyHookEvent(
+      sessions,
+      ev('UserPromptSubmit', { prompt: '\n  로그인   버그 고쳐 줘  \n자세한 내용은 이슈에' }),
+      2000
+    )
+    expect(activityOf(sessions)).toMatchObject({
+      title: 'T'.repeat(79) + '…',
+      prompt: '로그인 버그 고쳐 줘'
+    })
+    applyHookEvent(sessions, ev('UserPromptSubmit', { prompt: 'p'.repeat(300) }), 3000)
+    expect(activityOf(sessions)?.prompt).toBe('p'.repeat(199) + '…')
+    // 제목은 새로 오면 덮어쓰고, 없으면 그대로다.
+    applyHookEvent(
+      sessions,
+      ev('UserPromptSubmit', { prompt: '다음', session_title: '로그인 버그' }),
+      4000
+    )
+    expect(activityOf(sessions)).toMatchObject({ title: '로그인 버그', prompt: '다음' })
+    // 프롬프트 없이 온 새 입력은 마지막 요청을 모른다(이전 요청을 남기지 않는다).
+    applyHookEvent(sessions, ev('UserPromptSubmit'), 5000)
+    expect(activityOf(sessions)).toMatchObject({ title: '로그인 버그', prompt: null })
+  })
+
+  test('1 MB 명령·제어 문자·문자열이 아닌 tool_input 도 예외 없이 한 줄로', () => {
+    const sessions: Sessions = new Map()
+    const tool = (): NonNullable<ClaudeSession['activity']>['tool'] | undefined =>
+      activityOf(sessions)?.tool
+    applyHookEvent(sessions, ev('PreToolUse', bash('a'.repeat(1_000_000))), 1000)
+    expect(tool()?.summary?.length).toBeLessThanOrEqual(160)
+    expect(tool()?.summary?.endsWith('…')).toBe(true)
+    // 터미널 제어 문자·줄바꿈 뒤는 버린다.
+    applyHookEvent(sessions, ev('PreToolUse', bash('echo hi\u001b[31m red\r\nrm -rf /')), 2000)
+    expect(tool()?.summary).toBe('echo hi')
+    applyHookEvent(sessions, ev('PreToolUse', { tool_name: 'Bash', tool_input: 42 }), 3000)
+    expect(tool()).toEqual({ name: 'Bash', summary: null, since: 3000 })
+    applyHookEvent(
+      sessions,
+      ev('PreToolUse', { tool_name: 'Read', tool_input: { file_path: 'x'.repeat(1_000_000) } }),
+      4000
+    )
+    expect(tool()?.summary?.length).toBeLessThanOrEqual(80)
+    // 도구 이름이 문자열이 아니면 무엇을 실행하는지 모른다.
+    applyHookEvent(sessions, ev('PreToolUse', { tool_name: 7, tool_input: { command: 'x' } }), 5000)
+    expect(tool() ?? null).toBeNull()
+  })
+
+  test('activity 를 끄면 내용 값을 저장하지 않는다(상태는 그대로)', () => {
+    const events = [
+      ev('SessionStart', { session_title: '배포 준비' }),
+      ev('UserPromptSubmit', { prompt: '배포해 줘' }),
+      ev('PreToolUse', bash('npm run deploy')),
+      ev('PermissionRequest', bash('npm run deploy'))
+    ]
+    for (const tool of ['claude', 'codex'] as const) {
+      const on: Sessions = new Map()
+      const off: Sessions = new Map()
+      events.forEach((e, i) => {
+        applyHookEvent(on, e, 1000 + i, tool)
+        applyHookEvent(off, e, 1000 + i, tool, { activity: false })
+      })
+      expect(on.get('s1')?.activity).toBeDefined()
+      const withoutActivity = { ...on.get('s1')! }
+      delete withoutActivity.activity
+      expect(off.get('s1')).toEqual(withoutActivity)
+      expect(off.get('s1')).not.toHaveProperty('activity')
+      // 들고 있던 세션에 끈 채로 이벤트가 오면 그 내용도 버린다.
+      applyHookEvent(
+        on,
+        ev('Notification', { notification_type: 'permission_prompt' }),
+        2000,
+        tool,
+        {
+          activity: false
+        }
+      )
+      expect(on.get('s1')).toMatchObject({ state: 'waiting', waitingTool: 'Bash' })
+      expect(on.get('s1')).not.toHaveProperty('activity')
+    }
+  })
+
+  test('clearActivity 는 들고 있던 내용을 지운다', () => {
+    const sessions: Sessions = new Map()
+    applyHookEvent(sessions, ev('UserPromptSubmit', { prompt: '배포해 줘' }), 1000)
+    applyHookEvent(
+      sessions,
+      { ...ev('PermissionRequest', bash('npm i')), session_id: 's2' },
+      1000,
+      'codex'
+    )
+    clearActivity(sessions)
+    expect([...sessions.values()].map((s) => s.activity)).toEqual([undefined, undefined])
+    // 상태는 그대로다.
+    expect([...sessions.values()].map((s) => s.state)).toEqual(['working', 'waiting'])
+  })
+
+  test('한 줄로: 문자열이 아니거나 빈 글은 null, 앞의 빈 줄은 건너뛰고 넘치면 …', () => {
+    expect(oneLine(5, 10)).toBeNull()
+    expect(oneLine(null, 10)).toBeNull()
+    expect(oneLine('', 10)).toBeNull()
+    expect(oneLine(' \n\t ', 10)).toBeNull()
+    expect(oneLine('\u0007벨', 10)).toBeNull()
+    expect(oneLine('\r\n  첫 줄\t 이어서 \n둘째 줄', 80)).toBe('첫 줄 이어서')
+    expect(oneLine('abcdef', 4)).toBe('abc…')
+    expect(oneLine('abcd', 4)).toBe('abcd')
+    // 이모지(서로게이트 쌍)를 반으로 자르지 않는다.
+    expect(oneLine('ab😀cd', 4)).toBe('ab…')
+    expect(oneLine('첫 줄\u2028둘째', 80)).toBe('첫 줄')
+  })
+
+  test.each<[string, unknown, string | null]>([
+    ['Bash', { command: 'npm run build && npm test' }, 'npm run build && npm test'],
+    ['PowerShell', { command: 'Get-ChildItem\nRemove-Item x' }, 'Get-ChildItem'],
+    ['Read', { file_path: 'C:\\work\\shop-web\\src\\App.vue' }, 'App.vue'],
+    ['Edit', { file_path: '/Users/dev/app/src/main.ts' }, 'main.ts'],
+    ['Write', { file_path: '/Users/dev/app/README.md', content: '# 비밀' }, 'README.md'],
+    ['MultiEdit', { file_path: '/Users/dev/app/a.ts' }, 'a.ts'],
+    ['NotebookEdit', { notebook_path: '/Users/dev/app/n.ipynb' }, 'n.ipynb'],
+    ['Read', { file_path: '/Users/dev/app/' }, 'app'],
+    ['Grep', { pattern: 'TODO|FIXME' }, 'TODO|FIXME'],
+    ['Glob', { pattern: 'g'.repeat(100) }, 'g'.repeat(79) + '…'],
+    [
+      'WebFetch',
+      { url: 'https://user:pw@docs.example.com:8443/hooks?q=1' },
+      'docs.example.com:8443'
+    ],
+    ['WebFetch', { url: 'not a url' }, null],
+    ['Task', { description: '테스트 고치기', prompt: '긴 지시' }, '테스트 고치기'],
+    ['Agent', { description: '코드 살펴보기' }, '코드 살펴보기'],
+    ['TodoWrite', { todos: [] }, null],
+    ['mcp__github__create_pull_request', { title: 'x' }, null],
+    ['Bash', { command: 42 }, null],
+    ['Read', 'C:\\x', null],
+    ['Bash', null, null],
+    ['Bash', ['ls'], null]
+  ])('도구 요약 %s %o → %s', (name, input, expected) => {
+    expect(toolSummary(name, input)).toBe(expected)
   })
 })

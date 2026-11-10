@@ -55,6 +55,7 @@ export function agentRow(over: Partial<AgentRow> = {}): AgentRow {
     cpuPercent: 12.5,
     lastActiveAt: null,
     parked: false,
+    activity: null,
     ...over
   }
 }

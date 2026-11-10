@@ -1,5 +1,6 @@
 import { hiddenMatches } from '../shared/settings'
 import type {
+  AgentActivity,
   AgentRow,
   AgentTool,
   ClaudeHookStatus,
@@ -29,6 +30,7 @@ import { agentToolOf, topLevelAgentPids } from './processTree'
 import {
   codexTranscriptFor,
   hookViewForAgent,
+  oneLine,
   pairBySessionFile,
   reconcileSessions,
   type HookView,
@@ -55,6 +57,28 @@ export interface CollectOptions {
   hiddenServers?: string[]
   /** 작업 공간 경로 → 보여 줄 이름. */
   workspaceAliases?: Record<string, string>
+  /** 에이전트가 하는 일(G3b)을 행에 담는다. 끄면 모두 null 이고 Claude 세션 파일의 이름도 쓰지 않는다. */
+  showAgentActivity: boolean
+}
+
+/** 세션 파일의 이름을 제목으로 쓸 때의 길이(훅 제목과 같다). */
+const TITLE_MAX = 80
+
+/**
+ * 행의 하는 일(G3b): 그 행이 상태를 얻는 훅 세션의 내용에, 훅 제목이 없으면 Claude 세션 파일의 이름(한 줄 80자)을 제목으로
+ * 쓴다(훅 세션이 없어도). 실행 중인 도구는 작업 중·권한 대기일 때만, 권한을 기다리는 도구는 권한 대기일 때만 보인다
+ * (세션 파일·Codex 세션 기록이 더 늦은 근거라 상태가 바뀌었으면 옛 도구를 보이지 않게). 보일 것이 없으면 null.
+ */
+function rowActivity(
+  state: AgentRow['state'],
+  hook: AgentActivity | null,
+  fileName: string | null
+): AgentActivity | null {
+  const title = hook?.title ?? oneLine(fileName, TITLE_MAX)
+  const prompt = hook?.prompt ?? null
+  const tool = state === 'working' || state === 'waiting' ? (hook?.tool ?? null) : null
+  const waiting = state === 'waiting' ? (hook?.waiting ?? null) : null
+  return title || prompt || tool || waiting ? { title, prompt, tool, waiting } : null
 }
 
 /** 다른 Codex 프로세스 생존 구간을 기억하는 시간과, 마지막으로 본 뒤 꺼졌을 수 있는 여유(수집 주기보다 길게). */
@@ -73,7 +97,8 @@ export function collectOptionsFrom(s: Settings): CollectOptions {
     agentParkedMs: s.agentParkedMinutes * 60 * 1000,
     heavyPatterns: s.heavyPatterns,
     hiddenServers: s.hiddenServers,
-    workspaceAliases: s.workspaceAliases
+    workspaceAliases: s.workspaceAliases,
+    showAgentActivity: s.showAgentActivity
   }
 }
 
@@ -257,6 +282,27 @@ export function createCollector(deps: CollectorDeps): {
       const lastActiveAt = lastActiveOf(a, exact, seen)
       return { ...a, lastActiveAt, parked: isParked({ ...a, lastActiveAt }, now, parkedMs) }
     })
+  }
+
+  /**
+   * 행마다 하는 일(G3b)을 채운다(최종 상태가 정해진 뒤 — rowActivity). 설정이 꺼져 있으면 모두 null 이고 세션 파일의
+   * 이름도 쓰지 않는다. 세션 파일은 Claude 에만 있다.
+   */
+  function withAgentActivity(
+    agents: AgentRow[],
+    roots: Map<string, string | null>,
+    show: boolean
+  ): AgentRow[] {
+    return agents.map((a): AgentRow => ({
+      ...a,
+      activity: show
+        ? rowActivity(
+            a.state,
+            hookOfRow(roots)(a)?.activity ?? null,
+            a.tool === 'claude' ? (sessionFiles.get(a.pid)?.name ?? null) : null
+          )
+        : null
+    }))
   }
 
   /**
@@ -507,7 +553,11 @@ export function createCollector(deps: CollectorDeps): {
     })
     const stated = withStateSince(withRollout, agentStates, sampledAt, exactSinceFor(roots))
     agentStates = stated.memo
-    const active = withActivity(stated.agents, roots, sampledAt, options.agentParkedMs)
+    const active = withAgentActivity(
+      withActivity(stated.agents, roots, sampledAt, options.agentParkedMs),
+      roots,
+      options.showAgentActivity
+    )
 
     // 작업 공간은 판단 전에 정한다: 같은 작업 공간에서 에이전트가 일하면 그 작업 공간의 서버·남은 프로세스는
     // 정리 후보로 올리지 않는다(스펙 §4 — 다른 저장소에서 일하는 에이전트가 이 서버를 쓰고 있을 수 있다).
@@ -598,9 +648,14 @@ export function createCollector(deps: CollectorDeps): {
       return stateFrom(a, hook)
     })
     const now = deps.now()
+    const options = deps.options()
     const stated = withStateSince(restated, agentStates, now, exactSinceFor(rootOfCwd))
     agentStates = stated.memo
-    const agents = withActivity(stated.agents, rootOfCwd, now, deps.options().agentParkedMs)
+    const agents = withAgentActivity(
+      withActivity(stated.agents, rootOfCwd, now, options.agentParkedMs),
+      rootOfCwd,
+      options.showAgentActivity
+    )
     return { ...snapshot, agents }
   }
 

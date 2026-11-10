@@ -46,6 +46,11 @@ export interface Settings {
   hiddenServers: string[]
   /** 작업 공간 경로 → 보여 줄 이름. */
   workspaceAliases: Record<string, string>
+  /**
+   * 에이전트가 하는 일(G3b — 세션 제목·요청 첫 줄·도구 이름과 요약)을 보인다. 메모리에만 두고 파일로 남기지 않는다.
+   * 끄면 훅이 알려 준 내용을 받는 순간 버리고, 들고 있던 것도 지운다.
+   */
+  showAgentActivity: boolean
 }
 
 export const SETTINGS_VERSION = 3
@@ -111,7 +116,8 @@ export const DEFAULT_SETTINGS: Settings = {
   settingsVersion: SETTINGS_VERSION,
   extraRepos: [],
   hiddenServers: [],
-  workspaceAliases: {}
+  workspaceAliases: {},
+  showAgentActivity: true
 }
 
 function oneOf<T extends string>(value: unknown, choices: readonly T[], fallback: T): T {
@@ -326,6 +332,7 @@ export function normalizeSettings(value: unknown): Settings {
       SETTINGS_LIMITS.hiddenServers,
       cleanHidden
     ),
-    workspaceAliases: aliases(v.workspaceAliases)
+    workspaceAliases: aliases(v.workspaceAliases),
+    showAgentActivity: bool(v.showAgentActivity, d.showAgentActivity)
   }
 }

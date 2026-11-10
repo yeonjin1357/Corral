@@ -237,6 +237,18 @@ export type AgentTool = 'claude' | 'codex'
  */
 export type AgentState = 'working' | 'waiting' | 'idle' | 'error' | 'unknown'
 
+/**
+ * 에이전트가 하는 일(G3b). 훅이 알려 준 내용을 메모리에만 들고 pitwall 창에만 보인다(history.json·기록·로그·OS 알림에는
+ * 넣지 않는다). title: 세션 제목(훅의 session_title, 없으면 Claude 세션 파일의 이름), prompt: 마지막 요청의 첫 줄,
+ * tool: 지금 실행 중인 도구(이름·요약·시작 시각), waiting: 권한을 기다리는 도구(이름·요약). 모르면 null.
+ */
+export interface AgentActivity {
+  title: string | null
+  prompt: string | null
+  tool: { name: string; summary: string | null; since: number } | null
+  waiting: { tool: string | null; summary: string | null } | null
+}
+
 export interface AgentRow {
   pid: number
   tool: AgentTool
@@ -272,6 +284,8 @@ export interface AgentRow {
   lastActiveAt: number | null
   /** 오래 쉬는 세션: 쉬는 중·오류·확인 중이고 마지막 활동이 기준 시간(설정 agentParkedMinutes) 이상 전. */
   parked: boolean
+  /** 하는 일(G3b). 설정 showAgentActivity 가 꺼져 있거나 아는 것이 없으면 null. */
+  activity: AgentActivity | null
 }
 
 export type ClaudeHookState = 'off' | 'on' | 'partial' | 'error'

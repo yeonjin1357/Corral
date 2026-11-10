@@ -39,7 +39,7 @@ import { createSessionFileReader } from './claudeSessionFiles'
 import { createClaudeIntegration } from './claudeIntegration'
 import { createCodexIntegration } from './codexIntegration'
 import { createHookHub } from './hookHub'
-import { applyHookEvent } from './sessions'
+import { applyHookEvent, clearActivity } from './sessions'
 import type { Sessions } from './sessions'
 import { createScheduler } from './scheduler'
 import { createKiller, type KillConfirm } from './kill'
@@ -402,10 +402,14 @@ function scheduleRestate(): void {
   }, 200)
 }
 
-/** Claude·Codex 연동이 같이 쓰는 훅 서버. 이벤트가 오면 세션 상태를 바꾸고 화면을 바로 갱신한다. */
+/**
+ * Claude·Codex 연동이 같이 쓰는 훅 서버. 이벤트가 오면 세션 상태를 바꾸고 화면을 바로 갱신한다.
+ * 하는 일(G3b) 보기가 꺼져 있으면 이벤트의 내용(제목·요청·도구)은 받는 순간 버린다.
+ */
 const hookHub = createHookHub({
   onEvent: (event, tool) => {
-    if (applyHookEvent(sessions, event, Date.now(), tool)) scheduleRestate()
+    if (applyHookEvent(sessions, event, Date.now(), tool, { activity: settings.showAgentActivity }))
+      scheduleRestate()
   }
 })
 
@@ -484,6 +488,8 @@ function prepareWindowsHelper(): void {
 /** 바뀐 설정을 앱 전체에 반영한다(수집 기준값은 수집기가 매번 읽는다). */
 function applySettings(next: Settings): void {
   settings = next
+  // 하는 일(G3b) 보기를 끄면 들고 있던 내용도 지운다(화면은 저장 뒤 새로 수집할 때 비워진다).
+  if (!next.showAgentActivity) clearActivity(sessions)
   scheduler.setIntervals(REFRESH_INTERVALS[next.refresh])
   // 화면(prefers-color-scheme)과 확인 창·메뉴가 같은 테마를 따르도록 OS 테마 설정을 바꾼다.
   nativeTheme.themeSource = next.theme === 'auto' ? 'system' : next.theme
