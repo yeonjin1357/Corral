@@ -217,22 +217,56 @@ describe('오래 쉬는 에이전트(G2)', () => {
   })
 
   test('오래 쉬는 세션이 된 서버의 타이머는 그 에이전트의 마지막 활동보다 앞설 수 없다', () => {
-    // 서버는 0분부터 연결 0. 에이전트는 50분에 마지막으로 일했고, 60분 샘플에서 오래 쉬는 세션이 됐다.
-    const active = agent(W1, 'claude', { state: 'idle', lastActiveAt: 50 * MIN })
-    let memo: ServerMemo = new Map()
-    for (const t of [0, 30 * MIN, 55 * MIN])
-      memo = judgeServers([server()], [active], memo, t, THRESHOLD).memo
+    // 기억에는 0분부터 연결 0(보호 표시 없음 — 예: 다시 켠 뒤 불러온 기억). 에이전트는 50분에 마지막으로 일했다.
     const resting = parked(W1, 50 * MIN)
-    const justParked = judgeServers([server()], [resting], memo, 60 * MIN, THRESHOLD)
+    const previous: ServerMemo = new Map([[KEY, { state: 'idle', since: 0 }]])
+    const first = judgeServers([server()], [resting], previous, 60 * MIN, THRESHOLD)
     // 판단 전: 보호가 끝난 시각(마지막 활동 50분)부터 10분.
-    expect(justParked.rows[0]).toMatchObject({
+    expect(first.rows[0]).toMatchObject({
       judgement: null,
       idleSince: 50 * MIN,
       parkedAgent: true,
       parkedSince: 50 * MIN
     })
-    const later = judgeServers([server()], [resting], justParked.memo, 70 * MIN, THRESHOLD)
+    const later = judgeServers([server()], [resting], first.memo, 70 * MIN, THRESHOLD)
     expect(later.rows[0]).toMatchObject({ judgement: 'check', idleSince: 50 * MIN })
+
+    // 지난 샘플에 활동 중이던(보호하던) 에이전트가 그대로 오래 쉬는 세션이 되면 그 샘플부터 센다(판단이 한 번 늦어질 뿐).
+    const active = agent(W1, 'claude', { state: 'idle', lastActiveAt: 50 * MIN })
+    let memo: ServerMemo = new Map()
+    for (const t of [0, 30 * MIN, 55 * MIN])
+      memo = judgeServers([server()], [active], memo, t, THRESHOLD).memo
+    const justParked = judgeServers([server()], [resting], memo, 60 * MIN, THRESHOLD)
+    expect(justParked.rows[0]).toMatchObject({
+      judgement: null,
+      idleSince: 60 * MIN,
+      parkedAgent: true,
+      parkedSince: 50 * MIN
+    })
+    expect(justParked.memo.get(KEY)).toEqual({ state: 'idle', since: 60 * MIN })
+  })
+
+  test('활동 중인 에이전트가 꺼지면, 오래 쉬는 에이전트가 남아 있어도 그때부터 다시 센다', () => {
+    // 서버는 0분부터 연결 0. A 는 30분까지 일하고 31분에 꺼진다. P 는 내내 오래 쉬는 세션이고 32분에 꺼진다.
+    const a = agent(W1, 'codex', { state: 'working', lastActiveAt: 30 * MIN })
+    const p = parked(W1, -200 * MIN)
+    let memo: ServerMemo = new Map()
+    for (const t of [0, 10 * MIN, 30 * MIN])
+      memo = judgeServers([server()], [a, p], memo, t, THRESHOLD).memo
+    const aGone = judgeServers([server()], [p], memo, 31 * MIN, THRESHOLD)
+    expect(aGone.rows[0]).toMatchObject({
+      judgement: null,
+      idleSince: 31 * MIN,
+      parkedAgent: true,
+      parkedSince: -200 * MIN
+    })
+    expect(aGone.memo.get(KEY)).toEqual({ state: 'idle', since: 31 * MIN })
+    const pGone = judgeServers([server()], [], aGone.memo, 32 * MIN, THRESHOLD)
+    expect(pGone.rows[0]).toMatchObject({ judgement: null, idleSince: 31 * MIN })
+    const almost = judgeServers([server()], [], pGone.memo, 51 * MIN - 1, THRESHOLD)
+    expect(almost.rows[0].judgement).toBeNull()
+    const due = judgeServers([server()], [], almost.memo, 51 * MIN, THRESHOLD)
+    expect(due.rows[0]).toMatchObject({ judgement: 'candidate', idleSince: 31 * MIN })
   })
 
   test('에이전트가 꺼지면 그때부터 다시 센다', () => {

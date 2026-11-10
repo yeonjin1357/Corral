@@ -126,28 +126,28 @@ const searchOf = (...parts: (string | number | null | undefined)[]): string =>
     .toLowerCase()
 
 /**
- * 서버 판단 칸. 덮는 에이전트가 모두 오래 쉬는 세션이면(G2) 확인해볼 것에 연결 없는 시간 대신 에이전트가 쉰 기간을
- * 붙이고, 판단 전이면 "에이전트 오래 쉼". 긴 문구는 칸에서 잘리고 title 로 다 보인다.
+ * 서버 판단 칸. 덮는 에이전트가 모두 오래 쉬는 세션이면(G2) 확인해볼 것을 짧게("확인해볼 것 · 에이전트 쉼") 보이고
+ * 에이전트가 쉰 기간은 title 에(160px 칸에서 기간이 잘리지 않게), 판단 전이면 "에이전트 오래 쉼".
  */
 function judgedStatus(row: ServerRow, now: number): Cell {
   const idle = row.idleSince != null ? ` · ${formatDuration(now - row.idleSince)}` : ''
   if (row.unresolvable) return { text: st.unresolvable, dot: 'idle' }
   if (row.judgement === 'candidate') return { text: `${st.candidate}${idle}`, dot: 'stopped' }
   if (row.judgement === 'check')
-    return {
-      text:
-        row.parkedAgent && row.parkedSince != null
-          ? st.checkParked(formatDuration(Math.max(0, now - row.parkedSince)))
-          : `${st.check}${idle}`,
-      dot: 'warn'
-    }
+    return row.parkedAgent && row.parkedSince != null
+      ? {
+          text: st.checkParked,
+          title: st.checkParkedFor(formatDuration(Math.max(0, now - row.parkedSince))),
+          dot: 'warn'
+        }
+      : { text: `${st.check}${idle}`, dot: 'warn' }
   if (row.clientCount > 0) return { text: st.inUse, dot: 'running' }
   if (row.parkedAgent) return { text: st.agentParked, dot: 'idle' }
   if (row.agentInWorktree) return { text: st.agent, dot: 'idle' }
   return { text: `${st.idle}${idle}`, dot: 'idle' }
 }
 
-/** 서버 상태 칸. 메모리가 계속 늘면 배지와 근거(F6). */
+/** 서버 상태 칸. 메모리가 계속 늘면 배지와 근거(F6, 판단 칸의 title 이 있으면 거기에 이어 붙인다). */
 function serverStatus(row: ServerRow, now: number): Cell {
   const cell = judgedStatus(row, now)
   const g = row.memoryGrowth
@@ -155,7 +155,7 @@ function serverStatus(row: ServerRow, now: number): Cell {
   return {
     ...cell,
     badge: st.memoryGrowth,
-    title: `${cell.text} · ${st.memoryGrowthTitle(g.minutes, formatBytes(g.fromBytes), formatBytes(g.toBytes))}`
+    title: `${cell.title ?? cell.text} · ${st.memoryGrowthTitle(g.minutes, formatBytes(g.fromBytes), formatBytes(g.toBytes))}`
   }
 }
 
@@ -167,16 +167,24 @@ function cpuCell(cpuPercent: number | null, s: DashboardSnapshot): Cell {
     : { text: `${cpu.toFixed(1)}%`, sort: cpu, mono: true }
 }
 
-/** 에이전트 상태 칸: "작업 중 · 12분"(F3). 아직 모르는 상태는 시간 없이. 오래 쉬는 세션이면 배지(G2). */
+/**
+ * 에이전트 상태 칸: "작업 중 · 12분"(F3). 아직 모르는 상태는 시간 없이.
+ * 오래 쉬는 세션(G2)은 120px 칸에 배지까지 넣으면 기간이 잘려, 쉬는 중·확인 중이면 글자 자체를
+ * "오래 쉼 · 3시간"(마지막 활동부터)으로 하고(오류는 "오류 · 기간" 그대로), title 에 마지막 활동 시각.
+ */
 function agentStatus(a: AgentRow, now: number): Cell {
   const label = text.ui.agent.states[a.state]
+  const ago = (since: number): string => formatDuration(Math.max(0, now - since))
+  const parkedAt = a.parked ? a.lastActiveAt : null
   return {
     text:
-      a.stateSince != null && a.state !== 'unknown'
-        ? st.withTime(label, formatDuration(Math.max(0, now - a.stateSince)))
-        : label,
-    dot: AGENT_TONE[a.state],
-    ...(a.parked ? { badge: st.parked } : {})
+      parkedAt != null && a.state !== 'error'
+        ? st.withTime(st.parked, ago(parkedAt))
+        : a.stateSince != null && a.state !== 'unknown'
+          ? st.withTime(label, ago(a.stateSince))
+          : label,
+    ...(parkedAt != null ? { title: st.lastActive(ago(parkedAt)) } : {}),
+    dot: AGENT_TONE[a.state]
   }
 }
 

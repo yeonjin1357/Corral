@@ -62,7 +62,7 @@ describe('개발 서버 표', () => {
     expect(status[':6']).toEqual({ text: '판별 불가', dot: 'idle' })
   })
 
-  test('오래 쉬는 에이전트만 있는 서버: 확인해볼 것이면 에이전트가 쉰 기간, 판단 전이면 "에이전트 오래 쉼"', () => {
+  test('오래 쉬는 에이전트만 있는 서버: 확인해볼 것이면 짧은 문구(쉰 기간은 title), 판단 전이면 "에이전트 오래 쉼"', () => {
     const now = 300 * MIN
     const parked = { agentInWorktree: true, parkedAgent: true, parkedSince: now - 192 * MIN }
     const s = snapshot({
@@ -83,9 +83,37 @@ describe('개발 서버 표', () => {
     const status = Object.fromEntries(
       tableFor('ports', s).rows.map((r) => [r.cells.port.text, r.cells.status])
     )
-    expect(status[':1']).toEqual({ text: '확인해볼 것 · 에이전트가 3시간 12분째 쉼', dot: 'warn' })
+    // 160px 칸에서 기간이 잘리지 않게 칸에는 짧게, 쉰 기간은 title 에.
+    expect(status[':1']).toEqual({
+      text: '확인해볼 것 · 에이전트 쉼',
+      title: '확인해볼 것 · 에이전트가 3시간 12분째 쉼',
+      dot: 'warn'
+    })
     expect(status[':2']).toEqual({ text: '에이전트 오래 쉼', dot: 'idle' })
     expect(status[':3']).toEqual({ text: '사용 중', dot: 'running' })
+  })
+
+  test('오래 쉬는 에이전트 서버의 메모리 증가 title 은 쉰 기간 문구에 이어 붙인다', () => {
+    const now = 300 * MIN
+    const s = snapshot({
+      takenAt: now,
+      servers: [
+        serverRow({
+          judgement: 'check',
+          clientCount: 0,
+          idleSince: now - 25 * MIN,
+          agentInWorktree: true,
+          parkedAgent: true,
+          parkedSince: now - 120 * MIN,
+          memoryGrowth: { fromBytes: 2 * GB, toBytes: 3.6 * GB, minutes: 30 }
+        })
+      ]
+    })
+    expect(tableFor('ports', s).rows[0].cells.status).toMatchObject({
+      text: '확인해볼 것 · 에이전트 쉼',
+      badge: '메모리 증가',
+      title: '확인해볼 것 · 에이전트가 2시간째 쉼 · 30분 동안 2.0 GB → 3.6 GB'
+    })
   })
 
   test('한 서버의 여러 포트를 한 칸에', () => {
@@ -141,24 +169,55 @@ describe('에이전트 표', () => {
     expect(rows[1].cells.runtime.text).toBe('—')
   })
 
-  test('오래 쉬는 세션은 상태 칸에 "오래 쉼" 배지(끄는 버튼은 여전히 없다)', () => {
-    const now = 4 * 60 * MIN
+  test('오래 쉬는 에이전트의 상태 칸은 오래 쉼 · 기간', () => {
+    const now = 5 * 60 * MIN
     const s = snapshot({
       takenAt: now,
       agents: [
+        // 기간은 상태 시작이 아니라 마지막 활동부터. 120px 칸이라 배지 없이 글자로만.
         agentRow({
           state: 'idle',
           stateSince: now - 3 * 60 * MIN,
-          lastActiveAt: now - 3 * 60 * MIN,
+          lastActiveAt: now - 3 * 60 * MIN - 12 * MIN,
           parked: true
         }),
-        agentRow({ pid: 2, state: 'idle', stateSince: now - 10 * MIN })
+        agentRow({ pid: 2, state: 'unknown', lastActiveAt: now - 4 * 60 * MIN, parked: true }),
+        // 오류는 오류 · 기간 그대로(배지 없음).
+        agentRow({
+          pid: 3,
+          state: 'error',
+          stateSince: now - 10 * MIN,
+          lastActiveAt: now - 4 * 60 * MIN,
+          parked: true
+        }),
+        agentRow({ pid: 4, state: 'idle', stateSince: now - 10 * MIN })
       ]
     })
     const rows = tableFor('agents', s).rows
-    expect(rows[0].cells.status).toMatchObject({ text: '쉬는 중 · 3시간', badge: '오래 쉼' })
+    expect(rows[0].cells.status).toEqual({
+      text: '오래 쉼 · 3시간 12분',
+      title: '마지막 활동 3시간 12분 전',
+      dot: 'idle'
+    })
+    expect(rows[1].cells.status).toEqual({
+      text: '오래 쉼 · 4시간',
+      title: '마지막 활동 4시간 전',
+      dot: 'idle'
+    })
+    expect(rows[2].cells.status).toEqual({
+      text: '오류 · 10분',
+      title: '마지막 활동 4시간 전',
+      dot: 'stopped'
+    })
+    expect(rows[3].cells.status).toEqual({ text: '쉬는 중 · 10분', dot: 'idle' })
+    expect(rows.map((r) => r.cells.status.badge)).toEqual([
+      undefined,
+      undefined,
+      undefined,
+      undefined
+    ])
+    // 에이전트는 끄지 않는다.
     expect(rows[0].actions.map((a) => a.kind)).toEqual(['details'])
-    expect(rows[1].cells.status.badge).toBeUndefined()
   })
 
   test('작업 폴더를 모르면 그렇게 보이고, 동작은 자세히만(에이전트는 끄지 않는다)', () => {

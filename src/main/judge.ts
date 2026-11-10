@@ -71,7 +71,8 @@ function resting(agent: AgentRow): agent is AgentRow & { lastActiveAt: number } 
  *   아닌 것(쉬는 중이어도)이 활동 중이다.
  * - 연결 타이머는 늘 잰다. 활동 중인 에이전트가 덮고 있으면 판단만 하지 않는다.
  * - 타이머는 보호가 끝난 때보다 앞서지 않는다: 덮는 에이전트가 모두 오래 쉬면 그들의 마지막 활동 가운데 가장 늦은
- *   시각, 덮는 에이전트가 없고 지난 샘플에 보호받았으면(에이전트가 떠났으면) 지금부터 센다.
+ *   시각, 지난 샘플에 활동 중인 에이전트가 덮고 있었으면(떠났으면 — 오래 쉬는 에이전트가 남아 있어도) 지금.
+ *   둘 다면 더 늦은 쪽부터 센다.
  * - 연결 0 이 기준 시간 이상 → 정리 후보, 탭 연결만 기준 시간 이상 → 확인해볼 것. 덮는 에이전트가 모두 오래 쉬는
  *   세션이면 연결 0 이어도 확인해볼 것까지만(정리 후보·정리 추천에 넣지 않는다).
  * - 판별 불가·워크트리를 모르는 서버는 판단하지 않는다(불확실하면 후보에서 빼는 쪽).
@@ -130,9 +131,14 @@ export function judgeServers(
 
     // 여기서 덮는 에이전트는 모두 오래 쉬는 세션(마지막 활동을 앎). 기간은 그 가운데 가장 늦은 활동부터.
     const parkedSince = covering.length ? Math.max(...covering.map((a) => a.lastActiveAt)) : null
-    // 보호가 끝난 때: 오래 쉬는 세션이 된 에이전트의 마지막 활동, 에이전트가 떠났으면 지금.
-    const floor = parkedSince ?? (prev?.shielded ? now : null)
-    const since = floor === null ? counted : Math.max(counted, floor)
+    // 보호가 끝난 때보다 앞서 세지 않는다. 둘 다 해당하면 더 늦은 쪽:
+    // (a) 덮는 에이전트가 모두 오래 쉬면 그들의 마지막 활동 가운데 가장 늦은 시각,
+    // (b) 지난 샘플에 활동 중인 에이전트가 덮고 있었으면 지금(그 에이전트가 꺼졌으면 오래 쉬는 에이전트가 남아 있어도
+    //     처음부터 센다). 활동 중이던 에이전트가 그대로 오래 쉬는 세션이 된 샘플에도 (b)가 걸려 그때부터 세는데,
+    //     판단이 한 번 늦어질 뿐이라 둔다.
+    const floor = Math.max(parkedSince ?? -Infinity, prev?.shielded ? now : -Infinity)
+    const since = Math.max(counted, floor)
+    // 보호가 끝났으므로 shielded 없이 기억한다(다음 샘플에 다시 지금부터 세지 않게).
     memo.set(key, { state, since })
     const parked = parkedSince !== null
     const due = now - since >= thresholdMs

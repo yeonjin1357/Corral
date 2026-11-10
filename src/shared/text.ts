@@ -360,10 +360,14 @@ export const text = {
       agent: '에이전트 작업 중',
       /** 덮는 에이전트가 모두 오래 쉬는 세션인데 아직 판단 전(G2). */
       agentParked: '에이전트 오래 쉼',
-      /** 덮는 에이전트가 모두 오래 쉬는 세션이라 확인해볼 것까지만 올린 서버. duration: 가장 늦은 마지막 활동부터. */
-      checkParked: (duration: string): string => `확인해볼 것 · 에이전트가 ${duration}째 쉼`,
-      /** 에이전트 상태 칸의 오래 쉬는 세션 배지. */
+      /** 덮는 에이전트가 모두 오래 쉬는 세션이라 확인해볼 것까지만 올린 서버(표의 160px 칸용 짧은 문구). */
+      checkParked: '확인해볼 것 · 에이전트 쉼',
+      /** checkParked 의 긴 문구(표의 title·상세 패널 배지). duration: 가장 늦은 마지막 활동부터. */
+      checkParkedFor: (duration: string): string => `확인해볼 것 · 에이전트가 ${duration}째 쉼`,
+      /** 에이전트 상태 칸의 오래 쉬는 세션("오래 쉼 · 3시간"). */
       parked: '오래 쉼',
+      /** 오래 쉬는 에이전트 상태 칸의 title. */
+      lastActive: (duration: string): string => `마지막 활동 ${duration} 전`,
       unresolvable: '판별 불가',
       leftoverAgent: '에이전트 워크트리',
       leftoverFree: '끌 수 있음',

@@ -126,7 +126,7 @@ describe('작업 공간 묶음 보기', () => {
   })
 })
 
-test('상태 칸의 긴 문구(오래 쉬는 에이전트)는 칸에서 잘리고 title 에 다 보인다', () => {
+test('오래 쉬는 에이전트 서버의 상태 칸은 짧은 문구, 쉰 기간은 title 에', () => {
   const now = 300 * 60_000
   const s = snapshot({
     takenAt: now,
@@ -142,7 +142,6 @@ test('상태 칸의 긴 문구(오래 쉬는 에이전트)는 칸에서 잘리�
     ]
   })
   const w = mount(ItemTable, { props: props(s, { id: 'port', dir: 'asc' }) })
-  const full = '확인해볼 것 · 에이전트가 3시간 12분째 쉼'
-  const cell = w.find(`span[title="${full}"]`)
-  expect(cell.find('.truncate').text()).toBe(full)
+  const cell = w.find('span[title="확인해볼 것 · 에이전트가 3시간 12분째 쉼"]')
+  expect(cell.find('.truncate').text()).toBe('확인해볼 것 · 에이전트 쉼')
 })

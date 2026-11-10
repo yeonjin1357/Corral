@@ -366,12 +366,22 @@ describe('마지막 활동·오래 쉬는 세션(G2)', () => {
     expect(collector.exportState().serverMemo).toEqual({
       'server:4100:100': { state: 'idle', since: 10 * MIN, shielded: true }
     })
+    // 오래 쉬는 세션이 된 샘플: 지난 샘플에 보호받았으므로 그때부터 센다.
     clock.now = stoppedAt + 30 * MIN
+    const parkedAt = clock.now
+    const justParked = await collector.collect()
+    expect(justParked.servers[0]).toMatchObject({
+      judgement: null,
+      idleSince: parkedAt,
+      agentInWorktree: true,
+      parkedAgent: true,
+      parkedSince: stoppedAt
+    })
+    clock.now = parkedAt + 20 * MIN
     const s = await collector.collect()
     expect(s.servers[0]).toMatchObject({
       judgement: 'check',
-      idleSince: 10 * MIN,
-      agentInWorktree: true,
+      idleSince: parkedAt,
       parkedAgent: true,
       parkedSince: stoppedAt
     })
