@@ -4,7 +4,7 @@ import TrayView from './TrayView.vue'
 import { workspaceSummary } from './rows'
 import { GB, MB, agentRow, serverRow, snapshot } from './testing/fixtures'
 import { DEFAULT_SETTINGS } from '../../shared/settings'
-import type { DashboardSnapshot } from '../../shared/types'
+import type { AgentRow, DashboardSnapshot } from '../../shared/types'
 
 const WS = { root: 'C:\\work\\ws', name: 'ws', branch: 'main', outer: true }
 const s = snapshot({
@@ -84,6 +84,57 @@ describe('TrayView', () => {
     expect(action).toHaveBeenLastCalledWith('settings')
     await w.find('[data-action="quit"]').trigger('click')
     expect(action).toHaveBeenLastCalledWith('quit')
+    w.unmount()
+  })
+
+  test('요약 창의 에이전트 줄은 표와 같은 상태 글자, 권한 대기 다음에 조용함', async () => {
+    const MIN = 60_000
+    const now = 4 * 60 * MIN
+    const at = (pid: number, root: string): Partial<AgentRow> => ({
+      pid,
+      startedAt: pid,
+      worktree: { root, branch: 'main', isLinkedWorktree: false }
+    })
+    const many = snapshot({
+      ...s,
+      takenAt: now,
+      agents: [
+        agentRow({
+          ...at(1, 'C:\\work\\parked'),
+          state: 'idle',
+          stateSince: now - 3 * 60 * MIN,
+          parked: true,
+          lastActiveAt: now - 3 * 60 * MIN
+        }),
+        agentRow({ ...at(2, 'C:\\work\\busy'), state: 'working', stateSince: now - 5 * MIN }),
+        agentRow({ ...at(3, 'C:\\work\\broken'), state: 'error', stateSince: now - MIN }),
+        agentRow({
+          ...at(4, 'C:\\work\\quiet'),
+          state: 'working',
+          stateSince: now - 40 * MIN,
+          quietSince: now - 18 * MIN
+        }),
+        agentRow({ ...at(5, 'C:\\work\\asking'), state: 'waiting', stateSince: now - 3 * MIN })
+      ]
+    })
+    window.pitwall.getLatest = async () => many
+    const w = mount(TrayView)
+    await flushPromises()
+    const rows = w.findAll('[data-agent]')
+    expect(rows.map((r) => r.text())).toEqual([
+      expect.stringMatching(/asking.*권한 대기 · 3분/),
+      expect.stringMatching(/quiet.*조용함 · 18분/),
+      expect.stringMatching(/broken.*오류 · 1분/),
+      expect.stringMatching(/busy.*작업 중 · 5분/)
+    ])
+    const peach = rows.map((r) =>
+      r.findAll('span').some((x) => x.classes().includes('text-[color:var(--peach)]'))
+    )
+    expect(peach).toEqual([true, true, false, false])
+    // 오래 쉬는 세션도 표와 같은 글자("오래 쉼 · 기간").
+    listener!(snapshot({ ...many, takenAt: now + 1, agents: [many.agents[0]] }))
+    await flushPromises()
+    expect(w.find('[data-agent]').text()).toContain('오래 쉼 · 3시간')
     w.unmount()
   })
 

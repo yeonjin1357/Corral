@@ -85,8 +85,25 @@ export const text = {
       `정리 후보 ${n}개를 끄면 ${freed} 를 확보할 수 있어요.`,
     ramNoCandidates: '정리할 후보가 없어요. 메모리를 많이 쓰는 앱을 확인해 보세요.',
     waitingTitle: (tool: string): string => `${tool} 가 권한을 기다려요`,
+    /**
+     * where: "폴더 · 브랜치", waitingTool: 권한을 기다리는 도구 이름(모르면 null). 명령·프롬프트는 넣지 않는다
+     * (OS 알림 센터가 디스크에 남긴다).
+     */
+    waitingBody: (where: string, waitingTool: string | null): string =>
+      waitingTool ? `${where} — ${waitingTool}` : where,
     waitingManyTitle: (n: number, tool: string | null): string =>
       `${tool ?? '에이전트'} ${n}개가 권한을 기다려요`,
+    /** 계속 권한 대기일 때 다시 알림. duration: 기다린 시간(formatDuration). */
+    waitingStillTitle: (tool: string, duration: string): string =>
+      `${tool} 가 ${duration}째 권한을 기다려요`,
+    quietTitle: (folder: string, tool: string): string => `${folder} 의 ${tool} 가 조용해요`,
+    quietBody: (duration: string): string =>
+      `${duration}째 이벤트가 없어요. 멈췄는지 확인해 보세요.`,
+    quietManyTitle: (n: number): string => `에이전트 ${n}개가 조용해요`,
+    goneTitle: (folder: string, tool: string): string => `${folder} 의 ${tool} 가 꺼졌어요`,
+    /** 꺼지기 전 상태(작업 중·권한 대기)별 본문. */
+    goneBody: { working: '작업 중이었어요.', waiting: '권한을 기다리던 중이었어요.' },
+    goneManyTitle: (n: number): string => `에이전트 ${n}개가 꺼졌어요`,
     /** pressure: pressureText 결과("RAM 85%" 또는 "커밋 86%"). */
     heavyTitle: (pressure: string): string => `무거운 작업이 겹쳤어요 (${pressure})`,
     heavyBody: (labels: string): string => `${labels} 이(가) 동시에 돌고 있어요.`,
@@ -220,8 +237,9 @@ export const text = {
     open: '앱 열기',
     settings: '설정',
     quit: '종료',
-    /** pressure: pressureText 결과("RAM 82%" 또는 "커밋 91%"). */
-    tooltip: (pressure: string): string => `pitwall — ${pressure}`,
+    /** pressure: pressureText 결과("RAM 82%" 또는 "커밋 91%"), waiting: 권한을 기다리는 에이전트 수. */
+    tooltip: (pressure: string, waiting: number): string =>
+      waiting > 0 ? `pitwall — ${pressure} · 권한 대기 ${waiting}` : `pitwall — ${pressure}`,
     stillRunning:
       'pitwall 은 트레이에서 계속 실행돼요. 끄려면 트레이 아이콘 메뉴에서 종료를 누르세요.'
   },
@@ -567,6 +585,14 @@ export const text = {
       notifyClaudeWaiting: '에이전트 권한 대기',
       notifyClaudeWaitingHelp:
         'Claude·Codex 연동을 켜 두었을 때, 세션이 권한을 기다리기 시작하면 알려요.',
+      notifyAgentQuiet: '조용한 에이전트',
+      notifyAgentQuietHelp:
+        '훅으로 작업 중인 에이전트가 15분 넘게 이벤트도 CPU 사용도 없으면 알려요. 오래 걸리는 명령을 기다리는 중일 수도 있어요.',
+      notifyAgentGone: '에이전트 꺼짐',
+      notifyAgentGoneHelp: '작업 중이거나 권한을 기다리던 에이전트가 꺼지면 알려요.',
+      waitingReminder: '권한 대기 다시 알림',
+      waitingReminderHelp:
+        '권한 대기가 이 시간 넘게 이어지면 다시 알려요. 0 이면 다시 알리지 않아요.',
       notifyHeavy: '무거운 작업 겹침',
       notifyHeavyHelp: '무거운 작업이 둘 이상 겹치고 RAM 이 경고 기준 이상이 되면 알려요.',
       dependencyDirs: '지울 의존성 폴더 이름',

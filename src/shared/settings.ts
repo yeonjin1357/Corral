@@ -12,6 +12,10 @@ export interface NotifySettings {
   heavyOverlap: boolean
   /** 정확한 상태를 아는 에이전트(Claude 훅·Codex)가 2분 넘게 일한 뒤 끝났을 때. */
   agentDone: boolean
+  /** 훅으로 작업 중인 에이전트가 조용해졌을 때(G3c — 15분 넘게 이벤트도 CPU 사용도 없음). */
+  agentQuiet: boolean
+  /** 정확한 상태로 작업 중·권한 대기이던 에이전트가 꺼졌을 때. */
+  agentGone: boolean
 }
 
 export interface Settings {
@@ -27,6 +31,8 @@ export interface Settings {
   idlePortMinutes: number
   /** 쉬는 에이전트의 마지막 활동이 이 시간 이상 전이면 오래 쉬는 세션(G2). */
   agentParkedMinutes: number
+  /** 권한 대기가 이 시간 넘게 이어지면 다시 알린다(그 뒤로도 이 간격마다). 0 이면 다시 알리지 않는다. */
+  waitingReminderMinutes: number
   /** "명령 이름 [인자…]" — 예: `vue-tsc`, `vite build`. */
   heavyPatterns: string[]
   notify: NotifySettings
@@ -68,6 +74,7 @@ export const SETTINGS_LIMITS = {
   ramDangerMax: 99,
   idlePortMinutes: { min: 1, max: 1440 },
   agentParkedMinutes: { min: 10, max: 10080 },
+  waitingReminderMinutes: { min: 0, max: 120 },
   heavyPatterns: 50,
   patternLength: 100,
   dependencyDirs: 20,
@@ -87,6 +94,7 @@ export const DEFAULT_SETTINGS: Settings = {
   ramDangerPercent: 90,
   idlePortMinutes: 20,
   agentParkedMinutes: 180,
+  waitingReminderMinutes: 10,
   heavyPatterns: [
     'tsc',
     'vue-tsc',
@@ -100,7 +108,14 @@ export const DEFAULT_SETTINGS: Settings = {
     'mvn',
     'cargo build'
   ],
-  notify: { ramLow: true, claudeWaiting: true, heavyOverlap: true, agentDone: true },
+  notify: {
+    ramLow: true,
+    claudeWaiting: true,
+    heavyOverlap: true,
+    agentDone: true,
+    agentQuiet: true,
+    agentGone: true
+  },
   dependencyDirs: [
     'node_modules',
     '.next',
@@ -309,6 +324,12 @@ export function normalizeSettings(value: unknown): Settings {
       SETTINGS_LIMITS.agentParkedMinutes.max,
       d.agentParkedMinutes
     ),
+    waitingReminderMinutes: int(
+      v.waitingReminderMinutes,
+      SETTINGS_LIMITS.waitingReminderMinutes.min,
+      SETTINGS_LIMITS.waitingReminderMinutes.max,
+      d.waitingReminderMinutes
+    ),
     heavyPatterns: list(
       v.heavyPatterns,
       d.heavyPatterns,
@@ -319,7 +340,9 @@ export function normalizeSettings(value: unknown): Settings {
       ramLow: bool(notify.ramLow, d.notify.ramLow),
       claudeWaiting: bool(notify.claudeWaiting, d.notify.claudeWaiting),
       heavyOverlap: bool(notify.heavyOverlap, d.notify.heavyOverlap),
-      agentDone: bool(notify.agentDone, d.notify.agentDone)
+      agentDone: bool(notify.agentDone, d.notify.agentDone),
+      agentQuiet: bool(notify.agentQuiet, d.notify.agentQuiet),
+      agentGone: bool(notify.agentGone, d.notify.agentGone)
     },
     dependencyDirs: oldDefaultDirs
       ? [...d.dependencyDirs]

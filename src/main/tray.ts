@@ -10,6 +10,9 @@ export const LEVEL_COLORS: Record<MemoryLevel, string> = {
   danger: '#f38ba8'
 }
 
+/** 트레이 아이콘 오른쪽 위 점 색(Catppuccin peach, 화면의 권한 대기·조용함 색과 같다). */
+export const BADGE_COLOR = '#fab387'
+
 const hasMemory = (s: DashboardSnapshot | null): s is DashboardSnapshot =>
   !!s && s.memory.totalBytes > 0
 // 화면(RamBar)과 같은 규칙: 내림해야 경고 기준과 표시가 어긋나지 않는다.
@@ -87,7 +90,14 @@ export function buildTrayMenu(
 }
 
 export function trayTooltip(s: DashboardSnapshot | null): string {
-  return hasMemory(s) ? text.tray.tooltip(pressureText(s.memory)) : text.appName
+  if (!hasMemory(s)) return text.appName
+  const waiting = s.agents.filter((a) => a.state === 'waiting').length
+  return text.tray.tooltip(pressureText(s.memory), waiting)
+}
+
+/** 아이콘에 점을 찍을지(G3d): 권한을 기다리거나 조용한(G3c) 에이전트가 있으면. */
+export function trayBadge(s: DashboardSnapshot | null): boolean {
+  return !!s && s.agents.some((a) => a.state === 'waiting' || a.quietSince != null)
 }
 
 /** Electron Tray 중 pitwall 이 쓰는 부분(테스트에서 가짜로 바꿔 끼운다). */
@@ -108,7 +118,8 @@ export interface TrayLike {
 
 export function createTrayController<Icon, Menu>(deps: {
   tray: TrayLike
-  makeIcon: (level: MemoryLevel) => Icon
+  /** level: 메모리 단계(그래프 선 색), badge: 오른쪽 위 점(trayBadge). */
+  makeIcon: (level: MemoryLevel, badge: boolean) => Icon
   buildMenu: (items: MenuItemConstructorOptions[]) => Menu
   actions: TrayActions
   platform: Platform
@@ -126,7 +137,8 @@ export function createTrayController<Icon, Menu>(deps: {
   let last: DashboardSnapshot | null = null
   let updateStatus: UpdateStatus | null = null
   let tooltip = ''
-  let level: MemoryLevel | null = null
+  /** 지금 아이콘(단계·점). 바뀔 때만 다시 넣는다. */
+  let iconKey = ''
   let notified = false
   let menu: Menu | null = null
   const attachMenu = !(deps.onPopover && deps.platform === 'darwin')
@@ -147,9 +159,11 @@ export function createTrayController<Icon, Menu>(deps: {
       tooltip = nextTooltip
     }
     const nextLevel = hasMemory(s) ? s.memory.level : 'normal'
-    if (nextLevel !== level) {
-      deps.tray.setImage(deps.makeIcon(nextLevel))
-      level = nextLevel
+    const badge = trayBadge(s)
+    const nextIconKey = `${nextLevel}:${badge}`
+    if (nextIconKey !== iconKey) {
+      deps.tray.setImage(deps.makeIcon(nextLevel, badge))
+      iconKey = nextIconKey
     }
   }
 

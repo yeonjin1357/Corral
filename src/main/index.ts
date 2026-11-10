@@ -52,7 +52,7 @@ import { backgroundFor, overlayFor, windowChrome } from './windowChrome'
 import { createIconSource } from './icons'
 import { createRamHistory, loadHistory, saveHistory } from './historyStore'
 import { codexHome, createCodexReader } from './codexRollout'
-import { createTrayController, LEVEL_COLORS } from './tray'
+import { BADGE_COLOR, createTrayController, LEVEL_COLORS } from './tray'
 import {
   createIdleCloser,
   shouldReopen,
@@ -73,17 +73,23 @@ let trayController: ReturnType<typeof createTrayController> | null = null
 /** 트레이 '종료'·Cmd+Q 로 끝낼 때만 창을 실제로 닫는다. 그 외 닫기는 숨김. */
 let quitting = false
 
-const iconCache = new Map<MemoryLevel, Electron.NativeImage>()
-function trayIcon(level: MemoryLevel): Electron.NativeImage {
-  const cached = iconCache.get(level)
+const iconCache = new Map<string, Electron.NativeImage>()
+function trayIcon(level: MemoryLevel, badge = false): Electron.NativeImage {
+  const key = `${level}:${badge}`
+  const cached = iconCache.get(key)
   if (cached) return cached
   const color = LEVEL_COLORS[level]
-  // 앱 아이콘과 같은 작은 모니터. 그래프 선 색으로 RAM 상태를 보인다(16px 그대로·32px 는 2배).
-  const image = nativeImage.createFromBuffer(encodePng(renderSmallIcon(color, 16), 16, 16), {
+  const dot = badge ? BADGE_COLOR : undefined
+  // 앱 아이콘과 같은 작은 모니터. 그래프 선 색으로 RAM 상태를, 오른쪽 위 점으로 기다리는 에이전트를 보인다
+  // (16px 그대로·32px 는 2배).
+  const image = nativeImage.createFromBuffer(encodePng(renderSmallIcon(color, 16, dot), 16, 16), {
     scaleFactor: 1
   })
-  image.addRepresentation({ scaleFactor: 2, buffer: encodePng(renderSmallIcon(color, 32), 32, 32) })
-  iconCache.set(level, image)
+  image.addRepresentation({
+    scaleFactor: 2,
+    buffer: encodePng(renderSmallIcon(color, 32, dot), 32, 32)
+  })
+  iconCache.set(key, image)
   return image
 }
 
@@ -213,7 +219,8 @@ const notifier = createNotifier({
   settings: () => settings.notify,
   isFocused: () =>
     !!mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible() && mainWindow.isFocused(),
-  now: Date.now
+  now: Date.now,
+  reminderMs: () => settings.waitingReminderMinutes * 60 * 1000
 })
 
 function showWindow(): void {

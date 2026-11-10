@@ -172,8 +172,9 @@ function cpuCell(cpuPercent: number | null, s: DashboardSnapshot): Cell {
  * 오래 쉬는 세션(G2)은 130px 칸에 배지까지 넣으면 기간이 잘려, 쉬는 중·확인 중이면 글자 자체를
  * "오래 쉼 · 3시간"(마지막 활동부터)으로 하고(오류는 "오류 · 기간" 그대로), title 에 마지막 활동 시각.
  * 조용한 에이전트(G3c)도 같은 까닭으로 "조용함 · 18분"(조용해진 때부터, 주황 점)이고, title 에 실행 중인 도구와 까닭.
+ * 트레이 요약 창의 에이전트 줄도 같은 글자를 쓴다.
  */
-function agentStatus(a: AgentRow, now: number): Cell {
+export function agentStatus(a: AgentRow, now: number): Cell {
   const label = text.ui.agent.states[a.state]
   const ago = (since: number): string => formatDuration(Math.max(0, now - since))
   if (a.quietSince != null) {

@@ -113,20 +113,47 @@ const candidate = {
   memoryGrowth: null
 } as ServerRow
 
-function setup(over: { notify?: Partial<NotifySettings>; focused?: boolean } = {}): {
+function setup(
+  over: { notify?: Partial<NotifySettings>; focused?: boolean; reminderMs?: number } = {}
+): {
   shown: Notice[]
   clock: { now: number }
+  /** 창이 앞에 있는지(테스트 중에 바꿀 수 있다). */
+  window: { focused: boolean }
   update: (s: DashboardSnapshot) => void
 } {
   const shown: Notice[] = []
   const clock = { now: 0 }
+  const window = { focused: over.focused ?? false }
   const notifier = createNotifier({
     show: (n) => shown.push(n),
     settings: () => ({ ...DEFAULT_SETTINGS.notify, ...over.notify }),
-    isFocused: () => over.focused ?? false,
-    now: () => clock.now
+    isFocused: () => window.focused,
+    now: () => clock.now,
+    reminderMs: () => over.reminderMs ?? DEFAULT_SETTINGS.waitingReminderMinutes * MIN
   })
-  return { shown, clock, update: notifier.update }
+  return { shown, clock, window, update: notifier.update }
+}
+
+/** 명령·요청·세션 제목(알림에 들어가면 안 되는 내용)을 들고 있는 하는 일. */
+const SECRET = 'npm run deploy --token=abc123'
+function activity(waitingTool: string | null = null): AgentRow['activity'] {
+  return {
+    title: `배포 ${SECRET}`,
+    prompt: `이걸로 배포해 줘: ${SECRET}`,
+    tool: waitingTool ? null : { name: 'Bash', summary: SECRET, since: 0 },
+    waiting: waitingTool ? { tool: waitingTool, summary: SECRET } : null
+  }
+}
+
+/** 정확한 상태(훅)를 아는 에이전트. */
+function hooked(
+  pid: number,
+  state: AgentRow['state'],
+  stateSince = 0,
+  root = 'C:\\work\\shop-web'
+): AgentRow {
+  return { ...agent(pid, state, root), stateSource: 'hook', stateSince }
 }
 
 describe('RAM 부족', () => {
@@ -259,7 +286,8 @@ describe('Claude 권한 대기', () => {
       {
         title: 'Claude 가 권한을 기다려요',
         body: 'shop-web · develop',
-        target: 'agent:5000:5000'
+        target: 'agent:5000:5000',
+        focusAgentKey: 'agent:5000:5000'
       }
     ])
     // 계속 기다리는 중이면 다시 알리지 않고, 풀렸다가 다시 기다리면 새 요청이라 알린다.
@@ -355,16 +383,6 @@ describe('무거운 작업 겹침', () => {
 })
 
 describe('작업 끝남(F4)', () => {
-  /** 정확한 상태(훅)를 아는 에이전트. */
-  function hooked(
-    pid: number,
-    state: AgentRow['state'],
-    stateSince: number,
-    root = 'C:\\work\\shop-web'
-  ): AgentRow {
-    return { ...agent(pid, state, root), stateSource: 'hook', stateSince }
-  }
-
   test('2분 넘게 일한 뒤 끝나면 알린다(그 에이전트로 가는 대상)', () => {
     const { shown, clock, update } = setup()
     update(snap({ agents: [hooked(1, 'working', 0)] }))
@@ -374,7 +392,8 @@ describe('작업 끝남(F4)', () => {
       {
         title: 'shop-web 의 Claude 가 작업을 끝냈어요',
         body: '12분 동안 일했어요.',
-        target: 'agent:1:1'
+        target: 'agent:1:1',
+        focusAgentKey: 'agent:1:1'
       }
     ])
   })
@@ -401,7 +420,8 @@ describe('작업 끝남(F4)', () => {
       {
         title: 'shop-web 의 Claude 가 작업을 끝냈어요',
         body: '3분 동안 일했어요.',
-        target: 'agent:1:1'
+        target: 'agent:1:1',
+        focusAgentKey: 'agent:1:1'
       }
     ])
   })
@@ -460,4 +480,322 @@ describe('작업 끝남(F4)', () => {
     update(snap({ agents: [hooked(1, 'waiting', clock.now)] }))
     expect(shown).toEqual([])
   })
+})
+
+describe('권한 대기 본문·다시 알림(G3e)', () => {
+  /** 훅으로 권한 대기인 에이전트(기다리는 도구와 그 명령 요약을 안다). */
+  const waitingOn = (pid: number, since: number, root?: string): AgentRow => ({
+    ...hooked(pid, 'waiting', since, root),
+    activity: activity('Bash')
+  })
+
+  test('권한 대기 본문에 도구 이름은 있고 명령 요약은 없다', () => {
+    const { shown, update } = setup()
+    update(snap({ agents: [hooked(5000, 'working')] }))
+    update(snap({ agents: [waitingOn(5000, 0)] }))
+    expect(shown).toEqual([
+      {
+        title: 'Claude 가 권한을 기다려요',
+        body: 'shop-web · develop — Bash',
+        target: 'agent:5000:5000',
+        focusAgentKey: 'agent:5000:5000'
+      }
+    ])
+    // 기다리는 도구를 모르면(하는 일 보기를 끔) 폴더 · 브랜치만.
+    const unknown = setup()
+    unknown.update(snap({ agents: [hooked(5000, 'working')] }))
+    unknown.update(snap({ agents: [{ ...hooked(5000, 'waiting'), activity: null }] }))
+    expect(unknown.shown[0].body).toBe('shop-web · develop')
+  })
+
+  test('10분 넘게 계속 기다리면 다시 알리고, 0 이면 다시 알리지 않는다', () => {
+    const { shown, clock, update } = setup()
+    update(snap({ agents: [hooked(5000, 'working')] }))
+    update(snap({ agents: [waitingOn(5000, 0)] }))
+    clock.now = 10 * MIN - 1
+    update(snap({ agents: [waitingOn(5000, 0)] }))
+    expect(shown).toHaveLength(1)
+    clock.now = 10 * MIN
+    update(snap({ agents: [waitingOn(5000, 0)] }))
+    expect(shown[1]).toEqual({
+      title: 'Claude 가 10분째 권한을 기다려요',
+      body: 'shop-web · develop — Bash',
+      target: 'agent:5000:5000',
+      focusAgentKey: 'agent:5000:5000'
+    })
+    // 계속 기다리면 마지막으로 알린 뒤 10분마다 또 알린다.
+    clock.now = 15 * MIN
+    update(snap({ agents: [waitingOn(5000, 0)] }))
+    expect(shown).toHaveLength(2)
+    clock.now = 20 * MIN
+    update(snap({ agents: [waitingOn(5000, 0)] }))
+    expect(shown.slice(2).map((n) => n.title)).toEqual(['Claude 가 20분째 권한을 기다려요'])
+    // 풀렸다가 다시 기다리면 새 대기라 첫 알림부터 다시 센다.
+    clock.now = 21 * MIN
+    update(snap({ agents: [hooked(5000, 'working', 21 * MIN)] }))
+    clock.now = 22 * MIN
+    update(snap({ agents: [waitingOn(5000, 22 * MIN)] }))
+    clock.now = 31 * MIN
+    update(snap({ agents: [waitingOn(5000, 22 * MIN)] }))
+    clock.now = 32 * MIN
+    update(snap({ agents: [waitingOn(5000, 22 * MIN)] }))
+    expect(shown.slice(3).map((n) => n.title)).toEqual([
+      'Claude 가 권한을 기다려요',
+      'Claude 가 10분째 권한을 기다려요'
+    ])
+
+    const never = setup({ reminderMs: 0 })
+    never.update(snap({ agents: [hooked(5000, 'working')] }))
+    never.update(snap({ agents: [waitingOn(5000, 0)] }))
+    for (let m = 5; m <= 60; m += 5) {
+      never.clock.now = m * MIN
+      never.update(snap({ agents: [waitingOn(5000, 0)] }))
+    }
+    expect(never.shown).toHaveLength(1)
+  })
+
+  test('다시 알릴 때 창이 앞에 있으면 보내지 않고 다음 간격에 다시 본다, 권한 대기 알림을 끄면 다시 알리지도 않는다', () => {
+    const { shown, clock, window, update } = setup()
+    update(snap({ agents: [hooked(5000, 'working')] }))
+    update(snap({ agents: [waitingOn(5000, 0)] }))
+    window.focused = true
+    clock.now = 10 * MIN
+    update(snap({ agents: [waitingOn(5000, 0)] }))
+    window.focused = false
+    clock.now = 11 * MIN
+    update(snap({ agents: [waitingOn(5000, 0)] }))
+    expect(shown).toHaveLength(1)
+    clock.now = 20 * MIN
+    update(snap({ agents: [waitingOn(5000, 0)] }))
+    expect(shown.map((n) => n.title)).toEqual([
+      'Claude 가 권한을 기다려요',
+      'Claude 가 20분째 권한을 기다려요'
+    ])
+
+    const off = setup({ notify: { claudeWaiting: false } })
+    off.update(snap({ agents: [hooked(5000, 'working')] }))
+    off.update(snap({ agents: [waitingOn(5000, 0)] }))
+    off.clock.now = 30 * MIN
+    off.update(snap({ agents: [waitingOn(5000, 0)] }))
+    expect(off.shown).toEqual([])
+  })
+
+  test('시작할 때 이미 기다리던 세션은 바로 알리지 않고, 계속 기다리면 간격 뒤에 다시 알림으로 알린다', () => {
+    const { shown, clock, update } = setup()
+    clock.now = 30 * MIN
+    update(snap({ agents: [waitingOn(5000, 0)] }))
+    expect(shown).toEqual([])
+    clock.now = 40 * MIN
+    update(snap({ agents: [waitingOn(5000, 0)] }))
+    expect(shown.map((n) => n.title)).toEqual(['Claude 가 40분째 권한을 기다려요'])
+  })
+
+  test('여럿이 함께 다시 알릴 때가 되면 하나로 묶는다', () => {
+    const { shown, clock, update } = setup()
+    const both = (): DashboardSnapshot =>
+      snap({ agents: [waitingOn(5000, 0), waitingOn(5100, 0, 'C:\\work\\wt-a')] })
+    update(
+      snap({ agents: [hooked(5000, 'working'), hooked(5100, 'working', 0, 'C:\\work\\wt-a')] })
+    )
+    update(both())
+    clock.now = 10 * MIN
+    update(both())
+    const many = {
+      title: 'Claude 2개가 권한을 기다려요',
+      body: 'shop-web · develop, wt-a · develop',
+      target: null
+    }
+    expect(shown).toEqual([many, many])
+  })
+})
+
+describe('조용함·꺼짐 알림(G3e)', () => {
+  /** 훅으로 작업 중인 에이전트. quietSince 가 있으면 조용한 에이전트(G3c). */
+  const quiet = (pid: number, quietSince: number | null, root?: string): AgentRow => ({
+    ...hooked(pid, 'working', 0, root),
+    quietSince,
+    activity: activity()
+  })
+
+  test('조용함은 생길 때 한 번', () => {
+    const { shown, clock, update } = setup()
+    update(snap({ agents: [quiet(1, null)] }))
+    clock.now = 16 * MIN
+    update(snap({ agents: [quiet(1, MIN)] }))
+    expect(shown).toEqual([
+      {
+        title: 'shop-web 의 Claude 가 조용해요',
+        body: '15분째 이벤트가 없어요. 멈췄는지 확인해 보세요.',
+        target: 'agent:1:1',
+        focusAgentKey: 'agent:1:1'
+      }
+    ])
+    clock.now = 40 * MIN
+    update(snap({ agents: [quiet(1, MIN)] }))
+    expect(shown).toHaveLength(1)
+    // 이벤트가 와서 풀렸다가 다시 조용해지면 새로 알린다.
+    update(snap({ agents: [quiet(1, null)] }))
+    clock.now = 60 * MIN
+    update(snap({ agents: [quiet(1, 41 * MIN)] }))
+    expect(shown.slice(1).map((n) => n.body)).toEqual([
+      '19분째 이벤트가 없어요. 멈췄는지 확인해 보세요.'
+    ])
+  })
+
+  test('여럿이 함께 조용해지면 하나로, 시작할 때 이미 조용했거나 창이 앞에 있거나 설정에서 끄면 알리지 않는다', () => {
+    const many = setup()
+    many.update(snap({ agents: [quiet(1, null), quiet(2, null, 'C:\\work\\api')] }))
+    many.clock.now = 16 * MIN
+    many.update(snap({ agents: [quiet(1, MIN), quiet(2, MIN, 'C:\\work\\api')] }))
+    expect(many.shown).toEqual([
+      { title: '에이전트 2개가 조용해요', body: 'shop-web · develop, api · develop', target: null }
+    ])
+
+    const start = setup()
+    start.update(snap({ agents: [quiet(1, 0)] }))
+    start.update(snap({ agents: [quiet(1, 0)] }))
+    expect(start.shown).toEqual([])
+
+    for (const over of [{ focused: true }, { notify: { agentQuiet: false } }]) {
+      const quietOff = setup(over)
+      quietOff.update(snap({ agents: [quiet(1, null)] }))
+      quietOff.clock.now = 16 * MIN
+      quietOff.update(snap({ agents: [quiet(1, MIN)] }))
+      expect(quietOff.shown).toEqual([])
+    }
+  })
+
+  test('작업 중이던 에이전트가 사라지면 꺼짐 알림, CPU 추정이던 것은 알리지 않는다', () => {
+    const { shown, update } = setup()
+    const cpu: AgentRow = { ...agent(2, 'working', 'C:\\work\\api'), stateSource: 'cpu' }
+    update(snap({ agents: [{ ...hooked(1, 'working'), activity: activity() }, cpu] }))
+    // 지연된 스냅샷에서 빠진 것은 꺼진 것으로 보지 않는다.
+    update({ ...snap({ agents: [] }), stale: true })
+    expect(shown).toEqual([])
+    update(snap({ agents: [] }))
+    expect(shown).toEqual([
+      {
+        title: 'shop-web 의 Claude 가 꺼졌어요',
+        body: '작업 중이었어요.',
+        target: 'agent:1:1',
+        focusAgentKey: 'agent:1:1'
+      }
+    ])
+
+    // 권한을 기다리던 것, 세션 기록(rollout)·세션 파일로 안 정확한 상태도 알린다.
+    const waiting = setup({ notify: { claudeWaiting: false } })
+    waiting.update(snap({ agents: [hooked(1, 'waiting')] }))
+    waiting.update(snap({ agents: [] }))
+    expect(waiting.shown.map((n) => n.body)).toEqual(['권한을 기다리던 중이었어요.'])
+    const codex = setup()
+    codex.update(
+      snap({ agents: [{ ...agent(3, 'working'), tool: 'codex', stateSource: 'rollout' }] })
+    )
+    codex.update(snap({ agents: [] }))
+    expect(codex.shown.map((n) => n.title)).toEqual(['shop-web 의 Codex 가 꺼졌어요'])
+    const file = setup()
+    file.update(snap({ agents: [{ ...agent(4, 'working'), stateSource: 'file' }] }))
+    file.update(snap({ agents: [] }))
+    expect(file.shown).toHaveLength(1)
+  })
+
+  test('쉬는 중이던 에이전트가 사라지면 알리지 않는다', () => {
+    const { shown, update } = setup()
+    update(snap({ agents: [hooked(1, 'idle'), hooked(2, 'error'), hooked(3, 'unknown')] }))
+    update(snap({ agents: [] }))
+    expect(shown).toEqual([])
+  })
+
+  test('여럿이 함께 꺼지면 하나로, 창이 앞에 있거나 설정에서 끄면 알리지 않는다', () => {
+    const many = setup()
+    many.update(snap({ agents: [hooked(1, 'working'), hooked(2, 'waiting', 0, 'C:\\work\\api')] }))
+    many.update(snap({ agents: [] }))
+    expect(many.shown).toEqual([
+      { title: '에이전트 2개가 꺼졌어요', body: 'shop-web · develop, api · develop', target: null }
+    ])
+
+    for (const over of [{ focused: true }, { notify: { agentGone: false } }]) {
+      const goneOff = setup(over)
+      goneOff.update(snap({ agents: [hooked(1, 'working')] }))
+      goneOff.update(snap({ agents: [] }))
+      expect(goneOff.shown).toEqual([])
+    }
+  })
+})
+
+test('어떤 알림에도 명령·요청·세션 제목이 들어가지 않는다(도구 이름까지만)', () => {
+  const { shown, clock, update } = setup()
+  interface Look {
+    state: AgentRow['state']
+    since?: number
+    quietSince?: number
+  }
+  type Looks = Record<number, Look>
+  /** 에이전트 1~9 의 모습(주지 않은 것은 처음부터 작업 중). */
+  const all = (looks: Looks): Looks => ({
+    ...Object.fromEntries([1, 2, 3, 4, 5, 6, 7, 8, 9].map((pid) => [pid, { state: 'working' }])),
+    ...looks
+  })
+  const without = (looks: Looks, ...pids: number[]): Looks =>
+    Object.fromEntries(Object.entries(all(looks)).filter(([pid]) => !pids.includes(Number(pid))))
+  const at = (min: number, looks: Looks): void => {
+    clock.now = min * MIN
+    update(
+      snap({
+        agents: Object.entries(looks).map(([pid, look]) => ({
+          ...hooked(Number(pid), look.state, look.since ?? 0, `C:\\work\\wt-${pid}`),
+          quietSince: look.quietSince ?? null,
+          activity: activity(look.state === 'waiting' ? 'Bash' : null)
+        }))
+      })
+    )
+  }
+  const wait1: Looks = { 1: { state: 'waiting', since: MIN } }
+  const wait3: Looks = {
+    ...wait1,
+    2: { state: 'waiting', since: 2 * MIN },
+    3: { state: 'waiting', since: 2 * MIN }
+  }
+  const quiet1: Looks = { ...wait3, 4: { state: 'working', quietSince: 5 * MIN } }
+  const quiet3: Looks = {
+    ...quiet1,
+    5: { state: 'working', quietSince: 6 * MIN },
+    6: { state: 'working', quietSince: 6 * MIN }
+  }
+  const done1: Looks = { ...quiet3, 7: { state: 'idle', since: 22 * MIN } }
+  const done3: Looks = {
+    ...done1,
+    8: { state: 'idle', since: 23 * MIN },
+    9: { state: 'idle', since: 23 * MIN }
+  }
+  at(0, all({}))
+  at(1, all(wait1)) // 권한 대기 하나
+  at(2, all(wait3)) // 권한 대기 여럿
+  at(11, all(wait3)) // 다시 알림 하나
+  at(12, all(wait3)) // 다시 알림 여럿
+  at(20, all(quiet1)) // 조용함 하나
+  at(21, all(quiet3)) // 조용함 여럿
+  at(22, all(done1)) // 작업 끝남 하나
+  at(23, all(done3)) // 작업 끝남 여럿
+  at(24, without(done3, 1)) // 꺼짐 하나
+  at(25, without(done3, 1, 4, 5)) // 꺼짐 여럿
+  expect(shown.map((n) => n.title)).toEqual(
+    expect.arrayContaining([
+      'Claude 가 권한을 기다려요',
+      'Claude 2개가 권한을 기다려요',
+      'Claude 가 10분째 권한을 기다려요',
+      'wt-4 의 Claude 가 조용해요',
+      '에이전트 2개가 조용해요',
+      'wt-7 의 Claude 가 작업을 끝냈어요',
+      '에이전트 2개가 작업을 끝냈어요',
+      'wt-1 의 Claude 가 꺼졌어요',
+      '에이전트 2개가 꺼졌어요'
+    ])
+  )
+  expect(shown.some((n) => n.body.includes('Bash'))).toBe(true)
+  for (const n of shown) {
+    expect(n.title).not.toContain(SECRET)
+    expect(n.body).not.toContain(SECRET)
+    expect(`${n.title} ${n.body}`).not.toContain('배포')
+  }
 })

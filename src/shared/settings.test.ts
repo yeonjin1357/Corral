@@ -21,7 +21,15 @@ test('기본값: 보통 갱신, 자동 테마, 로그인 시 실행·업데이�
     ramDangerPercent: 90,
     idlePortMinutes: 20,
     agentParkedMinutes: 180,
-    notify: { ramLow: true, claudeWaiting: true, heavyOverlap: true, agentDone: true },
+    waitingReminderMinutes: 10,
+    notify: {
+      ramLow: true,
+      claudeWaiting: true,
+      heavyOverlap: true,
+      agentDone: true,
+      agentQuiet: true,
+      agentGone: true
+    },
     dependencyDirs: [
       'node_modules',
       '.next',
@@ -139,13 +147,29 @@ test('무거운 명령 패턴: 공백 정리·빈 값·중복(대소문자 무�
 
 test('알림은 항목별로, 빠진 항목은 기본값', () => {
   expect(
-    normalizeSettings({ notify: { ramLow: false, heavyOverlap: 'no', agentDone: false } }).notify
+    normalizeSettings({
+      notify: { ramLow: false, heavyOverlap: 'no', agentDone: false, agentGone: false }
+    }).notify
   ).toEqual({
     ramLow: false,
     claudeWaiting: true,
     heavyOverlap: true,
-    agentDone: false
+    agentDone: false,
+    agentQuiet: true,
+    agentGone: false
   })
+  expect(normalizeSettings({ notify: { agentQuiet: false } }).notify.agentQuiet).toBe(false)
+})
+
+test('권한 대기 다시 알림은 0~120분(0 이면 끔), 기본 10분', () => {
+  expect(DEFAULT_SETTINGS.waitingReminderMinutes).toBe(10)
+  expect(normalizeSettings({}).waitingReminderMinutes).toBe(10)
+  expect(normalizeSettings({ waitingReminderMinutes: 0 }).waitingReminderMinutes).toBe(0)
+  expect(normalizeSettings({ waitingReminderMinutes: -5 }).waitingReminderMinutes).toBe(0)
+  expect(normalizeSettings({ waitingReminderMinutes: 500 }).waitingReminderMinutes).toBe(120)
+  expect(normalizeSettings({ waitingReminderMinutes: 12.6 }).waitingReminderMinutes).toBe(13)
+  expect(normalizeSettings({ waitingReminderMinutes: '5' }).waitingReminderMinutes).toBe(10)
+  expect(normalizeSettings({ waitingReminderMinutes: NaN }).waitingReminderMinutes).toBe(10)
 })
 
 test('의존성 폴더 이름은 폴더 이름 하나만(경로·상위 폴더·.git 불가), 20개까지', () => {

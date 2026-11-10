@@ -184,6 +184,39 @@ test('설정 > 기준값에서 오래 쉬는 세션 기준(분)을 바꿔 저장
   w.unmount()
 })
 
+test('설정 > 알림에서 조용함·꺼짐 알림을 끄고 권한 대기 다시 알림(분)을 바꿔 저장한다', async () => {
+  const f = fake()
+  const w = await start(f)
+  f.navigate({ page: 'settings' })
+  await flushPromises()
+  await w
+    .findAll('button')
+    .find((b) => b.text().trim() === '알림')!
+    .trigger('click')
+  expect(w.text()).toContain(
+    '훅으로 작업 중인 에이전트가 15분 넘게 이벤트도 CPU 사용도 없으면 알려요. 오래 걸리는 명령을 기다리는 중일 수도 있어요.'
+  )
+  expect(w.text()).toContain('작업 중이거나 권한을 기다리던 에이전트가 꺼지면 알려요.')
+  expect(w.text()).toContain(
+    '권한 대기가 이 시간 넘게 이어지면 다시 알려요. 0 이면 다시 알리지 않아요.'
+  )
+  const quiet = w.find('#notify-quiet')
+  const gone = w.find('#notify-gone')
+  expect(quiet.attributes('aria-checked')).toBe('true')
+  expect(gone.attributes('aria-checked')).toBe('true')
+  const reminder = w.find('#waiting-reminder')
+  expect((reminder.element as HTMLInputElement).value).toBe('10')
+  expect(reminder.attributes()).toMatchObject({ min: '0', max: '120' })
+  await quiet.trigger('click')
+  await gone.trigger('click')
+  await reminder.setValue('0')
+  await w.find('form').trigger('submit')
+  await flushPromises()
+  expect(f.saved.at(-1)?.notify).toMatchObject({ agentQuiet: false, agentGone: false })
+  expect(f.saved.at(-1)?.waitingReminderMinutes).toBe(0)
+  w.unmount()
+})
+
 test('설정 > 에이전트 연동에서 "에이전트가 하는 일 보기"를 끄고 저장한다', async () => {
   const f = fake()
   const w = await start(f)

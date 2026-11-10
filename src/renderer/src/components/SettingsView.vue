@@ -487,6 +487,18 @@ const NOTICES_URL = `${REPO_URL}/blob/main/THIRD_PARTY_NOTICES.md`
                     help: S.notifyAgentDoneHelp
                   },
                   {
+                    id: 'notify-quiet',
+                    key: 'agentQuiet' as const,
+                    label: S.notifyAgentQuiet,
+                    help: S.notifyAgentQuietHelp
+                  },
+                  {
+                    id: 'notify-gone',
+                    key: 'agentGone' as const,
+                    label: S.notifyAgentGone,
+                    help: S.notifyAgentGoneHelp
+                  },
+                  {
                     id: 'notify-heavy',
                     key: 'heavyOverlap' as const,
                     label: S.notifyHeavy,
@@ -500,6 +512,26 @@ const NOTICES_URL = `${REPO_URL}/blob/main/THIRD_PARTY_NOTICES.md`
                 <div>
                   <Label :for="item.id">{{ item.label }}</Label>
                   <p class="mt-1 text-xs leading-relaxed text-muted-foreground">{{ item.help }}</p>
+                </div>
+              </div>
+              <div class="flex items-center justify-between gap-6">
+                <div>
+                  <Label for="waiting-reminder">{{ S.waitingReminder }}</Label>
+                  <p class="mt-1 text-xs leading-relaxed text-muted-foreground">
+                    {{ S.waitingReminderHelp }}
+                  </p>
+                </div>
+                <div class="flex shrink-0 items-center gap-2">
+                  <Input
+                    id="waiting-reminder"
+                    v-model.number="draft.waitingReminderMinutes"
+                    type="number"
+                    class="w-20 text-right tabular-nums"
+                    :min="SETTINGS_LIMITS.waitingReminderMinutes.min"
+                    :max="SETTINGS_LIMITS.waitingReminderMinutes.max"
+                    required
+                  />
+                  <span class="w-6 text-sm text-muted-foreground">{{ S.minutes }}</span>
                 </div>
               </div>
             </CardContent>

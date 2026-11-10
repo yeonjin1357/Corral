@@ -17,12 +17,12 @@ import {
   Sparkles
 } from '@lucide/vue'
 import type { DashboardSnapshot } from '../../shared/types'
-import { formatBytes, formatDuration, formatFreed, worktreeFolder } from '../../shared/format'
+import { formatBytes, formatFreed, worktreeFolder } from '../../shared/format'
 import { selectionKey } from '../../shared/keys'
 import { cleanupRecommendation } from '../../shared/recommend'
 import { text } from '../../shared/text'
 import { watchColorScheme } from './theme'
-import { agentIcon, workspaceSummary } from './rows'
+import { agentIcon, agentStatus, workspaceSummary } from './rows'
 import logo from '../../../resources/icon-small.png'
 import Card from './ui/Card.vue'
 import CardHeader from './ui/CardHeader.vue'
@@ -85,17 +85,17 @@ const agentCounts = computed(() => {
 })
 const recommendation = computed(() => (s.value ? cleanupRecommendation(s.value) : null))
 const workspaces = computed(() => (s.value ? workspaceSummary(s.value).slice(0, 5) : []))
-/** 사용자가 봐야 할 것(권한 대기·오류·작업 중)이 먼저. */
-const ORDER = { waiting: 0, error: 1, working: 2, idle: 3, unknown: 4 }
+type Agent = DashboardSnapshot['agents'][number]
+/** 사용자가 봐야 할 것(권한 대기·조용함·오류·작업 중)이 먼저. */
+const ORDER = { waiting: 0, quiet: 1, error: 2, working: 3, idle: 4, unknown: 5 }
+const rank = (a: Agent): number => (a.quietSince != null ? ORDER.quiet : ORDER[a.state])
 const agents = computed(() =>
-  [...(s.value?.agents ?? [])].sort((a, b) => ORDER[a.state] - ORDER[b.state]).slice(0, 4)
+  [...(s.value?.agents ?? [])].sort((a, b) => rank(a) - rank(b)).slice(0, 4)
 )
-const agentState = (a: DashboardSnapshot['agents'][number]): string => {
-  const label = text.ui.agent.states[a.state]
-  return a.stateSince != null && a.state !== 'unknown' && s.value
-    ? text.ui.rowStatus.withTime(label, formatDuration(Math.max(0, s.value.takenAt - a.stateSince)))
-    : label
-}
+/** 표(에이전트 탭)와 같은 상태 글자: "권한 대기 · 3분", "조용함 · 18분", "오래 쉼 · 3시간". */
+const agentState = (a: Agent): string => agentStatus(a, s.value?.takenAt ?? 0).text
+/** 사용자를 기다리는(권한 대기·조용함) 줄은 주황. */
+const needsAttention = (a: Agent): boolean => a.state === 'waiting' || a.quietSince != null
 const subtitle = computed(() => (!s.value ? T.reading : s.value.stale ? T.stale : T.live))
 </script>
 
@@ -239,9 +239,7 @@ const subtitle = computed(() => (!s.value ? T.reading : s.value.stale ? T.stale 
               }}</span>
               <span
                 class="shrink-0 text-xs tabular-nums"
-                :class="
-                  a.state === 'waiting' ? 'text-[color:var(--peach)]' : 'text-muted-foreground'
-                "
+                :class="needsAttention(a) ? 'text-[color:var(--peach)]' : 'text-muted-foreground'"
                 >{{ agentState(a) }}</span
               >
             </Button>

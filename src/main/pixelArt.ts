@@ -2,7 +2,7 @@
  * pitwall 아이콘: NeoHtop 앱 아이콘처럼 검은 둥근 판 위 픽셀 그림 하나("피트월 모니터" — 모니터와 심박 같은 그래프).
  * - 큰 아이콘(앱·설치 파일·macOS): 둥근 판 가운데에 16×16 그림. 테두리만 부드럽게(4×4 표본) 칠한다.
  * - 작은 아이콘(16·24·32px, 트레이·작업 표시줄·제목줄): 큰 그림을 줄이면 흐려지므로, 판을 꽉 채운 16×16 그림을
- *   정수배로 칠한다. 그래프 선 색으로 RAM 상태(정상·경고·위험)를 보인다.
+ *   정수배로 칠한다. 그래프 선 색으로 RAM 상태(정상·경고·위험)를, 오른쪽 위 주황 점으로 사용자를 기다리는 에이전트를 보인다.
  * 외부 라이브러리 없이 RGBA → PNG·ICO 로 만든다(scripts/make-icon.mjs 와 트레이가 같이 쓴다).
  */
 import { deflateSync } from 'node:zlib'
@@ -52,17 +52,34 @@ export const SMALL_GRID = [
   '.KKKKKKKKKKKKKK.'
 ]
 
+/**
+ * 작은 아이콘 오른쪽 위에 얹는 점(G3d — 권한 대기·조용한 에이전트). 지름 5칸, D 테두리(판 색), O 점 색,
+ * . 아래 그림 그대로. 작은 아이콘과 같이 정수배로 커진다(32px 에서 지름 10px·테두리 2px).
+ */
+export const DOT_GRID = ['.DDD.', 'DOOOD', 'DOOOD', 'DOOOD', '.DDD.']
+const DOT_LEFT = 16 - DOT_GRID[0].length
+
 type RGB = [number, number, number]
 const rgb = (hex: string): RGB => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)) as RGB
 
-/** 작은 아이콘(16의 정수배 크기). lineColor: 그래프 선 색(#rrggbb). */
-export function renderSmallIcon(lineColor: string, size: number): Buffer {
+/** 작은 아이콘(16의 정수배 크기). lineColor: 그래프 선 색(#rrggbb), dot: 있으면 오른쪽 위 점 색(#rrggbb). */
+export function renderSmallIcon(lineColor: string, size: number, dot?: string): Buffer {
   const scale = size / 16
-  const palette: Record<string, RGB> = { K: rgb(APP_TILE), W: [255, 255, 255], L: rgb(lineColor) }
+  const palette: Record<string, RGB> = {
+    K: rgb(APP_TILE),
+    W: [255, 255, 255],
+    L: rgb(lineColor),
+    D: rgb(APP_TILE),
+    ...(dot ? { O: rgb(dot) } : {})
+  }
+  const cellAt = (gx: number, gy: number): string => {
+    const d = dot ? (DOT_GRID[gy]?.[gx - DOT_LEFT] ?? '.') : '.'
+    return d === '.' ? SMALL_GRID[gy][gx] : d
+  }
   const out = Buffer.alloc(size * size * 4)
   for (let y = 0; y < size; y++)
     for (let x = 0; x < size; x++) {
-      const c = SMALL_GRID[Math.floor(y / scale)][Math.floor(x / scale)]
+      const c = cellAt(Math.floor(x / scale), Math.floor(y / scale))
       if (c === '.') continue
       const i = (y * size + x) * 4
       ;[out[i], out[i + 1], out[i + 2]] = palette[c]

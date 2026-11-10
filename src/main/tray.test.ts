@@ -1,5 +1,7 @@
 import {
+  BADGE_COLOR,
   buildTrayMenu,
+  trayBadge,
   trayTooltip,
   LEVEL_COLORS,
   createTrayController,
@@ -54,6 +56,28 @@ function snap(over: Partial<DashboardSnapshot> = {}): DashboardSnapshot {
     platform: 'win32',
     cpuCount: 8,
     ...over
+  }
+}
+
+function agentRow(state: AgentRow['state'], quietSince: number | null = null): AgentRow {
+  return {
+    pid: 1,
+    tool: 'claude',
+    worktree: null,
+    workspace: null,
+    startedAt: 1,
+    memoryBytes: 1,
+    commitBytes: null,
+    descendantCount: 0,
+    processes: [],
+    state,
+    stateSource: 'hook',
+    stateSince: null,
+    cpuPercent: 0,
+    lastActiveAt: null,
+    parked: false,
+    activity: null,
+    quietSince
   }
 }
 
@@ -235,9 +259,26 @@ test('툴팁', () => {
   ).toBe('pitwall — 커밋 91%')
 })
 
+test('풍선말에 권한 대기 수', () => {
+  expect(
+    trayTooltip(snap({ agents: [agentRow('waiting'), agentRow('working'), agentRow('waiting')] }))
+  ).toBe('pitwall — RAM 82% · 권한 대기 2')
+  // 조용한 에이전트는 점으로만 보이고 풍선말에는 세지 않는다.
+  expect(trayTooltip(snap({ agents: [agentRow('working', 1)] }))).toBe('pitwall — RAM 82%')
+})
+
 describe('아이콘', () => {
-  test('상태 색은 화면과 같은 Catppuccin(정상 초록·경고 노랑·위험 분홍)', () => {
+  test('상태 색은 화면과 같은 Catppuccin(정상 초록·경고 노랑·위험 분홍), 점은 주황', () => {
     expect(LEVEL_COLORS).toEqual({ normal: '#a6e3a1', warn: '#f9e2af', danger: '#f38ba8' })
+    expect(BADGE_COLOR).toBe('#fab387')
+  })
+
+  test('권한 대기나 조용한 에이전트가 있으면 점', () => {
+    expect(trayBadge(null)).toBe(false)
+    expect(trayBadge(snap())).toBe(false)
+    expect(trayBadge(snap({ agents: [agentRow('working'), agentRow('idle')] }))).toBe(false)
+    expect(trayBadge(snap({ agents: [agentRow('waiting')] }))).toBe(true)
+    expect(trayBadge(snap({ agents: [agentRow('working', 1)] }))).toBe(true)
   })
 })
 
@@ -300,6 +341,30 @@ describe('createTrayController', () => {
     )
     expect(tray.setImage).toHaveBeenLastCalledWith('icon:danger')
     expect(vi.mocked(tray.setContextMenu)).toHaveBeenCalledTimes(3)
+  })
+
+  test('권한 대기가 있으면 점이 있는 아이콘, 없어지면 점 없는 아이콘', () => {
+    const tray = fakeTray()
+    const makeIcon = vi.fn((level: string, badge: boolean) => `icon:${level}${badge ? ':dot' : ''}`)
+    const controller = createTrayController({
+      tray,
+      makeIcon,
+      buildMenu: (items) => ({ items }),
+      actions: { open: vi.fn(), settings: vi.fn(), quit: vi.fn() },
+      platform: 'win32'
+    })
+    expect(tray.setImage).toHaveBeenLastCalledWith('icon:normal')
+    controller.update(snap({ agents: [agentRow('waiting')] }))
+    expect(tray.setImage).toHaveBeenLastCalledWith('icon:warn:dot')
+    // 같은 단계·같은 점이면 아이콘을 다시 넣지 않는다.
+    controller.update(snap({ agents: [agentRow('waiting')], takenAt: 2 }))
+    expect(tray.setImage).toHaveBeenCalledTimes(2)
+    controller.update(snap({ agents: [agentRow('working')] }))
+    expect(tray.setImage).toHaveBeenLastCalledWith('icon:warn')
+    // 조용한 에이전트도 점.
+    controller.update(snap({ agents: [agentRow('working', 1)] }))
+    expect(tray.setImage).toHaveBeenLastCalledWith('icon:warn:dot')
+    expect(tray.setImage).toHaveBeenCalledTimes(4)
   })
 
   test('처음엔 normal 아이콘과 확인 중 메뉴', () => {

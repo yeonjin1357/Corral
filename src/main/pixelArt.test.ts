@@ -42,6 +42,42 @@ describe('작은 아이콘(16px 트레이·작업 표시줄): 피트월 모니�
   })
 })
 
+test('점을 주면 오른쪽 위 픽셀이 주황', () => {
+  const orange = [...hex('#fab387'), 255]
+  const dark = [...hex(APP_TILE), 255]
+  const plain = renderSmallIcon('#a6e3a1', 16)
+  const dotted = renderSmallIcon('#a6e3a1', 16, '#fab387')
+  // 16px: 오른쪽 위 5×5(x 11~15, y 0~4)에 지름 5px 점. 가운데 3×3 주황, 테두리 1px 어두운 색.
+  for (let y = 1; y <= 3; y++)
+    for (let x = 12; x <= 14; x++) expect(px(dotted, 16, x, y)).toEqual(orange)
+  expect(px(plain, 16, 13, 3)).not.toEqual(orange)
+  expect(px(plain, 16, 13, 4)).toEqual([255, 255, 255, 255]) // 원래는 모니터 테두리(흰색)
+  expect(px(dotted, 16, 13, 4)).toEqual(dark)
+  expect(px(dotted, 16, 15, 2)).toEqual(dark)
+  expect(px(dotted, 16, 13, 0)).toEqual(dark)
+  // 점의 네 모서리는 원래 그림 그대로(판 모서리는 투명).
+  expect(px(dotted, 16, 15, 0)[3]).toBe(0)
+  expect(px(dotted, 16, 11, 4)).toEqual(px(plain, 16, 11, 4))
+  // 점 밖은 그대로.
+  for (const [x, y] of [
+    [10, 2],
+    [13, 5],
+    [4, 3],
+    [8, 8]
+  ])
+    expect(px(dotted, 16, x, y)).toEqual(px(plain, 16, x, y))
+
+  // 32px 는 2배: 지름 10px(x 22~31, y 0~9), 테두리 2px.
+  const big = renderSmallIcon('#a6e3a1', 32, '#fab387')
+  expect(px(big, 32, 24, 2)).toEqual(orange)
+  expect(px(big, 32, 29, 7)).toEqual(orange)
+  expect(px(big, 32, 22, 4)).toEqual(dark)
+  expect(px(big, 32, 23, 4)).toEqual(dark)
+  expect(px(big, 32, 26, 8)).toEqual(dark)
+  expect(px(big, 32, 26, 9)).toEqual(dark)
+  expect(px(big, 32, 31, 0)[3]).toBe(0)
+})
+
 test('큰 아이콘: 둥근 검은 판 위 가운데에 모니터, 바깥 여백은 투명', () => {
   const size = 256
   const rgba = renderAppIcon(size)
