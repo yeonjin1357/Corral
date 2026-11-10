@@ -602,8 +602,11 @@ function applySettings(next: Settings): void {
   settings = next
   // 하는 일(G3b) 보기를 끄면 들고 있던 내용도 지운다(화면은 저장 뒤 새로 수집할 때 비워진다).
   if (!next.showAgentActivity) clearActivity(sessions)
-  // 토큰·한도(G6) 읽기를 끄면 들고 있던 숫자와 읽던 위치를 버린다(Codex 는 다음 읽기에서 버린다).
-  if (!next.readUsage) claudeUsage.clear()
+  // 토큰·한도(G6) 읽기를 끄면 들고 있던 숫자를 바로 버린다(Claude 는 읽던 위치도, Codex 는 숫자만).
+  if (!next.readUsage) {
+    claudeUsage.clear()
+    codexReader.dropUsage()
+  }
   scheduler.setIntervals(REFRESH_INTERVALS[next.refresh])
   // 화면(prefers-color-scheme)과 확인 창·메뉴가 같은 테마를 따르도록 OS 테마 설정을 바꾼다.
   nativeTheme.themeSource = next.theme === 'auto' ? 'system' : next.theme

@@ -1829,6 +1829,23 @@ describe('토큰·한도(G6)', () => {
     expect(s.codexLimits).toBeNull()
   })
 
+  test('수집 도중 readUsage 를 끄면 그 수집은 기록을 읽게 하지 않는다', async () => {
+    // 실제처럼 부를 때마다 새 기준값(collectOptionsFrom)을 만든다.
+    const settings = { readUsage: true }
+    // 수집이 Codex 기록을 기다리는 동안 사용자가 설정을 끈다(applySettings 의 clear 는 이미 지나갔다).
+    const { deps, claudeUsage } = claudeSetup(true, {
+      options: () => optionsWith(settings.readUsage),
+      codexInfo: async () => {
+        settings.readUsage = false
+        return { state: null, usage: usage(5), limits: limitsAt(MIN, 10) }
+      }
+    })
+    const s = await createCollector(deps).collect()
+    expect(claudeUsage.want).not.toHaveBeenCalled()
+    expect(s.agents.map((a) => a.usage)).toEqual([null, null, null, null])
+    expect(s.codexLimits).toBeNull()
+  })
+
   test('codexLimits 는 가장 최근 값', async () => {
     // Codex 둘(다른 폴더): 6000(wt-a) 은 CPU 추정, 6100(api) 은 훅으로 쉬는 중이어도 숫자를 읽는다(상태는 훅 그대로).
     const W3: WorktreeInfo = { root: 'C:\\work\\api', branch: 'main', isLinkedWorktree: false }

@@ -1,8 +1,15 @@
-import { open, readdir, stat } from 'fs/promises'
+import { open, readdir, stat, type FileHandle } from 'fs/promises'
 import type { Dirent } from 'fs'
 import { join, resolve } from 'path'
 import type { AgentUsage } from '../shared/types'
-import { jsonlInside, nonNegative } from './codexRollout'
+import {
+  cursorAt,
+  isGone,
+  jsonlInside,
+  nonNegative,
+  readLines,
+  type LineCursor
+} from './jsonlLines'
 
 /**
  * Claude Code 세션 기록에서 토큰 숫자 읽기(G6). Claude Code 는 세션마다
@@ -12,15 +19,14 @@ import { jsonlInside, nonNegative } from './codexRollout'
  * - `"usage"` 가 든 줄만 JSON 으로 읽고, 응답 줄(type assistant)의 type·isSidechain·message.id·message.model·
  *   usage 의 네 숫자만 꺼낸다. 대화 내용은 결과에도, 읽어 둔 집계에도 남기지 않는다.
  * - 덧붙은 만큼만 읽는다(파일이 줄면 처음부터). 큰 파일(64 MB 초과)은 끝 16 MB 만 읽고 출력 합은 모른다(null).
- * - 1 MB 씩 읽고 지금 덩어리와 덜 끝난 한 줄만 메모리에 둔다. 32 MB 넘는 한 줄은 모으지 않고 건너뛴다.
- * - 줄바꿈으로 끝난 줄만 읽는다(덜 쓴 마지막 줄은 다음에 그 처음부터 다시 읽는다).
+ * - 줄 읽기는 jsonlLines 의 readLines: 1 MB 씩, `"usage"` 가 든 줄만 이어 붙여 해석하고, 32 MB 넘는 한 줄은 건너뛰고,
+ *   덜 쓴 마지막 줄은 들고 있지 않는다(다음에 그 처음부터 다시 읽는다).
+ * - 잠깐 읽지 못하면(EBUSY·EPERM·EACCES 등) 알던 값과 읽던 위치를 두고, 파일이 없어지거나 경로를 거절하면 잊는다.
  */
 
 const MB = 1024 * 1024
 const MAX_FULL_BYTES = 64 * MB
 const TAIL_BYTES = 16 * MB
-const CHUNK_BYTES = MB
-const MAX_LINE_BYTES = 32 * MB
 /**
  * 출력 합을 셀 때 기억하는 message.id 수. 넘으면 가장 오래된 id 를 잊되 그 id 의 마지막 값은 합에 남긴다
  * (같은 응답의 줄은 이어져 있어 잊은 id 가 다시 나오지 않는다 — 다시 나오면 그 응답은 두 번 센다).
@@ -36,7 +42,6 @@ const MAX_FOUND = 500
 const SYNTHETIC_MODEL = '<synthetic>'
 /** 세션 id 로 기록 파일을 찾을 때 받는 모양(경로 글자가 들어가지 않게). */
 const SESSION_ID = /^[0-9a-fA-F-]{8,64}$/
-const NEWLINE = 0x0a
 const USAGE_KEY = '"usage"'
 const USAGE_BYTES = Buffer.from(USAGE_KEY)
 
@@ -134,14 +139,9 @@ export function tallyUsage(tally: UsageTally): AgentUsage | null {
   }
 }
 
-/** 파일 하나를 어디까지 읽었는지와 그때까지의 집계. */
+/** 파일 하나를 어디까지 읽었는지(커서)와 그때까지의 집계. */
 interface Progress {
-  /** 다 읽은 위치(마지막으로 읽은 줄 끝 다음). 덜 쓴 마지막 줄은 다음에 그 처음부터 다시 읽는다. */
-  offset: number
-  /** 마지막으로 읽었을 때 본 파일 크기(같으면 다시 열지 않는다, 줄면 처음부터). */
-  size: number
-  /** 다음 줄바꿈까지 버리는 중(너무 긴 줄, 끝만 읽을 때 잘린 첫 줄). */
-  skipping: boolean
+  cursor: LineCursor
   tally: UsageTally
 }
 
@@ -155,7 +155,10 @@ export interface ClaudeUsageReader {
   transcriptFor(sessionId: string): Promise<string | null>
   /** 그 파일의 읽던 위치·집계를 잊는다. */
   forget(transcriptPath: string): void
-  /** 들고 있던 것을 모두 버린다(설정 readUsage 를 끌 때). 그 전에 시작한 읽기도 결과를 남기지 않는다. */
+  /**
+   * 들고 있던 것을 모두 버린다(설정 readUsage 를 끌 때). 그 전에 시작한 읽기는 아직 파일을 열지 않았으면 열지 않고,
+   * 읽던 중이면 결과를 남기지 않는다.
+   */
   clear(): void
 }
 
@@ -172,116 +175,101 @@ export function createClaudeUsageReader(o: {
   maxLineBytes?: number
   /** 기억할 message.id 수(기본 5만). */
   maxIds?: number
+  /** 읽던 위치를 기억하는 파일 수(기본 64). */
+  maxFiles?: number
 }): ClaudeUsageReader {
   const maxFullBytes = o.maxFullBytes ?? MAX_FULL_BYTES
   const tailBytes = o.tailBytes ?? TAIL_BYTES
-  const chunkBytes = Math.max(1, o.chunkBytes ?? CHUNK_BYTES)
-  const maxLineBytes = o.maxLineBytes ?? MAX_LINE_BYTES
   const maxIds = Math.max(1, o.maxIds ?? MAX_IDS)
+  const maxFiles = Math.max(1, o.maxFiles ?? MAX_FILES)
+  const lineOptions = {
+    needles: [USAGE_BYTES],
+    chunkBytes: o.chunkBytes,
+    maxLineBytes: o.maxLineBytes
+  }
   const progress = new Map<string, Progress>()
   const inflight = new Map<string, Promise<AgentUsage | null>>()
   const found = new Map<string, string>()
-  /** clear 할 때마다 는다: 그 전에 시작한 읽기는 결과를 남기지 않는다. */
+  /** clear 할 때마다 는다: 그 전에 시작한 읽기는 파일을 열지 않고 결과를 남기지 않는다. */
   let generation = 0
 
   const keyOf = (path: string): string => resolve(path.replace(/^\\\\\?\\/, ''))
 
-  /** 처음 읽을 때: 큰 파일은 끝 tailBytes 만(잘린 첫 줄은 버리고, 출력 합은 세지 않는다). */
-  function fresh(size: number): Progress {
+  /**
+   * 처음(또는 파일이 줄어 다시) 읽을 자리: 큰 파일은 끝 tailBytes 부터(그 자리가 줄 가운데면 잘린 첫 줄은 버린다) —
+   * 출력 합은 세지 않는다.
+   */
+  async function fresh(file: FileHandle, size: number): Promise<Progress> {
     const partial = size > maxFullBytes
     return {
-      offset: partial ? Math.max(0, size - tailBytes) : 0,
-      size: -1,
-      skipping: partial,
+      cursor: await cursorAt(file, partial ? Math.max(0, size - tailBytes) : 0),
       tally: createTally(!partial)
     }
   }
 
-  /** p.offset 부터 size 까지 덩어리로 읽어 줄마다 집계에 더한다. */
-  async function advance(path: string, p: Progress, size: number): Promise<void> {
-    const file = await open(path, 'r')
-    try {
-      let position = p.offset
-      let lineStart = p.offset
-      let skipping = p.skipping
-      let pending: Buffer[] = []
-      let pendingBytes = 0
-      while (position < size) {
-        const length = Math.min(chunkBytes, size - position)
-        const chunk = Buffer.allocUnsafe(length)
-        const { bytesRead } = await file.read(chunk, 0, length, position)
-        if (bytesRead <= 0) break
-        const data = chunk.subarray(0, bytesRead)
-        let start = 0
-        for (let end = data.indexOf(NEWLINE); end >= 0; end = data.indexOf(NEWLINE, start)) {
-          if (!skipping && pendingBytes + (end - start) <= maxLineBytes) {
-            const piece = data.subarray(start, end)
-            const line = pendingBytes > 0 ? Buffer.concat([...pending, piece]) : piece
-            if (line.includes(USAGE_BYTES)) addUsageLine(p.tally, line.toString('utf8'), maxIds)
-          }
-          skipping = false
-          pending = []
-          pendingBytes = 0
-          start = end + 1
-          lineStart = position + start
-        }
-        if (!skipping && start < data.length) {
-          const rest = data.subarray(start)
-          if (pendingBytes + rest.length > maxLineBytes) {
-            // 너무 긴 줄: 모으지 않고 다음 줄바꿈까지 버린다.
-            skipping = true
-            pending = []
-            pendingBytes = 0
-          } else {
-            // 덩어리의 일부면 복사해 둔다(앞의 다른 줄까지 붙잡지 않게).
-            pending.push(start === 0 ? rest : Buffer.from(rest))
-            pendingBytes += rest.length
-          }
-        }
-        position += bytesRead
-      }
-      // 덜 쓴 마지막 줄은 다음에 그 처음부터 다시 읽는다(버리는 중이면 읽은 데까지 지나간다).
-      p.offset = skipping ? position : lineStart
-      p.skipping = skipping
-      p.size = position
-    } finally {
-      await file.close()
-    }
-  }
-
+  /** 최근에 쓴 파일로 기억한다(넘치면 가장 오래 안 쓴 것부터 잊는다). */
   function remember(key: string, p: Progress): void {
     progress.delete(key)
     progress.set(key, p)
-    if (progress.size > MAX_FILES) {
+    if (progress.size > maxFiles) {
       const oldest = progress.keys().next().value
       if (oldest !== undefined) progress.delete(oldest)
     }
   }
 
+  /** 읽지 못했을 때: 파일이 없어졌으면 잊고 null, 잠깐의 실패면 알던 값과 읽던 위치를 둔다. */
+  function failed(key: string, known: Progress | undefined, err: unknown): AgentUsage | null {
+    if (isGone(err)) {
+      progress.delete(key)
+      return null
+    }
+    return known ? tallyUsage(known.tally) : null
+  }
+
   async function readUsage(transcriptPath: string, key: string): Promise<AgentUsage | null> {
     const started = generation
+    /** 그 사이 clear 했으면 파일을 열지 않고 결과도 남기지 않는다(기다림마다 본다). */
+    const cleared = (): boolean => started !== generation
     const real = await jsonlInside(transcriptPath, o.projectsDir)
-    if (!real) return null
+    if (cleared()) return null
+    if (!real) {
+      // 없거나 거절한 경로.
+      progress.delete(key)
+      return null
+    }
+    const known = progress.get(key)
     let size: number
     try {
       size = (await stat(real)).size
-    } catch {
-      progress.delete(key)
-      return null
+    } catch (err) {
+      return cleared() ? null : failed(key, known, err)
     }
-    let p = progress.get(key)
-    // 크기가 같으면 열지 않는다.
-    if (p && size === p.size) return tallyUsage(p.tally)
-    if (!p || size < p.size) p = fresh(size)
+    if (cleared()) return null
+    // 크기가 같으면 열지 않는다(방금 쓴 파일로는 기억해 둔다).
+    if (known && size === known.cursor.size) {
+      remember(key, known)
+      return tallyUsage(known.tally)
+    }
+    let file: FileHandle
     try {
-      await advance(real, p, size)
-    } catch {
-      progress.delete(key)
-      return null
+      file = await open(real, 'r')
+    } catch (err) {
+      return cleared() ? null : failed(key, known, err)
     }
-    if (started !== generation) return null
-    remember(key, p)
-    return tallyUsage(p.tally)
+    try {
+      const p = known && size > known.cursor.size ? known : await fresh(file, size)
+      // 도중에 실패하면 커서는 그대로다(다음에 같은 줄을 다시 받아도 집계는 같다 — id 마다 마지막 값, 마지막 줄의 컨텍스트).
+      p.cursor = await readLines(file, p.cursor, size, lineOptions, (line) =>
+        addUsageLine(p.tally, line.toString('utf8'), maxIds)
+      )
+      if (cleared()) return null
+      remember(key, p)
+      return tallyUsage(p.tally)
+    } catch (err) {
+      return cleared() ? null : failed(key, known, err)
+    } finally {
+      await file.close()
+    }
   }
 
   const isFile = (path: string): Promise<boolean> =>
@@ -350,7 +338,10 @@ export interface UsageCache {
    * 주기에 한 번까지, 파일 크기가 그대로면 읽기 도구가 열지 않는다). 30분 동안 찾지 않은 세션은 잊는다.
    */
   want(targets: UsageTarget[]): void
-  /** 기억과 줄을 모두 버리고 읽기 도구도 비운다(설정 readUsage 를 끌 때). */
+  /**
+   * 기억과 줄을 모두 버리고 읽기 도구도 비운다(설정 readUsage 를 끌 때). 읽던 중인 것은 기록 파일을 더 열게 하지 않고
+   * 결과도 남기지 않는다.
+   */
   clear(): void
 }
 
@@ -382,15 +373,26 @@ export function createUsageCache(deps: {
   let entries = new Map<string, CacheEntry>()
   let queue: CacheEntry[] = []
   let running = false
+  /** clear 할 때마다 는다: 그 전에 시작한 읽기는 기록 파일을 열게 하지 않고 결과를 남기지 않는다. */
+  let generation = 0
 
+  /** 한 세션을 다시 읽는다. 기다림마다 clear 여부를 보고, 던지면(잠깐의 실패) 알던 값을 둔다. */
   async function refresh(entry: CacheEntry): Promise<void> {
+    const started = generation
     try {
       const path = entry.given ?? (await deps.reader.transcriptFor(entry.sessionId))
+      if (started !== generation) return
       if (entry.path !== null && entry.path !== path) deps.reader.forget(entry.path)
       entry.path = path
-      entry.value = path ? await deps.reader.usageFor(path) : null
+      if (!path) {
+        entry.value = null
+        return
+      }
+      const value = await deps.reader.usageFor(path)
+      if (started !== generation) return
+      entry.value = value
     } catch {
-      entry.value = null
+      // 잠깐의 실패: 알던 값을 둔다.
     }
   }
 
@@ -438,6 +440,7 @@ export function createUsageCache(deps: {
       pump()
     },
     clear() {
+      generation++
       entries = new Map()
       queue = []
       deps.reader.clear()

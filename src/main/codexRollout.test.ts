@@ -1,4 +1,4 @@
-import { appendFile, mkdir, mkdtemp, rm, writeFile, symlink } from 'fs/promises'
+import { appendFile, mkdir, mkdtemp, open, rm, writeFile, symlink } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import {
@@ -8,6 +8,23 @@ import {
   readRolloutState,
   rolloutState
 } from './codexRollout'
+
+/** 잠깐의 실패(EBUSY 등)를 흉내 낸다(파일 열기만). 나머지는 진짜 fs. */
+const fsControl = vi.hoisted(() => ({ failWith: null as string | null }))
+vi.mock('fs/promises', async (importOriginal) => {
+  const real = await importOriginal<typeof import('fs/promises')>()
+  return {
+    ...real,
+    open: async (...args: Parameters<typeof real.open>) => {
+      if (fsControl.failWith)
+        throw Object.assign(new Error(fsControl.failWith), { code: fsControl.failWith })
+      return real.open(...args)
+    }
+  }
+})
+beforeEach(() => {
+  fsControl.failWith = null
+})
 
 const CWD = 'C:\\work\\shop-web'
 const MIN = 60_000
@@ -532,4 +549,135 @@ describe('토큰·사용 한도(G6)', () => {
     on = false
     expect(await reader.infoFor(agent, now)).toEqual({ state: working, usage: null, limits: null })
   })
+
+  test('dropUsage 는 들고 있던 숫자를 바로 버린다(다시 필요하면 처음부터 읽는다)', async () => {
+    const path = await rolloutAt(new Date(2026, 10, 10, 9, 1, 0), [
+      event('task_started', '2026-11-10T00:01:00.000Z'),
+      tokenCount('2026-11-10T00:02:00.000Z', INFO, LIMITS)
+    ])
+    const reader = createCodexReader(home)
+    expect((await reader.infoFor(agent, now)).usage?.totalTokens).toBe(668962)
+    // 이미 읽은 숫자를 같은 길이로 바꿔 둔다: 들고 있던 숫자를 쓰면 옛 값, 버렸으면 다시 읽어 새 값.
+    await rewrite(path, '668962', '668963')
+    expect((await reader.infoFor(agent, now)).usage?.totalTokens).toBe(668962)
+    reader.dropUsage()
+    expect((await reader.infoFor(agent, now)).usage?.totalTokens).toBe(668963)
+  })
+
+  test('잠깐 읽지 못하면(EBUSY 등) 알던 상태·숫자를 둔다', async () => {
+    const path = await rolloutAt(new Date(2026, 10, 10, 9, 1, 0), [
+      event('task_started', '2026-11-10T00:01:00.000Z'),
+      tokenCount('2026-11-10T00:02:00.000Z', INFO, LIMITS)
+    ])
+    const reader = createCodexReader(home)
+    const known = await reader.infoFor(agent, now)
+    expect(known.state?.state).toBe('working')
+    await appendFile(path, event('task_complete', '2026-11-10T00:03:00.000Z') + '\n')
+    for (const code of ['EBUSY', 'EPERM', 'EACCES']) {
+      fsControl.failWith = code
+      expect(await reader.infoFor(agent, now), code).toEqual(known)
+    }
+    fsControl.failWith = null
+    expect(await reader.infoFor(agent, now)).toMatchObject({
+      state: { state: 'idle' },
+      usage: { totalTokens: 668962 }
+    })
+  })
+
+  /** 상태 이벤트가 아닌 긴 기록 줄(대화). */
+  const filler = (n: number): string[] =>
+    Array.from({ length: n }, (_, i) =>
+      line(
+        'response_item',
+        { type: 'message', content: [{ text: 'x'.repeat(100) + i }] },
+        '2026-11-10T00:01:30.000Z'
+      )
+    )
+
+  test('처음 읽을 때 큰 기록은 끝 firstReadBytes 만 읽는다(창 앞의 상태는 모른다)', async () => {
+    const path = await rolloutAt(new Date(2026, 10, 10, 9, 1, 0), [
+      event('task_started', '2026-11-10T00:01:00.000Z'),
+      ...filler(30),
+      tokenCount('2026-11-10T00:02:00.000Z', INFO, LIMITS)
+    ])
+    const reader = createCodexReader(home, { firstReadBytes: 1024 })
+    const info = await reader.infoFor(agent, now)
+    expect(info.state).toBeNull()
+    expect(info.usage?.totalTokens).toBe(668962)
+    // 그 뒤로는 덧붙은 만큼 이어 읽는다.
+    await appendFile(path, event('task_complete', '2026-11-10T00:03:00.000Z') + '\n')
+    expect((await reader.infoFor(agent, now)).state?.state).toBe('idle')
+  })
+
+  test('끝에서 읽기 시작하는 자리가 줄 처음이면 그 줄도 읽고, 숫자를 다시 켜도 끝만 다시 읽는다', async () => {
+    const last = event('task_complete', '2026-11-10T00:09:00.000Z')
+    await rolloutAt(new Date(2026, 10, 10, 9, 1, 0), [
+      event('task_started', '2026-11-10T00:01:00.000Z'),
+      ...filler(30),
+      tokenCount('2026-11-10T00:02:00.000Z', INFO, LIMITS),
+      last
+    ])
+    let on = false
+    // 창 = 마지막 줄 + 줄바꿈: 창의 첫 바이트가 바로 그 줄의 처음이다.
+    const reader = createCodexReader(home, {
+      usage: () => on,
+      firstReadBytes: Buffer.byteLength(last) + 1
+    })
+    const idle = {
+      state: 'idle' as const,
+      since: Date.parse('2026-11-10T00:09:00.000Z'),
+      lastEventAt: Date.parse('2026-11-10T00:09:00.000Z')
+    }
+    expect(await reader.infoFor(agent, now)).toEqual({ state: idle, usage: null, limits: null })
+    // 숫자를 켜면 처음부터 다시 읽되 그때도 끝만(창 앞의 token_count 는 모른다).
+    on = true
+    expect(await reader.infoFor(agent, now)).toEqual({ state: idle, usage: null, limits: null })
+  })
+
+  test('덜 쓴 마지막 줄은 들고 있지 않는다(다음에 그 처음부터 다시 읽는다)', async () => {
+    const before = event('task_complete', '2026-11-10T00:05:00.000Z')
+    const after = event('task_complete', '2026-11-10T00:06:00.000Z')
+    const path = await rolloutAt(new Date(2026, 10, 10, 9, 1, 0), [
+      event('task_started', '2026-11-10T00:01:00.000Z')
+    ])
+    // 줄바꿈 없이 끝난 마지막 줄(쓰는 중).
+    await appendFile(path, before)
+    const reader = createCodexReader(home)
+    expect((await reader.infoFor(agent, now)).state?.state).toBe('working')
+    // 그 자리를 같은 길이의 다른 바이트로 바꾸고 줄을 끝낸다: 새 바이트만 읽는다.
+    await rewrite(path, before, after)
+    await appendFile(path, '\n')
+    expect((await reader.infoFor(agent, now)).state).toEqual({
+      state: 'idle',
+      since: Date.parse('2026-11-10T00:06:00.000Z'),
+      lastEventAt: Date.parse('2026-11-10T00:06:00.000Z')
+    })
+  })
+
+  test('한도(32 MB)보다 긴 한 줄은 건너뛴다(작은 한도로 시험)', async () => {
+    await rolloutAt(new Date(2026, 10, 10, 9, 1, 0), [
+      event('task_started', '2026-11-10T00:01:00.000Z'),
+      event('task_complete', '2026-11-10T00:02:00.000Z', { last_agent_message: 'x'.repeat(2000) })
+    ])
+    const reader = createCodexReader(home, { maxLineBytes: 512, chunkBytes: 128 })
+    expect((await reader.infoFor(agent, now)).state).toEqual({
+      state: 'working',
+      since: Date.parse('2026-11-10T00:01:00.000Z'),
+      lastEventAt: Date.parse('2026-11-10T00:01:00.000Z')
+    })
+  })
 })
+
+/** 파일 안의 글자를 같은 길이의 다른 글자로 바꿔 쓴다(크기는 그대로). */
+async function rewrite(path: string, from: string, to: string): Promise<void> {
+  expect(Buffer.byteLength(to)).toBe(Buffer.byteLength(from))
+  const handle = await open(path, 'r+')
+  try {
+    const text = (await handle.readFile()).toString('utf8')
+    const at = text.indexOf(from)
+    expect(at).toBeGreaterThanOrEqual(0)
+    await handle.write(to, Buffer.byteLength(text.slice(0, at)))
+  } finally {
+    await handle.close()
+  }
+}

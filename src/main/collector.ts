@@ -643,8 +643,9 @@ export function createCollector(deps: CollectorDeps): {
       })
     )
     // 토큰 숫자(G6): 짝지은 Claude 세션의 기록을 뒤에서 읽게 한다(기다리지 않는다). 기억한 값은 마지막에 붙인다.
+    // 설정은 want 바로 전에 새로 읽는다(사이에 기다림 없음): 수집 도중 끄면 — 끌 때 기억을 비운 뒤라도 — 다시 읽게 하지 않는다.
     const usageTargets = new Map<number, UsageTarget>()
-    if (options.readUsage && deps.claudeUsage) {
+    if (deps.claudeUsage && deps.options().readUsage) {
       for (const a of built) {
         const target = usageTargetOf(a)
         if (target) usageTargets.set(a.pid, target)

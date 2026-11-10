@@ -1,6 +1,14 @@
-import { open, readdir, realpath, stat } from 'fs/promises'
-import { join, resolve, sep } from 'path'
+import { open, readdir, stat, type FileHandle } from 'fs/promises'
+import { join } from 'path'
 import type { AgentUsage, CodexLimits, LimitWindow } from '../shared/types'
+import {
+  cursorAt,
+  isGone,
+  jsonlInside,
+  nonNegative,
+  readLines,
+  type LineCursor
+} from './jsonlLines'
 
 /**
  * Codex 세션 기록(rollout) 읽기(F7 기본). 사용자 설정을 바꾸지 않고 `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-*.jsonl`
@@ -56,39 +64,20 @@ const USAGE_HINT =
 /** 요금제 이름은 이 길이까지만 받는다(아니면 모름). */
 const MAX_PLAN_LENGTH = 40
 
+/** 줄 읽기가 이어 붙여 넘기는 줄의 표시(EVENT_HINT·USAGE_HINT 와 같은 이름들). */
+const STATE_NEEDLES = [
+  'task_started',
+  'task_complete',
+  'turn_started',
+  'turn_complete',
+  'turn_aborted'
+].map((name) => Buffer.from(`"${name}"`))
+const USAGE_NEEDLES = [...STATE_NEEDLES, Buffer.from('"token_count"')]
+/** 처음 읽을 때(또는 처음부터 다시 읽을 때) 이보다 큰 기록은 끝 이만큼만 읽는다. */
+const FIRST_READ_BYTES = 16 * 1024 * 1024
+
 export function codexHome(env: Record<string, string | undefined>, homeDir: string): string {
   return env.CODEX_HOME || join(homeDir, '.codex')
-}
-
-/** Windows·macOS 는 경로 대소문자를 가리지 않는다. */
-const SAME_CASE = process.platform === 'win32' || process.platform === 'darwin'
-
-/** path 가 dir 안인지(dir 자신은 아니다). 대소문자는 플랫폼 규칙을 따른다. */
-function insideDir(path: string, dir: string): boolean {
-  const prefix = dir.endsWith(sep) ? dir : dir + sep
-  return SAME_CASE ? path.toLowerCase().startsWith(prefix.toLowerCase()) : path.startsWith(prefix)
-}
-
-/**
- * 받은 경로가 dir 안의 .jsonl 이면 그 실제 경로(링크를 풀어도 dir 의 실제 경로 안의 .jsonl 이어야 한다). 아니거나
- * 없으면 null. Windows 의 `\\?\` 앞머리는 뗀다. 상대 경로는 이 프로세스의 작업 폴더 기준이라 보통 밖이다.
- */
-export async function jsonlInside(
-  given: string | null | undefined,
-  dir: string
-): Promise<string | null> {
-  const path = given?.replace(/^\\\\\?\\/, '')
-  if (!path || !/\.jsonl$/i.test(path) || !insideDir(resolve(path), resolve(dir))) return null
-  const [real, realDir] = await Promise.all([
-    realpath(path).catch(() => null),
-    realpath(dir).catch(() => null)
-  ])
-  return real && realDir && /\.jsonl$/i.test(real) && insideDir(real, realDir) ? real : null
-}
-
-/** 0 이상의 유한한 숫자만 그 값, 아니면 null(없음 — 0 으로 보지 않는다). */
-export function nonNegative(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -322,14 +311,12 @@ export async function readRolloutState(path: string): Promise<RolloutState | nul
   }
 }
 
-/** 한 번에 읽을 크기(처음 읽는 큰 파일도 메모리에 다 올리지 않는다). */
-const READ_CHUNK = 1024 * 1024
-const NEWLINE = 0x0a
-
-/** 파일마다 읽은 위치와 그때까지 안 것. withUsage: token_count 까지 읽었는지(G6). */
+/**
+ * 파일마다 어디까지 읽었는지(커서 — 덜 쓴 마지막 줄은 들고 있지 않는다)와 그때까지 안 것.
+ * withUsage: token_count 까지 읽었는지(G6).
+ */
 interface RolloutProgress {
-  offset: number
-  rest: Buffer
+  cursor: LineCursor
   info: CodexInfo
   withUsage: boolean
 }
@@ -338,67 +325,93 @@ interface RolloutProgress {
  * 수집기용: 파일 첫 줄의 작업 폴더는 바뀌지 않으므로 기억해 두고, 상태는 파일마다 마지막으로 읽은 위치부터
  * 덧붙은 부분만 읽어 이어 간다. 긴 턴(도구 출력·추론이 64KB 를 넘음)에서도 task_started 를 잃지 않고,
  * 큰 파일도 매번 다시 읽지 않는다. 파일이 줄었으면(다시 쓴 경우) 처음부터 읽는다.
+ * - 처음 읽을 때(처음부터 다시 읽을 때도) firstReadBytes(기본 16 MB)보다 큰 기록은 끝 그만큼만 읽는다(그 자리가 줄
+ *   가운데면 잘린 첫 줄은 버린다). token_count 는 누적 값이고 상태는 마지막 이벤트로 정하므로 끝으로 충분하다 — 끝에
+ *   상태 이벤트가 없으면 상태는 모른다.
+ * - 줄 읽기는 jsonlLines 의 readLines: 이벤트 이름이 든 줄만 이어 붙여 해석하고, 32 MB 넘는 한 줄은 건너뛰고, 덜 쓴
+ *   마지막 줄은 들고 있지 않는다(대화 내용이 든 줄 조각을 읽기 사이에 남기지 않는다).
+ * - 잠깐 읽지 못하면(EBUSY·EPERM·EACCES 등) 알던 것과 읽던 위치를 두고, 파일이 없어지면 잊는다.
  * 토큰 숫자(G6)는 o.usage() 가 true 일 때만 읽는다(기본 true). 꺼져 있으면 token_count 줄을 읽지 않고 들고 있던
- * 숫자도 버린다. 다시 켜면 그 파일을 처음부터 다시 읽는다(꺼진 동안 건너뛴 숫자를 알기 위해).
+ * 숫자도 버린다(dropUsage 로 바로 버릴 수도 있다). 다시 켜면 그 파일을 처음부터(끝 firstReadBytes) 다시 읽는다.
  */
 export function createCodexReader(
   home: string,
-  o: { usage?: () => boolean } = {}
+  o: {
+    usage?: () => boolean
+    /** 처음 읽을 때 이보다 큰 기록은 끝 이만큼만 읽는다(기본 16 MB). */
+    firstReadBytes?: number
+    /** 한 번에 읽을 크기(기본 1 MB, 시험용). */
+    chunkBytes?: number
+    /** 이보다 긴 한 줄은 건너뛴다(기본 32 MB, 시험용). */
+    maxLineBytes?: number
+  } = {}
 ): {
   /** 세션 기록으로 안 상태. */
   stateFor(agent: CodexRolloutAgent, now: number): Promise<RolloutState | null>
   /** 세션 기록으로 안 상태·토큰 숫자·사용 한도(G6). 기록이 없으면 모두 null. */
   infoFor(agent: CodexRolloutAgent, now: number): Promise<CodexInfo>
+  /** 들고 있던 토큰 숫자·한도를 지금 버린다(설정 readUsage 를 끌 때). 상태와 읽은 위치는 그대로다. */
+  dropUsage(): void
 } {
   const sessionsDir = join(home, 'sessions')
   const usageOn = o.usage ?? ((): boolean => true)
+  const firstReadBytes = Math.max(1, o.firstReadBytes ?? FIRST_READ_BYTES)
   const progress = new Map<string, RolloutProgress>()
 
-  async function follow(path: string, withUsage: boolean): Promise<CodexInfo> {
-    let size: number
-    try {
-      size = (await stat(path)).size
-    } catch {
+  /** 읽지 못했을 때: 파일이 없어졌으면 잊고, 잠깐의 실패면 알던 것과 읽던 위치를 둔다. */
+  function failed(path: string, known: RolloutProgress | undefined, err: unknown): CodexInfo {
+    if (isGone(err)) {
       progress.delete(path)
       return NO_INFO
     }
-    let p = progress.get(path)
-    // 처음 보거나 파일이 줄었거나, 숫자를 건너뛰고 읽었는데 이제 숫자가 필요하면 처음부터.
-    if (!p || size < p.offset || (withUsage && !p.withUsage))
-      p = { offset: 0, rest: Buffer.alloc(0), info: NO_INFO, withUsage }
-    if (size > p.offset) {
-      const file = await open(path, 'r')
-      try {
-        let offset = p.offset
-        let rest = p.rest
-        let info = p.info
-        while (offset < size) {
-          const length = Math.min(READ_CHUNK, size - offset)
-          const chunk = Buffer.alloc(length)
-          const { bytesRead } = await file.read(chunk, 0, length, offset)
-          if (bytesRead <= 0) break
-          offset += bytesRead
-          // 줄 단위로만 해석한다(UTF-8 글자가 덩어리 경계에서 잘리지 않게 바이트로 들고 있다가 줄 끝에서 자른다).
-          const data = Buffer.concat([rest, chunk.subarray(0, bytesRead)])
-          const end = data.lastIndexOf(NEWLINE)
-          if (end < 0) {
-            rest = data
-            continue
-          }
-          info = readRollout(data.subarray(0, end).toString('utf8').split('\n'), info, withUsage)
-          rest = Buffer.from(data.subarray(end + 1))
-        }
-        p = { offset, rest, info, withUsage }
-      } finally {
-        await file.close()
-      }
-    }
-    if (progress.size > 50) progress.clear()
-    progress.set(path, p)
-    return p.info
+    return known?.info ?? NO_INFO
   }
 
-  /** 들고 있던 토큰 숫자·한도를 버린다(설정이 꺼져 있을 때). 상태와 읽은 위치는 그대로다. */
+  async function follow(path: string, withUsage: boolean): Promise<CodexInfo> {
+    const known = progress.get(path)
+    let size: number
+    try {
+      size = (await stat(path)).size
+    } catch (err) {
+      return failed(path, known, err)
+    }
+    // 처음 보거나 파일이 줄었거나, 숫자를 건너뛰고 읽었는데 이제 숫자가 필요하면 처음부터(끝 firstReadBytes).
+    const restart = !known || size < known.cursor.size || (withUsage && !known.withUsage)
+    if (!restart && size === known.cursor.size) return known.info
+    let file: FileHandle
+    try {
+      file = await open(path, 'r')
+    } catch (err) {
+      return failed(path, known, err)
+    }
+    try {
+      let info = restart ? NO_INFO : known.info
+      const from = restart ? await cursorAt(file, Math.max(0, size - firstReadBytes)) : known.cursor
+      const cursor = await readLines(
+        file,
+        from,
+        size,
+        {
+          needles: withUsage ? USAGE_NEEDLES : STATE_NEEDLES,
+          chunkBytes: o.chunkBytes,
+          maxLineBytes: o.maxLineBytes
+        },
+        (line) => {
+          info = readRollout([line.toString('utf8')], info, withUsage)
+        }
+      )
+      const p = { cursor, info, withUsage }
+      if (progress.size > 50) progress.clear()
+      progress.set(path, p)
+      return p.info
+    } catch (err) {
+      return failed(path, known, err)
+    } finally {
+      await file.close()
+    }
+  }
+
+  /** 들고 있던 토큰 숫자·한도를 버린다. 상태와 읽은 위치는 그대로다. */
   function dropUsage(): void {
     for (const [path, p] of progress)
       if (p.withUsage)
@@ -430,6 +443,7 @@ export function createCodexReader(
 
   return {
     infoFor,
+    dropUsage,
     async stateFor(agent, now) {
       return (await infoFor(agent, now)).state
     }

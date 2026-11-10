@@ -11,6 +11,25 @@ import {
 } from './claudeUsage'
 import type { AgentUsage } from '../shared/types'
 
+/** 파일 열기를 지켜보고(연 경로) 잠깐의 실패(EBUSY 등)를 흉내 낸다. 나머지는 진짜 fs. */
+const fsControl = vi.hoisted(() => ({ opened: [] as string[], failWith: null as string | null }))
+vi.mock('fs/promises', async (importOriginal) => {
+  const real = await importOriginal<typeof import('fs/promises')>()
+  return {
+    ...real,
+    open: async (...args: Parameters<typeof real.open>) => {
+      fsControl.opened.push(String(args[0]))
+      if (fsControl.failWith)
+        throw Object.assign(new Error(fsControl.failWith), { code: fsControl.failWith })
+      return real.open(...args)
+    }
+  }
+})
+beforeEach(() => {
+  fsControl.opened = []
+  fsControl.failWith = null
+})
+
 const MIN = 60 * 1000
 const SESSION = '0199a1b2-c3d4-4e5f-8a9b-0c1d2e3f4a5b'
 
@@ -56,6 +75,16 @@ const prompt = (text: string): string =>
     sessionId: SESSION,
     message: { role: 'user', content: text }
   })
+
+/** 파일의 offset 자리를 같은 길이의 다른 바이트로 바꿔 쓴다(크기는 그대로). */
+async function rewriteAt(path: string, offset: number, text: string): Promise<void> {
+  const handle = await open(path, 'r+')
+  try {
+    await handle.write(text, offset)
+  } finally {
+    await handle.close()
+  }
+}
 
 /** 대기 중인 프로미스 콜백을 모두 돌린다. */
 const settle = (): Promise<void> => new Promise((r) => setTimeout(r, 0))
@@ -289,6 +318,133 @@ describe('Claude 세션 기록에서 토큰 숫자 읽기(G6)', () => {
     expect(tallyUsage(tally)).toEqual(usage)
   })
 
+  test('덜 쓴 마지막 줄은 들고 있지 않는다(같은 자리를 바꿔 쓰면 새 바이트만 읽는다)', async () => {
+    const first = reply({ id: 'msg_1', output: 10 })
+    const before = reply({ id: 'msg_old', output: 50, text: '비밀 대화' })
+    const after = reply({ id: 'msg_new', output: 60, text: '다른 내용' })
+    expect(Buffer.byteLength(after)).toBe(Buffer.byteLength(before))
+    const path = join(project, `${SESSION}.jsonl`)
+    // 줄바꿈 없이 끝난 마지막 줄(쓰는 중).
+    await writeFile(path, first + '\n' + before)
+    const reader = createClaudeUsageReader({ projectsDir: projects })
+    expect(await reader.usageFor(path)).toMatchObject({ outputTokens: 10 })
+    // 그 자리를 다른 같은 길이의 바이트로 바꾸고 줄을 끝낸 뒤 한 줄 더.
+    await rewriteAt(path, Buffer.byteLength(first) + 1, after)
+    await appendFile(path, '\n' + reply({ id: 'msg_3', output: 7 }) + '\n')
+    expect(await reader.usageFor(path)).toMatchObject({ outputTokens: 77 })
+  })
+
+  test('끝만 읽을 때 창이 줄 처음에서 시작하면 그 줄을 버리지 않는다', async () => {
+    const filler = Array.from({ length: 20 }, (_, i) => prompt('x'.repeat(100) + i))
+    const last = reply({ id: 'msg_last', read: 7000 })
+    const path = await transcript([...filler, last])
+    // 창 = 마지막 줄 + 줄바꿈: 창의 첫 바이트가 바로 그 줄의 처음이다.
+    const reader = createClaudeUsageReader({
+      projectsDir: projects,
+      maxFullBytes: 1024,
+      tailBytes: Buffer.byteLength(last) + 1
+    })
+    expect(await reader.usageFor(path)).toMatchObject({ contextTokens: 7102, outputTokens: null })
+  })
+
+  test('끝만 읽을 때 창 앞에만 있는 줄은 읽지 않는다', async () => {
+    const filler = Array.from({ length: 40 }, (_, i) => prompt('x'.repeat(100) + i))
+    const path = await transcript([reply({ id: 'msg_only', read: 5000 }), ...filler])
+    const reader = createClaudeUsageReader({
+      projectsDir: projects,
+      maxFullBytes: 4096,
+      tailBytes: 1024
+    })
+    expect(await reader.usageFor(path)).toBeNull()
+  })
+
+  test('덩어리를 넘는 긴 줄은 "usage" 가 들어 있을 때만 이어 붙인다', async () => {
+    const path = await transcript([
+      prompt('z'.repeat(4000)),
+      reply({ id: 'msg_1', output: 3, read: 5, text: 'y'.repeat(300) })
+    ])
+    const reader = createClaudeUsageReader({ projectsDir: projects, chunkBytes: 64 })
+    const concat = vi.spyOn(Buffer, 'concat')
+    try {
+      expect(await reader.usageFor(path)).toMatchObject({ contextTokens: 107, outputTokens: 3 })
+      // 긴 요청 줄(usage 없음)은 이어 붙이지 않았다. 응답 줄은 이어 붙였다.
+      const joined = concat.mock.results.map((r) => r.value as Buffer)
+      expect(joined.some((b) => b.includes('z'.repeat(16)))).toBe(false)
+      expect(joined.some((b) => b.includes('y'.repeat(300)))).toBe(true)
+    } finally {
+      concat.mockRestore()
+    }
+  })
+
+  test('한글이 덩어리 경계에서 잘려도, "usage" 가 덩어리 경계에 걸쳐도 바르게 읽는다', async () => {
+    const path = await transcript([
+      reply({ id: 'msg_1', output: 4, read: 30, model: '모델-가나다라마바사', text: '한글 내용' })
+    ])
+    // 5 바이트씩: "usage"(7 바이트)는 언제나 경계에 걸치고, 한글(3 바이트)도 잘린다.
+    for (const chunkBytes of [5, 7, 11]) {
+      const reader = createClaudeUsageReader({ projectsDir: projects, chunkBytes })
+      expect(await reader.usageFor(path), String(chunkBytes)).toEqual({
+        contextTokens: 132,
+        contextWindow: null,
+        outputTokens: 4,
+        totalTokens: null,
+        model: '모델-가나다라마바사'
+      })
+    }
+  })
+
+  test('clear 하면 경로를 확인하던 읽기도 파일을 열지 않는다', async () => {
+    const path = await transcript([reply({})])
+    const reader = createClaudeUsageReader({ projectsDir: projects })
+    const pending = reader.usageFor(path)
+    reader.clear()
+    expect(await pending).toBeNull()
+    expect(fsControl.opened).toEqual([])
+    // 그 뒤에 새로 부르면 읽는다.
+    expect(await reader.usageFor(path)).not.toBeNull()
+    expect(fsControl.opened).toHaveLength(1)
+  })
+
+  test('잠깐 읽지 못하면(EBUSY 등) 알던 값과 읽던 위치를 두고, 파일이 없어지면 null', async () => {
+    const path = await transcript([reply({ id: 'msg_1', output: 10 })])
+    const reader = createClaudeUsageReader({ projectsDir: projects })
+    // 처음부터 읽지 못하면 모른다.
+    fsControl.failWith = 'EBUSY'
+    expect(await reader.usageFor(path)).toBeNull()
+    fsControl.failWith = null
+    expect(await reader.usageFor(path)).toMatchObject({ outputTokens: 10 })
+    let output = 10
+    for (const code of ['EBUSY', 'EPERM', 'EACCES']) {
+      output += 1
+      await appendFile(path, reply({ id: `msg_${code}`, output: 1 }) + '\n')
+      fsControl.failWith = code
+      expect(await reader.usageFor(path), code).toMatchObject({ outputTokens: output - 1 })
+      fsControl.failWith = null
+      // 읽던 위치를 두었는지: 이미 읽은 첫 줄을 같은 길이로 바꿔 둔다(처음부터 다시 읽으면 90 이 보인다).
+      await rewriteAt(path, 0, reply({ id: 'msg_1', output: 90 }))
+      expect(await reader.usageFor(path), code).toMatchObject({ outputTokens: output })
+    }
+    await rm(path)
+    expect(await reader.usageFor(path)).toBeNull()
+  })
+
+  test('바뀌지 않은 파일도 최근에 읽은 것으로 쳐서 먼저 잊지 않는다', async () => {
+    const a = await transcript([reply({ id: 'a', output: 10 })], 'aaaaaaaa-0001')
+    const b = await transcript([reply({ id: 'b', output: 20 })], 'bbbbbbbb-0001')
+    const c = await transcript([reply({ id: 'c', output: 30 })], 'cccccccc-0001')
+    const reader = createClaudeUsageReader({ projectsDir: projects, maxFiles: 2 })
+    await reader.usageFor(a)
+    await reader.usageFor(b)
+    // a 는 그대로지만 방금 읽은 것이다. c 를 읽으면 가장 오래전에 읽은 b 를 잊는다.
+    await reader.usageFor(a)
+    await reader.usageFor(c)
+    // 같은 길이로 바꿔 써서 확인한다: 기억하는 a 는 다시 읽지 않고, 잊은 b 는 처음부터 다시 읽는다.
+    await rewriteAt(a, 0, reply({ id: 'a', output: 90 }))
+    await rewriteAt(b, 0, reply({ id: 'b', output: 80 }))
+    expect((await reader.usageFor(a))?.outputTokens).toBe(10)
+    expect((await reader.usageFor(b))?.outputTokens).toBe(80)
+  })
+
   test('세션 id 로 projects 아래의 기록 파일을 찾고 기억한다(id 모양이 다르면 찾지 않는다)', async () => {
     const api = join(projects, 'C--work-api')
     await mkdir(api)
@@ -406,5 +562,41 @@ describe('토큰 숫자 기억(수집을 기다리게 하지 않는다)', () => 
     expect(cache.get('a')).toBeNull()
     // 줄 서 있던 b 는 읽지 않는다.
     expect(f.started).toEqual(['/given/a.jsonl'])
+  })
+
+  test('clear 하면 기록 파일을 찾던 중인 읽기도 그 파일을 열지 않고 값을 남기지 않는다', async () => {
+    const f = fakeReader()
+    let found: (path: string | null) => void = () => {}
+    f.reader.transcriptFor = vi.fn(
+      () =>
+        new Promise<string | null>((resolve) => {
+          found = resolve
+        })
+    )
+    const cache = createUsageCache({ reader: f.reader, now: () => 0 })
+    cache.want([{ sessionId: 'b', transcriptPath: null }])
+    await settle()
+    expect(f.reader.transcriptFor).toHaveBeenCalledWith('b')
+    cache.clear()
+    found('/p/b.jsonl')
+    await settle()
+    expect(f.started).toEqual([])
+    expect(cache.get('b')).toBeNull()
+  })
+
+  test('읽기가 실패해도(던짐) 알던 값을 둔다', async () => {
+    const f = fakeReader()
+    const cache = createUsageCache({ reader: f.reader, now: () => 0 })
+    const target = { sessionId: 'a', transcriptPath: '/given/a.jsonl' }
+    cache.want([target])
+    f.finish(0, U(1))
+    await settle()
+    f.reader.usageFor = vi.fn(async () => {
+      throw new Error('EBUSY')
+    })
+    cache.want([target])
+    await settle()
+    expect(f.reader.usageFor).toHaveBeenCalled()
+    expect(cache.get('a')).toEqual(U(1))
   })
 })
