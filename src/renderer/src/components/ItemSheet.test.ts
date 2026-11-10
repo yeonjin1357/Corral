@@ -114,3 +114,20 @@ describe('상세 패널: 프로세스 목록', () => {
     expect(document.body.querySelector('[data-processes]')).toBeNull()
   })
 })
+
+describe('상세 패널: 커밋', () => {
+  const cardText = (): string => document.body.textContent!.replace(/\s+/g, ' ')
+
+  test('서버 메모리 카드에 커밋', () => {
+    sheet({ kind: 'server', row: serverRow({ commitBytes: 4.2 * 1024 * MB }) })
+    expect(cardText()).toContain('커밋 4.2 GB')
+  })
+
+  test('남은 프로세스·무거운 작업·에이전트에도, 모르면 없다', () => {
+    sheet({ kind: 'agent', row: agentRow({ commitBytes: 800 * MB }) })
+    expect(cardText()).toContain('커밋 800 MB')
+    wrapper?.unmount()
+    sheet({ kind: 'heavy', row: heavyJob() })
+    expect(cardText()).not.toContain('커밋')
+  })
+})

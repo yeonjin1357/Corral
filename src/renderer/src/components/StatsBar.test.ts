@@ -74,3 +74,78 @@ test('개발 서버 카드: 큰 숫자는 서버 수, 아래 줄은 포트 수',
   expect(card.find('.text-3xl').text()).toBe('2개')
   expect(card.text()).toContain('포트 4개 · 작업 공간 1곳')
 })
+
+describe('메모리 카드: 남은 메모리와 커밋', () => {
+  const memoryCard = (w: VueWrapper): string =>
+    w.findAll('[data-slot=card]')[0].text().replace(/\s+/g, ' ')
+
+  /** 메모리 카드 머리의 배지(경고·위험·커밋). */
+  const badges = (w: VueWrapper): string[] =>
+    w
+      .findAll('[data-slot=card]')[0]
+      .findAll('[data-slot=badge]')
+      .map((b) => b.text())
+      .filter(Boolean)
+
+  test('메모리 카드에 남은 메모리와 커밋 사용률', () => {
+    const w = bar(
+      snapshot({
+        memory: {
+          totalBytes: 63.7 * GB,
+          usedBytes: 56.8 * GB,
+          usedPercent: 89.2,
+          availableBytes: 6.5 * GB,
+          level: 'warn',
+          ramLevel: 'warn',
+          commit: { usedBytes: 104.8 * GB, limitBytes: 127.7 * GB, percent: 82.1, level: 'warn' },
+          kernelBytes: 2 * GB
+        }
+      })
+    )
+    const card = memoryCard(w)
+    expect(card).toContain('63.7 GB 중 56.8 GB 사용 · 남은 6.5 GB')
+    expect(card).toContain('커밋 104.8 / 127.7 GB (82%)')
+    expect(card).toContain('경고')
+    // 원인이 RAM 이라 "커밋" 배지는 없다.
+    expect(badges(w)).toEqual(['경고'])
+  })
+
+  test('경고 원인이 커밋이면 배지 옆에 "커밋"', () => {
+    const w = bar(
+      snapshot({
+        memory: {
+          ...snapshot().memory,
+          usedPercent: 50,
+          level: 'danger',
+          ramLevel: 'normal',
+          commit: { usedBytes: 120 * GB, limitBytes: 127.7 * GB, percent: 94, level: 'danger' }
+        }
+      })
+    )
+    expect(badges(w)).toEqual(['위험', '커밋'])
+  })
+
+  test('커밋을 모르면 커밋 줄이 없다', () => {
+    const w = bar(snapshot())
+    expect(memoryCard(w)).not.toContain('커밋')
+  })
+
+  test('무거운 작업이 겹친 이유는 더 높은 쪽(RAM 또는 커밋) 퍼센트로 말한다', () => {
+    const base = snapshot({
+      heavyJobs: [heavyJob({ pid: 1 }), heavyJob({ pid: 2 })],
+      heavyOverlap: true
+    })
+    expect(bar(base).text()).toContain('RAM 82% 에서 겹쳐 도는 중')
+    const commit = snapshot({
+      heavyJobs: [heavyJob({ pid: 1 }), heavyJob({ pid: 2 })],
+      heavyOverlap: true,
+      memory: {
+        ...base.memory,
+        ramLevel: 'normal',
+        level: 'danger',
+        commit: { usedBytes: 120 * GB, limitBytes: 127.7 * GB, percent: 94.3, level: 'danger' }
+      }
+    })
+    expect(bar(commit).text()).toContain('커밋 94% 에서 겹쳐 도는 중')
+  })
+})

@@ -70,6 +70,18 @@ function rowCount(key: ProcessGroup): { n: number; hidden: number } {
       return { n: 0, hidden: 0 }
   }
 }
+/** 사실 카드 줄. 커밋을 모르면 커밋·한도 줄은 없다. */
+const facts = computed<[string, string][]>(() => [
+  [t.sheet.facts.total, formatBytes(m.value.totalBytes)],
+  [t.sheet.facts.used, formatBytes(m.value.usedBytes)],
+  [t.sheet.facts.free, formatBytes(m.value.availableBytes)],
+  ...(m.value.commit
+    ? ([
+        [t.sheet.facts.commit, formatBytes(m.value.commit.usedBytes)],
+        [t.sheet.facts.commitLimit, formatBytes(m.value.commit.limitBytes)]
+      ] as [string, string][])
+    : [])
+])
 const topApps = computed(() => props.snapshot.apps.slice(0, 5))
 const groups = computed(() =>
   ORDER.map((g) => {
@@ -139,11 +151,7 @@ const groups = computed(() =>
       <Card size="sm">
         <CardContent class="gap-0 divide-y divide-border">
           <div
-            v-for="[label, value] in [
-              [t.sheet.facts.total, formatBytes(m.totalBytes)],
-              [t.sheet.facts.used, formatBytes(m.usedBytes)],
-              [t.sheet.facts.free, formatBytes(Math.max(0, m.totalBytes - m.usedBytes))]
-            ]"
+            v-for="[label, value] in facts"
             :key="label"
             class="flex justify-between gap-4 py-3 first:pt-0 last:pb-0"
           >
@@ -188,6 +196,13 @@ const groups = computed(() =>
                 /></span>
               </div>
               <Progress :value="g.share" :style="{ '--primary': g.color }" />
+              <p
+                v-if="g.key === 'system' && m.kernelBytes != null"
+                data-kernel
+                class="text-[11px] text-muted-foreground"
+              >
+                {{ t.sheet.kernelIncluded(formatBytes(m.kernelBytes)) }}
+              </p>
             </component>
           </div>
         </CardContent>
@@ -196,6 +211,12 @@ const groups = computed(() =>
         class="rounded-lg border border-border bg-muted/40 p-4 text-sm leading-relaxed text-muted-foreground"
       >
         {{ t.groups.systemNote }}
+      </p>
+      <p
+        v-if="m.commit"
+        class="rounded-lg border border-border bg-muted/40 p-4 text-sm leading-relaxed text-muted-foreground"
+      >
+        {{ t.sheet.commitNote }}
       </p>
       <Card v-if="topApps.length" size="sm">
         <CardHeader

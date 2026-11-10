@@ -17,7 +17,7 @@ import {
   Sparkles
 } from '@lucide/vue'
 import type { DashboardSnapshot } from '../../shared/types'
-import { formatBytes, formatDuration, worktreeFolder } from '../../shared/format'
+import { formatBytes, formatDuration, formatFreed, worktreeFolder } from '../../shared/format'
 import { selectionKey } from '../../shared/keys'
 import { cleanupRecommendation } from '../../shared/recommend'
 import { text } from '../../shared/text'
@@ -178,7 +178,10 @@ const subtitle = computed(() => (!s.value ? T.reading : s.value.stale ? T.stale 
           @click="act('open')"
         >
           <Sparkles />{{
-            T.recommend(recommendation.items.length, formatBytes(recommendation.totalBytes))
+            T.recommend(
+              recommendation.items.length,
+              formatFreed(recommendation.totalBytes, recommendation.totalCommitBytes)
+            )
           }}
         </Button>
 

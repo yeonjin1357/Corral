@@ -15,7 +15,7 @@ import {
   hiddenLabel,
   hiddenMatches
 } from '../../shared/settings'
-import { describeKillResult, formatBytes } from '../../shared/format'
+import { describeKillResult, formatBytes, formatFreed, pressureText } from '../../shared/format'
 import { cleanupRecommendation } from '../../shared/recommend'
 import { text } from '../../shared/text'
 import { watchColorScheme } from './theme'
@@ -514,7 +514,9 @@ const hookButton = computed(() => hookControls(snapshot.value?.hook ?? null).but
 
 // ── 알림 카드 ──
 const recommendation = computed(() =>
-  snapshot.value ? cleanupRecommendation(snapshot.value) : { items: [], totalBytes: 0 }
+  snapshot.value
+    ? cleanupRecommendation(snapshot.value)
+    : { items: [], totalBytes: 0, totalCommitBytes: null }
 )
 /**
  * 정리 추천 카드를 닫으면(NeoHtop 알림 카드의 X) 그때의 상태를 기억해 둔다.
@@ -665,7 +667,7 @@ const takenAt = computed(() =>
           {{
             text.ui.home.recommendSummary(
               recommendation.items.length,
-              formatBytes(recommendation.totalBytes)
+              formatFreed(recommendation.totalBytes, recommendation.totalCommitBytes)
             )
           }}
           <template #below>
@@ -682,7 +684,14 @@ const takenAt = computed(() =>
                 <ItemIcon v-if="item.icon" :icon="item.icon" :size="12" />
                 <span>{{ item.title }}</span>
                 <span class="truncate text-muted-foreground">{{ item.where }}</span>
-                <span class="tabular-nums">{{ formatBytes(item.memoryBytes) }}</span>
+                <span class="tabular-nums">{{
+                  item.commitBytes == null
+                    ? formatBytes(item.memoryBytes)
+                    : text.ui.home.chipSize(
+                        formatBytes(item.memoryBytes),
+                        formatBytes(item.commitBytes)
+                      )
+                }}</span>
               </Button>
               <span
                 v-if="recommendation.items.length > RECOMMEND_SHOWN"
@@ -709,12 +718,7 @@ const takenAt = computed(() =>
           class="heavy-box"
           :title="text.ui.recommend.overlapTitle"
         >
-          {{
-            text.ui.home.heavyOverlap(
-              Math.floor(snapshot.memory.usedPercent),
-              snapshot.heavyJobs.length
-            )
-          }}
+          {{ text.ui.home.heavyOverlap(pressureText(snapshot.memory), snapshot.heavyJobs.length) }}
           <template #actions>
             <Button variant="outline" size="sm" @click="((tab = 'heavy'), (query = ''))">
               {{ text.ui.cards.showList }}

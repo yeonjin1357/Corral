@@ -16,7 +16,7 @@ import {
   Unplug
 } from '@lucide/vue'
 import type { DashboardSnapshot, ProcessGroup } from '../../../shared/types'
-import { formatBytes } from '../../../shared/format'
+import { formatBytes, pressureText } from '../../../shared/format'
 import { text } from '../../../shared/text'
 import type { Point } from '../history'
 import Card from '../ui/Card.vue'
@@ -53,6 +53,25 @@ const hasMemory = computed(() => s.value.memory.totalBytes > 0)
 // 화면·트레이 공통 규칙: 내림해야 경고 기준과 표시가 어긋나지 않는다.
 const ramPercent = computed(() => Math.floor(s.value.memory.usedPercent))
 const level = computed(() => s.value.memory.level)
+/** 경고·위험의 이유로 말할 사용률("RAM 85%" 또는 "커밋 86%"). */
+const pressure = computed(() => pressureText(s.value.memory))
+/** level 은 RAM·커밋 중 높은 쪽이라, ramLevel 과 다르면 원인은 커밋이다. */
+const commitCaused = computed(() => level.value !== s.value.memory.ramLevel)
+const commit = computed(() => s.value.memory.commit)
+const COMMIT_COLOR = { warn: 'var(--peach)', danger: 'var(--destructive)' } as const
+/** "104.8 / 127.7 GB (82%)": 두 값의 단위가 같으면 앞 값의 단위는 뺀다. */
+const commitLine = computed(() => {
+  const c = commit.value
+  if (!c) return null
+  const used = formatBytes(c.usedBytes)
+  const limit = formatBytes(c.limitBytes)
+  const unit = limit.slice(limit.lastIndexOf(' '))
+  return text.ui.cards.commitLine(
+    used.endsWith(unit) ? used.slice(0, -unit.length) : used,
+    limit,
+    Math.floor(c.percent)
+  )
+})
 
 const GROUPS: { key: ProcessGroup; label: string; color: string }[] = [
   { key: 'devServer', label: text.ui.groups.devServer, color: 'var(--chart-1)' },
@@ -213,14 +232,31 @@ const diskSub = computed(() =>
             class="text-[10px] font-normal"
             >{{ text.ui.cards.levels[level] }}</Badge
           >
+          <Badge
+            v-if="hasMemory && level !== 'normal' && commitCaused"
+            variant="outline"
+            class="text-[10px] font-normal"
+            >{{ text.ui.cards.commitCause }}</Badge
+          >
         </template>
       </PanelHeader>
       <CardContent class="min-h-0 flex-1 gap-2">
         <div>
-          <div class="text-3xl leading-8 font-semibold tracking-tight tabular-nums">
-            {{ hasMemory ? ramPercent : text.ui.none
-            }}<span v-if="hasMemory" class="ml-0.5 text-lg font-normal text-muted-foreground"
-              >%</span
+          <!-- 카드 높이가 정해져 있어 커밋 줄은 큰 숫자와 같은 줄 오른쪽에 둔다. -->
+          <div class="flex items-baseline justify-between gap-2">
+            <div class="text-3xl leading-8 font-semibold tracking-tight tabular-nums">
+              {{ hasMemory ? ramPercent : text.ui.none
+              }}<span v-if="hasMemory" class="ml-0.5 text-lg font-normal text-muted-foreground"
+                >%</span
+              >
+            </div>
+            <span
+              v-if="hasMemory && commit && commitLine"
+              data-commit-line
+              class="min-w-0 truncate text-[11px] leading-4 tabular-nums text-muted-foreground"
+              :style="commit.level !== 'normal' ? { color: COMMIT_COLOR[commit.level] } : undefined"
+              :title="text.ui.sheet.commitNote"
+              >{{ commitLine }}</span
             >
           </div>
           <p class="text-xs leading-4 text-muted-foreground">
@@ -228,7 +264,8 @@ const diskSub = computed(() =>
               hasMemory
                 ? text.ui.cards.memoryOf(
                     formatBytes(s.memory.usedBytes),
-                    formatBytes(s.memory.totalBytes)
+                    formatBytes(s.memory.totalBytes),
+                    formatBytes(s.memory.availableBytes)
                   )
                 : text.ui.loading
             }}
@@ -431,7 +468,7 @@ const diskSub = computed(() =>
           class="text-[11px] leading-4 text-destructive"
           :class="{ 'mt-auto': !heavyItems.length }"
         >
-          {{ text.ui.cards.overlapNote(ramPercent) }}
+          {{ text.ui.cards.overlapNote(pressure) }}
         </p>
       </CardContent>
     </Card>

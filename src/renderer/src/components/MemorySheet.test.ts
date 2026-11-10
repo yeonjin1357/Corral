@@ -90,3 +90,34 @@ describe('메모리 상세: 어디에 쓰고 있나', () => {
     expect(names).toEqual(['chrome.exe', 'svchost.exe', 'a.exe', 'b.exe', 'c.exe'])
   })
 })
+
+test('커밋·한도·남은 메모리·커널 몫을 보인다, 모르면 숨긴다', () => {
+  sheet(
+    snapshot({
+      memory: {
+        totalBytes: 63.7 * GB,
+        usedBytes: 56.8 * GB,
+        usedPercent: 89.2,
+        availableBytes: 6.5 * GB,
+        level: 'warn',
+        ramLevel: 'warn',
+        commit: { usedBytes: 104.8 * GB, limitBytes: 127.7 * GB, percent: 82.1, level: 'warn' },
+        kernelBytes: 2 * GB
+      }
+    })
+  )
+  const body = document.body.textContent!.replace(/\s+/g, ' ')
+  expect(body).toContain('남은 메모리6.5 GB')
+  expect(body).toContain('커밋104.8 GB')
+  expect(body).toContain('커밋 한도127.7 GB')
+  expect(body).toContain('커널 2.0 GB 포함')
+  expect(body).toContain('페이지 파일로 밀려난 것')
+  wrapper?.unmount()
+  document.body.innerHTML = ''
+
+  sheet(snapshot())
+  const plain = document.body.textContent!
+  expect(plain).not.toContain('커밋')
+  expect(document.body.querySelector('[data-kernel]')).toBeNull()
+  expect(plain).not.toContain('포함')
+})

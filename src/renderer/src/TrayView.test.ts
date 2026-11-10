@@ -98,3 +98,21 @@ describe('TrayView', () => {
     w.unmount()
   })
 })
+
+test('정리 추천 버튼은 커밋을 알면 RAM·커밋 둘 다 보인다', async () => {
+  const commitSnap = snapshot({
+    ...s,
+    servers: s.servers.map((r) => ({ ...r, commitBytes: 1 * GB }))
+  })
+  window.pitwall = {
+    getLatest: async () => commitSnap,
+    onSnapshot: () => () => {},
+    settings: { get: async () => DEFAULT_SETTINGS, onChange: () => () => {} },
+    fileIcon: async () => null,
+    tray: { action: vi.fn(async () => {}) }
+  } as unknown as Window['pitwall']
+  const w = mount(TrayView)
+  await flushPromises()
+  expect(w.find('[data-action="recommend"]').text()).toMatch(/RAM 약 .* · 커밋 약 .* 확보/)
+  w.unmount()
+})

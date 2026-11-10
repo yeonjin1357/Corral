@@ -1,6 +1,6 @@
 import type { MenuItemConstructorOptions } from 'electron'
 import type { DashboardSnapshot, MemoryLevel, Platform, UpdateStatus } from '../shared/types'
-import { formatBytes } from '../shared/format'
+import { formatBytes, pressureText } from '../shared/format'
 import { text } from '../shared/text'
 
 /** 트레이 아이콘(작은 모니터) 그래프 선 색: 화면 어두운 테마(NeoHtop Catppuccin)의 초록·노랑·분홍. */
@@ -87,7 +87,7 @@ export function buildTrayMenu(
 }
 
 export function trayTooltip(s: DashboardSnapshot | null): string {
-  return hasMemory(s) ? text.tray.tooltip(percentOf(s)) : text.appName
+  return hasMemory(s) ? text.tray.tooltip(pressureText(s.memory)) : text.appName
 }
 
 /** Electron Tray 중 pitwall 이 쓰는 부분(테스트에서 가짜로 바꿔 끼운다). */

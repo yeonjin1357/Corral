@@ -220,7 +220,8 @@ export const text = {
     open: '앱 열기',
     settings: '설정',
     quit: '종료',
-    tooltip: (percent: number): string => `pitwall — RAM ${percent}%`,
+    /** pressure: pressureText 결과("RAM 82%" 또는 "커밋 91%"). */
+    tooltip: (pressure: string): string => `pitwall — ${pressure}`,
     stillRunning:
       'pitwall 은 트레이에서 계속 실행돼요. 끄려면 트레이 아이콘 메뉴에서 종료를 누르세요.'
   },
@@ -262,7 +263,13 @@ export const text = {
     /** 맨 위 카드 줄(NeoHtop StatsBar). */
     cards: {
       memory: '메모리',
-      memoryOf: (used: string, total: string): string => `${total} 중 ${used} 사용`,
+      memoryOf: (used: string, total: string, free: string): string =>
+        `${total} 중 ${used} 사용 · 남은 ${free}`,
+      /** 커밋 사용량(단위가 같으면 앞 값의 단위는 뺀다: "104.8 / 127.7 GB"). */
+      commitLine: (used: string, limit: string, percent: number): string =>
+        `커밋 ${used} / ${limit} (${percent}%)`,
+      /** 경고·위험의 원인이 RAM 이 아니라 커밋일 때 배지 옆에 붙는다. */
+      commitCause: '커밋',
       levels: { warn: '경고', danger: '위험' },
       memoryDetails: '메모리 자세히 보기',
       showList: '목록에서 보기',
@@ -285,7 +292,8 @@ export const text = {
       heavy: '무거운 작업',
       heavyRunning: '실행 중',
       overlap: '겹침',
-      overlapNote: (percent: number): string => `RAM ${percent}% 에서 겹쳐 도는 중`,
+      /** pressure: pressureText 결과("RAM 85%" 또는 "커밋 86%"). */
+      overlapNote: (pressure: string): string => `${pressure} 에서 겹쳐 도는 중`,
       heavyHelp:
         '설정한 무거운 명령(타입 검사·빌드 등)이에요. 둘 이상 겹치고 RAM 이 경고 기준을 넘으면 알려요.',
       leftovers: '남은 프로세스',
@@ -327,6 +335,7 @@ export const text = {
       status: '상태',
       clients: '연결',
       memory: '메모리',
+      commit: '커밋',
       cpu: 'CPU',
       runtime: '실행 시간',
       tool: '도구',
@@ -372,7 +381,8 @@ export const text = {
       agents: '에이전트',
       agentStates: (working: number, waiting: number): string =>
         waiting > 0 ? `작업 중 ${working} · 권한 대기 ${waiting}` : `작업 중 ${working}`,
-      recommend: (n: number, size: string): string => `정리 추천 ${n}개 · 약 ${size} 확보`,
+      /** freed: formatFreed 결과. */
+      recommend: (n: number, freed: string): string => `정리 추천 ${n}개 · ${freed} 확보`,
       workspaces: '작업 공간',
       workspaceColumns: '서버 · 메모리',
       noServers: '열려 있는 개발 서버가 없어요.'
@@ -384,6 +394,7 @@ export const text = {
       renameLabel: '작업 공간 이름',
       renameHint: 'Enter 로 저장, Esc 로 취소. 비우면 폴더 이름으로 돌아가요.',
       memoryHint: '묶음 안 서버 메모리 합(서버마다 한 번)',
+      commitHint: '묶음 안 서버 커밋 합(서버마다 한 번)',
       workspaceRepo: '작업 공간 저장소',
       viewLabel: '개발 서버 보기',
       list: '목록',
@@ -431,7 +442,17 @@ export const text = {
       memoryTitle: '메모리',
       memoryDesc: 'pitwall 이 묶어서 본 메모리 사용',
       reading: (time: string): string => `${time} 측정`,
-      facts: { total: '전체 메모리', used: '사용 중', free: '남은 메모리' },
+      facts: {
+        total: '전체 메모리',
+        used: '사용 중',
+        free: '남은 메모리',
+        commit: '커밋',
+        commitLimit: '커밋 한도'
+      },
+      /** 커널 몫(시스템·공유 메모리 줄 아래). */
+      kernelIncluded: (size: string): string => `커널 ${size} 포함`,
+      commitNote:
+        '커밋은 프로세스가 차지하기로 한 메모리 전체(RAM 에 올라온 것 + 페이지 파일로 밀려난 것)예요. 메모리가 부족하면 RAM 값은 줄어도 커밋은 그대로예요.',
       groupsTitle: '어디에 쓰고 있나',
       groupsDesc: '사용 중인 메모리를 묶음별로 나눴어요.',
       topApps: '메모리를 많이 쓰는 다른 앱',
@@ -678,15 +699,19 @@ export const text = {
       ramTrend: 'RAM 사용 추이',
       groups: '메모리 묶음',
       recommendTitle: '메모리 정리 추천',
-      recommendSummary: (n: number, size: string): string =>
-        `${n}개를 끄면 약 ${size} 를 확보할 수 있어요.`,
+      /** freed: formatFreed 결과. */
+      recommendSummary: (n: number, freed: string): string =>
+        `${n}개를 끄면 ${freed} 를 확보할 수 있어요.`,
+      /** 추천 칩의 크기: RAM 크기와 커밋 크기("1.2 GB · 커밋 4.2 GB"). */
+      chipSize: (memory: string, commit: string): string => `${memory} · 커밋 ${commit}`,
       recommendNone:
         "정리 후보가 없어요. '다른 앱'에서 메모리를 많이 쓰는 앱 중 끌 만한 것을 확인해 보세요.",
       showApps: '다른 앱 보기',
       killAll: '모두 끄기',
       heavyTitle: '무거운 작업',
-      heavyOverlap: (percent: number, n: number): string =>
-        `RAM 이 ${percent}% 인데 무거운 작업 ${n}개가 겹쳐 돌고 있어요. 하나가 끝날 때까지 새 작업을 미루면 좋아요.`,
+      /** pressure: pressureText 결과("RAM 85%" 또는 "커밋 86%"). */
+      heavyOverlap: (pressure: string, n: number): string =>
+        `${pressure} 인데 무거운 작업 ${n}개가 겹쳐 돌고 있어요. 하나가 끝날 때까지 새 작업을 미루면 좋아요.`,
       topAppsTitle: '메모리를 많이 쓰는 다른 앱',
       groupHeaders: { name: '구분', memory: '메모리', processes: '프로세스' },
       collectMode: (label: string): string => `수집 방식: ${label}`,
@@ -715,6 +740,8 @@ export const text = {
     },
     detail: {
       url: (port: number): string => `http://localhost:${port}`,
+      /** 상세 패널 메모리 카드의 보조 줄. */
+      commitSub: (size: string): string => `커밋 ${size}`,
       open: '브라우저로 열기',
       kill: '내리기',
       inUse: '사용 중',

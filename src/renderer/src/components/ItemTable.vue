@@ -278,6 +278,12 @@ const G = text.ui.group
                     >{{ formatBytes(block.group.memoryBytes) }}</span
                   >
                   <span
+                    v-else-if="col.id === 'commit' && block.group.commitBytes != null"
+                    class="font-mono text-xs"
+                    :title="G.commitHint"
+                    >{{ formatBytes(block.group.commitBytes) }}</span
+                  >
+                  <span
                     v-else-if="col.id === 'branch' && block.group.outer"
                     class="truncate text-muted-foreground"
                     >{{ G.workspaceRepo }}</span

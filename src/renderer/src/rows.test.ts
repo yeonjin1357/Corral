@@ -1,4 +1,12 @@
-import { filterRows, groupServers, hiddenServerTable, sortRows, tableFor, TABS } from './rows'
+import {
+  filterRows,
+  groupServers,
+  hiddenServerTable,
+  sortRows,
+  tableFor,
+  TABS,
+  workspaceSummary
+} from './rows'
 import {
   GB,
   MB,
@@ -394,5 +402,79 @@ describe('새 정보 표시(F3·F5·F6)', () => {
     const t = hiddenServerTable(s)
     expect(t.rows.map((r) => [r.cells.port.text, r.cells.status.text])).toEqual([[':2375', '숨김']])
     expect(t.rows[0].actions.map((a) => a.kind)).toEqual(['unhide'])
+  })
+})
+
+describe('커밋 칸', () => {
+  test('커밋을 하나라도 알면 커밋 칸이 메모리 칸 뒤에, 하나도 모르면 칸이 없다', () => {
+    const ids = (t: ReturnType<typeof tableFor>): string[] => t.columns.map((c) => c.id)
+    const known = snapshot({
+      servers: [serverRow({ commitBytes: 2 * GB })],
+      agents: [agentRow({ commitBytes: 1 * GB })],
+      leftovers: [leftoverRow({ commitBytes: 1 * GB })],
+      heavyJobs: [heavyJob({ commitBytes: 1 * GB })],
+      apps: [{ name: 'a.exe', memoryBytes: GB, commitBytes: GB, processCount: 1, exePath: null }]
+    })
+    for (const tab of ['ports', 'agents', 'leftovers', 'heavy', 'apps'] as const) {
+      const cols = ids(tableFor(tab, known))
+      expect(cols[cols.indexOf('memory') + 1]).toBe('commit')
+    }
+    expect(tableFor('ports', known).columns.find((c) => c.id === 'commit')).toMatchObject({
+      label: '커밋',
+      width: 96,
+      align: 'right'
+    })
+    const unknown = snapshot({
+      servers: [serverRow()],
+      agents: [agentRow()],
+      leftovers: [leftoverRow()],
+      heavyJobs: [heavyJob()]
+    })
+    for (const tab of ['ports', 'agents', 'leftovers', 'heavy', 'apps'] as const)
+      expect(ids(tableFor(tab, unknown))).not.toContain('commit')
+    // 숨긴 서버 표도 같은 규칙(그 표의 행만 본다).
+    expect(ids(hiddenServerTable(snapshot({ hiddenServers: [serverRow()] })))).not.toContain(
+      'commit'
+    )
+    expect(
+      ids(hiddenServerTable(snapshot({ hiddenServers: [serverRow({ commitBytes: GB })] })))
+    ).toContain('commit')
+  })
+
+  test('커밋 칸은 커밋으로 정렬하고 모르는 행은 —', () => {
+    const s = snapshot({
+      servers: [
+        serverRow({ pid: 1, ports: [1], commitBytes: 1 * GB }),
+        serverRow({ pid: 2, ports: [2], commitBytes: null }),
+        serverRow({ pid: 3, ports: [3], commitBytes: 4 * GB })
+      ]
+    })
+    const rows = tableFor('ports', s).rows
+    expect(rows[0].cells.commit).toMatchObject({ text: '1.0 GB', sort: GB })
+    expect(rows[1].cells.commit).toMatchObject({ text: '—', sort: -1 })
+    expect(sortRows(rows, 'commit', 'desc').map((r) => r.cells.commit.text)).toEqual([
+      '4.0 GB',
+      '1.0 GB',
+      '—'
+    ])
+  })
+
+  test('묶음 머리와 작업 공간 요약은 커밋 합을 같이 낸다(모르면 null)', () => {
+    const WS = { root: 'C:\\work\\ws', name: 'ws', branch: 'main', outer: true }
+    const a = serverRow({ pid: 1, ports: [1], workspace: WS, commitBytes: 1 * GB })
+    const b = serverRow({ pid: 2, ports: [2], workspace: WS, commitBytes: 2 * GB })
+    const s = snapshot({ servers: [a, b] })
+    const rows = tableFor('ports', s).rows
+    expect(groupServers(rows, s.servers, [])[0].group?.commitBytes).toBe(3 * GB)
+    expect(workspaceSummary(s)[0].commitBytes).toBe(3 * GB)
+    const none = snapshot({
+      servers: [
+        serverRow({ pid: 1, workspace: WS }),
+        serverRow({ pid: 2, ports: [2], workspace: WS })
+      ]
+    })
+    expect(
+      groupServers(tableFor('ports', none).rows, none.servers, [])[0].group?.commitBytes
+    ).toBeNull()
   })
 })

@@ -213,6 +213,20 @@ describe('buildTrayMenu', () => {
 test('툴팁', () => {
   expect(trayTooltip(snap())).toBe('pitwall — RAM 82%')
   expect(trayTooltip(null)).toBe('pitwall')
+  // 커밋이 더 높으면 그 압박을 말한다.
+  const m = snap().memory
+  expect(
+    trayTooltip(
+      snap({
+        memory: {
+          ...m,
+          ramLevel: 'normal',
+          level: 'danger',
+          commit: { usedBytes: 91, limitBytes: 100, percent: 91.4, level: 'danger' }
+        }
+      })
+    )
+  ).toBe('pitwall — 커밋 91%')
 })
 
 describe('아이콘', () => {

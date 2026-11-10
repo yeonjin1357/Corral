@@ -91,6 +91,9 @@ const cpuText = (cpuPercent: number | null): string => {
   const cpu = displayCpuPercent(cpuPercent, props.platform, props.cpuCount)
   return cpu == null ? t.none : `${cpu.toFixed(1)}%`
 }
+/** 메모리 카드 보조 줄에 붙일 커밋(모르면 없음). */
+const commitSub = (commitBytes: number | null | undefined): string | undefined =>
+  commitBytes == null ? undefined : t.detail.commitSub(formatBytes(commitBytes))
 const workspaceText = (ws: { name: string; root: string } | null): string =>
   ws ? `${ws.name} · ${ws.root}` : t.none
 
@@ -151,13 +154,7 @@ const view = computed<View | null>(() => {
             icon: MemoryStick,
             label: t.detail.memory,
             value: formatBytes(r.memoryBytes),
-            sub: r.memoryGrowth
-              ? `${t.rowStatus.memoryGrowth} · ${t.rowStatus.memoryGrowthTitle(
-                  r.memoryGrowth.minutes,
-                  formatBytes(r.memoryGrowth.fromBytes),
-                  formatBytes(r.memoryGrowth.toBytes)
-                )}`
-              : undefined,
+            sub: commitSub(r.commitBytes),
             trend: true
           },
           {
@@ -218,6 +215,7 @@ const view = computed<View | null>(() => {
             icon: MemoryStick,
             label: t.detail.memory,
             value: formatBytes(r.memoryBytes),
+            sub: commitSub(r.commitBytes),
             trend: true
           },
           {
@@ -249,7 +247,12 @@ const view = computed<View | null>(() => {
         description: `${r.processName} · PID ${r.pid}`,
         badge: r.agentInWorktree ? { text: t.rowStatus.leftoverAgent, variant: 'secondary' } : null,
         cards: [
-          { icon: MemoryStick, label: t.detail.memory, value: formatBytes(r.memoryBytes) },
+          {
+            icon: MemoryStick,
+            label: t.detail.memory,
+            value: formatBytes(r.memoryBytes),
+            sub: commitSub(r.commitBytes)
+          },
           {
             icon: Timer,
             label: t.sheet.runtime,
@@ -276,7 +279,12 @@ const view = computed<View | null>(() => {
         title: r.label,
         description: `${r.processName} · PID ${r.pid}`,
         cards: [
-          { icon: MemoryStick, label: t.detail.memory, value: formatBytes(r.memoryBytes) },
+          {
+            icon: MemoryStick,
+            label: t.detail.memory,
+            value: formatBytes(r.memoryBytes),
+            sub: commitSub(r.commitBytes)
+          },
           {
             icon: Timer,
             label: t.sheet.runtime,
@@ -450,7 +458,12 @@ const folderSize = (f: DiskRow['folders'][number]): string =>
             </CardDescription>
           </CardHeader>
           <CardContent class="flex-1 justify-between gap-3">
-            <p class="text-2xl font-semibold tabular-nums">{{ card.value }}</p>
+            <div>
+              <p class="text-2xl font-semibold tabular-nums">{{ card.value }}</p>
+              <p v-if="card.trend && card.sub" class="text-xs text-muted-foreground">
+                {{ card.sub }}
+              </p>
+            </div>
             <ResourceTrend
               v-if="card.trend"
               :points="memoryHistory"

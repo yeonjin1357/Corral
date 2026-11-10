@@ -18,6 +18,7 @@ import type {
 import { selectionKey } from '../../shared/keys'
 import {
   agentCovers,
+  commitSum,
   displayCpuPercent,
   formatBytes,
   formatDuration,
@@ -108,6 +109,12 @@ const branchOf = (w: WorktreeInfo | null): Cell => ({
   muted: true
 })
 const memoryCell = (bytes: number): Cell => ({ text: formatBytes(bytes), sort: bytes, mono: true })
+/** 커밋 칸. 모르면 —(정렬에서는 맨 뒤). */
+const commitCell = (bytes: number | null | undefined): Cell =>
+  bytes == null
+    ? { text: text.ui.none, sort: -1, muted: true }
+    : { text: formatBytes(bytes), sort: bytes, mono: true }
+const COMMIT_COLUMN: Column = { id: 'commit', label: c.commit, width: 96, align: 'right' }
 const runtimeCell = (now: number, startedAt: number | null): Cell =>
   startedAt == null
     ? { text: text.ui.none, sort: -1, muted: true }
@@ -218,7 +225,26 @@ const AGENT_TONE: Record<AgentState, Tone> = {
   unknown: 'idle'
 }
 
+/** 그 표의 모든 행이 커밋을 모르면 커밋 칸을 뺀다(일부만 모르면 그 칸은 —). */
+function dropEmptyCommit(table: Table): Table {
+  if (!table.columns.some((col) => col.id === 'commit')) return table
+  if (table.rows.some((row) => row.cells.commit && row.cells.commit.sort !== -1)) return table
+  return {
+    ...table,
+    columns: table.columns.filter((col) => col.id !== 'commit'),
+    rows: table.rows.map((row) => {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { commit: _, ...cells } = row.cells
+      return { ...row, cells }
+    })
+  }
+}
+
 export function tableFor(tab: TabKey, s: DashboardSnapshot): Table {
+  return dropEmptyCommit(buildTable(tab, s))
+}
+
+function buildTable(tab: TabKey, s: DashboardSnapshot): Table {
   const now = s.takenAt
   switch (tab) {
     case 'ports':
@@ -231,6 +257,7 @@ export function tableFor(tab: TabKey, s: DashboardSnapshot): Table {
           { id: 'clients', label: c.clients, width: 64, align: 'right' },
           { id: 'cpu', label: c.cpu, width: 72, align: 'right' },
           { id: 'memory', label: c.memory, width: 96, align: 'right' },
+          COMMIT_COLUMN,
           { id: 'process', label: c.process, width: 140 }
         ],
         sort: { id: 'port', dir: 'asc' },
@@ -250,6 +277,7 @@ export function tableFor(tab: TabKey, s: DashboardSnapshot): Table {
             clients: { text: String(p.clientCount), sort: p.clientCount, mono: true },
             cpu: cpuCell(p.cpuPercent, s),
             memory: memoryCell(p.memoryBytes),
+            commit: commitCell(p.commitBytes),
             process: { text: p.processName, mono: true, muted: true }
           },
           actions: [
@@ -274,6 +302,7 @@ export function tableFor(tab: TabKey, s: DashboardSnapshot): Table {
           { id: 'status', label: c.status, width: 120 },
           { id: 'cpu', label: c.cpu, width: 72, align: 'right' },
           { id: 'memory', label: c.memory, width: 96, align: 'right' },
+          COMMIT_COLUMN,
           { id: 'runtime', label: c.runtime, width: 110, align: 'right' }
         ],
         sort: { id: 'name', dir: 'asc' },
@@ -291,6 +320,7 @@ export function tableFor(tab: TabKey, s: DashboardSnapshot): Table {
                   ? { text: text.ui.none, sort: -1, muted: true }
                   : { text: `${cpu.toFixed(1)}%`, sort: cpu, mono: true },
               memory: memoryCell(a.memoryBytes),
+              commit: commitCell(a.commitBytes),
               runtime: runtimeCell(now, a.startedAt)
             },
             actions: [{ kind: 'details', label: ACTIONS.details }],
@@ -310,6 +340,7 @@ export function tableFor(tab: TabKey, s: DashboardSnapshot): Table {
           { id: 'project', label: c.project, width: 200 },
           { id: 'status', label: c.status, width: 140 },
           { id: 'memory', label: c.memory, width: 96, align: 'right' },
+          COMMIT_COLUMN,
           { id: 'runtime', label: c.runtime, width: 110, align: 'right' },
           { id: 'process', label: c.process, width: 160 }
         ],
@@ -326,6 +357,7 @@ export function tableFor(tab: TabKey, s: DashboardSnapshot): Table {
                 ? { text: st.leftoverAgent, dot: 'idle' as const }
                 : { text: st.leftoverFree, dot: 'warn' as const },
               memory: memoryCell(l.memoryBytes),
+              commit: commitCell(l.commitBytes),
               runtime: runtimeCell(now, l.startedAt),
               process: { text: l.processName, mono: true, muted: true }
             },
@@ -343,6 +375,7 @@ export function tableFor(tab: TabKey, s: DashboardSnapshot): Table {
           { id: 'name', label: c.command, width: 180 },
           { id: 'project', label: c.project, width: 220 },
           { id: 'memory', label: c.memory, width: 96, align: 'right' },
+          COMMIT_COLUMN,
           { id: 'runtime', label: c.runtime, width: 110, align: 'right' },
           { id: 'process', label: c.process, width: 160 }
         ],
@@ -354,6 +387,7 @@ export function tableFor(tab: TabKey, s: DashboardSnapshot): Table {
             name: { text: j.label, title: j.commandLine, icon: heavyIcon(j, s.platform) },
             project: { text: folderOf(j.worktree), title: j.worktree?.root },
             memory: memoryCell(j.memoryBytes),
+            commit: commitCell(j.commitBytes),
             runtime: runtimeCell(now, j.startedAt),
             process: { text: j.processName, mono: true, muted: true }
           },
@@ -415,6 +449,7 @@ export function tableFor(tab: TabKey, s: DashboardSnapshot): Table {
         columns: [
           { id: 'name', label: c.app, width: 260 },
           { id: 'memory', label: c.memory, width: 110, align: 'right' },
+          COMMIT_COLUMN,
           { id: 'processes', label: c.processes, width: 110, align: 'right' }
         ],
         sort: { id: 'memory', dir: 'desc' },
@@ -424,6 +459,7 @@ export function tableFor(tab: TabKey, s: DashboardSnapshot): Table {
           cells: {
             name: { text: a.name.replace(/\.exe$/i, ''), title: a.name, icon: appIcon(a) },
             memory: memoryCell(a.memoryBytes),
+            commit: commitCell(a.commitBytes),
             processes: {
               text: text.ui.groups.processes(a.processCount),
               sort: a.processCount
@@ -467,6 +503,8 @@ export interface ServerGroup {
   serverCount: number
   /** 서버 메모리 합(서버마다 한 번). */
   memoryBytes: number
+  /** 서버 커밋 합. 하나도 모르면 null. */
+  commitBytes: number | null
   /** 그 작업 공간에서 실행 중인 에이전트. */
   agents: AgentRow[]
   /** 머리에 보일 에이전트 로고와 설명(도구 · 상태 · 경과 시간). */
@@ -533,6 +571,7 @@ export function groupServers(
         outer: ws.outer,
         serverCount: all.length,
         memoryBytes: all.reduce((sum, r) => sum + r.memoryBytes, 0),
+        commitBytes: commitSum(all),
         agents: inside,
         agentBadges: inside.map((a) => ({
           key: selectionKey.agent(a),
@@ -580,6 +619,7 @@ export interface WorkspaceSummary {
   title: string
   serverCount: number
   memoryBytes: number
+  commitBytes: number | null
   agents: AgentRow[]
   /** 누르면 열 서버(메모리가 가장 큰 것). */
   firstKey: string
@@ -612,6 +652,7 @@ export function workspaceSummary(s: DashboardSnapshot): WorkspaceSummary[] {
         title: ws?.root ?? largest.worktree?.root ?? portList(largest.ports),
         serverCount: servers.length,
         memoryBytes: servers.reduce((sum, r) => sum + r.memoryBytes, 0),
+        commitBytes: commitSum(servers),
         agents,
         firstKey: selectionKey.server(largest),
         status: groupStatus(servers)
