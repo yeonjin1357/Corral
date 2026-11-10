@@ -286,6 +286,7 @@ export const text = {
       agentsSub: '실행 중',
       stateSource: '상태 판단',
       sourceHook: 'Claude 훅',
+      sourceFile: '세션 파일',
       sourceCpu: 'CPU 추정',
       agentStates: '상태',
       agentOthers: '그 외',
@@ -611,7 +612,12 @@ export const text = {
         error: '오류',
         unknown: '확인 중'
       },
-      sources: { hook: 'Claude 훅', cpu: 'CPU 추정', rollout: 'Codex 세션 기록' },
+      sources: {
+        hook: 'Claude 훅',
+        cpu: 'CPU 추정',
+        rollout: 'Codex 세션 기록',
+        file: 'Claude 세션 파일'
+      },
       runtime: '실행 시간',
       cpu: 'CPU',
       cpuSub: '코어 1개 = 100% 기준',
@@ -621,7 +627,9 @@ export const text = {
         'Codex 세션 기록을 찾지 못해 CPU 사용량으로 짐작해요. Codex 연동을 켜면 권한 대기까지 알 수 있어요.',
       codexRolloutNote:
         'Codex 세션 기록으로 상태를 알아요. 권한 대기는 Codex 연동을 켜야 알 수 있어요.',
-      noHookNote: 'Claude 연동을 켜면 권한 대기까지 정확히 알 수 있어요.'
+      noHookNote: 'Claude 연동을 켜면 권한 대기까지 정확히 알 수 있어요.',
+      fileNote:
+        'Claude Code 가 남기는 세션 파일로 작업 중·쉬는 중을 알아요. 권한 대기는 Claude 연동을 켜야 알 수 있어요.'
     },
     disk: {
       empty: '정리할 끝난 워크트리가 없어요.',

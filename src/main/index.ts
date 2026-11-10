@@ -35,6 +35,7 @@ import { resolveProcessWorktrees, resolveWorkspace, resolveWorktree } from './co
 import { collectOptionsFrom, createCollector } from './collector'
 import { loadConfig, updateConfig } from './config'
 import { claudeConfigDir } from './claudeHooks'
+import { createSessionFileReader } from './claudeSessionFiles'
 import { createClaudeIntegration } from './claudeIntegration'
 import { createCodexIntegration } from './codexIntegration'
 import { createHookHub } from './hookHub'
@@ -95,6 +96,11 @@ const sessions: Sessions = new Map()
 /** Codex 세션 기록 읽기(세션 폴더만, 설정은 바꾸지 않는다). */
 const codexReader = createCodexReader(codexHome(process.env, homedir()))
 
+/** Claude 실행 중 세션 파일 읽기(`<Claude 설정 폴더>/sessions/<pid>.json` 만 읽는다). */
+const sessionFileReader = createSessionFileReader({
+  dir: join(claudeConfigDir(process.env, homedir()), 'sessions')
+})
+
 const collector = platform
   ? createCollector({
       platform,
@@ -104,6 +110,7 @@ const collector = platform
       resolveWorktree,
       resolveWorkspace,
       codexState: (agent, now) => codexReader.stateFor(agent, now),
+      claudeSessionFiles: (agents, now) => sessionFileReader.read(agents, now),
       sessions,
       hookStatus: () => claude.status(),
       codexHookStatus: () => codex.status(),

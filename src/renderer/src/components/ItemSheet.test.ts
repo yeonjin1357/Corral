@@ -131,3 +131,14 @@ describe('상세 패널: 커밋', () => {
     expect(cardText()).not.toContain('커밋')
   })
 })
+
+test('상세 패널: 세션 파일로 안 에이전트는 상태 출처와 그 설명을 보인다', () => {
+  sheet({ kind: 'agent', row: agentRow({ state: 'idle', stateSource: 'file' }) })
+  const source = [...document.body.querySelectorAll('p')].find(
+    (p) => p.textContent?.trim() === '상태 출처'
+  )?.nextElementSibling
+  expect(source?.textContent?.trim()).toBe('Claude 세션 파일')
+  expect(document.body.textContent!.replace(/\s+/g, ' ')).toContain(
+    'Claude Code 가 남기는 세션 파일로 작업 중·쉬는 중을 알아요. 권한 대기는 Claude 연동을 켜야 알 수 있어요.'
+  )
+})

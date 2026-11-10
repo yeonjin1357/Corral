@@ -57,6 +57,29 @@ describe('카드의 메모리 합은 메모리 카드 묶음과 같은 값(같�
   })
 })
 
+test('에이전트 카드의 상태 줄: 훅이 켜져 있으면 Claude 훅, 아니고 세션 파일로 아는 에이전트가 있으면 세션 파일, 아니면 CPU 추정', () => {
+  const stateLine = (s: DashboardSnapshot): string =>
+    bar(s)
+      .findAll('[data-slot=card]')
+      .find((c) => c.find('[data-slot=card-title]').text().trim() === '에이전트')!
+      .find('p[title="상태 판단"]')
+      .text()
+      .replace(/\s+/g, ' ')
+  const hookOn = {
+    state: 'on' as const,
+    problem: null,
+    allHooksDisabled: false,
+    settingsPath: 'C:\\Users\\dev\\.claude\\settings.json'
+  }
+  const fromFile = agentRow({ stateSource: 'file' })
+  const fromCpu = agentRow({ pid: 5001, stateSource: 'cpu' })
+  expect(stateLine(snapshot({ agents: [fromFile, fromCpu], hook: hookOn }))).toBe(
+    '상태 · Claude 훅'
+  )
+  expect(stateLine(snapshot({ agents: [fromFile, fromCpu] }))).toBe('상태 · 세션 파일')
+  expect(stateLine(snapshot({ agents: [fromCpu] }))).toBe('상태 · CPU 추정')
+})
+
 test('개발 서버 카드: 큰 숫자는 서버 수, 아래 줄은 포트 수', () => {
   const s = snapshot({
     servers: [

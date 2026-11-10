@@ -1,9 +1,10 @@
 import type { AgentState, AgentTool } from '../shared/types'
+import type { ClaudeSessionFile } from './claudeSessionFiles'
 
 /**
- * 에이전트 세션 하나(Claude Code·Codex). 훅 이벤트로만 알 수 있다. 이벤트에는 프로세스 정보가 없어서, 수집 때 같은
- * 워크트리의 에이전트 프로세스와 짝지어(processKey) 그 프로세스의 행에 붙이고 끝났는지 판단한다. 아직 짝이 없으면
- * 작업 폴더의 워크트리로 그 워크트리의 짝 없는 행에 붙인다.
+ * 에이전트 세션 하나(Claude Code·Codex). 훅 이벤트로만 알 수 있다. 이벤트에는 프로세스 정보가 없어서, 수집 때
+ * 에이전트 프로세스와 짝지어(processKey — Claude 는 세션 파일로 정확히, 그 밖은 같은 워크트리·가까운 시작 시각으로)
+ * 그 프로세스의 행에 붙이고 끝났는지 판단한다. 아직 짝이 없으면 작업 폴더의 워크트리로 그 워크트리의 짝 없는 행에 붙인다.
  */
 export interface ClaudeSession {
   id: string
@@ -255,6 +256,33 @@ export function reconcileSessions(
     if (!replaced) continue
     sessions.delete(replaced.id)
     session.processKey = replaced.processKey
+  }
+}
+
+/**
+ * Claude 세션 파일(G3a)로 세션과 프로세스를 정확히 잇는다(reconcileSessions 의 추측보다 먼저). 파일의 세션 id 와 같은
+ * Claude 세션이 있으면 processKey 를 그 파일의 프로세스(keyOfPid)로 고치고, 같은 processKey 를 가진 다른 Claude 세션은
+ * 버린다(그 프로세스가 /clear 등으로 새 세션으로 넘어감). 모두 고친 뒤에 버려서, 추측이 엇갈린 두 짝을 서로 바꿔도
+ * 잃지 않는다. 이번 샘플의 Claude 가 아닌 pid(keyOfPid 가 null)와 아직 훅 소식이 없는 세션은 건너뛰고,
+ * Codex 세션은 건드리지 않는다.
+ */
+export function pairBySessionFile(
+  sessions: Sessions,
+  files: Map<number, ClaudeSessionFile>,
+  keyOfPid: (pid: number) => string | null
+): void {
+  const owner = new Map<string, string>()
+  for (const [pid, file] of files) {
+    const key = keyOfPid(pid)
+    const session = sessions.get(file.sessionId)
+    if (!key || !session || toolOf(session) !== 'claude') continue
+    session.processKey = key
+    owner.set(key, session.id)
+  }
+  for (const [id, s] of sessions) {
+    if (toolOf(s) !== 'claude' || !s.processKey) continue
+    const mine = owner.get(s.processKey)
+    if (mine !== undefined && mine !== id) sessions.delete(id)
   }
 }
 

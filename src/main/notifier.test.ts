@@ -383,6 +383,25 @@ describe('작업 끝남(F4)', () => {
     expect(shown).toEqual([])
   })
 
+  test('세션 파일로 안 상태도 2분 넘게 일하고 끝나면 작업 끝남을 알린다', () => {
+    const { shown, clock, update } = setup()
+    const file = (state: AgentRow['state'], since: number): AgentRow => ({
+      ...agent(1, state),
+      stateSource: 'file',
+      stateSince: since
+    })
+    update(snap({ agents: [file('working', 0)] }))
+    clock.now = 3 * MIN
+    update(snap({ agents: [file('idle', clock.now)] }))
+    expect(shown).toEqual([
+      {
+        title: 'shop-web 의 Claude 가 작업을 끝냈어요',
+        body: '3분 동안 일했어요.',
+        target: 'agent:1:1'
+      }
+    ])
+  })
+
   test('CPU 추정 상태로는 알리지 않는다', () => {
     const { shown, clock, update } = setup()
     const cpu = (state: AgentRow['state'], since: number): AgentRow => ({

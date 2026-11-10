@@ -26,16 +26,18 @@ export function trackSeen(
 }
 
 /**
- * 마지막 활동 시각. 훅·세션 기록으로 아는 상태는 그 정확한 시각(exact, 없으면 본 기록), CPU 추정은 pitwall 이
+ * 마지막 활동 시각. 훅·세션 기록·세션 파일로 아는 상태는 그 정확한 시각(exact, 없으면 본 기록), CPU 추정은 pitwall 이
  * 마지막으로 작업 중으로 본 시각이고 본 적이 없으면 처음 본 시각(그 전은 모르므로 보수적으로).
+ * CPU 를 읽지 못해 확인 중(unknown)인 CPU 추정은 근거가 없어 null(오래 쉬는 세션으로 보지 않는다).
  */
 export function lastActiveOf(
-  agent: Pick<AgentRow, 'stateSource'>,
+  agent: Pick<AgentRow, 'stateSource' | 'state'>,
   exact: number | null,
   seen: { firstSeen: number; lastWorking: number | null }
-): number {
+): number | null {
   const observed = seen.lastWorking ?? seen.firstSeen
-  return agent.stateSource === 'cpu' ? observed : (exact ?? observed)
+  if (agent.stateSource !== 'cpu') return exact ?? observed
+  return agent.state === 'unknown' ? null : observed
 }
 
 /**

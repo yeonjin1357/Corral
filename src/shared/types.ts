@@ -243,18 +243,22 @@ export interface AgentRow {
   /** 메모리에 센 프로세스(자기 포함)를 이름별로 묶은 것(상세 패널). */
   processes: ProcessSummary[]
   state: AgentState
-  /** hook: 훅 이벤트로 안 상태, rollout: Codex 세션 기록으로 안 상태, cpu: CPU 변화로 짐작한 상태. */
-  stateSource: 'hook' | 'cpu' | 'rollout'
   /**
-   * 지금 상태가 시작된 시각. 훅 상태는 그 상태가 된 이벤트 시각, CPU 추정은 pitwall 이 그 상태를 처음 본 시각.
-   * 아직 판단하지 못했으면(unknown) null.
+   * hook: 훅 이벤트로 안 상태, rollout: Codex 세션 기록으로 안 상태, file: Claude 실행 중 세션 파일로 안 상태
+   * (작업 중·쉬는 중만), cpu: CPU 변화로 짐작한 상태.
+   */
+  stateSource: 'hook' | 'cpu' | 'rollout' | 'file'
+  /**
+   * 지금 상태가 시작된 시각. 훅 상태는 그 상태가 된 이벤트 시각, 세션 파일은 상태가 바뀐 시각(모르면 CPU 추정처럼),
+   * CPU 추정은 pitwall 이 그 상태를 처음 본 시각. 아직 판단하지 못했으면(unknown) null.
    */
   stateSince: number | null
   /** 지난 샘플 이후 하위 트리 CPU 사용률(코어 1개 = 100). 모르면 null. */
   cpuPercent: number | null
   /**
    * 마지막 활동 시각(G2). 훅은 그 프로세스 세션의 마지막 활동 이벤트(60초 뒤의 idle 알림은 활동이 아니다),
-   * Codex 세션 기록은 마지막 이벤트, CPU 추정은 pitwall 이 마지막으로 작업 중으로 본 시각(본 적 없으면 처음 본 시각).
+   * Codex 세션 기록은 마지막 이벤트, 세션 파일은 상태가 바뀐 시각(작업 중이면 수집 시각), CPU 추정은 pitwall 이
+   * 마지막으로 작업 중으로 본 시각(본 적 없으면 처음 본 시각). CPU 를 읽지 못해 확인 중인 CPU 추정과
    * 수집기가 채우기 전에는 null.
    */
   lastActiveAt: number | null

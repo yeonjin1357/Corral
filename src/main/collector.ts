@@ -23,11 +23,13 @@ import {
   type CpuMemo
 } from './agents'
 import { isParked, lastActiveOf, trackSeen, type SeenMemo } from './activity'
+import { fileStateOver, type ClaudeSessionFile } from './claudeSessionFiles'
 import { activityOf, judgeServers, type ServerMemo } from './judge'
 import { agentToolOf, topLevelAgentPids } from './processTree'
 import {
   codexTranscriptFor,
   hookViewForAgent,
+  pairBySessionFile,
   reconcileSessions,
   type HookView,
   type LiveClaude,
@@ -93,6 +95,14 @@ export interface CollectorDeps {
     agent: { cwd: string; startedAt: number | null; exclude?: { from: number; to: number }[] },
     now: number
   ) => Promise<RolloutState | null>
+  /**
+   * Claude 실행 중 세션 파일(G3a, pid → 파일). 세션과 프로세스를 정확히 잇고, 훅이 없을 때 작업 중·쉬는 중을 안다.
+   * 없으면 쓰지 않는다(지금처럼 추측으로 잇고 CPU 추정).
+   */
+  claudeSessionFiles?: (
+    agents: { pid: number; startedAt: number | null }[],
+    now: number
+  ) => Promise<Map<number, ClaudeSessionFile>>
   /** 훅 서버가 채우는 에이전트 세션들(수집기는 읽고 끝난 것을 버린다). */
   sessions: Sessions
   hookStatus: () => Promise<ClaudeHookStatus>
@@ -174,17 +184,58 @@ export function createCollector(deps: CollectorDeps): {
       hookFor(roots)({ key: agentKey(a), worktreeRoot: a.worktree?.root ?? null, tool: a.tool })
   /** Codex 세션 기록으로 안 상태(pid → 상태). restate 가 덮어쓰지 않도록 기억한다. */
   let rollouts = new Map<number, RolloutState>()
-  /** 정확한 상태의 시작 시각: 훅은 이벤트 시각, Codex 세션 기록은 기록의 이벤트 시각. */
+  /** 마지막 수집에서 읽은 Claude 세션 파일(pid → 파일). restate(수집 사이)는 새로 읽지 않고 이것과 견준다. */
+  let sessionFiles = new Map<number, ClaudeSessionFile>()
+  /** 정확한 상태의 시작 시각: 훅은 이벤트 시각, Codex 세션 기록은 기록의 이벤트 시각, 세션 파일은 상태가 바뀐 시각. */
   const exactSinceFor =
     (roots: Map<string, string | null>) =>
     (a: AgentRow): number | null => {
       if (a.stateSource === 'rollout') return rollouts.get(a.pid)?.since ?? null
+      if (a.stateSource === 'file') return sessionFiles.get(a.pid)?.statusUpdatedAt ?? null
       return hookOfRow(roots)(a)?.since ?? null
     }
 
   /**
-   * 마지막 활동 시각과 오래 쉬는 세션(G2)을 채운다. 훅은 그 프로세스 세션의 마지막 활동 이벤트, Codex 세션 기록은
-   * 마지막 이벤트, CPU 추정은 pitwall 이 본 기록(마지막으로 작업 중으로 본 시각, 없으면 처음 본 시각).
+   * 훅·Claude 세션 파일·CPU 가운데 이 에이전트 상태의 근거(G3a). 훅과 파일이 둘 다 있으면 더 늦은 근거를 따르고
+   * (fileStateOver), 둘 다 없으면 CPU 추정. Codex 세션 기록은 따로 정한다(readRollouts).
+   */
+  function stateFrom(a: AgentRow, hook: HookView | null): AgentRow {
+    const file = a.tool === 'claude' ? sessionFiles.get(a.pid) : undefined
+    const fromFile = file ? fileStateOver(file, hook) : null
+    if (fromFile) return { ...a, state: fromFile, stateSource: 'file' }
+    return {
+      ...a,
+      state: hook?.state ?? cpuState(a.cpuPercent),
+      stateSource: hook ? 'hook' : 'cpu'
+    }
+  }
+
+  /**
+   * 정확한 근거로 아는 마지막 활동 시각. 훅은 그 프로세스 세션의 마지막 활동 이벤트, Codex 세션 기록은 마지막 이벤트,
+   * 세션 파일은 상태가 바뀐 시각(작업 중이면 지금). CPU 추정이거나 모르면 null.
+   */
+  function exactActivityOf(
+    a: AgentRow,
+    roots: Map<string, string | null>,
+    now: number
+  ): number | null {
+    switch (a.stateSource) {
+      case 'rollout':
+        return rollouts.get(a.pid)?.lastEventAt ?? null
+      case 'hook':
+        return hookOfRow(roots)(a)?.lastActivityAt ?? null
+      case 'file': {
+        const file = sessionFiles.get(a.pid)
+        return file?.status === 'busy' ? now : (file?.statusUpdatedAt ?? null)
+      }
+      case 'cpu':
+        return null
+    }
+  }
+
+  /**
+   * 마지막 활동 시각과 오래 쉬는 세션(G2)을 채운다. 정확한 근거(exactActivityOf)가 없으면 pitwall 이 본 기록
+   * (마지막으로 작업 중으로 본 시각, 없으면 처음 본 시각 — CPU 를 읽지 못해 확인 중인 CPU 추정은 모름).
    */
   function withActivity(
     agents: AgentRow[],
@@ -194,12 +245,7 @@ export function createCollector(deps: CollectorDeps): {
   ): AgentRow[] {
     agentSeen = trackSeen(agents, agentSeen, now)
     return agents.map((a): AgentRow => {
-      const exact =
-        a.stateSource === 'rollout'
-          ? (rollouts.get(a.pid)?.lastEventAt ?? null)
-          : a.stateSource === 'hook'
-            ? (hookOfRow(roots)(a)?.lastActivityAt ?? null)
-            : null
+      const exact = exactActivityOf(a, roots, now)
       const seen = agentSeen.get(agentKey(a)) ?? { firstSeen: now, lastWorking: null }
       const lastActiveAt = lastActiveOf(a, exact, seen)
       return { ...a, lastActiveAt, parked: isParked({ ...a, lastActiveAt }, now, parkedMs) }
@@ -332,6 +378,19 @@ export function createCollector(deps: CollectorDeps): {
     }
   }
 
+  /** Claude 세션 파일을 읽는다. 읽기가 없거나 실패하면 빈 결과(지금처럼 추측으로 잇고 CPU 추정). */
+  async function readSessionFiles(
+    agents: { pid: number; startedAt: number | null }[],
+    now: number
+  ): Promise<Map<number, ClaudeSessionFile>> {
+    if (!deps.claudeSessionFiles || agents.length === 0) return new Map()
+    try {
+      return await deps.claudeSessionFiles(agents, now)
+    } catch {
+      return new Map()
+    }
+  }
+
   async function readHookStatus(): Promise<ClaudeHookStatus> {
     try {
       return await deps.hookStatus()
@@ -345,10 +404,11 @@ export function createCollector(deps: CollectorDeps): {
     const options = deps.options()
     const [raw, memory] = await Promise.all([deps.sample(), deps.readMemory()])
     const needed = pidsForWorktreeLookup(raw, deps.platform, options.heavyPatterns)
+    const agentPids = topLevelAgentPids(raw.processes)
     const worktrees = await deps.resolveProcessWorktrees(
       raw.processes.filter((p) => needed.has(p.pid)),
       raw.cwds ?? {},
-      new Set(topLevelAgentPids(raw.processes))
+      new Set(agentPids)
     )
     const now = deps.now()
     const snapshot = buildSnapshot({
@@ -365,29 +425,40 @@ export function createCollector(deps: CollectorDeps): {
     })
 
     const devServerPids = new Set(snapshot.servers.flatMap((p) => [p.pid, ...p.descendantPids]))
-    const [roots, hook, codexHook] = await Promise.all([
+    const byPid = new Map(raw.processes.map((p) => [p.pid, p]))
+    const agentProcs = agentPids.flatMap((pid) => {
+      const p = byPid.get(pid)
+      const tool = p ? agentToolOf(p) : null
+      return p && tool ? [{ p, tool }] : []
+    })
+    // 세션 파일은 Claude 에이전트에만 있다.
+    const claudeProcs = agentProcs
+      .filter((a) => a.tool === 'claude')
+      .map(({ p }) => ({ pid: p.pid, startedAt: p.startedAt }))
+    const [roots, hook, codexHook, files] = await Promise.all([
       resolveSessionRoots(),
       readHookStatus(),
-      readCodexHookStatus()
+      readCodexHookStatus(),
+      readSessionFiles(claudeProcs, now)
     ])
     rootOfCwd = roots
+    sessionFiles = files
 
     // 세션을 이번 샘플의 에이전트 프로세스(Claude·Codex)와 짝짓고 끝난 세션을 버린 뒤 상태를 정한다(끝난 세션이 한 번도 섞이지 않게).
-    const byPid = new Map(raw.processes.map((p) => [p.pid, p]))
-    const live: LiveClaude[] = topLevelAgentPids(raw.processes).flatMap((pid) => {
-      const p = byPid.get(pid)
-      const w = worktrees.get(pid)
-      const tool = p ? agentToolOf(p) : null
-      if (!p || !w || !tool) return []
-      return [
-        {
-          key: `${pid}:${p.startedAt ?? ''}`,
-          rootKey: worktreeKey(w.root),
-          startedAt: p.startedAt,
-          tool
-        }
-      ]
+    const live: LiveClaude[] = agentProcs.flatMap(({ p, tool }) => {
+      const w = worktrees.get(p.pid)
+      return w
+        ? [{ key: agentKey(p), rootKey: worktreeKey(w.root), startedAt: p.startedAt, tool }]
+        : []
     })
+    // 세션 파일이 가리키는 짝이 먼저다(추측은 아직 짝이 없는 세션에만). reconcileSessions 가 꺼진 프로세스의
+    // 세션을 버리므로 이번 샘플에서 짝지을 수 있는(live) Claude 로만 잇는다.
+    const claudeKeys = new Map(
+      agentProcs
+        .filter(({ p, tool }) => tool === 'claude' && worktrees.has(p.pid))
+        .map(({ p }) => [p.pid, agentKey(p)])
+    )
+    pairBySessionFile(deps.sessions, files, (pid) => claudeKeys.get(pid) ?? null)
     reconcileSessions(deps.sessions, {
       now,
       sampledAt,
@@ -395,7 +466,7 @@ export function createCollector(deps: CollectorDeps): {
       rootOfCwd: (cwd) => roots.get(cwd) ?? null
     })
 
-    const { agents: built, cpu } = buildAgents({
+    const { agents: hooked, cpu } = buildAgents({
       sample: raw,
       worktrees,
       devServerPids,
@@ -404,6 +475,10 @@ export function createCollector(deps: CollectorDeps): {
       hookFor: hookFor(roots)
     })
     previousCpu = cpu
+    // 훅 상태가 없거나 파일이 더 늦은 근거인 Claude 에이전트는 세션 파일의 상태를 쓴다.
+    const built = hooked.map((a) =>
+      a.tool === 'claude' && sessionFiles.has(a.pid) ? stateFrom(a, hookOfRow(roots)(a)) : a
+    )
     rollouts = await readRollouts(built, raw.cwds ?? {}, now)
     const withRollout = built.map((a): AgentRow => {
       const r = rollouts.get(a.pid)
@@ -497,17 +572,14 @@ export function createCollector(deps: CollectorDeps): {
     rootOfCwd = await resolveSessionRoots(rootOfCwd)
     const restated = snapshot.agents.map((a): AgentRow => {
       const hook = hookOfRow(rootOfCwd)(a)
-      const fromHook = hook?.state ?? null
       // 세션 기록 상태는 다음 수집에서 다시 읽는다. 그보다 새 훅 이벤트(새 입력 등)가 왔을 때만 훅을 따른다.
       if (a.stateSource === 'rollout') {
         const r = rollouts.get(a.pid)
         if (!hook || (r && hook.since <= r.since)) return a
       }
-      return {
-        ...a,
-        state: fromHook ?? cpuState(a.cpuPercent),
-        stateSource: fromHook ? 'hook' : 'cpu'
-      }
+      // 세션 파일은 다음 수집에서 다시 읽는다. 마지막으로 읽은 파일과 훅 가운데 더 늦은 근거를 따른다
+      // (훅 상태가 생기지 않은 파일 행은 그대로).
+      return stateFrom(a, hook)
     })
     const now = deps.now()
     const stated = withStateSince(restated, agentStates, now, exactSinceFor(rootOfCwd))

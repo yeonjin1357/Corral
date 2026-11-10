@@ -145,6 +145,14 @@ const agentCounts = computed(() => {
 })
 const agentMemory = computed(() => groupBytes('agent'))
 const hookOn = computed(() => s.value.hook?.state === 'on')
+/** "상태 · …" 줄의 출처: 훅이 켜져 있으면 훅, 아니고 세션 파일로 아는 에이전트가 있으면 세션 파일, 아니면 CPU 추정. */
+const stateSourceLabel = computed(() =>
+  hookOn.value
+    ? text.ui.cards.sourceHook
+    : s.value.agents.some((a) => a.stateSource === 'file')
+      ? text.ui.cards.sourceFile
+      : text.ui.cards.sourceCpu
+)
 
 const heavyMemory = computed(() => groupBytes('heavy'))
 
@@ -389,7 +397,7 @@ const diskSub = computed(() =>
         <div class="mt-auto border-t border-border/60 pt-3">
           <p class="mb-2 text-[11px] text-muted-foreground" :title="text.ui.cards.stateSource">
             {{ text.ui.cards.agentStates }} ·
-            {{ hookOn ? text.ui.cards.sourceHook : text.ui.cards.sourceCpu }}
+            {{ stateSourceLabel }}
           </p>
           <dl class="flex justify-between gap-2">
             <div>

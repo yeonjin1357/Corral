@@ -5,21 +5,30 @@ const PARKED_MS = 180 * MIN
 
 describe('마지막 활동 시각', () => {
   test('CPU 추정은 마지막으로 작업 중이던 시각, 본 적 없으면 처음 본 시각', () => {
-    const cpu = { stateSource: 'cpu' as const }
+    const cpu = { stateSource: 'cpu' as const, state: 'idle' as const }
     expect(lastActiveOf(cpu, null, { firstSeen: 1000, lastWorking: 5000 })).toBe(5000)
     expect(lastActiveOf(cpu, null, { firstSeen: 1000, lastWorking: null })).toBe(1000)
     // CPU 추정에는 정확한 시각이 없다(넘어와도 쓰지 않는다).
     expect(lastActiveOf(cpu, 9000, { firstSeen: 1000, lastWorking: null })).toBe(1000)
   })
 
-  test('훅·세션 기록은 그 세션의 시각, 모르면 pitwall 이 본 기록', () => {
+  test('CPU 를 읽지 못해 확인 중인 CPU 추정은 근거가 없어 null', () => {
+    const unknown = { stateSource: 'cpu' as const, state: 'unknown' as const }
+    expect(lastActiveOf(unknown, null, { firstSeen: 1000, lastWorking: null })).toBeNull()
+    expect(lastActiveOf(unknown, 9000, { firstSeen: 1000, lastWorking: 5000 })).toBeNull()
+  })
+
+  test('훅·세션 기록·세션 파일은 그 시각, 모르면 pitwall 이 본 기록', () => {
     const seen = { firstSeen: 1000, lastWorking: 3000 }
-    expect(lastActiveOf({ stateSource: 'hook' }, 7000, seen)).toBe(7000)
-    expect(lastActiveOf({ stateSource: 'rollout' }, 6000, seen)).toBe(6000)
-    expect(lastActiveOf({ stateSource: 'hook' }, null, seen)).toBe(3000)
-    expect(lastActiveOf({ stateSource: 'rollout' }, null, { ...seen, lastWorking: null })).toBe(
-      1000
-    )
+    const idle = 'idle' as const
+    expect(lastActiveOf({ stateSource: 'hook', state: idle }, 7000, seen)).toBe(7000)
+    expect(lastActiveOf({ stateSource: 'rollout', state: idle }, 6000, seen)).toBe(6000)
+    expect(lastActiveOf({ stateSource: 'file', state: idle }, 5000, seen)).toBe(5000)
+    expect(lastActiveOf({ stateSource: 'hook', state: idle }, null, seen)).toBe(3000)
+    expect(lastActiveOf({ stateSource: 'file', state: idle }, null, seen)).toBe(3000)
+    expect(
+      lastActiveOf({ stateSource: 'rollout', state: idle }, null, { ...seen, lastWorking: null })
+    ).toBe(1000)
   })
 })
 
@@ -68,7 +77,7 @@ describe('오래 쉬는 세션', () => {
     const now = 1000 * MIN
     const seen = trackSeen([{ pid: 1, startedAt: 0, state: 'idle' }], new Map(), now)
     expect(seen.get('1:0')?.firstSeen).toBe(now)
-    const lastActiveAt = lastActiveOf({ stateSource: 'cpu' }, null, seen.get('1:0')!)
+    const lastActiveAt = lastActiveOf({ stateSource: 'cpu', state: 'idle' }, null, seen.get('1:0')!)
     expect(isParked({ state: 'idle', lastActiveAt }, now, PARKED_MS)).toBe(false)
   })
 

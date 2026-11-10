@@ -195,9 +195,11 @@ const view = computed<View | null>(() => {
             : r.stateSource === 'rollout'
               ? t.agent.codexRolloutNote
               : null
-          : r.stateSource === 'cpu' && props.hook?.state !== 'on'
-            ? t.agent.noHookNote
-            : null
+          : r.stateSource === 'file'
+            ? t.agent.fileNote
+            : r.stateSource === 'cpu' && props.hook?.state !== 'on'
+              ? t.agent.noHookNote
+              : null
       const state = t.agent.states[r.state]
       return {
         icon: agentIcon(r),

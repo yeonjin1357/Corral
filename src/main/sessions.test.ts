@@ -2,6 +2,7 @@ import {
   applyHookEvent,
   codexTranscriptFor,
   hookViewForAgent,
+  pairBySessionFile,
   reconcileSessions,
   SESSION_EXPIRE_MS,
   type ClaudeSession,
@@ -9,6 +10,7 @@ import {
   type LiveClaude,
   type Sessions
 } from './sessions'
+import type { ClaudeSessionFile } from './claudeSessionFiles'
 import type { AgentState, AgentTool } from '../shared/types'
 
 const CWD = 'C:\\work\\shop-web'
@@ -524,6 +526,77 @@ describe('프로세스 단위 상태(G3a)', () => {
       lastActivityAt: 9000,
       sessionId: 'waiting-old'
     })
+  })
+})
+
+describe('Claude 세션 파일로 정확한 짝(G3a)', () => {
+  const ROOT = CWD.toLowerCase()
+  const rootOfCwd = (cwd: string): string | null =>
+    cwd.toLowerCase().startsWith(ROOT) ? ROOT : null
+  const claude = (key: string, startedAt: number): LiveClaude => ({ key, rootKey: ROOT, startedAt })
+  const start = (sessions: Sessions, id: string, at: number, name = 'SessionStart'): void => {
+    applyHookEvent(sessions, { ...ev(name), session_id: id }, at)
+  }
+  /** pid → 그 프로세스가 지금 쓰는 세션 id. */
+  const files = (...entries: [number, string][]): Map<number, ClaudeSessionFile> =>
+    new Map(
+      entries.map(([pid, sessionId]) => [
+        pid,
+        { pid, sessionId, status: 'idle', statusUpdatedAt: null, name: null }
+      ])
+    )
+  const keys = new Map([
+    [11, 'p1'],
+    [12, 'p2'],
+    [14, 'p4']
+  ])
+  const keyOfPid = (pid: number): string | null => keys.get(pid) ?? null
+
+  test('세션 파일이 가리키는 프로세스로 짝을 고치고, 그 프로세스의 예전 세션은 버린다', () => {
+    const sessions: Sessions = new Map()
+    start(sessions, 'a', 1000)
+    start(sessions, 'b', 1100, 'PermissionRequest')
+    applyHookEvent(sessions, { ...ev('UserPromptSubmit'), session_id: 'cx' }, 1200, 'codex')
+    reconcileSessions(sessions, {
+      now: 3000,
+      sampledAt: 2000,
+      live: [
+        claude('p1', 900),
+        claude('p2', 1050),
+        { key: 'c1', rootKey: ROOT, startedAt: 1150, tool: 'codex' }
+      ],
+      rootOfCwd
+    })
+    // 시작 시각으로 짐작한 짝은 a → p1, b → p2 인데 실제로는 반대다(pid 11 = p1 이 b 를 쓴다).
+    expect([sessions.get('a')?.processKey, sessions.get('b')?.processKey]).toEqual(['p1', 'p2'])
+    pairBySessionFile(
+      sessions,
+      // 13 은 이번 샘플의 Claude 가 아니고, 14 의 파일이 가리키는 cx 는 Codex 세션이다.
+      files([11, 'b'], [12, 'a'], [13, 'a'], [14, 'cx']),
+      keyOfPid
+    )
+    expect(sessions.get('a')?.processKey).toBe('p2')
+    expect(sessions.get('b')?.processKey).toBe('p1')
+    expect(sessions.get('cx')?.processKey).toBe('c1')
+    expect(
+      hookViewForAgent(sessions, { key: 'p1', rootKey: ROOT, tool: 'claude' }, rootOfCwd)
+    ).toMatchObject({ state: 'waiting', sessionId: 'b' })
+
+    // p1 에서 /clear: 새 세션이 시작되고 파일이 그 세션을 가리킨다. p1 의 예전 세션(b)은 버린다.
+    start(sessions, 'cleared', 4000)
+    // 아직 훅 소식이 없는 세션을 가리키면(p2 의 새 세션) 그대로 둔다.
+    pairBySessionFile(sessions, files([11, 'cleared'], [12, 'not-yet']), keyOfPid)
+    expect([...sessions.keys()].sort()).toEqual(['a', 'cleared', 'cx'])
+    expect(sessions.get('cleared')?.processKey).toBe('p1')
+    expect(sessions.get('a')?.processKey).toBe('p2')
+    // 정확한 짝은 다음 정리에서도 그대로다.
+    reconcileSessions(sessions, {
+      now: 9000,
+      sampledAt: 8000,
+      live: [claude('p1', 900), claude('p2', 1050)],
+      rootOfCwd
+    })
+    expect(sessions.get('cleared')?.processKey).toBe('p1')
   })
 })
 

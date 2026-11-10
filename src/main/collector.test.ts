@@ -4,6 +4,7 @@ import { buildTrayMenu } from './tray'
 import { DEFAULT_SETTINGS } from '../shared/settings'
 import type { Sessions } from './sessions'
 import { applyHookEvent } from './sessions'
+import type { ClaudeSessionFile } from './claudeSessionFiles'
 import type {
   ClaudeHookStatus,
   ProcessInfo,
@@ -283,10 +284,11 @@ describe('마지막 활동·오래 쉬는 세션(G2)', () => {
       lastActiveAt: 40 * MIN,
       parked: false
     })
-    // CPU 추정은 pitwall 이 처음 본 시각(그 전은 모른다).
+    // CPU 를 아직 읽지 못한(확인 중) CPU 추정은 근거가 없어 모른다.
     expect(s.agents.find((a) => a.pid === 6000)).toMatchObject({
+      state: 'unknown',
       stateSource: 'cpu',
-      lastActiveAt: 60 * MIN,
+      lastActiveAt: null,
       parked: false
     })
   })
@@ -362,10 +364,232 @@ describe('마지막 활동·오래 쉬는 세션(G2)', () => {
       clock.now
     )
     const s = await after.collect()
-    expect(s.agents.map((a) => [a.pid, a.lastActiveAt])).toEqual([
-      [5000, 3 * MIN],
-      [6000, clock.now]
+    // 첫 수집은 아직 CPU 를 읽지 못해(확인 중) 마지막 활동을 모른다.
+    expect(s.agents.map((a) => [a.pid, a.state, a.lastActiveAt])).toEqual([
+      [5000, 'unknown', null],
+      [6000, 'unknown', null]
     ])
+    // CPU 를 읽으면 CPU 추정은 이어 쓴 마지막 작업 시각, 본 적 없으면 처음 본 시각(그 전은 모른다).
+    const seenAt = clock.now
+    clock.now += 5000
+    const next = await after.collect()
+    expect(next.agents.map((a) => [a.pid, a.state, a.lastActiveAt])).toEqual([
+      [5000, 'idle', 3 * MIN],
+      [6000, 'idle', seenAt]
+    ])
+  })
+})
+
+describe('Claude 세션 파일(G3a)', () => {
+  const HOUR = 60 * MIN
+  const fileOf = (over: Partial<ClaudeSessionFile> = {}): ClaudeSessionFile => ({
+    pid: 5000,
+    sessionId: 'f1',
+    status: 'idle',
+    statusUpdatedAt: null,
+    name: null,
+    ...over
+  })
+  /** 수집기에 넘길 세션 파일 읽기. current.file 을 바꾸면 다음 수집부터 반영된다. */
+  const filesFrom = (current: {
+    file: ClaudeSessionFile | null
+  }): NonNullable<CollectorDeps['claudeSessionFiles']> =>
+    vi.fn<NonNullable<CollectorDeps['claudeSessionFiles']>>(async () =>
+      current.file ? new Map([[current.file.pid, current.file]]) : new Map()
+    )
+  /** 파일과 같은 세션(f1)의 훅 이벤트. */
+  const hookEvent = (
+    sessions: Sessions,
+    name: string,
+    at: number,
+    extra: Record<string, unknown> = {}
+  ): void => {
+    applyHookEvent(
+      sessions,
+      { session_id: 'f1', cwd: W1.root, hook_event_name: name, ...extra },
+      at
+    )
+  }
+
+  test('훅이 없어도 세션 파일로 작업 중·쉬는 중과 그 시작 시각을 안다', async () => {
+    const current = { file: fileOf({ status: 'busy', statusUpdatedAt: 7 * MIN }) }
+    const claudeSessionFiles = filesFrom(current)
+    const { deps, clock } = setup({ claudeSessionFiles })
+    const collector = createCollector(deps)
+    const s = await collector.collect()
+    // Claude 에이전트의 파일만 읽는다(Codex 는 세션 파일이 없다).
+    expect(claudeSessionFiles).toHaveBeenCalledWith([{ pid: 5000, startedAt: 100 }], 10 * MIN)
+    expect(s.agents.find((a) => a.pid === 5000)).toMatchObject({
+      state: 'working',
+      stateSource: 'file',
+      stateSince: 7 * MIN,
+      // 작업 중이면 마지막 활동은 수집 시각.
+      lastActiveAt: 10 * MIN,
+      parked: false
+    })
+    expect(s.agents.find((a) => a.pid === 6000)?.stateSource).toBe('cpu')
+
+    current.file = fileOf({ status: 'idle', statusUpdatedAt: 11 * MIN })
+    clock.now = 12 * MIN
+    const idle = await collector.collect()
+    expect(idle.agents[0]).toMatchObject({
+      pid: 5000,
+      state: 'idle',
+      stateSource: 'file',
+      stateSince: 11 * MIN,
+      lastActiveAt: 11 * MIN
+    })
+    // 훅 이벤트가 와도(다른 폴더의 세션) 훅 상태가 생기지 않은 파일 행은 그대로다.
+    clock.now = 13 * MIN
+    applyHookEvent(
+      deps.sessions,
+      { session_id: 'elsewhere', cwd: 'C:\\tmp', hook_event_name: 'UserPromptSubmit' },
+      clock.now
+    )
+    expect((await collector.restate(idle)).agents[0]).toMatchObject({
+      state: 'idle',
+      stateSource: 'file',
+      stateSince: 11 * MIN,
+      lastActiveAt: 11 * MIN
+    })
+    // 상태 시각이 없으면 지금처럼 pitwall 이 그 상태를 처음 본 시각.
+    current.file = fileOf({ status: 'busy', statusUpdatedAt: null })
+    clock.now = 14 * MIN
+    expect((await collector.collect()).agents[0]).toMatchObject({
+      state: 'working',
+      stateSource: 'file',
+      stateSince: 14 * MIN,
+      lastActiveAt: 14 * MIN
+    })
+  })
+
+  test('훅과 파일이 둘 다 있으면 더 늦은 근거를 따른다: 훅은 쉬는 중(5시간 전)인데 파일이 방금 busy 면 작업 중', async () => {
+    const current = { file: null as ClaudeSessionFile | null }
+    const { deps, sessions, clock } = setup({ claudeSessionFiles: filesFrom(current) })
+    clock.now = 10 * HOUR
+    hookEvent(sessions, 'Stop', clock.now - 5 * HOUR)
+    current.file = fileOf({ status: 'busy', statusUpdatedAt: clock.now - 1000 })
+    const collector = createCollector(deps)
+    const s = await collector.collect()
+    expect(s.agents[0]).toMatchObject({
+      pid: 5000,
+      state: 'working',
+      stateSource: 'file',
+      stateSince: clock.now - 1000,
+      lastActiveAt: clock.now,
+      parked: false
+    })
+    // 그 뒤 훅 소식이 오면 훅이 더 늦은 근거다(수집 사이에도 마지막으로 읽은 파일과 견준다).
+    clock.now += 10_000
+    hookEvent(sessions, 'UserPromptSubmit', clock.now)
+    const working = await collector.restate(s)
+    expect(working.agents[0]).toMatchObject({
+      state: 'working',
+      stateSource: 'hook',
+      stateSince: clock.now
+    })
+    clock.now += 10_000
+    hookEvent(sessions, 'Stop', clock.now)
+    expect((await collector.restate(working)).agents[0]).toMatchObject({
+      state: 'idle',
+      stateSource: 'hook',
+      stateSince: clock.now,
+      lastActiveAt: clock.now
+    })
+  })
+
+  test('권한 요청이 파일의 busy 시각보다 늦으면 권한 대기(훅)', async () => {
+    const current = { file: null as ClaudeSessionFile | null }
+    const { deps, sessions, clock } = setup({ claudeSessionFiles: filesFrom(current) })
+    clock.now = 60 * MIN
+    hookEvent(sessions, 'UserPromptSubmit', clock.now - 2 * MIN)
+    hookEvent(sessions, 'PermissionRequest', clock.now - 30_000, { tool_name: 'Bash' })
+    current.file = fileOf({ status: 'busy', statusUpdatedAt: clock.now - 2 * MIN })
+    const s = await createCollector(deps).collect()
+    expect(s.agents[0]).toMatchObject({
+      pid: 5000,
+      state: 'waiting',
+      stateSource: 'hook',
+      stateSince: clock.now - 30_000
+    })
+  })
+
+  test('훅과 파일의 시각이 5초 안이면 훅', async () => {
+    const current = { file: null as ClaudeSessionFile | null }
+    const { deps, sessions, clock } = setup({ claudeSessionFiles: filesFrom(current) })
+    clock.now = 60 * MIN
+    const stoppedAt = clock.now - 10 * MIN
+    hookEvent(sessions, 'Stop', stoppedAt)
+    current.file = fileOf({ status: 'busy', statusUpdatedAt: stoppedAt + 5000 })
+    const collector = createCollector(deps)
+    expect((await collector.collect()).agents[0]).toMatchObject({
+      state: 'idle',
+      stateSource: 'hook',
+      stateSince: stoppedAt
+    })
+    // 5초를 넘으면 파일.
+    current.file = fileOf({ status: 'busy', statusUpdatedAt: stoppedAt + 5001 })
+    clock.now += 5000
+    expect((await collector.collect()).agents[0]).toMatchObject({
+      state: 'working',
+      stateSource: 'file',
+      stateSince: stoppedAt + 5001
+    })
+  })
+
+  test('CPU 를 읽지 못해 확인 중인 에이전트는 lastActiveAt 이 null 이고 오래 쉬는 세션이 아니다', async () => {
+    const noCpu: RawSample = {
+      ...sampleAt(0),
+      processes: sampleAt(0).processes.map((p) => ({ ...p, cpuMs: null }))
+    }
+    const { deps, clock } = setup({ sample: async () => noCpu })
+    const collector = createCollector(deps)
+    await collector.collect()
+    clock.now += 200 * MIN
+    const s = await collector.collect()
+    expect(s.agents.map((a) => [a.pid, a.state, a.stateSource, a.lastActiveAt, a.parked])).toEqual([
+      [5000, 'unknown', 'cpu', null, false],
+      [6000, 'unknown', 'cpu', null, false]
+    ])
+  })
+
+  test('막 켠 pitwall 도 세션 파일의 시각으로 오래 쉬는 세션을 안다', async () => {
+    const { deps, clock } = setup({
+      claudeSessionFiles: filesFrom({ file: fileOf({ status: 'idle', statusUpdatedAt: 5 * HOUR }) })
+    })
+    clock.now = 10 * HOUR
+    const s = await createCollector(deps).collect()
+    expect(s.agents[0]).toMatchObject({
+      pid: 5000,
+      state: 'idle',
+      stateSource: 'file',
+      stateSince: 5 * HOUR,
+      lastActiveAt: 5 * HOUR,
+      parked: true
+    })
+  })
+
+  test('세션 파일이 없으면 지금처럼 CPU 추정', async () => {
+    const cases: Partial<CollectorDeps>[] = [
+      {},
+      { claudeSessionFiles: filesFrom({ file: null }) },
+      // 상태를 모르는 파일(모양이 다름)은 상태 근거가 아니다.
+      { claudeSessionFiles: filesFrom({ file: fileOf({ status: null, statusUpdatedAt: MIN }) }) },
+      {
+        claudeSessionFiles: async () => {
+          throw new Error('EACCES')
+        }
+      }
+    ]
+    for (const over of cases) {
+      const { deps, samples, clock } = setup(over)
+      samples.push(sampleAt(1000), sampleAt(2000))
+      const collector = createCollector(deps)
+      await collector.collect()
+      clock.now += 5000
+      const s = await collector.collect()
+      expect(s.agents[0]).toMatchObject({ pid: 5000, state: 'working', stateSource: 'cpu' })
+    }
   })
 })
 
