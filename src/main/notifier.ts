@@ -1,6 +1,12 @@
 import type { AgentRow, DashboardSnapshot } from '../shared/types'
 import type { NotifySettings } from '../shared/settings'
-import { formatDuration, formatFreed, worktreeFolder, worktreeLabel } from '../shared/format'
+import {
+  formatDuration,
+  formatFreed,
+  pressureText,
+  worktreeFolder,
+  worktreeLabel
+} from '../shared/format'
 import { agentKey, selectionKey } from '../shared/keys'
 import { cleanupRecommendation } from '../shared/recommend'
 import { text } from '../shared/text'
@@ -13,6 +19,8 @@ export interface Notice {
 }
 
 const RAM_COOLDOWN_MS = 30 * 60 * 1000
+/** 위험 아래로 이만큼 이어서 내려가 있었으면 정상까지 안 내려와도 다시 알릴 수 있다(늘 경고 근처인 PC). */
+const RAM_REARM_MS = 5 * 60 * 1000
 const HEAVY_COOLDOWN_MS = 10 * 60 * 1000
 /** 이보다 짧게 일한 뒤 끝난 것은 알리지 않는다(터미널에서 주고받는 짧은 답마다 알리면 시끄럽다). */
 const DONE_MIN_WORK_MS = 2 * 60 * 1000
@@ -20,7 +28,8 @@ const DONE_MIN_WORK_MS = 2 * 60 * 1000
 /**
  * 스냅샷 변화의 "넘어가는 순간"에만 OS 알림을 보낸다(스펙 §8, 항목별로 끔).
  * - 첫 스냅샷은 기준선이다(시작할 때 이미 그런 상태는 알리지 않는다).
- * - RAM 부족: 위험으로 넘어갈 때. 정상으로 내려와야 다시, 30분 안에는 다시 알리지 않는다.
+ * - RAM 부족(메모리 단계 = RAM·커밋 중 높은 쪽): 위험으로 넘어갈 때. 정상으로 내려오거나 위험 아래로 5분 있었으면
+ *   다시, 30분 안에는 다시 알리지 않는다. 제목은 원인을 따른다(RAM 이 위험이면 RAM, 아니면 커밋).
  * - Claude 권한 대기: 훅으로 권한 대기가 된 세션마다(여럿이면 하나로). pitwall 창이 앞에 있으면 알리지 않는다.
  * - 무거운 작업 겹침: 겹침이 시작될 때. 끝나야 다시, 10분 안에는 다시 알리지 않는다.
  * - 작업 끝남(F4): 정확한 상태(CPU 추정 아님)의 에이전트가 2분 넘게 작업 중이다가 쉬는 중이 될 때(여럿이면 하나로).
@@ -35,6 +44,8 @@ export function createNotifier(deps: {
   let started = false
   let ramArmed = true
   let ramLastAt = Number.NEGATIVE_INFINITY
+  /** 위험 아래로 내려간 시각(지금 위험이면 null). */
+  let ramBelowSince: number | null = null
   let heavyArmed = true
   let heavyLastAt = Number.NEGATIVE_INFINITY
   let waiting = new Set<string>()
@@ -42,16 +53,25 @@ export function createNotifier(deps: {
   let working = new Map<string, number | null>()
 
   function ram(s: DashboardSnapshot, notify: boolean): void {
-    const level = s.memory.level
-    if (level === 'normal') ramArmed = true
-    if (level !== 'danger' || !ramArmed) return
+    const { memory } = s
+    const now = deps.now()
+    if (memory.level !== 'danger') {
+      ramBelowSince ??= now
+      if (memory.level === 'normal' || now - ramBelowSince >= RAM_REARM_MS) ramArmed = true
+      return
+    }
+    ramBelowSince = null
+    if (!ramArmed) return
     ramArmed = false
-    if (!notify || deps.now() - ramLastAt < RAM_COOLDOWN_MS) return
-    ramLastAt = deps.now()
+    if (!notify || now - ramLastAt < RAM_COOLDOWN_MS) return
+    ramLastAt = now
     if (!deps.settings().ramLow) return
     const rec = cleanupRecommendation(s)
     deps.show({
-      title: text.notify.ramTitle(Math.floor(s.memory.usedPercent)),
+      title:
+        memory.ramLevel === 'danger' || !memory.commit
+          ? text.notify.ramTitle(Math.floor(memory.usedPercent))
+          : text.notify.commitTitle(Math.floor(memory.commit.percent)),
       body:
         rec.items.length > 0
           ? text.notify.ramBody(rec.items.length, formatFreed(rec.totalBytes, rec.totalCommitBytes))
@@ -134,7 +154,7 @@ export function createNotifier(deps: {
     heavyLastAt = deps.now()
     if (!deps.settings().heavyOverlap) return
     deps.show({
-      title: text.notify.heavyTitle(Math.floor(s.memory.usedPercent)),
+      title: text.notify.heavyTitle(pressureText(s.memory)),
       body: text.notify.heavyBody(s.heavyJobs.map((j) => j.label).join(', ')),
       target: null
     })

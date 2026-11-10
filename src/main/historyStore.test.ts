@@ -17,7 +17,7 @@ afterEach(async () => {
 
 function file(savedAt: number): HistoryFile {
   return {
-    version: 1,
+    version: 2,
     savedAt,
     ram: [{ t: savedAt - MIN, value: 71.5 }],
     servers: { 'server:4100:200': [{ t: savedAt - MIN, bytes: 1024 }] },
@@ -59,10 +59,40 @@ test('깨진 파일·다른 버전·없는 파일은 무시', async () => {
   expect(await loadHistory(path, 0)).toBeNull()
   await writeFile(path, '{ "version": 1, "savedAt": ')
   expect(await loadHistory(path, 0)).toBeNull()
-  await writeFile(path, JSON.stringify({ ...file(0), version: 2 }))
+  await writeFile(path, JSON.stringify({ ...file(0), version: 3 }))
   expect(await loadHistory(path, 0)).toBeNull()
   await writeFile(path, JSON.stringify({ ...file(0), savedAt: 'x' }))
   expect(await loadHistory(path, 0)).toBeNull()
+})
+
+test('version 1 파일은 버린다', async () => {
+  // 예전 형식은 서버 기록이 작업 세트다. 커밋 기록을 이어 붙이면 가짜 메모리 증가가 된다.
+  await writeFile(path, JSON.stringify({ ...file(100 * MIN), version: 1 }))
+  expect(await loadHistory(path, 101 * MIN)).toBeNull()
+})
+
+test('serverMemo 의 shielded 를 보존한다', async () => {
+  await writeFile(
+    path,
+    JSON.stringify({
+      ...file(100 * MIN),
+      serverMemo: {
+        'server:1:1': { state: 'idle', since: 99 * MIN, shielded: true },
+        'server:2:2': { state: 'tabs', since: 99 * MIN, shielded: false },
+        'server:3:3': { state: 'idle', since: 99 * MIN, shielded: 'yes' }
+      },
+      agentStates: { '5000:100': { state: 'working', since: 99 * MIN, shielded: true } }
+    })
+  )
+  const loaded = await loadHistory(path, 101 * MIN)
+  expect(loaded?.serverMemo).toStrictEqual({
+    'server:1:1': { state: 'idle', since: 99 * MIN, shielded: true },
+    'server:2:2': { state: 'tabs', since: 99 * MIN, shielded: false },
+    // 불리언이 아니면 그 값만 버린다.
+    'server:3:3': { state: 'idle', since: 99 * MIN }
+  })
+  // 에이전트 상태 기억에는 없는 값이다.
+  expect(loaded?.agentStates).toStrictEqual({ '5000:100': { state: 'working', since: 99 * MIN } })
 })
 
 test('항목 모양이 틀린 부분은 버리고 나머지는 쓴다', async () => {
@@ -88,7 +118,7 @@ test('항목 모양이 틀린 부분은 버리고 나머지는 쓴다', async ()
 test('저장은 임시 파일에 쓰고 바꿔 넣는다(임시 파일이 남지 않는다)', async () => {
   await saveHistory(path, file(1))
   expect(await readdir(dir)).toEqual(['history.json'])
-  expect(JSON.parse(await readFile(path, 'utf8')).version).toBe(1)
+  expect(JSON.parse(await readFile(path, 'utf8')).version).toBe(2)
 })
 
 test('RAM 기록은 30초 간격·2시간만', () => {

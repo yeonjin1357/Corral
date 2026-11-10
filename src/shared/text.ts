@@ -20,6 +20,11 @@ export const text = {
     withCommit: (ram: string, commit: string): string => `RAM 약 ${ram} · 커밋 약 ${commit}`,
     ramOnly: (ram: string): string => `약 ${ram}`
   },
+  /** 메모리 압박의 원인(pressureText): 커밋 단계가 더 높으면 커밋 사용률, 아니면 RAM 사용률. */
+  pressure: {
+    ram: (percent: number): string => `RAM ${percent}%`,
+    commit: (percent: number): string => `커밋 ${percent}%`
+  },
   cleanupWorkspace: {
     title: '작업 공간 정리',
     /** freed: formatFreed 결과("약 1.2 GB" 또는 "RAM 약 1.2 GB · 커밋 약 4.2 GB"). */
@@ -73,6 +78,8 @@ export const text = {
   },
   notify: {
     ramTitle: (percent: number): string => `RAM 이 부족해요 (${percent}%)`,
+    /** RAM 은 위험이 아닌데 커밋이 위험 기준을 넘었을 때. */
+    commitTitle: (percent: number): string => `메모리 한도에 가까워요 (커밋 ${percent}%)`,
     /** freed: formatFreed 결과. */
     ramBody: (n: number, freed: string): string =>
       `정리 후보 ${n}개를 끄면 ${freed} 를 확보할 수 있어요.`,
@@ -80,7 +87,8 @@ export const text = {
     waitingTitle: (tool: string): string => `${tool} 가 권한을 기다려요`,
     waitingManyTitle: (n: number, tool: string | null): string =>
       `${tool ?? '에이전트'} ${n}개가 권한을 기다려요`,
-    heavyTitle: (percent: number): string => `무거운 작업이 겹쳤어요 (RAM ${percent}%)`,
+    /** pressure: pressureText 결과("RAM 85%" 또는 "커밋 86%"). */
+    heavyTitle: (pressure: string): string => `무거운 작업이 겹쳤어요 (${pressure})`,
     heavyBody: (labels: string): string => `${labels} 이(가) 동시에 돌고 있어요.`,
     doneTitle: (folder: string, tool: string): string => `${folder} 의 ${tool} 가 작업을 끝냈어요`,
     doneBody: (duration: string): string => `${duration} 동안 일했어요.`,

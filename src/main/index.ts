@@ -142,7 +142,7 @@ async function persistHistory(): Promise<void> {
   if (!collector) return
   try {
     await saveHistory(historyPath, {
-      version: 1,
+      version: 2,
       savedAt: Date.now(),
       ram: ramHistory.points(),
       ...collector.exportState()

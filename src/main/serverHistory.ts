@@ -19,6 +19,8 @@ const MAX_SERVERS = 200
 export interface MemorySample {
   t: number
   bytes: number
+  /** true 면 커밋 크기, 없으면 작업 세트(커밋을 모를 때). 한 서버의 기록은 한 종류로만 이어진다. */
+  commit?: boolean
 }
 
 /** 서버 선택 키 → 메모리 기록(시간 순). history.json 에 그대로 쓴다. */
@@ -57,17 +59,38 @@ function validSamples(value: unknown): value is MemorySample[] {
         s !== null &&
         Number.isFinite((s as MemorySample).t) &&
         Number.isFinite((s as MemorySample).bytes) &&
-        (s as MemorySample).bytes >= 0
+        (s as MemorySample).bytes >= 0 &&
+        ((s as MemorySample).commit === undefined ||
+          typeof (s as MemorySample).commit === 'boolean')
     )
   )
+}
+
+/** 표본 하나. 커밋이면 표시를 달고, 작업 세트면 표시 없이(예전 기록과 같은 모양). */
+function sample(t: number, bytes: number, commit: boolean): MemorySample {
+  return commit ? { t, bytes, commit: true } : { t, bytes }
+}
+
+/** 시간 순 기록에서 마지막 표본과 같은 종류로 이어진 끝부분(종류가 바뀌면 처음부터 다시 센다). */
+function sameKindTail(samples: MemorySample[]): MemorySample[] {
+  const last = samples[samples.length - 1]
+  if (!last) return samples
+  let from = samples.length - 1
+  while (from > 0 && !!samples[from - 1].commit === !!last.commit) from--
+  return samples.slice(from)
 }
 
 /**
  * 서버별 메모리 기록(F6). 메인 프로세스가 1분에 한 번 남기고 60분만 보관한다. 지금 없는 서버의 기록은 지운다
  * (서버 키에 시작 시각이 있어 다시 뜬 서버는 새로 센다). history.json 으로 내보내고 불러온다(F8).
+ * 커밋 크기를 알면 커밋으로 잰다(작업 세트는 메모리가 모자라면 OS 가 줄여 새는 서버를 놓친다). 커밋과 작업 세트는
+ * 크기가 달라 이어 보면 가짜 증가가 되므로, 직전 표본과 종류가 다르면 그 서버의 기록을 비우고 새로 시작한다.
  */
 export function createServerHistory(): {
-  record(servers: Pick<ServerRow, 'pid' | 'startedAt' | 'memoryBytes'>[], now: number): void
+  record(
+    servers: Pick<ServerRow, 'pid' | 'startedAt' | 'memoryBytes' | 'commitBytes'>[],
+    now: number
+  ): void
   growthOf(key: string, now: number): MemoryGrowth | null
   export(): ServerHistoryData
   import(data: unknown, now: number): void
@@ -79,9 +102,13 @@ export function createServerHistory(): {
       const next = new Map<string, MemorySample[]>()
       for (const row of servers) {
         const key = selectionKey.server(row)
-        const list = (data.get(key) ?? []).filter((s) => now - s.t <= KEEP_MS)
+        const commit = row.commitBytes != null
+        const kept = (data.get(key) ?? []).filter((s) => now - s.t <= KEEP_MS)
+        // 직전 표본과 종류(커밋·작업 세트)가 다르면 처음부터 다시 센다.
+        const list = kept.length > 0 && !!kept[kept.length - 1].commit === commit ? kept : []
         const last = list[list.length - 1]
-        if (!last || now - last.t >= RECORD_EVERY_MS) list.push({ t: now, bytes: row.memoryBytes })
+        if (!last || now - last.t >= RECORD_EVERY_MS)
+          list.push(sample(now, row.commitBytes ?? row.memoryBytes, commit))
         next.set(key, list)
       }
       data = next
@@ -98,10 +125,12 @@ export function createServerHistory(): {
         for (const [key, value] of Object.entries(raw)) {
           if (next.size >= MAX_SERVERS) break
           if (!key.startsWith('server:') || !validSamples(value)) continue
-          const kept = value
-            .filter((s) => s.t <= now && now - s.t <= KEEP_MS)
-            .map((s) => ({ t: s.t, bytes: s.bytes }))
-            .sort((a, b) => a.t - b.t)
+          const kept = sameKindTail(
+            value
+              .filter((s) => s.t <= now && now - s.t <= KEEP_MS)
+              .map((s) => sample(s.t, s.bytes, s.commit === true))
+              .sort((a, b) => a.t - b.t)
+          )
           if (kept.length) next.set(key, kept)
         }
       }

@@ -35,6 +35,23 @@ function snap(
   }
 }
 
+/** RAM 은 넉넉한데(50%) 커밋이 한도에 가까워 메모리 단계가 level 인 스냅샷. */
+function commitBound(
+  over: Partial<DashboardSnapshot>,
+  level: MemoryLevel,
+  percent: number
+): DashboardSnapshot {
+  const s = snap(over)
+  return {
+    ...s,
+    memory: {
+      ...s.memory,
+      level,
+      commit: { usedBytes: (64 * GB * percent) / 100, limitBytes: 64 * GB, percent, level }
+    }
+  }
+}
+
 function agent(pid: number, state: AgentRow['state'], root = 'C:\\work\\shop-web'): AgentRow {
   return {
     pid,
@@ -149,6 +166,61 @@ describe('RAM 부족', () => {
     expect(shown).toHaveLength(1)
   })
 
+  test('위험과 경고를 오가며 정상으로 안 내려와도, 위험 아래로 5분 있었으면 다시 알린다(30분 간격은 지킨다)', () => {
+    const { shown, clock, update } = setup()
+    update(snap())
+    update(snap({}, 'danger'))
+    expect(shown).toHaveLength(1)
+    // 위험 아래로 5분이 안 됐다가 다시 위험이면 알리지 않는다.
+    clock.now = 1 * MIN
+    update(snap({}, 'warn'))
+    clock.now = 5 * MIN
+    update(snap({}, 'danger'))
+    expect(shown).toHaveLength(1)
+    // 경고로 5분 있었어도 첫 알림에서 30분이 안 됐으면 알리지 않는다.
+    clock.now = 6 * MIN
+    update(snap({}, 'warn'))
+    clock.now = 11 * MIN
+    update(snap({}, 'warn'))
+    clock.now = 12 * MIN
+    update(snap({}, 'danger'))
+    expect(shown).toHaveLength(1)
+    // 30분이 지난 뒤 경고로 5분 있다가 다시 위험이면 알린다.
+    clock.now = 31 * MIN
+    update(snap({}, 'warn'))
+    clock.now = 36 * MIN
+    update(snap({}, 'warn'))
+    clock.now = 37 * MIN
+    update(snap({}, 'danger'))
+    expect(shown).toHaveLength(2)
+    expect(shown[1].title).toBe('RAM 이 부족해요 (93%)')
+  })
+
+  test('커밋 때문에 위험이면 제목이 커밋 문구', () => {
+    const { shown, clock, update } = setup()
+    update(snap())
+    update(commitBound({ servers: [candidate] }, 'danger', 95.8))
+    expect(shown).toEqual([
+      {
+        title: '메모리 한도에 가까워요 (커밋 95%)',
+        body: '정리 후보 1개를 끄면 약 900 MB 를 확보할 수 있어요.',
+        target: null
+      }
+    ])
+    // RAM 도 위험이면 RAM 문구.
+    update(snap())
+    clock.now = 30 * MIN
+    const both = snap({}, 'danger')
+    update({
+      ...both,
+      memory: {
+        ...both.memory,
+        commit: { usedBytes: 62 * GB, limitBytes: 64 * GB, percent: 96.9, level: 'danger' }
+      }
+    })
+    expect(shown[1].title).toBe('RAM 이 부족해요 (93%)')
+  })
+
   test('시작할 때 이미 위험이면 알리지 않고, 정상으로 내려온 뒤부터 알린다', () => {
     const { shown, update } = setup()
     update(snap({}, 'danger'))
@@ -258,6 +330,14 @@ describe('무거운 작업 겹침', () => {
     clock.now += 10 * MIN
     update(snap({ heavyJobs: jobs, heavyOverlap: true }, 'warn'))
     expect(shown).toHaveLength(2)
+  })
+
+  test('커밋 때문에 겹침 경고가 나면 제목에 커밋 사용률', () => {
+    const { shown, update } = setup()
+    const jobs = [heavy(1, 'vue-tsc'), heavy(2, 'vite build')]
+    update(commitBound({}, 'warn', 86.4))
+    update(commitBound({ heavyJobs: jobs, heavyOverlap: true }, 'warn', 86.4))
+    expect(shown.map((n) => n.title)).toEqual(['무거운 작업이 겹쳤어요 (커밋 86%)'])
   })
 
   test('설정에서 끄면 알리지 않는다', () => {

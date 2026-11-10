@@ -5,12 +5,14 @@ import {
   displayCpuPercent,
   formatBytes,
   formatFreed,
+  pressureText,
   worktreeLabel,
   worktreeFolder,
   describeKillResult,
   formatDuration,
   describeCollectError
 } from './format'
+import type { CommitSummary, MemoryLevel } from './types'
 
 test('수집 오류를 한국어로: 시간 초과·결과 해석 실패·macOS 명령 실패·실행 불가, 이미 한국어면 그대로', () => {
   expect(describeCollectError('timeout')).toBe('수집 명령이 시간 안에 끝나지 않았어요.')
@@ -68,6 +70,29 @@ test('1MB 미만은 KB(최소 1 KB)', () => {
 test('확보 예상: 커밋을 알면 RAM·커밋 둘 다, 모르면 RAM 만', () => {
   expect(formatFreed(1.2 * GB, 4.2 * GB)).toBe('RAM 약 1.2 GB · 커밋 약 4.2 GB')
   expect(formatFreed(1.2 * GB, null)).toBe('약 1.2 GB')
+})
+
+test('pressureText 는 커밋 단계가 더 높을 때만 커밋을, 아니면 RAM 을 말한다', () => {
+  const commit = (percent: number, level: MemoryLevel): CommitSummary => ({
+    usedBytes: percent,
+    limitBytes: 100,
+    percent,
+    level
+  })
+  expect(pressureText({ usedPercent: 85.7, ramLevel: 'warn', commit: null })).toBe('RAM 85%')
+  expect(
+    pressureText({ usedPercent: 60.2, ramLevel: 'normal', commit: commit(86.9, 'warn') })
+  ).toBe('커밋 86%')
+  expect(
+    pressureText({ usedPercent: 85.7, ramLevel: 'warn', commit: commit(96.1, 'danger') })
+  ).toBe('커밋 96%')
+  // 같은 단계거나 RAM 이 더 높으면 RAM.
+  expect(pressureText({ usedPercent: 85.7, ramLevel: 'warn', commit: commit(88, 'warn') })).toBe(
+    'RAM 85%'
+  )
+  expect(pressureText({ usedPercent: 93.6, ramLevel: 'danger', commit: commit(88, 'warn') })).toBe(
+    'RAM 93%'
+  )
 })
 
 test('커밋 합: 아는 것만 더하고, 하나도 모르면 null', () => {

@@ -12,12 +12,19 @@ const MAX_ENTRIES = 500
 
 const AGENT_STATES: readonly AgentState[] = ['working', 'waiting', 'idle', 'error', 'unknown']
 
-export type ServerMemoData = Record<string, { state: 'idle' | 'tabs'; since: number }>
+/** 서버별 정리 판단 기억. shielded: 지난 샘플에 활동 중인 에이전트가 그 서버를 덮고 있었는지. */
+export type ServerMemoData = Record<
+  string,
+  { state: 'idle' | 'tabs'; since: number; shielded?: boolean }
+>
 export type AgentStateData = Record<string, { state: AgentState; since: number }>
 
-/** userData/history.json 의 모양. */
+/**
+ * userData/history.json 의 모양. version 2: 서버 메모리 기록이 커밋(알 때)으로 바뀌었다.
+ * version 1 의 작업 세트 기록 뒤에 커밋 기록을 이어 붙이면 가짜 메모리 증가가 되므로 예전 파일은 버린다.
+ */
 export interface HistoryFile {
-  version: 1
+  version: 2
   savedAt: number
   ram: TrendPoint[]
   servers: ServerHistoryData
@@ -59,6 +66,17 @@ function validStates<S extends string>(
   return result
 }
 
+/** 서버 판단 기억: 상태·시각이 맞는 항목만, shielded 는 불리언일 때만 남긴다. */
+function validServerMemo(value: unknown): ServerMemoData {
+  const result: ServerMemoData = validStates(value, ['idle', 'tabs'] as const)
+  if (!isRecord(value)) return result
+  for (const [key, entry] of Object.entries(result)) {
+    const shielded = (value[key] as Record<string, unknown>).shielded
+    if (typeof shielded === 'boolean') entry.shielded = shielded
+  }
+  return result
+}
+
 /**
  * history.json 을 읽는다. 없거나 깨졌거나 형식(버전)이 다르면 null(새로 시작).
  * 저장한 지 10분이 넘었으면(또는 저장 시각이 지금보다 뒤면) 정리 판단 기억은 버리고 기록만 돌려준다.
@@ -70,13 +88,13 @@ export async function loadHistory(path: string, now: number): Promise<LoadedHist
   } catch {
     return null
   }
-  if (!isRecord(raw) || raw.version !== 1 || !Number.isFinite(raw.savedAt)) return null
+  if (!isRecord(raw) || raw.version !== 2 || !Number.isFinite(raw.savedAt)) return null
   const savedAt = raw.savedAt as number
   const resume = savedAt <= now && now - savedAt <= RESUME_JUDGEMENT_MS
   return {
     ram: validPoints(raw.ram),
     servers: isRecord(raw.servers) ? (raw.servers as ServerHistoryData) : {},
-    serverMemo: resume ? validStates(raw.serverMemo, ['idle', 'tabs'] as const) : null,
+    serverMemo: resume ? validServerMemo(raw.serverMemo) : null,
     agentStates: resume ? validStates(raw.agentStates, AGENT_STATES) : null
   }
 }

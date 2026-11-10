@@ -73,11 +73,13 @@ describe('memoryGrowth', () => {
 describe('createServerHistory', () => {
   const row = (
     bytes: number,
-    pid = 4100
-  ): Pick<ServerRow, 'pid' | 'startedAt' | 'memoryBytes'> => ({
+    pid = 4100,
+    commitBytes: number | null = null
+  ): Pick<ServerRow, 'pid' | 'startedAt' | 'memoryBytes' | 'commitBytes'> => ({
     pid,
     startedAt: 1,
-    memoryBytes: bytes
+    memoryBytes: bytes,
+    commitBytes
   })
 
   test('서버마다 1분에 한 번 기록하고 60분만 보관, 사라진 서버는 지운다', () => {
@@ -98,6 +100,29 @@ describe('createServerHistory', () => {
     expect(h.growthOf('server:1:1', 30 * MIN)).toBeNull()
   })
 
+  test('커밋이 있으면 커밋으로 적는다', () => {
+    const h = createServerHistory()
+    h.record([row(GB, 4100, 3 * GB), row(GB, 9)], 0)
+    expect(h.export()).toStrictEqual({
+      'server:4100:1': [{ t: 0, bytes: 3 * GB, commit: true }],
+      // 커밋을 모르면(macOS·보조 코드가 막힌 PC) 작업 세트로.
+      'server:9:1': [{ t: 0, bytes: GB }]
+    })
+  })
+
+  test('작업 세트 기록 뒤에 커밋 기록이 이어지면 처음부터 다시 센다(가짜 증가 없음)', () => {
+    const h = createServerHistory()
+    for (let m = 0; m <= 35; m++) h.record([row(GB)], m * MIN)
+    h.record([row(GB, 4100, 4 * GB)], 36 * MIN)
+    expect(h.growthOf('server:4100:1', 36 * MIN)).toBeNull()
+    expect(h.export()['server:4100:1']).toStrictEqual([
+      { t: 36 * MIN, bytes: 4 * GB, commit: true }
+    ])
+    // 커밋을 다시 모르게 돼도 처음부터 센다.
+    h.record([row(GB)], 37 * MIN)
+    expect(h.export()['server:4100:1']).toStrictEqual([{ t: 37 * MIN, bytes: GB }])
+  })
+
   test('불러오기는 형식이 맞는 기록만, 60분 안의 것만 받는다', () => {
     const h = createServerHistory()
     h.import(
@@ -112,5 +137,28 @@ describe('createServerHistory', () => {
       100 * MIN
     )
     expect(h.export()).toEqual({ 'server:1:1': [{ t: 50 * MIN, bytes: 2 }] })
+  })
+
+  test('불러오기는 커밋 표시를 지키고, 종류가 섞인 기록은 마지막 종류로 이어진 부분만 받는다', () => {
+    const h = createServerHistory()
+    h.import(
+      {
+        'server:1:1': [
+          { t: 10 * MIN, bytes: 1 },
+          { t: 20 * MIN, bytes: 4, commit: true },
+          { t: 30 * MIN, bytes: 5, commit: true }
+        ],
+        'server:2:2': [{ t: 30 * MIN, bytes: 1, commit: false }],
+        'server:3:3': [{ t: 30 * MIN, bytes: 1, commit: 'yes' }]
+      } as never,
+      40 * MIN
+    )
+    expect(h.export()).toStrictEqual({
+      'server:1:1': [
+        { t: 20 * MIN, bytes: 4, commit: true },
+        { t: 30 * MIN, bytes: 5, commit: true }
+      ],
+      'server:2:2': [{ t: 30 * MIN, bytes: 1 }]
+    })
   })
 })

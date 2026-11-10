@@ -1,4 +1,4 @@
-import type { KillResult, Platform, WorktreeInfo } from './types'
+import type { KillResult, MemoryLevel, MemorySummary, Platform, WorktreeInfo } from './types'
 import { text } from './text'
 
 /** 수집 실패 이유를 화면·트레이에 보일 한국어 문장으로 바꾼다(이미 한국어면 그대로). */
@@ -57,6 +57,21 @@ export function formatFreed(memoryBytes: number, commitBytes: number | null): st
   return commitBytes == null
     ? text.freed.ramOnly(formatBytes(memoryBytes))
     : text.freed.withCommit(formatBytes(memoryBytes), formatBytes(commitBytes))
+}
+
+const LEVEL_RANK: Record<MemoryLevel, number> = { normal: 0, warn: 1, danger: 2 }
+
+/**
+ * 메모리 압박의 원인(알림 제목 등): 커밋 단계가 RAM 단계보다 높으면 "커밋 86%", 아니면 "RAM 85%".
+ * 메모리 단계(level)는 둘 중 높은 쪽이라, RAM % 만 보이면 왜 경고인지 모를 수 있다.
+ */
+export function pressureText(
+  memory: Pick<MemorySummary, 'usedPercent' | 'ramLevel' | 'commit'>
+): string {
+  const { commit } = memory
+  return commit && LEVEL_RANK[commit.level] > LEVEL_RANK[memory.ramLevel]
+    ? text.pressure.commit(Math.floor(commit.percent))
+    : text.pressure.ram(Math.floor(memory.usedPercent))
 }
 
 /** 실행 시간 같은 길이를 짧게: 30초, 45분, 3시간 12분, 2일 5시간. 알 수 없으면 —. */
