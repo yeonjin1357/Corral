@@ -396,6 +396,8 @@ export const text = {
       path: '경로',
       pid: 'PID',
       children: '하위 프로세스',
+      processes: (n: number): string => `프로세스 ${n}개`,
+      processRest: (n: number): string => `그 밖 ${n}개(메모리가 작은 것은 줄였어요)`,
       startedAt: '시작 시각',
       runtime: '실행 시간',
       branchKind: '체크아웃',
@@ -682,7 +684,12 @@ export const text = {
       system: '시스템·공유 메모리',
       systemNote:
         '시스템·공유 메모리: 커널·드라이버, 여러 앱이 같이 쓰는 메모리, pitwall 이 읽을 수 없는 프로세스(보안 프로그램·관리자 권한 등)를 합친 값이에요.',
-      processes: (n: number): string => `${n}개`
+      processes: (n: number): string => `${n}개`,
+      /** 묶음의 행 수(탭 숫자와 같은 단위). 숨긴 서버가 있으면 함께 적는다. */
+      count: (n: number, hidden = 0): string =>
+        hidden ? `${n}개(숨김 ${hidden}개 포함)` : `${n}개`,
+      processCount: (n: number): string => `프로세스 ${n}개`,
+      goTo: (label: string): string => `${label} 탭에서 보기`
     },
     detail: {
       url: (port: number): string => `http://localhost:${port}`,

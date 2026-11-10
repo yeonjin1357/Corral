@@ -104,6 +104,10 @@ describe('findHeavyJobs', () => {
         workspace: null,
         memoryBytes: 8005 * MB,
         descendantPids: [102],
+        processes: [
+          { name: 'node.exe', hint: 'vue-tsc', count: 1, memoryBytes: 8000 * MB },
+          { name: 'cmd.exe', hint: null, count: 1, memoryBytes: 5 * MB }
+        ],
         startedAt: 201
       }
     ])

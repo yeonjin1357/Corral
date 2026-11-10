@@ -34,6 +34,7 @@ function agent(pid: number, state: AgentRow['state'], root = 'C:\\work\\shop-web
     startedAt: pid,
     memoryBytes: 1,
     descendantCount: 0,
+    processes: [],
     state,
     stateSource: state === 'waiting' ? 'hook' : 'cpu',
     stateSince: null,
@@ -51,6 +52,7 @@ function heavy(pid: number, label: string): HeavyJobRow {
     workspace: null,
     memoryBytes: 4 * GB,
     descendantPids: [],
+    processes: [],
     startedAt: 1
   }
 }
@@ -65,6 +67,7 @@ const candidate = {
   unresolvable: false,
   memoryBytes: 900 * MB,
   descendantPids: [],
+  processes: [],
   clientCount: 0,
   startedAt: 1,
   judgement: 'candidate',

@@ -5,11 +5,12 @@
 -->
 <script setup lang="ts">
 import { computed } from 'vue'
-import { RefreshCw } from '@lucide/vue'
+import { ChevronRight, RefreshCw } from '@lucide/vue'
 import type { DashboardSnapshot, ProcessGroup } from '../../../shared/types'
 import { formatBytes } from '../../../shared/format'
 import { text } from '../../../shared/text'
 import type { Point } from '../history'
+import type { TabKey } from '../rows'
 import Sheet from '../ui/Sheet.vue'
 import Card from '../ui/Card.vue'
 import CardHeader from '../ui/CardHeader.vue'
@@ -28,7 +29,7 @@ const props = defineProps<{
   windowMs: number
   refreshing: boolean
 }>()
-const emit = defineEmits<{ refresh: [] }>()
+const emit = defineEmits<{ refresh: []; go: [tab: TabKey] }>()
 const open = defineModel<boolean>('open', { required: true })
 
 const t = text.ui
@@ -43,13 +44,31 @@ const reading = computed(() =>
   })
 )
 
-const ORDER: { key: ProcessGroup; color: string }[] = [
-  { key: 'devServer', color: 'var(--chart-1)' },
-  { key: 'agent', color: 'var(--chart-2)' },
-  { key: 'heavy', color: 'var(--chart-3)' },
-  { key: 'otherApps', color: 'var(--chart-4)' },
-  { key: 'system', color: 'var(--status-idle)' }
+/** 묶음 색과, 누르면 갈 탭(시스템·공유 메모리는 행이 없어 없음). */
+const ORDER: { key: ProcessGroup; color: string; tab: TabKey | null }[] = [
+  { key: 'devServer', color: 'var(--chart-1)', tab: 'ports' },
+  { key: 'agent', color: 'var(--chart-2)', tab: 'agents' },
+  { key: 'heavy', color: 'var(--chart-3)', tab: 'heavy' },
+  { key: 'otherApps', color: 'var(--chart-4)', tab: 'apps' },
+  { key: 'system', color: 'var(--status-idle)', tab: null }
 ]
+/** 탭 숫자와 같은 단위의 행 수. 숨긴 서버도 메모리를 쓰므로 개발 서버 수에 넣고 따로 적는다. */
+function rowCount(key: ProcessGroup): { n: number; hidden: number } {
+  const s = props.snapshot
+  switch (key) {
+    case 'devServer':
+      return { n: s.servers.length + s.hiddenServers.length, hidden: s.hiddenServers.length }
+    case 'agent':
+      return { n: s.agents.length, hidden: 0 }
+    case 'heavy':
+      return { n: s.heavyJobs.length, hidden: 0 }
+    case 'otherApps':
+      return { n: s.apps.length, hidden: 0 }
+    default:
+      return { n: 0, hidden: 0 }
+  }
+}
+const topApps = computed(() => props.snapshot.apps.slice(0, 5))
 const groups = computed(() =>
   ORDER.map((g) => {
     const usage = props.snapshot.groups.find((x) => x.group === g.key)
@@ -58,6 +77,7 @@ const groups = computed(() =>
       ...g,
       label: t.groups[g.key],
       bytes,
+      rows: rowCount(g.key),
       count: usage?.processCount ?? 0,
       share: hasMemory.value ? (bytes / m.value.totalBytes) * 100 : 0
     }
@@ -137,16 +157,35 @@ const groups = computed(() =>
           <CardDescription>{{ t.sheet.groupsDesc }}</CardDescription>
         </CardHeader>
         <CardContent class="gap-4">
-          <div v-for="g in groups" :key="g.key" class="min-w-0 space-y-1.5">
-            <div class="flex justify-between gap-2 text-xs">
-              <span class="text-muted-foreground"
-                >{{ g.label
-                }}<span v-if="g.key !== 'system'" class="ml-1 tabular-nums"
-                  >· {{ t.groups.processes(g.count) }}</span
-                ></span
-              ><span class="tabular-nums">{{ formatBytes(g.bytes) }}</span>
-            </div>
-            <Progress :value="g.share" :style="{ '--primary': g.color }" />
+          <div v-for="g in groups" :key="g.key" :data-memory-group="g.key" class="min-w-0">
+            <component
+              :is="g.tab ? 'button' : 'div'"
+              :type="g.tab ? 'button' : undefined"
+              :title="g.tab ? t.groups.goTo(g.label) : undefined"
+              :class="[
+                '-mx-2 block w-[calc(100%+1rem)] space-y-1.5 rounded-md px-2 py-1.5 text-left',
+                g.tab &&
+                  'group/row cursor-pointer outline-none transition-colors hover:bg-muted/50 focus-visible:ring-[3px] focus-visible:ring-ring/50'
+              ]"
+              @click="g.tab && emit('go', g.tab)"
+            >
+              <div class="flex items-center justify-between gap-2 text-xs">
+                <span class="min-w-0 text-muted-foreground"
+                  >{{ g.label }}
+                  <span v-if="g.tab" class="tabular-nums"
+                    >{{ t.groups.count(g.rows.n, g.rows.hidden) }} ·
+                    {{ t.groups.processCount(g.count) }}</span
+                  ></span
+                ><span class="flex shrink-0 items-center gap-1 tabular-nums"
+                  >{{ formatBytes(g.bytes)
+                  }}<ChevronRight
+                    v-if="g.tab"
+                    class="size-3.5 text-muted-foreground opacity-50 group-hover/row:opacity-100"
+                    aria-hidden="true"
+                /></span>
+              </div>
+              <Progress :value="g.share" :style="{ '--primary': g.color }" />
+            </component>
           </div>
         </CardContent>
       </Card>
@@ -155,14 +194,19 @@ const groups = computed(() =>
       >
         {{ t.groups.systemNote }}
       </p>
-      <Card v-if="snapshot.topApps.length" size="sm">
+      <Card v-if="topApps.length" size="sm">
         <CardHeader
           ><CardTitle class="text-sm">{{ t.sheet.topApps }}</CardTitle></CardHeader
         >
         <CardContent>
           <table :class="TABLE.table">
             <tbody :class="TABLE.body">
-              <tr v-for="app in snapshot.topApps" :key="app.name" :class="TABLE.row">
+              <tr
+                v-for="app in topApps"
+                :key="app.name"
+                :data-top-app="app.name"
+                :class="TABLE.row"
+              >
                 <td :class="[TABLE.cell, 'pl-0 text-[13px]']">{{ app.name }}</td>
                 <td :class="[TABLE.cell, 'text-right text-xs text-muted-foreground']">
                   {{ t.groups.processes(app.processCount) }}

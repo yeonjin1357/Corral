@@ -251,3 +251,20 @@ test('저장 안 한 설정 화면이 대시보드에서 바꾼 숨기기·별�
   })
   w.unmount()
 })
+
+test('메모리 상세의 묶음을 누르면 상세를 닫고 그 탭으로 간다(검색어는 비운다)', async () => {
+  const f = fake()
+  const w = await start(f)
+  await w.find('input[type="search"], input').setValue('없는이름')
+  await w.find('[aria-label="메모리 자세히 보기"]').trigger('click')
+  await flushPromises()
+  const agent = document.body.querySelector<HTMLElement>('[data-memory-group="agent"] button')!
+  agent.click()
+  await flushPromises()
+  expect(document.body.querySelector('[data-memory-group]')).toBeNull()
+  expect(
+    w.find('[data-slot="toggle-group-item"][data-value="agents"]').attributes('data-state')
+  ).toBe('on')
+  expect((w.find('input[type="search"], input').element as HTMLInputElement).value).toBe('')
+  w.unmount()
+})

@@ -197,6 +197,16 @@ function select(key: string): void {
   selectedKey.value = key
 }
 
+/** 메모리 상세의 묶음에서 그 탭으로(숨긴 서버 보기·검색은 풀어 묶음 전체가 보이게). */
+function goToTab(next: TabKey): void {
+  memoryOpen.value = false
+  page.value = 'dashboard'
+  selectedKey.value = null
+  showHidden.value = false
+  query.value = ''
+  tab.value = next
+}
+
 function goHome(): void {
   page.value = 'dashboard'
   selectedKey.value = null
@@ -456,7 +466,7 @@ const counts = computed<Record<TabKey, number>>(() => {
     leftovers: s.leftovers.length,
     heavy: s.heavyJobs.length,
     disk: s.disk?.rows.length ?? 0,
-    apps: s.topApps.length
+    apps: s.apps.length
   }
 })
 const emptyText = computed(() => {
@@ -790,6 +800,7 @@ const takenAt = computed(() =>
       :window-ms="windowMs"
       :refreshing="refreshing"
       @refresh="refresh"
+      @go="goToTab"
     />
   </div>
 </template>

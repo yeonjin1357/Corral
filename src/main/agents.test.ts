@@ -90,6 +90,12 @@ describe('에이전트 행', () => {
     )
     expect(agents[0].memoryBytes).toBe(430 * MB)
     expect(agents[0].descendantCount).toBe(2)
+    // 상세 패널의 프로세스 목록도 같은 프로세스(자기 포함)로 메모리와 맞는다.
+    expect(agents[0].processes.map((p) => [p.name, p.count, p.memoryBytes / MB])).toEqual([
+      ['claude.exe', 1, 400],
+      ['node.exe', 1, 20],
+      ['bash.exe', 1, 10]
+    ])
   })
 
   test('워크트리는 에이전트 자신의 판별 결과', () => {
@@ -295,6 +301,7 @@ describe('상태 시작 시각(F3)', () => {
     startedAt: 100,
     memoryBytes: 1,
     descendantCount: 0,
+    processes: [],
     state: 'working',
     stateSource: 'cpu',
     stateSince: null,

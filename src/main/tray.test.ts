@@ -35,6 +35,7 @@ function snap(over: Partial<DashboardSnapshot> = {}): DashboardSnapshot {
       unresolvable: false,
       memoryBytes: 1,
       descendantPids: [],
+      processes: [],
       clientCount: 0,
       startedAt: null,
       judgement: null,
@@ -80,6 +81,7 @@ describe('buildTrayMenu', () => {
       startedAt: 1,
       memoryBytes: 1,
       descendantCount: 0,
+      processes: [],
       state,
       stateSource: 'hook',
       stateSince: null,
@@ -99,6 +101,7 @@ describe('buildTrayMenu', () => {
           workspace: null,
           memoryBytes: 1,
           descendantPids: [],
+          processes: [],
           startedAt: 1,
           agentInWorktree: false
         }
@@ -161,6 +164,7 @@ describe('buildTrayMenu', () => {
       workspace: null,
       memoryBytes: 1,
       descendantPids: [],
+      processes: [],
       startedAt: 1
     })
     const one = labels(buildTrayMenu(snap({ heavyJobs: [job(1)] }), actions))
@@ -343,6 +347,7 @@ test('남은 프로세스 줄은 에이전트 워크트리의 것을 빼고 센�
     workspace: null,
     memoryBytes: 1,
     descendantPids: [],
+    processes: [],
     startedAt: 1,
     agentInWorktree
   })

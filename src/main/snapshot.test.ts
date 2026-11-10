@@ -132,6 +132,14 @@ describe('포트를 연 프로세스 고르기', () => {
     ])
   })
 
+  test('서버 행은 자기와 자손을 이름별로 묶은 프로세스 목록을 담는다(상세 패널용)', () => {
+    const server = buildSnapshot(input).servers.find((r) => r.pid === 4100)!
+    expect(server.processes).toEqual([
+      { name: 'node.exe', hint: null, count: 1, memoryBytes: 1000 * MB },
+      { name: 'esbuild.exe', hint: 'esbuild', count: 1, memoryBytes: 200 * MB }
+    ])
+  })
+
   test('조상(3단계까지)의 worktree 를 물려받고, 4단계 위는 보지 않는다', () => {
     const s = buildSnapshot(input)
     expect(s.servers.find((r) => r.ports.includes(3010))?.worktree).toEqual(W3)
@@ -277,8 +285,8 @@ describe('묶음과 에이전트', () => {
     expect(none.groups.find((x) => x.group === 'otherApps')!.memoryBytes).toBe(0)
   })
 
-  test('다른 앱 상위 5개: 이름별로 묶어 메모리 큰 순(같으면 이름 순)', () => {
-    expect(buildSnapshot(input).topApps).toEqual([
+  test('다른 앱 전부: 이름별로 묶어 메모리 큰 순(같으면 이름 순)', () => {
+    expect(buildSnapshot(input).apps.slice(0, 5)).toEqual([
       { name: 'claude.exe', memoryBytes: 300 * MB, processCount: 1, exePath: null },
       { name: 'unrelated.exe', memoryBytes: 300 * MB, processCount: 1, exePath: null },
       { name: 'python.exe', memoryBytes: 80 * MB, processCount: 1, exePath: null },
@@ -290,6 +298,13 @@ describe('묶음과 에이전트', () => {
         exePath: null
       }
     ])
+  })
+
+  test('다른 앱은 상위 몇 개로 자르지 않는다: 앱별 프로세스 수 합이 다른 앱 묶음의 프로세스 수와 같다', () => {
+    const s = buildSnapshot(input)
+    expect(s.apps.length).toBeGreaterThan(5)
+    const total = s.apps.reduce((sum, a) => sum + a.processCount, 0)
+    expect(total).toBe(s.groups.find((g) => g.group === 'otherApps')!.processCount)
   })
 
   test('다른 앱은 명령줄에서 찾은 실행 파일 경로를 함께 담는다(앱 아이콘용, 모르면 null)', () => {
@@ -310,7 +325,7 @@ describe('묶음과 에이전트', () => {
           )
         ]
       }
-    }).topApps
+    }).apps
     expect(apps[0]).toEqual({
       name: 'Figma.exe',
       memoryBytes: 900 * MB,

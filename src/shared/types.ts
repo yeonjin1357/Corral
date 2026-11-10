@@ -111,6 +111,8 @@ export interface ServerRow {
   /** 맨 위 프로세스 + 모든 자손. */
   memoryBytes: number
   descendantPids: number[]
+  /** 맨 위 프로세스 + 자손을 이름별로 묶은 것(상세 패널). */
+  processes: ProcessSummary[]
   /** 서버의 모든 포트에 붙은 연결 수 합. */
   clientCount: number
   /** 맨 위 프로세스의 시작 시각. 종료 직전 같은 프로세스인지(pid 재사용 아님) 확인하는 데 쓴다. */
@@ -142,6 +144,8 @@ export interface LeftoverRow {
   /** 자기 + 자손. */
   memoryBytes: number
   descendantPids: number[]
+  /** 자기 + 자손을 이름별로 묶은 것(상세 패널). */
+  processes: ProcessSummary[]
   startedAt: number | null
   /** 같은 워크트리에 에이전트가 실행 중. */
   agentInWorktree: boolean
@@ -153,6 +157,16 @@ export interface GroupUsage {
   group: ProcessGroup
   memoryBytes: number
   processCount: number
+}
+
+/** 한 행(서버·에이전트·무거운 작업·남은 프로세스)을 이루는 프로세스를 이름·짧은 이름별로 묶은 것(상세 패널용). */
+export interface ProcessSummary {
+  /** 프로세스 이름(예: node.exe). */
+  name: string
+  /** 무엇인지 알 수 있는 짧은 이름(패키지·스크립트 이름). 모르면 null. 명령줄의 다른 인자는 담지 않는다. */
+  hint: string | null
+  count: number
+  memoryBytes: number
 }
 
 /** 다른 앱을 프로세스 이름별로 묶은 것(예: chrome.exe 40개). */
@@ -181,6 +195,8 @@ export interface AgentRow {
   /** 자기 + 자손 중 개발 서버가 아닌 것. */
   memoryBytes: number
   descendantCount: number
+  /** 메모리에 센 프로세스(자기 포함)를 이름별로 묶은 것(상세 패널). */
+  processes: ProcessSummary[]
   state: AgentState
   /** hook: 훅 이벤트로 안 상태, rollout: Codex 세션 기록으로 안 상태, cpu: CPU 변화로 짐작한 상태. */
   stateSource: 'hook' | 'cpu' | 'rollout'
@@ -239,8 +255,8 @@ export interface DashboardSnapshot {
   /** 디스크 정리(끝난 워크트리의 의존성 폴더). 아직 찾지 않았으면 null. */
   disk: DiskReport | null
   groups: GroupUsage[]
-  /** 다른 앱 중 메모리를 많이 쓰는 것 상위 5개. */
-  topApps: AppUsage[]
+  /** 다른 앱 전부(이름별, 메모리 큰 순). */
+  apps: AppUsage[]
   agentProcessCount: number
   /** CPU 표시 기준(Windows 는 전체 CPU 대비, macOS 는 코어 1개 = 100%). 모르면 null. */
   platform: Platform | null
@@ -310,5 +326,7 @@ export interface HeavyJobRow {
   /** 자기 + 자손. */
   memoryBytes: number
   descendantPids: number[]
+  /** 자기 + 자손을 이름별로 묶은 것(상세 패널). */
+  processes: ProcessSummary[]
   startedAt: number | null
 }

@@ -9,6 +9,7 @@ import type {
 import { worktreeFolder } from '../shared/format'
 import { agentKey } from '../shared/keys'
 import { agentToolOf, buildTree, topLevelAgentPids } from './processTree'
+import { summarizeProcesses } from './processSummary'
 
 /** 하위 트리 CPU 사용률이 코어 1개 기준 이 값(%) 이상이면 작업 중으로 본다. */
 export const WORKING_CPU_PERCENT = 2
@@ -150,6 +151,7 @@ export function buildAgents(input: {
       startedAt: self.startedAt,
       memoryBytes: members.reduce((sum, m) => sum + m.memoryBytes, 0),
       descendantCount: descendants.length,
+      processes: summarizeProcesses(members),
       state: hookState ?? cpuState(cpuPercent),
       stateSource: hookState ? 'hook' : 'cpu',
       // 상태 시작 시각은 이전 상태를 기억하는 수집기(withStateSince)가 채운다.

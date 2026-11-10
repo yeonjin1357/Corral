@@ -417,7 +417,7 @@ export function tableFor(tab: TabKey, s: DashboardSnapshot): Table {
           { id: 'processes', label: c.processes, width: 110, align: 'right' }
         ],
         sort: { id: 'memory', dir: 'desc' },
-        rows: s.topApps.map((a) => ({
+        rows: s.apps.map((a) => ({
           key: null,
           id: `app:${a.name}`,
           cells: {

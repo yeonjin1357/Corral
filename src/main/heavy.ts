@@ -1,5 +1,6 @@
 import type { HeavyJobRow, RawSample, WorktreeInfo } from '../shared/types'
 import { buildTree } from './processTree'
+import { summarizeProcesses } from './processSummary'
 
 /** 실행 파일·스크립트로 보는 확장자(이름에서 떼고 비교한다). */
 const EXEC_EXT = /\.(exe|cmd|bat|com|js|mjs|cjs|ps1|sh)$/i
@@ -156,8 +157,8 @@ export function findHeavyJobs(
     if (tree.ancestors(pid, Number.MAX_SAFE_INTEGER).some((a) => label.has(a.pid))) continue
     const p = tree.byPid.get(pid)!
     const descendantPids = tree.descendants(pid).filter((d) => !o.exclude.has(d))
-    let memoryBytes = p.memoryBytes
-    for (const d of descendantPids) memoryBytes += tree.byPid.get(d)?.memoryBytes ?? 0
+    const members = [p, ...descendantPids.flatMap((d) => tree.byPid.get(d) ?? [])]
+    const memoryBytes = members.reduce((sum, m) => sum + m.memoryBytes, 0)
     let worktree = worktrees.get(pid) ?? null
     if (!worktree)
       for (const a of tree.ancestors(pid, MAX_ANCESTOR_DEPTH)) {
@@ -173,6 +174,7 @@ export function findHeavyJobs(
       workspace: null,
       memoryBytes,
       descendantPids,
+      processes: summarizeProcesses(members),
       startedAt: p.startedAt
     })
   }

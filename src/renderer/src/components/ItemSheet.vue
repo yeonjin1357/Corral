@@ -11,6 +11,7 @@ import {
   ExternalLink,
   FolderGit2,
   HardDrive,
+  Layers,
   MemoryStick,
   Plug,
   Terminal,
@@ -107,6 +108,17 @@ interface View {
   folders?: DiskRow['folders']
 }
 
+/** 메모리에 센 프로세스(자기 포함)를 이름별로. 한도로 잘린 나머지는 개수만. */
+const processes = computed(() => {
+  const item = props.item
+  if (!item || item.kind === 'disk') return null
+  const total =
+    1 + (item.kind === 'agent' ? item.row.descendantCount : item.row.descendantPids.length)
+  const list = item.row.processes
+  const shown = list.reduce((n, p) => n + p.count, 0)
+  return { list, total, rest: Math.max(0, total - shown) }
+})
+
 const view = computed<View | null>(() => {
   const item = props.item
   if (!item) return null
@@ -170,7 +182,6 @@ const view = computed<View | null>(() => {
           { label: t.sheet.path, value: r.worktree?.root ?? t.none },
           { label: t.columns.process, value: r.processName },
           { label: t.sheet.pid, value: String(r.pid) },
-          { label: t.sheet.children, value: `${r.descendantPids.length}${t.cards.count}` },
           { label: t.sheet.startedAt, value: r.startedAt == null ? t.none : time(r.startedAt) }
         ],
         command: r.commandLine
@@ -223,7 +234,6 @@ const view = computed<View | null>(() => {
           },
           { label: t.sheet.path, value: r.worktree?.root ?? t.tags.noWorktree },
           { label: t.sheet.workspace, value: workspaceText(r.workspace) },
-          { label: t.sheet.children, value: `${r.descendantCount}${t.cards.count}` },
           { label: t.sheet.runtime, value: runtime(r.startedAt) }
         ],
         note
@@ -251,8 +261,7 @@ const view = computed<View | null>(() => {
             label: t.columns.branch,
             value: r.worktree?.branch ?? (r.worktree ? text.detached : t.none)
           },
-          { label: t.sheet.path, value: r.worktree?.root ?? t.tags.noWorktree },
-          { label: t.sheet.children, value: `${r.descendantPids.length}${t.cards.count}` }
+          { label: t.sheet.path, value: r.worktree?.root ?? t.tags.noWorktree }
         ],
         command: r.commandLine,
         note: t.leftover.why
@@ -279,8 +288,7 @@ const view = computed<View | null>(() => {
             label: t.columns.branch,
             value: r.worktree?.branch ?? (r.worktree ? text.detached : t.none)
           },
-          { label: t.sheet.path, value: r.worktree?.root ?? t.tags.noWorktree },
-          { label: t.sheet.children, value: `${r.descendantPids.length}${t.cards.count}` }
+          { label: t.sheet.path, value: r.worktree?.root ?? t.tags.noWorktree }
         ],
         command: r.commandLine,
         note: t.settings.heavyHelp
@@ -458,6 +466,47 @@ const folderSize = (f: DiskRow['folders'][number]): string =>
             <p class="text-xs text-muted-foreground">{{ fact.label }}</p>
             <p class="mt-1 break-all" data-selectable>{{ fact.value }}</p>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card v-if="processes && processes.list.length" size="sm" data-processes>
+        <CardHeader>
+          <CardTitle class="flex items-center gap-2 text-sm">
+            <Layers class="size-4" />{{ t.sheet.processes(processes.total) }}
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div :class="TABLE.container">
+            <table :class="TABLE.table">
+              <tbody :class="TABLE.body">
+                <tr
+                  v-for="p in processes.list"
+                  :key="`${p.name}:${p.hint ?? ''}`"
+                  data-process-row
+                  :class="TABLE.row"
+                >
+                  <td :class="[TABLE.cell, 'whitespace-normal']">
+                    <span class="font-mono text-xs" data-selectable>{{ p.name }}</span
+                    >{{ p.hint ? ' ' : ''
+                    }}<span v-if="p.hint" class="text-xs text-muted-foreground" data-selectable>{{
+                      p.hint
+                    }}</span>
+                  </td>
+                  <td
+                    :class="[TABLE.cell, 'text-right text-xs text-muted-foreground tabular-nums']"
+                  >
+                    ×{{ p.count }}
+                  </td>
+                  <td :class="[TABLE.cell, 'text-right font-mono text-xs']">
+                    {{ formatBytes(p.memoryBytes) }}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p v-if="processes.rest" data-process-rest class="mt-2 text-xs text-muted-foreground">
+            {{ t.sheet.processRest(processes.rest) }}
+          </p>
         </CardContent>
       </Card>
 

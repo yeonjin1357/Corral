@@ -1,0 +1,97 @@
+import { describe, expect, test } from 'vitest'
+import type { ProcessInfo } from '../shared/types'
+import { processHint, summarizeProcesses } from './processSummary'
+
+const MB = 1024 * 1024
+let nextPid = 100
+function proc(name: string, commandLine: string, memoryMb = 10): ProcessInfo {
+  return { pid: nextPid++, ppid: 1, name, commandLine, memoryBytes: memoryMb * MB, startedAt: 1 }
+}
+
+describe('processHint: 무엇인지 알 수 있는 짧은 이름(패키지·스크립트 이름만)', () => {
+  test.each([
+    [
+      'node_modules 안 패키지(범위 이름 포함)',
+      proc(
+        'node.exe',
+        String.raw`"C:\Program Files\nodejs\node.exe" C:\Users\dev\AppData\Local\npm-cache\_npx\1a2b\node_modules\@upstash\context7-mcp\dist\index.js`
+      ),
+      '@upstash/context7-mcp'
+    ],
+    [
+      '겹친 node_modules 는 실제 스크립트의 패키지',
+      proc('node', '/usr/local/bin/node /work/app/node_modules/a/node_modules/b/bin/run.js'),
+      'b'
+    ],
+    [
+      'npx 로 띄운 패키지(버전 꼬리는 뗀다)',
+      proc('node.exe', 'npx -y @scope/some-server@latest --port 1234'),
+      '@scope/some-server'
+    ],
+    ['uvx 로 띄운 패키지', proc('uvx.exe', 'uvx mcp-server-fetch'), 'mcp-server-fetch'],
+    ['python -m 모듈', proc('python.exe', 'python.exe -m http.server 9000'), 'http.server'],
+    [
+      '스크립트 파일 이름',
+      proc('node.exe', String.raw`node C:\work\shop-web\scripts\seed.mjs --fast`),
+      'seed.mjs'
+    ],
+    [
+      'java -jar',
+      proc('java.exe', String.raw`java -Xmx2g -jar C:\work\api\build\app.jar`),
+      'app.jar'
+    ],
+    [
+      '이미 아는 개발 도구는 그 이름',
+      proc('node.exe', 'node /work/app/node_modules/@playwright/mcp/cli.js'),
+      'Playwright MCP'
+    ]
+  ])('%s', (_case, p, hint) => {
+    expect(processHint(p)).toBe(hint)
+  })
+
+  test('셸·콘솔·명령줄이 없는 프로세스는 null', () => {
+    expect(
+      processHint(proc('conhost.exe', String.raw`\??\C:\Windows\system32\conhost.exe 0x4`))
+    ).toBeNull()
+    expect(processHint(proc('bash.exe', '/usr/bin/bash'))).toBeNull()
+    expect(processHint(proc('svchost.exe', ''))).toBeNull()
+  })
+
+  test('명령줄의 다른 인자(토큰·주소 등)는 담지 않는다', () => {
+    const p = proc('node.exe', 'node server.js --token=abc123secret --db postgres://u:pw@host/db')
+    expect(processHint(p)).toBe('server.js')
+  })
+
+  test('너무 긴 이름은 자른다', () => {
+    const long = 'x'.repeat(200)
+    expect(
+      processHint(proc('node.exe', `node /work/node_modules/${long}/index.js`))!.length
+    ).toBeLessThanOrEqual(60)
+  })
+})
+
+describe('summarizeProcesses: 이름·짧은 이름별로 묶어 메모리 큰 순', () => {
+  test('같은 이름과 짧은 이름은 하나로 묶어 개수와 메모리를 더한다', () => {
+    const list = summarizeProcesses([
+      proc('claude.exe', 'claude', 300),
+      proc('node.exe', 'node /a/node_modules/@scope/mcp-one/index.js', 100),
+      proc('node.exe', 'node /b/node_modules/@scope/mcp-one/index.js', 50),
+      proc('node.exe', 'node /a/node_modules/other-mcp/index.js', 40),
+      proc('cmd.exe', 'cmd.exe', 5),
+      proc('CMD.EXE', 'cmd.exe', 5)
+    ])
+    expect(list).toEqual([
+      { name: 'claude.exe', hint: null, count: 1, memoryBytes: 300 * MB },
+      { name: 'node.exe', hint: '@scope/mcp-one', count: 2, memoryBytes: 150 * MB },
+      { name: 'node.exe', hint: 'other-mcp', count: 1, memoryBytes: 40 * MB },
+      { name: 'cmd.exe', hint: null, count: 2, memoryBytes: 10 * MB }
+    ])
+  })
+
+  test('묶음이 한도를 넘으면 메모리 큰 것부터 한도만큼', () => {
+    const many = Array.from({ length: 50 }, (_, i) => proc(`p${i}.exe`, '', i + 1))
+    const list = summarizeProcesses(many, 30)
+    expect(list).toHaveLength(30)
+    expect(list[0]).toMatchObject({ name: 'p49.exe' })
+  })
+})

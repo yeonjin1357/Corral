@@ -16,6 +16,7 @@ function server(over: Partial<ServerRow>): ServerRow {
     unresolvable: false,
     memoryBytes: 100 * MB,
     descendantPids: [],
+    processes: [],
     clientCount: 0,
     startedAt: 1,
     judgement: 'candidate',
@@ -37,6 +38,7 @@ function leftover(over: Partial<LeftoverRow>): LeftoverRow {
     workspace: null,
     memoryBytes: 1100 * MB,
     descendantPids: [],
+    processes: [],
     startedAt: 5,
     agentInWorktree: false,
     ...over

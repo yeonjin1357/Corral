@@ -37,6 +37,7 @@ const candidate: ServerRow = {
   unresolvable: false,
   memoryBytes: 800 * MB,
   descendantPids: [4101],
+  processes: [],
   clientCount: 0,
   startedAt: 200,
   judgement: 'candidate',
@@ -54,6 +55,7 @@ const daemon: LeftoverRow = {
   workspace: null,
   memoryBytes: 1100 * MB,
   descendantPids: [],
+  processes: [],
   startedAt: 50,
   agentInWorktree: false
 }
@@ -190,6 +192,7 @@ describe('작업 공간 한 번에 정리(F2)', () => {
     workspace: WS,
     memoryBytes: 4000 * MB,
     descendantPids: [],
+    processes: [],
     startedAt: 1
   }
   const agent: AgentRow = {
@@ -200,6 +203,7 @@ describe('작업 공간 한 번에 정리(F2)', () => {
     startedAt: 1,
     memoryBytes: 600 * MB,
     descendantCount: 2,
+    processes: [],
     state: 'idle',
     stateSource: 'hook',
     stateSince: 1,

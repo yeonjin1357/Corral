@@ -23,6 +23,7 @@ export function serverRow(over: Partial<ServerRow> = {}): ServerRow {
     unresolvable: false,
     memoryBytes: 1200 * MB,
     descendantPids: [4101],
+    processes: [],
     clientCount: 1,
     startedAt: 200,
     judgement: null,
@@ -43,6 +44,7 @@ export function agentRow(over: Partial<AgentRow> = {}): AgentRow {
     startedAt: 100,
     memoryBytes: 600 * MB,
     descendantCount: 3,
+    processes: [],
     state: 'working',
     stateSource: 'hook',
     stateSince: null,
@@ -61,6 +63,7 @@ export function leftoverRow(over: Partial<LeftoverRow> = {}): LeftoverRow {
     workspace: null,
     memoryBytes: 900 * MB,
     descendantPids: [7001, 7002],
+    processes: [],
     startedAt: 300,
     agentInWorktree: false,
     ...over
@@ -77,6 +80,7 @@ export function heavyJob(over: Partial<HeavyJobRow> = {}): HeavyJobRow {
     workspace: null,
     memoryBytes: 6 * GB,
     descendantPids: [],
+    processes: [],
     startedAt: 0,
     ...over
   }
@@ -135,7 +139,7 @@ export function snapshot(over: Partial<DashboardSnapshot> = {}): DashboardSnapsh
       { group: 'otherApps', memoryBytes: 18 * GB, processCount: 300 },
       { group: 'system', memoryBytes: 2 * GB, processCount: 0 }
     ],
-    topApps: [
+    apps: [
       {
         name: 'chrome.exe',
         memoryBytes: 5 * GB,

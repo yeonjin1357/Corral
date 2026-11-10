@@ -1,0 +1,90 @@
+// @vitest-environment happy-dom
+import { mount, type VueWrapper } from '@vue/test-utils'
+import { afterEach } from 'vitest'
+import ItemSheet, { type Selected } from './ItemSheet.vue'
+import { MB, agentRow, diskRow, heavyJob, serverRow } from '../testing/fixtures'
+
+let wrapper: VueWrapper | null = null
+afterEach(() => {
+  wrapper?.unmount()
+  wrapper = null
+  document.body.innerHTML = ''
+})
+
+function sheet(item: Selected): VueWrapper {
+  wrapper = mount(ItemSheet, {
+    attachTo: document.body,
+    props: {
+      item,
+      now: 10_000_000,
+      memoryHistory: [],
+      windowMs: 600_000,
+      busy: false,
+      hook: null,
+      platform: 'win32',
+      cpuCount: 8,
+      open: true
+    }
+  })
+  return wrapper
+}
+
+const processRows = (): string[][] =>
+  [...document.body.querySelectorAll('[data-process-row]')].map((tr) =>
+    [...tr.querySelectorAll('td')].map((td) => td.textContent!.replace(/\s+/g, ' ').trim())
+  )
+const processTitle = (): string | undefined =>
+  document.body.querySelector('[data-processes] [data-slot=card-title]')?.textContent?.trim()
+
+describe('상세 패널: 프로세스 목록', () => {
+  test('에이전트가 띄운 프로세스를 이름·무엇인지·개수·메모리로 보인다(자기 포함 개수)', () => {
+    sheet({
+      kind: 'agent',
+      row: agentRow({
+        descendantCount: 4,
+        processes: [
+          { name: 'node.exe', hint: '@playwright/mcp', count: 2, memoryBytes: 310 * MB },
+          { name: 'claude.exe', hint: null, count: 1, memoryBytes: 300 * MB },
+          { name: 'cmd.exe', hint: null, count: 2, memoryBytes: 10 * MB }
+        ]
+      })
+    })
+    expect(processTitle()).toBe('프로세스 5개')
+    expect(processRows()).toEqual([
+      ['node.exe @playwright/mcp', '×2', '310 MB'],
+      ['claude.exe', '×1', '300 MB'],
+      ['cmd.exe', '×2', '10 MB']
+    ])
+  })
+
+  test('목록이 한도로 잘렸으면 나머지 개수를 한 줄로 알린다', () => {
+    sheet({
+      kind: 'server',
+      row: serverRow({
+        descendantPids: [2, 3, 4, 5],
+        processes: [{ name: 'java.exe', hint: null, count: 2, memoryBytes: 900 * MB }]
+      })
+    })
+    expect(processTitle()).toBe('프로세스 5개')
+    expect(document.body.querySelector('[data-process-rest]')!.textContent).toContain('그 밖 3개')
+  })
+
+  test('무거운 작업도 프로세스 목록을 보인다', () => {
+    sheet({
+      kind: 'heavy',
+      row: heavyJob({
+        descendantPids: [2],
+        processes: [
+          { name: 'node.exe', hint: 'vue-tsc', count: 1, memoryBytes: 800 * MB },
+          { name: 'cmd.exe', hint: null, count: 1, memoryBytes: 5 * MB }
+        ]
+      })
+    })
+    expect(processRows().map((r) => r[0])).toEqual(['node.exe vue-tsc', 'cmd.exe'])
+  })
+
+  test('디스크 정리 항목에는 프로세스 목록이 없다', () => {
+    sheet({ kind: 'disk', row: diskRow() })
+    expect(document.body.querySelector('[data-processes]')).toBeNull()
+  })
+})

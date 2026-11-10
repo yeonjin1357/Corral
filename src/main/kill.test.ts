@@ -94,6 +94,7 @@ const row: ServerRow = {
   unresolvable: false,
   memoryBytes: 2 * MB,
   descendantPids: [4101],
+  processes: [],
   clientCount: 0,
   startedAt: 200,
   judgement: null,
@@ -343,6 +344,7 @@ describe('남은 프로세스 끄기', () => {
     workspace: null,
     memoryBytes: 2 * MB,
     descendantPids: [4101],
+    processes: [],
     startedAt: 200,
     agentInWorktree: false
   }

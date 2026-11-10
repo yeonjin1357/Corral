@@ -1,7 +1,9 @@
 import type { LeftoverRow, Platform, ProcessInfo, RawSample, WorktreeInfo } from '../shared/types'
 import { agentCovers } from '../shared/format'
-import { text } from '../shared/text'
 import { buildTree, classifyAgent } from './processTree'
+import { processLabel, summarizeProcesses } from './processSummary'
+
+export { processLabel }
 
 /** 주인(실행한 프로세스)이 끝나도 남기 쉬운 개발 도구. 명령줄은 `/` 로 바꿔 비교한다. */
 const TOOL =
@@ -10,9 +12,6 @@ const TOOL =
 /** 셸·패키지 실행기. 이것 자체는 개발 도구가 아니지만, 아래에 개발 도구를 거느린 채 남으면 같이 정리 대상이다. */
 const WRAPPER_NAME = /^(cmd|bash|sh|zsh|dash|powershell|pwsh)(\.exe)?$/i
 const WRAPPER_COMMAND = /npm-cli\.js|npx-cli\.js|[\\/]pnpm|[\\/]yarn|[\\/]bun(\.exe)?\b/i
-
-const BROWSER_NAME =
-  /^(chrome|chromium|msedge|firefox|headless_shell|pw_run|MiniBrowser|WebKit\w*)(\.exe)?$/i
 
 function normalized(p: ProcessInfo): string {
   return p.commandLine.replace(/\\/g, '/')
@@ -24,26 +23,6 @@ export function isLeftoverTool(p: ProcessInfo): boolean {
 
 function isWrapper(p: ProcessInfo): boolean {
   return WRAPPER_NAME.test(p.name) || WRAPPER_COMMAND.test(p.commandLine)
-}
-
-/** 목록에 보일 알아보기 쉬운 이름. 모르면 프로세스 이름. */
-export function processLabel(p: ProcessInfo): string {
-  const cmd = normalized(p)
-  const labels = text.leftoverLabels
-  if (/KotlinCompileDaemon/i.test(cmd)) return labels.kotlinDaemon
-  if (/GradleDaemon/i.test(cmd)) return labels.gradleDaemon
-  if (/@playwright\/mcp|playwright-mcp/i.test(cmd)) return labels.playwrightMcp
-  if (/playwright/i.test(cmd))
-    return BROWSER_NAME.test(p.name) ? labels.playwrightBrowser : labels.playwright
-  if (/--remote-debugging-pipe|--headless/i.test(cmd)) return labels.headlessBrowser
-  if (/vitest/i.test(cmd)) return 'Vitest'
-  if (/jest-worker/i.test(cmd)) return labels.jestWorker
-  if (/esbuild/i.test(cmd)) return 'esbuild'
-  if (/webpack/i.test(cmd)) return 'webpack'
-  if (/tsserver/i.test(cmd)) return labels.tsserver
-  const bin = /node_modules\/\.bin\/([^/\s"']+)/i.exec(cmd)
-  if (bin) return bin[1]
-  return p.name
 }
 
 /**
@@ -95,6 +74,7 @@ export function findLeftovers(
       worktree,
       memoryBytes: members.reduce((sum, m) => sum + m.memoryBytes, 0),
       descendantPids: descendants,
+      processes: summarizeProcesses(members),
       startedAt: p.startedAt,
       workspace: null,
       agentInWorktree: !!worktree && agentCovers(opts.agentRoots ?? [], worktree.root)

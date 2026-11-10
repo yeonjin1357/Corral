@@ -6,6 +6,7 @@ import type {
   MemorySummary,
   Platform,
   ProcessInfo,
+  ProcessSummary,
   RawSample,
   ServerRow,
   WorktreeInfo
@@ -15,6 +16,7 @@ import { exePathOf } from '../shared/exePath'
 import { worktreeKey } from '../shared/format'
 import { findLeftovers } from './leftovers'
 import { findHeavyJobs } from './heavy'
+import { summarizeProcesses } from './processSummary'
 import { buildTree, classifyAgent, topLevelAgentPids, type ProcessTree } from './processTree'
 
 /** WSL·Docker·Podman 처럼 다른 환경의 포트를 대신 열어 주는 프로세스. 어느 worktree 것인지 알 수 없다. */
@@ -107,10 +109,8 @@ function summarizeMemory(
   }
 }
 
-const TOP_APPS = 5
-
-/** 프로세스 이름별로 묶어 메모리 큰 순(같으면 이름 순) 상위 몇 개. 이름은 대소문자를 무시하고 묶는다. */
-function topAppsOf(processes: ProcessInfo[], platform: Platform | null): AppUsage[] {
+/** 프로세스 이름별로 묶어 메모리 큰 순(같으면 이름 순). 이름은 대소문자를 무시하고 묶는다. */
+function appsOf(processes: ProcessInfo[], platform: Platform | null): AppUsage[] {
   const byName = new Map<string, AppUsage>()
   for (const p of processes) {
     const key = p.name.toLowerCase()
@@ -127,9 +127,9 @@ function topAppsOf(processes: ProcessInfo[], platform: Platform | null): AppUsag
         exePath: exePathOf(p.commandLine, platform)
       })
   }
-  return [...byName.values()]
-    .sort((a, b) => b.memoryBytes - a.memoryBytes || a.name.localeCompare(b.name))
-    .slice(0, TOP_APPS)
+  return [...byName.values()].sort(
+    (a, b) => b.memoryBytes - a.memoryBytes || a.name.localeCompare(b.name)
+  )
 }
 
 /**
@@ -147,6 +147,7 @@ interface PortEntry {
   unresolvable: boolean
   memoryBytes: number
   descendantPids: number[]
+  processes: ProcessSummary[]
   clientCount: number
   startedAt: number | null
 }
@@ -186,6 +187,7 @@ function serversOf(ports: PortEntry[], tree: ProcessTree): ServerRow[] {
       unresolvable: head.unresolvable,
       memoryBytes: head.memoryBytes,
       descendantPids: head.descendantPids,
+      processes: head.processes,
       clientCount,
       startedAt: head.startedAt,
       judgement: null,
@@ -274,6 +276,7 @@ export function buildSnapshot(input: {
       unresolvable: !worktree,
       memoryBytes: p.memoryBytes + memoryOf(descendantPids),
       descendantPids,
+      processes: summarizeProcesses([p, ...descendantPids.flatMap((d) => tree.byPid.get(d) ?? [])]),
       clientCount: clients.get(`${p.pid}:${t.localPort}`) ?? 0,
       startedAt: p.startedAt
     })
@@ -359,7 +362,7 @@ export function buildSnapshot(input: {
     codexHook: null,
     disk: null,
     groups,
-    topApps: topAppsOf(rest, input.platform ?? null),
+    apps: appsOf(rest, input.platform ?? null),
     agentProcessCount,
     platform: input.platform ?? null,
     cpuCount: input.cpuCount && input.cpuCount > 0 ? input.cpuCount : 1,

@@ -9,7 +9,7 @@ function snap(): DashboardSnapshot {
   return {
     ...blankSnapshot(1),
     platform: 'win32',
-    topApps: [{ name: 'chrome.exe', memoryBytes: 1, processCount: 1, exePath: CHROME }],
+    apps: [{ name: 'chrome.exe', memoryBytes: 1, processCount: 1, exePath: CHROME }],
     servers: [
       {
         ports: [8080],
@@ -21,6 +21,7 @@ function snap(): DashboardSnapshot {
         unresolvable: false,
         memoryBytes: 1,
         descendantPids: [],
+        processes: [],
         clientCount: 0,
         startedAt: null,
         judgement: null,
