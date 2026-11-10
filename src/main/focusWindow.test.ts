@@ -1,4 +1,6 @@
 import { createFocuser, focusScript, openNoticeTarget } from './focusWindow'
+import { HOST_CANDIDATE_LIMIT } from './agents'
+import { buildPowerShellArgs, nativeHelperDllName, powershellPath } from './collect/windows'
 import { blankSnapshot } from '../shared/snapshot'
 import { selectionKey } from '../shared/keys'
 import type { AgentRow, CollectMode, DashboardSnapshot, Platform } from '../shared/types'
@@ -86,10 +88,11 @@ const found = (focused: boolean, pid = 3000): CommandResult => ({
   exitCode: 0
 })
 
-describe('스크립트', () => {
-  const findLine = (script: string): string | undefined =>
-    script.split('\n').find((l) => l.includes('[PitwallWindow]::Find('))
+/** 스크립트에서 창 찾기 줄(pid 가 들어가는 유일한 줄). */
+const findLine = (script: string): string | undefined =>
+  script.split('\n').find((l) => l.includes('[PitwallWindow]::Find('))
 
+describe('스크립트', () => {
   test('스크립트는 pid 를 숫자로만 넣고 find 에서는 Focus 를 부르지 않는다', () => {
     const find = focusScript(null, [4000, 3000], 'find')
     expect(findLine(find)).toBe('$w = [PitwallWindow]::Find([int[]]@(4000,3000))')
@@ -143,9 +146,28 @@ describe('스크립트', () => {
       expect(script).not.toContain('Remove-Item')
     }
   })
+
+  test(`창 후보 ${HOST_CANDIDATE_LIMIT}개(가장 긴 pid)와 긴 DLL 경로도 한 명령줄 길이 제한(32767자) 안에 들어간다`, () => {
+    const pids = Array.from({ length: HOST_CANDIDATE_LIMIT }, (_, i) => 0x7fffffff - i)
+    const dll =
+      'C:\\Users\\' + '가'.repeat(60) + '\\AppData\\Roaming\\pitwall\\' + nativeHelperDllName()
+    const script = focusScript(dll, pids, 'focus')
+    expect(findLine(script)).toBe(`$w = [PitwallWindow]::Find([int[]]@(${pids.join(',')}))`)
+    // 수집 스크립트와 같은 여유(30000)를 둔다.
+    expect([powershellPath(), ...buildPowerShellArgs(script)].join(' ').length).toBeLessThan(30000)
+  })
 })
 
 describe('창으로 가기', () => {
+  test(`창 후보가 ${HOST_CANDIDATE_LIMIT}개를 넘으면(스냅샷이 이상해도) 앞의 ${HOST_CANDIDATE_LIMIT}개만 넣는다`, async () => {
+    const pids = Array.from({ length: 100 }, (_, i) => 1000 + i)
+    const f = fakes({ latest: snap({ agents: [agent({ host: { pids, app: null } })] }) })
+    await f.focuser.findHost(KEY)
+    expect(findLine(scriptOf(f.calls[0].argv))).toBe(
+      `$w = [PitwallWindow]::Find([int[]]@(${pids.slice(0, HOST_CANDIDATE_LIMIT).join(',')}))`
+    )
+  })
+
   test('스냅샷에 없는 키는 실행하지 않고 false', async () => {
     const f = fakes()
     for (const key of [

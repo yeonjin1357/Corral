@@ -1,5 +1,6 @@
 import {
   buildAgents,
+  HOST_CANDIDATE_LIMIT,
   measureTreeCpu,
   withStateSince,
   WORKING_CPU_PERCENT,
@@ -256,7 +257,7 @@ describe('에이전트가 떠 있는 창(G3f 창으로 가기)', () => {
     expect(agents[0].host.pids).toEqual([21, 20, 650, 700])
   })
 
-  test('창 후보는 pitwall 자신에서 멈추고 24개를 넘지 않는다', () => {
+  test('창 후보는 pitwall 자신에서 멈추고 64개를 넘지 않는다', () => {
     // pitwall 이 띄운 셸이라도 pitwall 창은 후보가 아니다(그 위 조상·같은 이름 프로세스도 보지 않는다).
     const fromPitwall = run(
       [
@@ -269,16 +270,18 @@ describe('에이전트가 떠 있는 창(G3f 창으로 가기)', () => {
       { selfPid: 900 }
     )
     expect(fromPitwall.agents[0].host.pids).toEqual([950])
-    // 같은 이름 프로세스가 많아도 앞의 24개만.
-    const many = Array.from({ length: 40 }, (_, i) => proc(1000 + i, 10, 'Agents.exe'))
+    // 같은 이름 프로세스가 많아도 앞의 64개만(창을 가진 본 프로세스가 뒤쪽이어도 웬만하면 들어가게 넉넉히).
+    const many = Array.from({ length: 100 }, (_, i) => proc(1000 + i, 10, 'Agents.exe'))
     const capped = run([
       ...many,
       proc(300, 299, 'Agents.exe'),
       proc(301, 300, 'powershell.exe'),
       proc(5000, 301, 'claude.exe')
     ])
-    expect(capped.agents[0].host.pids).toHaveLength(24)
+    expect(capped.agents[0].host.pids).toHaveLength(64)
     expect(capped.agents[0].host.pids.slice(0, 4)).toEqual([301, 300, 1000, 1001])
+    expect(capped.agents[0].host.pids.at(-1)).toBe(1061)
+    expect(HOST_CANDIDATE_LIMIT).toBe(64)
   })
 
   test('Windows 셸(explorer.exe)과 그 위는 넣지 않는다(바탕 화면·탐색기 창은 에이전트의 창이 아니다)', () => {

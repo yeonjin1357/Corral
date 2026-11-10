@@ -250,7 +250,7 @@ export interface AgentActivity {
 }
 
 /**
- * 에이전트가 떠 있는 창을 찾을 단서(G3f 창으로 가기). pids: 창 후보 pid(고를 순서대로, 최대 24 — 조상과 그 콘솔 호스트 자식,
+ * 에이전트가 떠 있는 창을 찾을 단서(G3f 창으로 가기). pids: 창 후보 pid(고를 순서대로, 최대 64 — 조상과 그 콘솔 호스트 자식,
  * 바깥 앱과 같은 이름의 프로세스, 앱 조상이 없으면 WindowsTerminal. 규칙은 agents.ts 의 hostFinder), app: 조상 가운데 명령줄이
  * `/…/<이름>.app/Contents/MacOS/…` 인 첫 것의 `.app` 경로(다른 .app 안의 보조 앱은 건너뛴다). 모르면 빈 목록·null.
  */

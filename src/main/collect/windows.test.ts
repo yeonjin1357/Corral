@@ -781,7 +781,7 @@ describe.runIf(process.platform === 'win32')('실제 Windows 에서', () => {
     )
     const anyWindow = Number(titled.stdout.trim()) > 0
     const pids = s.processes.map((p) => p.pid).filter((pid) => pid > 0)
-    // 명령줄 길이 제한 때문에 나눠서 찾는다(앱의 창 후보는 24개까지라 한 번이면 된다).
+    // 명령줄 길이 제한 때문에 나눠서 찾는다(앱의 창 후보는 64개까지라 한 번이면 된다).
     let found: { pid: number; title: string; focused: boolean } | null = null
     for (let i = 0; i < pids.length && !found; i += 200) {
       const script = focusScript(null, pids.slice(i, i + 200), 'find')

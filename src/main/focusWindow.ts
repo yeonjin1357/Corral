@@ -2,7 +2,7 @@ import type { AgentRow, DashboardSnapshot, Platform } from '../shared/types'
 import { COMMAND_TIMEOUT_MS } from '../shared/defaults'
 import { selectionKey } from '../shared/keys'
 import type { Runner } from './collect/runCommand'
-import { appBundleOf } from './agents'
+import { appBundleOf, HOST_CANDIDATE_LIMIT } from './agents'
 import {
   buildPowerShellArgs,
   helperSourceLines,
@@ -104,7 +104,8 @@ export function createFocuser(deps: {
   async function windowsHost(agent: AgentRow, mode: 'find' | 'focus'): Promise<FocusResult | null> {
     const collectMode = deps.latest()?.collectMode
     if (collectMode === 'basic' || collectMode === 'safe') return null
-    const pids = agent.host.pids.filter(isScriptPid)
+    // 수집이 이미 상한을 지키지만, 명령줄 길이를 넘지 않도록 여기서도 앞의 것만 넣는다.
+    const pids = agent.host.pids.filter(isScriptPid).slice(0, HOST_CANDIDATE_LIMIT)
     if (pids.length === 0) return null
     const result = await deps.run(
       [powershellPath(), ...buildPowerShellArgs(focusScript(deps.helperDllPath(), pids, mode))],

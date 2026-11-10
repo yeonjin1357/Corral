@@ -84,8 +84,11 @@ export function measureTreeCpu(
 
 /** 창을 찾아볼 조상 수(가까운 것부터). */
 const HOST_MAX_DEPTH = 12
-/** 창 후보 pid 수 상한(스크립트 명령줄 길이 때문에, 앞의 것을 남긴다). */
-const HOST_MAX_PIDS = 24
+/**
+ * 창 후보 pid 수 상한(앞의 것을 남긴다). 창을 가진 본 프로세스가 같은 이름 보조 프로세스들 뒤에 올 수 있어 넉넉히 두되,
+ * 창 찾기 스크립트의 명령줄 길이(32767자) 안에 들어가는 만큼(가장 긴 pid 64개로 테스트).
+ */
+export const HOST_CANDIDATE_LIMIT = 64
 
 /**
  * Windows 셸. 시작 메뉴·작업 표시줄로 띄운 것은 모두 이 아래라 조상에 흔히 있지만, 그 창(바탕 화면·탐색기)은
@@ -119,7 +122,7 @@ export function appBundleOf(commandLine: string): string | null {
  * 2. 조상 가운데 가장 바깥의 앱(셸·런타임·콘솔 호스트가 아닌 것) 이름과 같은 다른 프로세스(pid 오름차순) — 여러 에이전트
  *    도구는 창 없는 pty 데몬이 셸을 띄우고, 창은 같은 실행 파일의 다른 프로세스가 갖는다.
  * 3. 그런 앱 조상이 하나도 없으면 WindowsTerminal.exe(기본 터미널로 넘긴 콘솔은 셸의 부모가 explorer 다).
- * 중복 없이 24개까지. app 은 조상 가운데 첫 `.app` 번들(macOS).
+ * 중복 없이 앞의 HOST_CANDIDATE_LIMIT(64)개까지. app 은 조상 가운데 첫 `.app` 번들(macOS).
  */
 export function hostFinder(
   processes: ProcessInfo[],
@@ -154,7 +157,7 @@ export function hostFinder(
     const outerApp = ancestors.filter((p) => !NOT_APP.test(p.name)).pop()
     candidates.push(...named(outerApp ? outerApp.name : WINDOWS_TERMINAL_NAME))
     const app = ancestors.map((p) => appBundleOf(p.commandLine)).find((a) => a !== null) ?? null
-    return { pids: [...new Set(candidates)].slice(0, HOST_MAX_PIDS), app }
+    return { pids: [...new Set(candidates)].slice(0, HOST_CANDIDATE_LIMIT), app }
   }
 }
 
