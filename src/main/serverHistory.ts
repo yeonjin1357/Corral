@@ -11,6 +11,8 @@ const MIN_SPAN_MS = 30 * MIN
 const MIN_RATIO = 1.5
 const MIN_GROWTH_BYTES = GB
 const STEADY_SHARE = 0.8
+/** 기록 사이가 이보다 벌어지면(앱이 꺼져 있었음) 끊긴 것으로 보고 그 뒤의 이어진 기록만 판단한다. */
+const MAX_GAP_MS = 5 * MIN
 /** 불러올 때 받을 서버 수 상한(깨진 파일이 메모리를 잡아먹지 않게). */
 const MAX_SERVERS = 200
 
@@ -23,12 +25,16 @@ export interface MemorySample {
 export type ServerHistoryData = Record<string, MemorySample[]>
 
 /**
- * 최근 60분 기록에서 메모리가 계속 늘고 있으면 그 근거. 기록이 30분이 안 되거나, 처음보다 50% 그리고 1 GB 이상
+ * 최근 60분 기록(5분 넘게 끊겼으면 끊긴 뒤의 이어진 기록)에서 메모리가 계속 늘고 있으면 그 근거. 기록이 30분이 안 되거나, 처음보다 50% 그리고 1 GB 이상
  * 늘지 않았거나, 1분 간격 변화 가운데 줄어든 것이 20% 를 넘으면(오르내리는 캐시 등) null.
  * 샘플은 시간 순이어야 한다.
  */
 export function memoryGrowth(samples: MemorySample[], now: number): MemoryGrowth | null {
-  const recent = samples.filter((s) => s.t <= now && now - s.t <= KEEP_MS)
+  const kept = samples.filter((s) => s.t <= now && now - s.t <= KEEP_MS)
+  // 꺼져 있던 동안 꾸준히 늘었는지는 모르므로, 마지막으로 끊긴 뒤의 이어진 기록만 본다.
+  let from = 0
+  for (let i = 1; i < kept.length; i++) if (kept[i].t - kept[i - 1].t > MAX_GAP_MS) from = i
+  const recent = kept.slice(from)
   if (recent.length < 2) return null
   const first = recent[0]
   const last = recent[recent.length - 1]

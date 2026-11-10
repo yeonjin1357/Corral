@@ -24,6 +24,23 @@ describe('memoryGrowth', () => {
     })
   })
 
+  test('기록이 5분 넘게 끊겼으면(앱을 껐다 켬) 끊긴 뒤의 이어진 기록만 본다', () => {
+    // 10분 평평 → 앱이 25분 꺼짐(그 사이 한 번에 오름) → 10분 평평. 꺼진 동안 꾸준히 늘었는지 모른다.
+    const before = series(Array(11).fill(2), 0)
+    const after = series(Array(11).fill(3.5), 35 * MIN)
+    expect(memoryGrowth([...before, ...after], 45 * MIN)).toBeNull()
+  })
+
+  test('끊긴 뒤 이어진 기록이 30분 넘게 늘면 그 구간으로 판단한다', () => {
+    const before = series(Array(5).fill(1), 0)
+    const after = series(rising(2, 3.6, 30), 20 * MIN)
+    expect(memoryGrowth([...before, ...after], 50 * MIN)).toEqual({
+      fromBytes: 2 * GB,
+      toBytes: Math.round(3.6 * GB),
+      minutes: 30
+    })
+  })
+
   test('30분이 안 되면 아직 판단하지 않는다', () => {
     expect(memoryGrowth(series(rising(2, 4, 29)), 29 * MIN)).toBeNull()
   })
