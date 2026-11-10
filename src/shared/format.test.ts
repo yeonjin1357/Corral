@@ -1,3 +1,4 @@
+import { text } from './text'
 import {
   agentCovers,
   displayCpuPercent,
@@ -118,4 +119,11 @@ test('CPU 표시: Windows 는 작업 관리자처럼 전체 CPU 대비, macOS �
   expect(displayCpuPercent(null, 'win32', 8)).toBeNull()
   expect(displayCpuPercent(5, 'win32', 0)).toBe(5)
   expect(displayCpuPercent(5, null, 8)).toBe(5)
+})
+
+test('추이 그래프 길이 문구: 초·분·시간(분이 남으면 함께)', () => {
+  expect(text.ui.trend.window(30_000)).toBe('30초')
+  expect(text.ui.trend.window(10 * 60_000)).toBe('10분')
+  expect(text.ui.trend.window(120 * 60_000)).toBe('2시간')
+  expect(text.ui.trend.window(90 * 60_000)).toBe('1시간 30분')
 })

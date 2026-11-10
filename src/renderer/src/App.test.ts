@@ -270,14 +270,26 @@ test('메모리 상세의 묶음을 누르면 상세를 닫고 그 탭으로 간
   w.unmount()
 })
 
-test('메모리 상세의 RAM 추이는 최근 2시간, 기록이 끊긴 구간은 비운다', async () => {
-  const f = fake()
-  const w = await start(f)
-  await w.find('[aria-label="메모리 자세히 보기"]').trigger('click')
-  await flushPromises()
-  const sheet = w.findComponent(MemorySheet)
-  expect(sheet.props('windowMs')).toBe(2 * 60 * 60 * 1000)
-  expect(sheet.props('gapMs')).toBeGreaterThanOrEqual(60_000)
+test('메모리 상세의 RAM 추이는 쌓인 기록만큼(최소 작은 그래프 길이, 최대 2시간), 끊긴 구간은 비운다', async () => {
+  const MIN = 60_000
+  const open = async (points: { t: number; value: number }[]): Promise<VueWrapper> => {
+    const w = await start(fake({ historyRam: async () => points }))
+    await w.find('[aria-label="메모리 자세히 보기"]').trigger('click')
+    await flushPromises()
+    return w
+  }
+  // 막 켰을 때(기록 없음): 작은 그래프와 같은 10분(보통 갱신 5초 × 120).
+  let w = await open([])
+  expect(w.findComponent(MemorySheet).props('windowMs')).toBe(10 * MIN)
+  expect(w.findComponent(MemorySheet).props('gapMs')).toBeGreaterThanOrEqual(MIN)
+  w.unmount()
+  // 앱이 기억한 기록이 90분이면 90분.
+  w = await open([{ t: 1 - 90 * MIN, value: 50 }])
+  expect(w.findComponent(MemorySheet).props('windowMs')).toBe(90 * MIN)
+  w.unmount()
+  // 2시간보다 오래된 기록은 버리므로 축도 그만큼 길어지지 않는다.
+  w = await open([{ t: 1 - 300 * MIN, value: 50 }])
+  expect(w.findComponent(MemorySheet).props('windowMs')).toBe(10 * MIN)
   w.unmount()
 })
 

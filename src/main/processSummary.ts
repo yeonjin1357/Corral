@@ -46,6 +46,8 @@ function withoutVersion(pkg: string): string {
 }
 
 const RUNNER = /^(npx|uvx|bunx|pipx)(\.cmd|\.exe)?$/i
+/** 셸·콘솔: 무엇을 띄웠든 짧은 이름을 붙이지 않는다(띄운 프로세스가 목록에 따로 있어, 붙이면 같은 것이 여럿처럼 보인다). */
+const SHELL = /^(cmd|bash|sh|zsh|dash|fish|powershell|pwsh|conhost)(\.exe)?$/i
 const SCRIPT = /\.(m?js|cjs|ts|mts|py|jar)$/i
 const PACKAGE = /node_modules\/((?:@[^/\s]+\/)?[^/\s.][^/\s]*)\//g
 
@@ -60,7 +62,7 @@ export function processHint(p: ProcessInfo): string | null {
 }
 
 function findHint(p: ProcessInfo): string | null {
-  if (!p.commandLine) return null
+  if (!p.commandLine || SHELL.test(p.name)) return null
   const known = processLabel(p)
   if (known !== p.name) return known
   const cmd = p.commandLine.replace(/\\/g, '/')

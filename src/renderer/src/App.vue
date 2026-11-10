@@ -77,6 +77,15 @@ const query = ref('')
 const intervals = computed(() => REFRESH_INTERVALS[settings.value.refresh])
 /** 추이 그래프 가로축: 창이 열려 있을 때 기록 한도만큼(보통 5초 × 120 = 10분). */
 const windowMs = computed(() => intervals.value.openMs * POINT_LIMIT)
+/**
+ * 메모리 상세의 추이 가로축: 쌓인 RAM 기록만큼(작은 그래프 길이 ~ 앱이 기억하는 2시간). 막 켰을 때 2시간 축의
+ * 오른쪽 끝에만 점이 있어 빈 그래프처럼 보이지 않게.
+ */
+const memoryWindowMs = computed(() => {
+  const ram = history.value.ram
+  const span = ram.length ? ram[ram.length - 1].t - ram[0].t : 0
+  return Math.min(RAM_KEEP_MS, Math.max(windowMs.value, span))
+})
 /** 기록 사이가 이보다 벌어지면 그래프를 잇지 않는다: 창을 닫아 둔 동안의 수집 간격(의 3배)보다 길면 앱이 꺼져 있던 것. */
 const gapMs = computed(() => Math.max(60_000, 3 * intervals.value.closedMs))
 const isMac = navigator.userAgent.includes('Mac')
@@ -808,7 +817,7 @@ const takenAt = computed(() =>
       v-model:open="memoryOpen"
       :snapshot="snapshot"
       :ram-history="history.ram"
-      :window-ms="RAM_KEEP_MS"
+      :window-ms="memoryWindowMs"
       :gap-ms="gapMs"
       :refreshing="refreshing"
       @refresh="refresh"

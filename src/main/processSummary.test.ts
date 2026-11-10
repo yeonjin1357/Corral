@@ -57,6 +57,17 @@ describe('processHint: 무엇인지 알 수 있는 짧은 이름(패키지·스�
     expect(processHint(proc('svchost.exe', ''))).toBeNull()
   })
 
+  test('셸·콘솔은 무엇을 띄웠든 짧은 이름을 붙이지 않는다(띄운 프로세스가 따로 보이므로)', () => {
+    expect(
+      processHint(proc('cmd.exe', 'cmd.exe /d /s /c "npx -y @playwright/mcp@latest"'))
+    ).toBeNull()
+    expect(
+      processHint(proc('bash.exe', 'bash -c "node /x/node_modules/@scope/pkg/index.js"'))
+    ).toBeNull()
+    expect(processHint(proc('pwsh.exe', 'pwsh -File C:/x/run.ps1'))).toBeNull()
+    expect(processHint(proc('zsh', 'zsh -c vitest'))).toBeNull()
+  })
+
   test('명령줄의 다른 인자(토큰·주소 등)는 담지 않는다', () => {
     const p = proc('node.exe', 'node server.js --token=abc123secret --db postgres://u:pw@host/db')
     expect(processHint(p)).toBe('server.js')

@@ -234,12 +234,13 @@ export const text = {
       dismiss: '닫기'
     },
     trend: {
-      window: (ms: number): string =>
-        ms >= 3_600_000 && ms % 3_600_000 === 0
-          ? `${ms / 3_600_000}시간`
-          : ms >= 60_000
-            ? `${Math.round(ms / 60_000)}분`
-            : `${Math.round(ms / 1000)}초`,
+      window: (ms: number): string => {
+        if (ms < 60_000) return `${Math.round(ms / 1000)}초`
+        const minutes = Math.round(ms / 60_000)
+        if (minutes < 60) return `${minutes}분`
+        const rest = minutes % 60
+        return rest ? `${Math.floor(minutes / 60)}시간 ${rest}분` : `${minutes / 60}시간`
+      },
       collecting: '기록을 모으는 중…'
     },
     /** 맨 위 카드 줄(NeoHtop StatsBar). */
