@@ -9,7 +9,8 @@ export interface GitFixture {
   main: string
   origin: string
   git(cwd: string, ...args: string[]): string
-  commit(cwd: string, message: string): void
+  /** 빈 커밋 하나. at 을 주면 그 시각에 한 커밋으로(작성·커밋 시각 모두) 남긴다. */
+  commit(cwd: string, message: string, at?: Date): void
   /** 브랜치를 만들어 커밋 하나를 올리고(원격에도, upstream 설정) 워크트리로 꺼낸다. */
   pushedBranchWorktree(name: string): string
   /** 원격에 올린 브랜치를 원격에서 지우고 fetch --prune(머지 후 삭제된 상황). */
@@ -21,7 +22,7 @@ export async function createGitFixture(prefix = 'pitwall-git-'): Promise<GitFixt
   const dir = await realpath(await mkdtemp(join(tmpdir(), prefix)))
   const origin = join(dir, 'origin.git')
   const main = join(dir, 'main')
-  const git = (cwd: string, ...args: string[]): string =>
+  const run = (cwd: string, args: string[], env?: Record<string, string>): string =>
     execFileSync(
       'git',
       [
@@ -35,10 +36,23 @@ export async function createGitFixture(prefix = 'pitwall-git-'): Promise<GitFixt
         'init.defaultBranch=main',
         ...args
       ],
-      { cwd, encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }
+      {
+        cwd,
+        encoding: 'utf8',
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: env ? { ...process.env, ...env } : undefined
+      }
     ).trim()
-  const commit = (cwd: string, message: string): void => {
-    git(cwd, 'commit', '--allow-empty', '-m', message)
+  const git = (cwd: string, ...args: string[]): string => run(cwd, args)
+  const commit = (cwd: string, message: string, at?: Date): void => {
+    // git 내부 형식 "<유닉스 초> <시간대>".
+    const date = at ? `${Math.floor(at.getTime() / 1000)} +0000` : null
+    run(
+      cwd,
+      ['commit', '--allow-empty', '-m', message],
+      date ? { GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date } : undefined
+    )
   }
   git(dir, 'init', '--bare', origin)
   git(dir, 'clone', origin, main)

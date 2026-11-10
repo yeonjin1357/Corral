@@ -570,6 +570,33 @@ const NOTICES_URL = `${REPO_URL}/blob/main/THIRD_PARTY_NOTICES.md`
           </Card>
           <Card size="sm">
             <CardHeader
+              ><CardTitle>{{ S.groups.stale }}</CardTitle></CardHeader
+            >
+            <CardContent>
+              <div class="flex items-center justify-between gap-6">
+                <div>
+                  <Label for="stale-worktree-days">{{ S.staleWorktreeDays }}</Label>
+                  <p class="mt-1 text-xs leading-relaxed text-muted-foreground">
+                    {{ S.staleWorktreeDaysHelp }}
+                  </p>
+                </div>
+                <div class="flex shrink-0 items-center gap-2">
+                  <Input
+                    id="stale-worktree-days"
+                    v-model.number="draft.staleWorktreeDays"
+                    type="number"
+                    class="w-20 text-right tabular-nums"
+                    :min="SETTINGS_LIMITS.staleWorktreeDays.min"
+                    :max="SETTINGS_LIMITS.staleWorktreeDays.max"
+                    required
+                  />
+                  <span class="w-6 text-sm text-muted-foreground">{{ S.days }}</span>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+          <Card size="sm">
+            <CardHeader
               ><CardTitle>{{ S.groups.repos }}</CardTitle></CardHeader
             >
             <CardContent>

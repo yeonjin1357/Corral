@@ -1,17 +1,28 @@
-import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from 'fs/promises'
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  stat,
+  symlink,
+  utimes,
+  writeFile
+} from 'fs/promises'
 import { tmpdir } from 'os'
-import { join } from 'path'
+import { join, sep } from 'path'
 import {
   createDiskManager,
   createRepoMemory,
   measureDir,
+  pathExists,
   snapshotWorktrees,
   type DiskDeps
 } from './disk'
 import { createGitFixture, type GitFixture } from './testing/gitFixture'
 import { blankSnapshot } from '../shared/snapshot'
 import type { KillConfirm } from './kill'
-import type { AgentRow, DashboardSnapshot, ServerRow, RawSample } from '../shared/types'
+import type { AgentRow, DashboardSnapshot, DiskRow, ServerRow, RawSample } from '../shared/types'
 
 const LINK_TYPE = process.platform === 'win32' ? 'junction' : 'dir'
 
@@ -79,6 +90,63 @@ describe('createRepoMemory', () => {
     await memory.load()
     expect(memory.list()).toEqual([])
   })
+
+  test('임시 폴더 아래 저장소는 기억하지 않는다', async () => {
+    const temp = join(dir, 'tmp')
+    const memory = createRepoMemory(join(dir, 'a.json'), 200, { tempDir: temp + sep })
+    memory.add([
+      join(temp, 'pitwall-disk-1', 'main', '.git'),
+      temp + sep,
+      join(dir, 'tmp-other', '.git'),
+      join(dir, 'work', '.git')
+    ])
+    expect(memory.list()).toEqual([join(dir, 'tmp-other', '.git'), join(dir, 'work', '.git')])
+    // Windows·macOS 는 대소문자를 가리지 않는다.
+    if (process.platform === 'win32' || process.platform === 'darwin') {
+      memory.add([join(temp.toUpperCase(), 'x', '.git')])
+      expect(memory.list()).toHaveLength(2)
+    }
+    // 기본은 OS 임시 폴더.
+    const byDefault = createRepoMemory(join(dir, 'b.json'))
+    byDefault.add([join(tmpdir(), 'pitwall-git-x', 'main', '.git')])
+    expect(byDefault.list()).toEqual([])
+    // null 이면 가리지 않는다.
+    const everything = createRepoMemory(join(dir, 'c.json'), 200, { tempDir: null })
+    everything.add([join(tmpdir(), 'pitwall-git-x', 'main', '.git')])
+    expect(everything.list()).toEqual([join(tmpdir(), 'pitwall-git-x', 'main', '.git')])
+    await Promise.all([memory.flush(), byDefault.flush(), everything.flush()])
+  })
+
+  test('없어진 저장소는 prune 으로 빠지고, 모르는 것은 남는다', async () => {
+    const file = join(dir, 'state.json')
+    const memory = createRepoMemory(file, 200, { tempDir: null })
+    await memory.load()
+    memory.add([
+      'C:\\work\\a\\.git',
+      'C:\\work\\gone\\.git',
+      'C:\\work\\nas\\.git',
+      'C:\\work\\b\\.git'
+    ])
+    await memory.flush()
+    const answers: Record<string, boolean | null> = {
+      'C:\\work\\a\\.git': true,
+      'C:\\work\\gone\\.git': false,
+      'C:\\work\\nas\\.git': null
+    }
+    await memory.prune(async (d) => {
+      if (d in answers) return answers[d]
+      throw new Error('EIO')
+    })
+    await memory.flush()
+    expect(memory.list()).toEqual(['C:\\work\\a\\.git', 'C:\\work\\nas\\.git', 'C:\\work\\b\\.git'])
+    expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({ repos: memory.list() })
+
+    // 실제 확인: 있으면 true, 없으면(ENOENT·ENOTDIR) false, 네트워크 공유는 열지 않고 null.
+    expect(await pathExists(dir)).toBe(true)
+    expect(await pathExists(join(dir, 'nope', '.git'))).toBe(false)
+    expect(await pathExists(join(file, 'child'))).toBe(false)
+    expect(await pathExists('\\\\nas\\share\\repo\\.git')).toBeNull()
+  })
 })
 
 describe('createDiskManager (실제 git)', () => {
@@ -111,9 +179,15 @@ describe('createDiskManager (실제 git)', () => {
     await fx.cleanup()
   })
 
+  const SETTINGS = {
+    dependencyDirs: ['node_modules'],
+    extraRepos: [] as string[],
+    staleWorktreeDays: 14
+  }
+
   function deps(over: Partial<DiskDeps> = {}): DiskDeps & { confirm: ReturnType<typeof vi.fn> } {
     return {
-      settings: () => ({ dependencyDirs: ['node_modules'], extraRepos: [] }),
+      settings: () => SETTINGS,
       knownRepos: () => [join(fx.main, '.git')],
       latest: () => blankSnapshot(1),
       resample: async (): Promise<RawSample> => ({
@@ -162,7 +236,7 @@ describe('createDiskManager (실제 git)', () => {
     const manager = createDiskManager(
       deps({
         knownRepos: () => [],
-        settings: () => ({ dependencyDirs: ['node_modules'], extraRepos: [join(fx.main, 'src')] })
+        settings: () => ({ ...SETTINGS, extraRepos: [join(fx.main, 'src')] })
       })
     )
     expect((await manager.scan()).rows.map((r) => r.worktreeRoot)).toEqual([gone])
@@ -175,7 +249,7 @@ describe('createDiskManager (실제 git)', () => {
     await writeFile(join(gone, '.venv', 'x'), Buffer.alloc(500))
     const manager = createDiskManager(
       deps({
-        settings: () => ({ dependencyDirs: ['..', 'node_modules', '.venv'], extraRepos: [] })
+        settings: () => ({ ...SETTINGS, dependencyDirs: ['..', 'node_modules', '.venv'] })
       })
     )
     const [row] = (await manager.scan()).rows
@@ -274,7 +348,7 @@ describe('createDiskManager (실제 git)', () => {
     await writeFile(join(gone, 'build', 'gen.sh'), 'echo')
     const manager = createDiskManager(
       deps({
-        settings: () => ({ dependencyDirs: ['node_modules', 'dist', 'build'], extraRepos: [] })
+        settings: () => ({ ...SETTINGS, dependencyDirs: ['node_modules', 'dist', 'build'] })
       })
     )
     const report = await manager.scan()
@@ -478,4 +552,143 @@ describe('createDiskManager (실제 git)', () => {
     expect(report.error).toBeNull()
     expect(report.rows.map((r) => r.worktreeRoot)).toEqual([gone])
   }, 60000)
+
+  describe('오래 안 쓴 워크트리', () => {
+    const DAY = 24 * 60 * 60 * 1000
+
+    /**
+     * 30일 전에 커밋한 워크트리(브랜치 또는 detached)에 의존성 폴더를 두고 색인 수정 시각을 20일 전으로 돌린다.
+     * 마지막으로 만진 때는 둘 중 늦은 20일 전이다.
+     */
+    async function oldWorktree(name: string, detached = false): Promise<string> {
+      const path = join(fx.dir, name)
+      fx.git(fx.main, 'worktree', 'add', ...(detached ? ['--detach'] : ['-b', name]), path, 'main')
+      fx.commit(path, `old work on ${name}`, new Date(Date.now() - 30 * DAY))
+      await mkdir(join(path, 'node_modules'), { recursive: true })
+      await writeFile(join(path, 'node_modules', 'c.js'), Buffer.alloc(500))
+      await mkdir(join(path, 'src'), { recursive: true })
+      await writeFile(join(path, 'src', 'index.js'), 'keep me')
+      const index = join(fx.git(path, 'rev-parse', '--absolute-git-dir'), 'index')
+      const twentyDaysAgo = new Date(Date.now() - 20 * DAY)
+      await utimes(index, twentyDaysAgo, twentyDaysAgo)
+      return path
+    }
+
+    test('14일 넘게 커밋·변경이 없는 워크트리는 오래 안 씀으로 뜬다, detached 도', async () => {
+      const old = await oldWorktree('old-work')
+      const loose = await oldWorktree('loose', true)
+      const manager = createDiskManager(deps({ now: Date.now }))
+      const report = await manager.scan()
+      const row = (root: string): DiskRow | undefined =>
+        report.rows.find((r) => r.worktreeRoot === root)
+      expect(row(old)).toEqual({
+        worktreeRoot: old,
+        commonDir: join(fx.main, '.git'),
+        branch: 'old-work',
+        evidence: 'stale',
+        staleDays: 20,
+        folders: [{ name: 'node_modules', path: join(old, 'node_modules'), bytes: 500 }],
+        totalBytes: 500,
+        inUse: false
+      })
+      expect(row(loose)).toMatchObject({ branch: null, evidence: 'stale', staleDays: 20 })
+      // 끝난 근거가 있으면 그대로, 막 만든 워크트리는 오래 안 쓴 것이 아니다.
+      expect(row(gone)?.evidence).toBe('upstreamGone')
+      expect(row(fresh)).toBeUndefined()
+
+      // 기준보다 짧으면(20일 < 21일) 아니다.
+      const stricter = createDiskManager(
+        deps({ now: Date.now, settings: () => ({ ...SETTINGS, staleWorktreeDays: 21 }) })
+      )
+      expect((await stricter.scan()).rows.map((r) => r.worktreeRoot)).toEqual([gone])
+
+      // 시간이 더 지나도 끝난 근거가 먼저다.
+      const later = createDiskManager(deps({ now: () => Date.now() + 40 * DAY }))
+      const laterRows = (await later.scan()).rows
+      expect(laterRows.find((r) => r.worktreeRoot === gone)?.evidence).toBe('upstreamGone')
+      expect(laterRows.find((r) => r.worktreeRoot === fresh)?.evidence).toBe('stale')
+
+      // 지우는 것은 끝난 워크트리와 같다(의존성 폴더만).
+      const result = await manager.remove(old)
+      expect(result.status).toBe('killed')
+      expect(await exists(join(old, 'node_modules'))).toBe(false)
+      expect(await readFile(join(old, 'src', 'index.js'), 'utf8')).toBe('keep me')
+    }, 60000)
+
+    test('0 이면 오래 안 쓴 워크트리를 찾지 않는다', async () => {
+      await oldWorktree('old-work')
+      await oldWorktree('loose', true)
+      const manager = createDiskManager(
+        deps({ now: Date.now, settings: () => ({ ...SETTINGS, staleWorktreeDays: 0 }) })
+      )
+      expect((await manager.scan()).rows.map((r) => r.worktreeRoot)).toEqual([gone])
+    }, 60000)
+
+    test('오래 안 쓴 워크트리도 실행 중인 것이 있으면 지우지 않는다', async () => {
+      const old = await oldWorktree('old-work')
+      const server = {
+        worktree: { root: old, branch: 'old-work', isLinkedWorktree: true }
+      } as ServerRow
+      const withServer = deps({
+        now: Date.now,
+        latest: () => ({ ...blankSnapshot(1), servers: [server] })
+      })
+      const manager = createDiskManager(withServer)
+      const row = (await manager.scan()).rows.find((r) => r.worktreeRoot === old)
+      expect(row).toMatchObject({ evidence: 'stale', inUse: true })
+      expect(await manager.remove(old)).toEqual({
+        status: 'failed',
+        message: '이 워크트리에서 개발 서버·에이전트 등이 실행 중이라 지우지 않았어요.'
+      })
+      expect(withServer.confirm).not.toHaveBeenCalled()
+
+      const withShell = deps({
+        now: Date.now,
+        resample: async () => ({
+          processes: [
+            {
+              pid: 55,
+              ppid: 1,
+              name: 'node.exe',
+              commandLine: 'node',
+              memoryBytes: 1,
+              startedAt: 1
+            }
+          ],
+          tcp: [],
+          cwds: { 55: join(old, 'src') },
+          collectMode: 'helper-dll'
+        })
+      })
+      const m2 = createDiskManager(withShell)
+      await m2.scan()
+      expect(await m2.remove(old)).toEqual({
+        status: 'failed',
+        message: '이 워크트리를 쓰는 프로세스가 있어 지우지 않았어요: node.exe (PID 55)'
+      })
+      expect(withShell.confirm).not.toHaveBeenCalled()
+      expect(await exists(join(old, 'node_modules'))).toBe(true)
+    }, 60000)
+
+    test('확인 창 사이에 다시 쓰기 시작하면 지우지 않는다', async () => {
+      const old = await oldWorktree('old-work')
+      const d = deps({
+        now: Date.now,
+        confirm: vi.fn(async () => {
+          fx.commit(old, 'back to work')
+          return true
+        })
+      })
+      const manager = createDiskManager(d)
+      expect((await manager.scan()).rows.find((r) => r.worktreeRoot === old)?.evidence).toBe(
+        'stale'
+      )
+      expect(await manager.remove(old)).toEqual({
+        status: 'failed',
+        message: '이 워크트리를 다시 쓰기 시작해 지우지 않았어요.'
+      })
+      expect(d.confirm).toHaveBeenCalledTimes(1)
+      expect(await exists(join(old, 'node_modules'))).toBe(true)
+    }, 60000)
+  })
 })

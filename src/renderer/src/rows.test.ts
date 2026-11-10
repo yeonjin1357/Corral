@@ -389,6 +389,28 @@ describe('남은 프로세스·무거운 작업·디스크·다른 앱 표', () 
     expect(rows[1].actions.find((a) => a.kind === 'remove')?.disabled).toBe(true)
   })
 
+  test('디스크: 오래 안 쓴 워크트리는 근거에 날수, 상태는 확인해볼 것(사용 중이면 사용 중)', () => {
+    const s = snapshot({
+      disk: {
+        rows: [
+          diskRow(),
+          diskRow({ worktreeRoot: 'C:\\work\\b', evidence: 'stale', staleDays: 21 }),
+          diskRow({ worktreeRoot: 'C:\\work\\c', evidence: 'stale', staleDays: 30, inUse: true })
+        ],
+        scannedAt: 1,
+        scanning: false,
+        error: null
+      }
+    })
+    const rows = tableFor('disk', s).rows
+    expect(rows[0].cells.status).toEqual({ text: '지울 수 있음', dot: 'running' })
+    expect(rows[1].cells.evidence.text).toBe('오래 안 씀(21일)')
+    expect(rows[1].cells.status).toEqual({ text: '확인해볼 것', dot: 'warn' })
+    expect(rows[1].actions.find((a) => a.kind === 'remove')?.disabled).toBe(false)
+    expect(rows[2].cells.evidence.text).toBe('오래 안 씀(30일)')
+    expect(rows[2].cells.status).toEqual({ text: '사용 중', dot: 'warn' })
+  })
+
   test('다른 앱: 고를 수 없는 행이고 프로세스 수를 센다', () => {
     const row = tableFor('apps', snapshot()).rows[0]
     expect(row.key).toBeNull()

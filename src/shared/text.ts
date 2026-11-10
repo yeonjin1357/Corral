@@ -72,6 +72,7 @@ export const text = {
     inUseBy: (name: string, pid: number): string =>
       `이 워크트리를 쓰는 프로세스가 있어 지우지 않았어요: ${name} (PID ${pid})`,
     notFinished: '이 워크트리의 브랜치가 더는 끝난 상태가 아니라 지우지 않았어요.',
+    notStale: '이 워크트리를 다시 쓰기 시작해 지우지 않았어요.',
     partial: (names: string): string =>
       `지우지 못한 폴더가 있어요(파일을 쓰는 프로그램이 있을 수 있어요): ${names}. 일부만 지워졌을 수 있으니 이 워크트리를 다시 쓰려면 의존성을 다시 설치해 주세요.`,
     unknownAgent:
@@ -325,7 +326,11 @@ export const text = {
       leftoversAgent: (n: number): string => `에이전트 워크트리 ${n}개는 뺐어요.`,
       leftoversHelp: '실행한 에이전트·터미널이 끝났는데 10분 넘게 남아 있는 개발 도구예요.',
       disk: '디스크 정리',
-      diskSub: (n: number): string => `끝난 워크트리 ${n}곳에서 확보 가능`,
+      /** finished·stale: 사용 중이 아닌 끝난·오래 안 쓴 워크트리 수. 오래 안 쓴 곳이 없으면 예전 문구. */
+      diskSub: (finished: number, stale = 0): string =>
+        stale > 0
+          ? `끝난 워크트리 ${finished}곳 · 오래 안 쓴 ${stale}곳`
+          : `끝난 워크트리 ${finished}곳에서 확보 가능`,
       diskInUse: '사용 중이라 제외',
       diskNotYet: '아직 찾지 않았어요',
       diskAuto: '곧 저절로 찾아요',
@@ -612,6 +617,7 @@ export const text = {
         heavy: '무거운 명령',
         notify: 'OS 알림',
         dirs: '지울 폴더',
+        stale: '오래 안 쓴 워크트리',
         repos: '더 살펴볼 저장소',
         hook: '연동 상태',
         app: 'pitwall',
@@ -678,6 +684,10 @@ export const text = {
       dependencyDirs: '지울 의존성 폴더 이름',
       dependencyDirsHelp:
         '한 줄에 하나씩. 끝난 워크트리 바로 아래의 이 이름 폴더 가운데 git 이 무시하는(.gitignore 등) 폴더만 지워요. 저장소에 올라간 폴더는 이름이 같아도 건너뛰어요. 경로나 .git 은 쓸 수 없어요.',
+      staleWorktreeDays: '오래 안 쓴 워크트리 기준',
+      staleWorktreeDaysHelp:
+        '끝난 근거가 없어도 이 날수 동안 커밋도 변경도 없던 워크트리를 "확인해볼 것"으로 보여 줘요. 0 이면 찾지 않아요.',
+      days: '일',
       extraRepos: '더 살펴볼 저장소',
       extraReposHelp:
         '에이전트·개발 서버를 본 저장소는 저절로 기억해요. 그 밖에 끝난 워크트리를 찾아볼 저장소를 여기 더해요.',
@@ -787,12 +797,16 @@ export const text = {
       scanning: '찾는 중…',
       rescan: '다시 찾기',
       remove: '의존성 폴더 지우기',
-      evidence: { upstreamGone: '원격 삭제됨', merged: '머지됨' },
+      evidence: { upstreamGone: '원격 삭제됨', merged: '머지됨', stale: '오래 안 씀' },
+      /** 오래 안 쓴 워크트리의 근거 칸(G5d). */
+      staleFor: (days: number): string => `오래 안 씀(${days}일)`,
       evidenceNote: {
         upstreamGone:
           '원격 브랜치가 지워졌어요(보통 머지한 뒤 지워요). 워크트리와 소스는 그대로 두고 의존성 폴더만 지워요.',
         merged:
-          '원격 브랜치가 기본 브랜치에 머지됐어요. 워크트리와 소스는 그대로 두고 의존성 폴더만 지워요.'
+          '원격 브랜치가 기본 브랜치에 머지됐어요. 워크트리와 소스는 그대로 두고 의존성 폴더만 지워요.',
+        stale: (days: number): string =>
+          `끝났다는 근거는 없지만 ${days}일 동안 커밋도 변경도 없었어요. 의존성 폴더만 지우고 워크트리와 소스는 그대로 둬요.`
       },
       inUse: '사용 중',
       inUseNote: '이 워크트리에서 개발 서버·에이전트 등이 실행 중이라 지울 수 없어요.',

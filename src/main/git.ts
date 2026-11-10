@@ -1,4 +1,5 @@
-import { normalize, resolve } from 'path'
+import { readFile, stat } from 'fs/promises'
+import { join, normalize, resolve } from 'path'
 import { runCommand, type CommandResult } from './collect/runCommand'
 
 /** 디스크 정리에 쓰는 git 명령. 네트워크(fetch)는 하지 않고 이 PC 에 있는 정보만 읽는다. */
@@ -166,4 +167,49 @@ export async function finishedEvidence(
   ])
   if (firstParents.exitCode !== 0) return null
   return firstParents.stdout.split(/\r?\n/).includes(wt.head) ? null : 'merged'
+}
+
+/** 커밋 시각(ms, 커밋한 시각 %ct). 커밋 이름이 아니거나 읽을 수 없으면 null. */
+async function commitTime(commonDir: string, head: string): Promise<number | null> {
+  // HEAD 는 `worktree list` 가 알려 준 커밋 해시다. 해시 모양이 아니면 git 에 넘기지 않는다.
+  if (!/^[0-9a-f]{7,64}$/i.test(head)) return null
+  const r = await git(['--git-dir', commonDir, 'log', '-1', '--format=%ct', head, '--'])
+  const seconds = Number(r.stdout.trim())
+  return r.exitCode === 0 && r.stdout.trim() && Number.isFinite(seconds) ? seconds * 1000 : null
+}
+
+/**
+ * 그 워크트리의 git 폴더에 있는 색인(index) 파일의 수정 시각(ms). 연결된 워크트리는 `<워크트리>/.git` 파일의
+ * `gitdir:` 이 가리키는 폴더(`.git/worktrees/<이름>`), 메인 체크아웃은 `.git` 폴더다. 모르면 null.
+ */
+async function indexTime(worktree: string): Promise<number | null> {
+  try {
+    const dotGit = join(worktree, '.git')
+    let gitDir = dotGit
+    if (!(await stat(dotGit)).isDirectory()) {
+      const m = /^gitdir:\s*(.+?)\s*$/m.exec(await readFile(dotGit, 'utf8'))
+      if (!m) return null
+      gitDir = resolve(worktree, m[1])
+    }
+    return (await stat(join(gitDir, 'index'))).mtimeMs
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 워크트리를 마지막으로 만진 시각(ms): HEAD 커밋 시각과 그 워크트리 색인 파일 수정 시각 중 늦은 쪽(G5d).
+ * 색인은 add·checkout·commit 등을 하면 바뀐다(pitwall 은 잠금 없이 읽기만 해 바꾸지 않는다).
+ * 하나라도 모르면 null — 오래 안 쓴 것으로 보지 않는다.
+ */
+export async function lastTouched(
+  wt: { path: string; head: string | null },
+  commonDir: string
+): Promise<number | null> {
+  if (!wt.head) return null
+  const [committed, indexed] = await Promise.all([
+    commitTime(commonDir, wt.head),
+    indexTime(wt.path)
+  ])
+  return committed == null || indexed == null ? null : Math.max(committed, indexed)
 }

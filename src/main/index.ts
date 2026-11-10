@@ -52,7 +52,7 @@ import { applyHookEvent, clearActivity } from './sessions'
 import type { Sessions } from './sessions'
 import { createScheduler } from './scheduler'
 import { createKiller, type KillConfirm } from './kill'
-import { createDiskManager, createRepoMemory, snapshotWorktrees } from './disk'
+import { createDiskManager, createRepoMemory, pathExists, snapshotWorktrees } from './disk'
 import { createNotifier, type Notice } from './notifier'
 import { loginItemOptions, shouldStartHidden } from './startup'
 import { createUpdater } from './updates'
@@ -451,7 +451,11 @@ const DISK_FIRST_SCAN_MS = 60 * 1000
 const DISK_SCAN_EVERY_MS = 30 * 60 * 1000
 const disk = createDiskManager({
   settings: () => settings,
-  knownRepos: () => repoMemory.list(),
+  // 찾을 때마다 없어진 저장소를 먼저 뺀다(G5a).
+  knownRepos: async () => {
+    await repoMemory.prune(pathExists)
+    return repoMemory.list()
+  },
   latest: () => scheduler.latest(),
   resample: () =>
     platform ? sample(platform) : Promise.reject(new Error(text.unsupportedPlatform)),
@@ -597,8 +601,12 @@ async function saveSettings(next: unknown): Promise<Settings> {
   void scheduler.refreshNow()
   if (saved.settings.updateCheck && !before.updateCheck) void updater.check()
   const diskChanged =
-    JSON.stringify([before.dependencyDirs, before.extraRepos]) !==
-    JSON.stringify([saved.settings.dependencyDirs, saved.settings.extraRepos])
+    JSON.stringify([before.dependencyDirs, before.extraRepos, before.staleWorktreeDays]) !==
+    JSON.stringify([
+      saved.settings.dependencyDirs,
+      saved.settings.extraRepos,
+      saved.settings.staleWorktreeDays
+    ])
   if (diskChanged) void disk.scan({ manual: true })
   return saved.settings
 }
@@ -817,6 +825,8 @@ if (!app.requestSingleInstanceLock()) {
     // 설정을 먼저 읽어 첫 수집부터 사용자 기준값·주기를 쓴다.
     applySettings((await loadConfig(app.getPath('userData'))).settings)
     await repoMemory.load()
+    // 없어진 저장소(지운 저장소·테스트가 남긴 임시 저장소)는 불러온 뒤 한 번 뺀다(G5a). 기다리지 않는다.
+    void repoMemory.prune(pathExists)
     // 첫 수집 전에 불러와야 판단 기억이 이어진다.
     await restoreHistory()
     setInterval(() => void persistHistory(), HISTORY_SAVE_EVERY_MS).unref()

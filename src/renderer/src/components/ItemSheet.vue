@@ -56,7 +56,15 @@ import Badge from '../ui/Badge.vue'
 import { TABLE } from '../ui/variants'
 import ResourceTrend from './ResourceTrend.vue'
 import ItemIcon from './ItemIcon.vue'
-import { DISK_ICON, agentIcon, heavyIcon, leftoverIcon, serverIcon, type RowIcon } from '../rows'
+import {
+  DISK_ICON,
+  agentIcon,
+  diskEvidenceText,
+  heavyIcon,
+  leftoverIcon,
+  serverIcon,
+  type RowIcon
+} from '../rows'
 
 export type Selected =
   | { kind: 'server'; row: ServerRow }
@@ -416,7 +424,7 @@ const view = computed<View | null>(() => {
           {
             icon: FolderGit2,
             label: t.disk.evidenceTitle,
-            value: t.disk.evidence[r.evidence],
+            value: diskEvidenceText(r),
             sub: t.disk.evidenceSub
           }
         ],
@@ -426,7 +434,13 @@ const view = computed<View | null>(() => {
           { label: t.sheet.path, value: r.worktreeRoot }
         ],
         folders: r.folders,
-        note: r.inUse ? t.disk.inUseNote : t.disk.evidenceNote[r.evidence]
+        note: r.inUse
+          ? t.disk.inUseNote
+          : r.evidence !== 'stale'
+            ? t.disk.evidenceNote[r.evidence]
+            : r.staleDays != null
+              ? t.disk.evidenceNote.stale(r.staleDays)
+              : null
       }
     }
   }

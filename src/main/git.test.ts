@@ -1,5 +1,5 @@
 import { execFileSync } from 'child_process'
-import { mkdir, mkdtemp, realpath, rm, writeFile } from 'fs/promises'
+import { mkdir, mkdtemp, realpath, rm, utimes, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join, normalize } from 'path'
 import {
@@ -7,9 +7,11 @@ import {
   finishedEvidence,
   gitCommonDir,
   ignoredFolders,
+  lastTouched,
   listWorktrees,
   parseWorktreeList
 } from './git'
+import { createGitFixture, type GitFixture } from './testing/gitFixture'
 
 describe('parseWorktreeList', () => {
   test('메인·연결된 워크트리·detached·bare·잠김·정리 가능 표시를 읽는다', () => {
@@ -92,7 +94,7 @@ describe('실제 git 저장소에서', () => {
         'init.defaultBranch=main',
         ...args
       ],
-      { cwd, encoding: 'utf8', windowsHide: true }
+      { cwd, encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }
     ).trim()
   }
 
@@ -271,3 +273,38 @@ describe('실제 git 저장소에서', () => {
     expect(await defaultBranch((await gitCommonDir(lonely))!)).toBeNull()
   })
 }, 60000)
+
+describe('lastTouched (실제 git)', () => {
+  let fx: GitFixture
+  beforeEach(async () => {
+    fx = await createGitFixture('pitwall-touched-')
+  }, 60000)
+  afterEach(async () => {
+    await fx.cleanup()
+  })
+
+  test('lastTouched 는 커밋 시각과 index 수정 시각 중 늦은 쪽', async () => {
+    const path = join(fx.dir, 'old')
+    fx.git(fx.main, 'worktree', 'add', '-b', 'old', path, 'main')
+    const committed = new Date('2026-01-01T00:00:00Z')
+    fx.commit(path, 'old work', committed)
+    const common = (await gitCommonDir(fx.main))!
+    const entry = (await listWorktrees(common)).find((w) => w.branch === 'old')!
+    // 연결된 워크트리의 색인은 그 워크트리의 git 폴더(.git/worktrees/<이름>)에 있다.
+    const index = join(fx.git(path, 'rev-parse', '--absolute-git-dir'), 'index')
+
+    const indexLater = new Date('2026-02-01T00:00:00Z')
+    await utimes(index, indexLater, indexLater)
+    expect(await lastTouched(entry, common)).toBe(indexLater.getTime())
+
+    const indexEarlier = new Date('2025-12-01T00:00:00Z')
+    await utimes(index, indexEarlier, indexEarlier)
+    expect(await lastTouched(entry, common)).toBe(committed.getTime())
+
+    // 하나라도 모르면 null: HEAD 를 모름, 커밋을 읽을 수 없음, 색인 파일이 없음.
+    expect(await lastTouched({ ...entry, head: null }, common)).toBeNull()
+    expect(await lastTouched({ ...entry, head: 'f'.repeat(40) }, common)).toBeNull()
+    await rm(index)
+    expect(await lastTouched(entry, common)).toBeNull()
+  }, 60000)
+})

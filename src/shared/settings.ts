@@ -46,6 +46,11 @@ export interface Settings {
   /** 디스크 정리에서 살펴볼 저장소(에이전트·개발 서버를 본 저장소는 자동으로 기억한다). */
   extraRepos: string[]
   /**
+   * 끝난 근거가 없어도 이 날수 넘게 커밋도 색인 변경도 없던 연결된 워크트리를 디스크 정리에 "확인해볼 것"으로
+   * 올린다(G5d). 0 이면 찾지 않는다.
+   */
+  staleWorktreeDays: number
+  /**
    * 목록에서 숨길 서버: `:3000`(포트) 또는 프로세스 이름(`Docker Desktop.exe`). 숨긴 서버는 개수·정리 판단·추천·
    * 알림·트레이에서 빠진다.
    */
@@ -80,6 +85,7 @@ export const SETTINGS_LIMITS = {
   idlePortMinutes: { min: 1, max: 1440 },
   agentParkedMinutes: { min: 10, max: 10080 },
   waitingReminderMinutes: { min: 0, max: 120 },
+  staleWorktreeDays: { min: 0, max: 365 },
   heavyPatterns: 50,
   patternLength: 100,
   dependencyDirs: 20,
@@ -135,6 +141,7 @@ export const DEFAULT_SETTINGS: Settings = {
   ],
   settingsVersion: SETTINGS_VERSION,
   extraRepos: [],
+  staleWorktreeDays: 14,
   hiddenServers: [],
   workspaceAliases: {},
   showAgentActivity: true,
@@ -355,6 +362,12 @@ export function normalizeSettings(value: unknown): Settings {
       : list(v.dependencyDirs, d.dependencyDirs, SETTINGS_LIMITS.dependencyDirs, cleanDirName),
     settingsVersion: SETTINGS_VERSION,
     extraRepos: list(v.extraRepos, d.extraRepos, SETTINGS_LIMITS.extraRepos, cleanRepoPath),
+    staleWorktreeDays: int(
+      v.staleWorktreeDays,
+      SETTINGS_LIMITS.staleWorktreeDays.min,
+      SETTINGS_LIMITS.staleWorktreeDays.max,
+      d.staleWorktreeDays
+    ),
     hiddenServers: list(
       v.hiddenServers,
       d.hiddenServers,

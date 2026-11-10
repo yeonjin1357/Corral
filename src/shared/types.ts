@@ -424,13 +424,18 @@ export interface DiskFolder {
   skipped?: 'link' | 'unreadable' | 'tracked'
 }
 
-/** 디스크 정리 대상: 끝난 연결된 워크트리 하나. */
+/** 디스크 정리 대상: 끝났거나 오래 안 쓴 연결된 워크트리 하나. */
 export interface DiskRow {
   worktreeRoot: string
   commonDir: string
   branch: string | null
-  /** 끝났다고 본 근거: upstreamGone 원격 브랜치가 지워짐, merged 기본 브랜치에 머지됨. */
-  evidence: 'upstreamGone' | 'merged'
+  /**
+   * 목록에 올린 근거: upstreamGone 원격 브랜치가 지워짐, merged 기본 브랜치에 머지됨,
+   * stale 끝난 근거는 없지만 기준(staleWorktreeDays) 넘게 커밋도 색인 변경도 없음(G5d, detached 포함).
+   */
+  evidence: 'upstreamGone' | 'merged' | 'stale'
+  /** stale 일 때 마지막으로 만진 뒤 지난 날수. */
+  staleDays?: number
   folders: DiskFolder[]
   /** 지울 수 있는 폴더 크기의 합(재는 중이면 null). */
   totalBytes: number | null

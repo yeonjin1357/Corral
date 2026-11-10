@@ -8,6 +8,7 @@ import type {
   AgentTool,
   AppUsage,
   DashboardSnapshot,
+  DiskRow,
   HeavyJobRow,
   LeftoverRow,
   Platform,
@@ -267,6 +268,12 @@ export function heavyIcon(row: HeavyJobRow, platform: Platform | null): RowIcon 
   }
 }
 export const DISK_ICON: RowIcon = { fallback: 'folder' }
+/** 디스크 행의 근거: 오래 안 쓴 워크트리는 날수까지("오래 안 씀(21일)"), 날수를 모르면 이름만. */
+export function diskEvidenceText(r: DiskRow): string {
+  return r.evidence === 'stale' && r.staleDays != null
+    ? text.ui.disk.staleFor(r.staleDays)
+    : text.ui.disk.evidence[r.evidence]
+}
 export function appIcon(app: AppUsage): RowIcon {
   return {
     brand: appBrand(app.name),
@@ -564,7 +571,7 @@ function buildTable(tab: SnapshotTab, s: DashboardSnapshot): Table {
                 title: r.branch ?? undefined,
                 muted: true
               },
-              evidence: { text: text.ui.disk.evidence[r.evidence] },
+              evidence: { text: diskEvidenceText(r) },
               folders: {
                 text: r.folders.map((f) => f.name).join(', ') || text.ui.none,
                 muted: true
@@ -573,9 +580,12 @@ function buildTable(tab: SnapshotTab, s: DashboardSnapshot): Table {
                 r.totalBytes == null
                   ? { text: text.ui.disk.measuring, sort: -1, muted: true }
                   : { text: formatBytes(r.totalBytes), sort: r.totalBytes, mono: true },
+              // 오래 안 쓴 워크트리는 끝났다는 근거가 없어 "확인해볼 것"까지만(G5d).
               status: r.inUse
                 ? { text: st.diskInUse, dot: 'warn' as const }
-                : { text: st.diskFree, dot: 'running' as const }
+                : r.evidence === 'stale'
+                  ? { text: st.check, dot: 'warn' as const }
+                  : { text: st.diskFree, dot: 'running' as const }
             },
             actions: [
               { kind: 'details', label: ACTIONS.details },

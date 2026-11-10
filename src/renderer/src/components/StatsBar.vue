@@ -219,9 +219,11 @@ const diskNote = computed(() => {
   if (!diskReady.value) return text.ui.cards.diskAuto
   return scannedTime.value ? text.ui.cards.diskScanned(scannedTime.value) : ''
 })
-const diskSub = computed(() =>
-  diskReady.value ? text.ui.cards.diskSub(diskFree.value.length) : text.ui.cards.diskNotYet
-)
+const diskSub = computed(() => {
+  if (!diskReady.value) return text.ui.cards.diskNotYet
+  const stale = diskFree.value.filter((r) => r.evidence === 'stale').length
+  return text.ui.cards.diskSub(diskFree.value.length - stale, stale)
+})
 </script>
 
 <template>

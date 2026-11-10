@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
 import { mount, type DOMWrapper, type VueWrapper } from '@vue/test-utils'
 import StatsBar from './StatsBar.vue'
-import type { DashboardSnapshot } from '../../../shared/types'
-import { GB, MB, agentRow, heavyJob, serverRow, snapshot } from '../testing/fixtures'
+import type { DashboardSnapshot, DiskRow } from '../../../shared/types'
+import { GB, MB, agentRow, diskRow, heavyJob, serverRow, snapshot } from '../testing/fixtures'
 
 function bar(s: DashboardSnapshot): VueWrapper {
   return mount(StatsBar, { props: { snapshot: s, ramHistory: [], windowMs: 600_000 } })
@@ -119,6 +119,23 @@ test('개발 서버 카드: 큰 숫자는 서버 수, 아래 줄은 포트 수',
     .find((c) => c.find('[data-slot=card-title]').text().trim() === '개발 서버')!
   expect(card.find('.text-3xl').text()).toBe('2개')
   expect(card.text()).toContain('포트 4개 · 작업 공간 1곳')
+})
+
+test('디스크 정리 카드: 큰 숫자는 사용 중이 아닌 행의 합, 아래 줄은 끝난 곳과 오래 안 쓴 곳', () => {
+  const diskCard = (rows: DiskRow[]): DOMWrapper<Element> =>
+    bar(snapshot({ disk: { rows, scannedAt: 1, scanning: false, error: null } }))
+      .findAll('[data-slot=card]')
+      .find((c) => c.find('[data-slot=card-title]').text().trim() === '디스크 정리')!
+  const card = diskCard([
+    diskRow({ totalBytes: 1 * GB }),
+    diskRow({ worktreeRoot: 'C:\\work\\b', totalBytes: 1 * GB, inUse: true }),
+    diskRow({ worktreeRoot: 'C:\\work\\c', evidence: 'stale', staleDays: 21, totalBytes: 2 * GB }),
+    diskRow({ worktreeRoot: 'C:\\work\\d', evidence: 'stale', staleDays: 40, totalBytes: 1 * GB })
+  ])
+  expect(card.find('.text-2xl').text()).toBe('4.0 GB')
+  expect(card.text()).toContain('끝난 워크트리 1곳 · 오래 안 쓴 2곳')
+  // 오래 안 쓴 곳이 없으면 지금 문구 그대로.
+  expect(diskCard([diskRow()]).text()).toContain('끝난 워크트리 1곳에서 확보 가능')
 })
 
 describe('메모리 카드: 남은 메모리와 커밋', () => {

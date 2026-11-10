@@ -132,6 +132,17 @@ test('오래 쉬는 세션 기준은 10~10080분, 기본 180분', () => {
   expect(normalizeSettings({ agentParkedMinutes: NaN }).agentParkedMinutes).toBe(180)
 })
 
+test('오래 안 쓴 워크트리 기준은 0~365일(0 이면 끔), 기본 14일', () => {
+  expect(DEFAULT_SETTINGS.staleWorktreeDays).toBe(14)
+  expect(normalizeSettings({}).staleWorktreeDays).toBe(14)
+  expect(normalizeSettings({ staleWorktreeDays: 0 }).staleWorktreeDays).toBe(0)
+  expect(normalizeSettings({ staleWorktreeDays: -3 }).staleWorktreeDays).toBe(0)
+  expect(normalizeSettings({ staleWorktreeDays: 1000 }).staleWorktreeDays).toBe(365)
+  expect(normalizeSettings({ staleWorktreeDays: 20.6 }).staleWorktreeDays).toBe(21)
+  expect(normalizeSettings({ staleWorktreeDays: '7' }).staleWorktreeDays).toBe(14)
+  expect(normalizeSettings({ staleWorktreeDays: NaN }).staleWorktreeDays).toBe(14)
+})
+
 test('무거운 명령 패턴: 공백 정리·빈 값·중복(대소문자 무시) 제거, 100자·50개 제한', () => {
   const s = normalizeSettings({
     heavyPatterns: [

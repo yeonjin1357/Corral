@@ -1,4 +1,5 @@
 import { lstat, opendir, readFile, realpath, rename, rm, stat, writeFile } from 'fs/promises'
+import { tmpdir } from 'os'
 import { basename, join } from 'path'
 import type {
   DashboardSnapshot,
@@ -12,13 +13,24 @@ import type {
 import { agentCovers, formatBytes } from '../shared/format'
 import { isDependencyDirName } from '../shared/settings'
 import { text } from '../shared/text'
-import { defaultBranch, finishedEvidence, gitCommonDir, ignoredFolders, listWorktrees } from './git'
+import {
+  defaultBranch,
+  finishedEvidence,
+  gitCommonDir,
+  ignoredFolders,
+  lastTouched,
+  listWorktrees,
+  type GitWorktree
+} from './git'
 import type { KillConfirm } from './kill'
 
-/* 디스크 정리(스펙 §3-8): 끝난 연결된 워크트리의 의존성 폴더 크기를 보여 주고, 확인 후 지운다. */
+/*
+ * 디스크 정리(스펙 §3-8, G5d): 끝났거나 오래 안 쓴 연결된 워크트리의 의존성 폴더 크기를 보여 주고, 확인 후 지운다.
+ */
 
 const MEASURE_CONCURRENCY = 32
-const MEASURE_CACHE_MS = 24 * 60 * 60 * 1000
+const DAY_MS = 24 * 60 * 60 * 1000
+const MEASURE_CACHE_MS = DAY_MS
 
 /**
  * 폴더 안 파일 크기의 합. 링크(심볼릭 링크·Windows 정션)는 따라가지 않는다 — pnpm 처럼 바깥 저장소를 가리키는
@@ -71,24 +83,64 @@ export async function measureDir(root: string): Promise<{ bytes: number; files: 
   return { bytes, files }
 }
 
-/** 디스크 정리에서 살펴볼 저장소(git 공용 폴더)를 기억한다. 에이전트·개발 서버가 한 번이라도 관찰된 저장소. */
+/**
+ * path 가 dir 과 같거나 그 아래인지. 끝 구분자는 무시하고, Windows·macOS 는 대소문자를 가리지 않는다
+ * (Windows 는 / 와 \ 도 같게 본다).
+ */
+function isInside(path: string, dir: string): boolean {
+  const key = (p: string): string => {
+    const s = (process.platform === 'win32' ? p.replace(/\\/g, '/') : p).replace(/\/+$/, '')
+    return process.platform === 'win32' || process.platform === 'darwin' ? s.toLowerCase() : s
+  }
+  const d = key(dir)
+  const p = key(path)
+  return !!d && (p === d || p.startsWith(`${d}/`))
+}
+
+/**
+ * 저장소가 아직 있는지(G5a): 있으면 true, 없으면(ENOENT·ENOTDIR) false, 그 밖의 오류는 모름(null).
+ * 네트워크 공유는 응답이 없으면 멈출 수 있어 열지 않고 null.
+ */
+export async function pathExists(path: string): Promise<boolean | null> {
+  if (/^[\\/]{2}/.test(path)) return null
+  try {
+    await stat(path)
+    return true
+  } catch (e) {
+    const code = errorCode(e)
+    return code === 'ENOENT' || code === 'ENOTDIR' ? false : null
+  }
+}
+
+/**
+ * 디스크 정리에서 살펴볼 저장소(git 공용 폴더)를 기억한다. 에이전트·개발 서버가 한 번이라도 관찰된 저장소.
+ * OS 임시 폴더(tempDir, 기본 os.tmpdir(), null 이면 가리지 않음) 아래 저장소는 기억하지 않는다(테스트가 만들고
+ * 지우는 저장소). 없어진 저장소는 prune 으로 뺀다(G5a).
+ */
 export function createRepoMemory(
   file: string,
-  max = 200
+  max = 200,
+  opts: { tempDir?: string | null } = {}
 ): {
   load(): Promise<void>
   add(dirs: Iterable<string | null | undefined>): void
+  /** exists 가 false(없음)라고 한 저장소만 빼고 저장한다. null(모름)·오류는 둔다. */
+  prune(exists: (dir: string) => Promise<boolean | null>): Promise<void>
   list(): string[]
   flush(): Promise<void>
 } {
   let repos: string[] = []
   let writing: Promise<void> = Promise.resolve()
   const key = (p: string): string => p.replace(/[\\/]+$/, '').toLowerCase()
+  const tempDir = opts.tempDir === undefined ? tmpdir() : opts.tempDir
 
   async function save(): Promise<void> {
     const tmp = `${file}.tmp-${process.pid}`
     await writeFile(tmp, JSON.stringify({ repos }, null, 2) + '\n')
     await rename(tmp, file)
+  }
+  const queueSave = (): void => {
+    writing = writing.then(save).catch(() => {})
   }
 
   return {
@@ -106,13 +158,30 @@ export function createRepoMemory(
       let changed = false
       for (const dir of dirs) {
         if (!dir) continue
+        if (tempDir && isInside(dir, tempDir)) continue
         if (repos.some((r) => key(r) === key(dir))) continue
         repos.push(dir)
         changed = true
       }
       if (!changed) return
       while (repos.length > max) repos.shift()
-      writing = writing.then(save).catch(() => {})
+      queueSave()
+    },
+    async prune(exists) {
+      const answers = await Promise.all(
+        repos.map(async (dir) => {
+          try {
+            return { dir, exists: await exists(dir) }
+          } catch {
+            return { dir, exists: null }
+          }
+        })
+      )
+      const gone = new Set(answers.filter((a) => a.exists === false).map((a) => key(a.dir)))
+      if (gone.size === 0) return
+      // 확인하는 동안 add 로 더해진 저장소는 그대로 둔다.
+      repos = repos.filter((r) => !gone.has(key(r)))
+      queueSave()
     },
     list: () => [...repos],
     flush: () => writing
@@ -128,9 +197,9 @@ export function snapshotWorktrees(s: DashboardSnapshot | null): WorktreeInfo[] {
 }
 
 export interface DiskDeps {
-  settings: () => { dependencyDirs: string[]; extraRepos: string[] }
-  /** 기억해 둔 저장소 공용 폴더. */
-  knownRepos: () => string[]
+  settings: () => { dependencyDirs: string[]; extraRepos: string[]; staleWorktreeDays: number }
+  /** 기억해 둔 저장소 공용 폴더. 찾을 때마다 부른다(그때 없어진 저장소를 먼저 뺄 수 있다). */
+  knownRepos: () => string[] | Promise<string[]>
   latest: () => DashboardSnapshot | null
   /** 지우기 직전 그 워크트리를 쓰는 프로세스가 있는지 보는 최신 샘플. */
   resample: () => Promise<RawSample>
@@ -262,10 +331,11 @@ export function createDiskManager(deps: DiskDeps): {
   }
 
   async function repoList(): Promise<string[]> {
+    const known = await deps.knownRepos()
     const extra = await Promise.all(deps.settings().extraRepos.map((p) => gitCommonDir(p)))
     const all: string[] = []
     const real: string[] = []
-    for (const dir of [...deps.knownRepos(), ...extra]) {
+    for (const dir of [...known, ...extra]) {
       // 네트워크 공유는 응답이 없으면 찾기 전체가 멈출 수 있어 보지 않는다(설정의 추가 저장소와 같은 규칙).
       if (!dir || /^[\\/]{2}/.test(dir)) continue
       // 같은 저장소를 다른 경로(정션·subst·8.3 이름)로 알 수 있어 실제 경로로 겹침을 가린다.
@@ -277,7 +347,36 @@ export function createDiskManager(deps: DiskDeps): {
     return all
   }
 
-  /** 저장소 하나의 끝난 워크트리. 그 저장소만의 문제(지워짐·시간 초과)는 빈 목록으로, git 이 없으면 던진다. */
+  /**
+   * 오래 안 쓴 날수(G5d): 기준(staleWorktreeDays, 0 이면 끔) 이상 커밋도 색인 변경도 없었으면 마지막으로 만진 뒤
+   * 지난 날수, 아니거나 모르면 null.
+   */
+  async function staleDaysOf(commonDir: string, wt: GitWorktree): Promise<number | null> {
+    const days = deps.settings().staleWorktreeDays
+    if (!(days > 0)) return null
+    const touched = await lastTouched(wt, commonDir)
+    if (touched == null) return null
+    const idle = deps.now() - touched
+    return idle >= days * DAY_MS ? Math.floor(idle / DAY_MS) : null
+  }
+
+  /** 목록에 올릴 근거: 끝난 근거가 먼저, 없으면 오래 안 씀(detached 도). 둘 다 아니면 null. */
+  async function evidenceOf(
+    commonDir: string,
+    wt: GitWorktree,
+    defaultRef: string | null
+  ): Promise<Pick<DiskRow, 'evidence' | 'staleDays'> | null> {
+    // detached 는 끝난 근거가 없다(finishedEvidence 가 git 을 부르지 않고 null).
+    const finished = await finishedEvidence(commonDir, wt, defaultRef)
+    if (finished) return { evidence: finished }
+    const staleDays = await staleDaysOf(commonDir, wt)
+    return staleDays == null ? null : { evidence: 'stale', staleDays }
+  }
+
+  /**
+   * 저장소 하나의 끝났거나 오래 안 쓴 워크트리. 그 저장소만의 문제(지워짐·시간 초과)는 빈 목록으로,
+   * git 이 없으면 던진다.
+   */
   async function rowsOf(commonDir: string): Promise<DiskRow[]> {
     const found: DiskRow[] = []
     try {
@@ -287,13 +386,13 @@ export function createDiskManager(deps: DiskDeps): {
       const defaultRef = await defaultBranch(commonDir)
       for (const wt of list.slice(1)) {
         // 잠긴 워크트리는 다른 도구가 쓰는 중이라는 표시다.
-        if (wt.bare || wt.prunable || wt.locked || !wt.branch) continue
+        if (wt.bare || wt.prunable || wt.locked) continue
         const isDir = await stat(wt.path).then(
           (s) => s.isDirectory(),
           () => false
         )
         if (!isDir) continue
-        const evidence = await finishedEvidence(commonDir, wt, defaultRef)
+        const evidence = await evidenceOf(commonDir, wt, defaultRef)
         if (!evidence) continue
         const folders = await dependencyFolders(wt.path)
         if (folders.length === 0) continue
@@ -301,7 +400,7 @@ export function createDiskManager(deps: DiskDeps): {
           worktreeRoot: wt.path,
           commonDir,
           branch: wt.branch,
-          evidence,
+          ...evidence,
           folders,
           totalBytes: null,
           inUse: false
@@ -363,7 +462,8 @@ export function createDiskManager(deps: DiskDeps): {
   }
 
   /**
-   * 지워도 되는지: 아직 메인이 아닌 연결된 워크트리이고 여전히 끝났고, 그 워크트리를 쓰는 것이 없다.
+   * 지워도 되는지: 아직 메인이 아닌 연결된 워크트리이고 여전히 끝났고(오래 안 쓴 행은 여전히 오래 안 썼고),
+   * 그 워크트리를 쓰는 것이 없다.
    * 확인 창 앞뒤로 두 번 부른다(창을 띄운 사이 npm install·개발 서버·에이전트를 시작했을 수 있다).
    */
   async function checkRemovable(
@@ -372,13 +472,15 @@ export function createDiskManager(deps: DiskDeps): {
     const list = await listWorktrees(row.commonDir)
     const index = list.findIndex((w) => samePath(w.path, row.worktreeRoot))
     if (index <= 0) return { problem: { status: 'gone' } }
-    const evidence = await finishedEvidence(
-      row.commonDir,
-      list[index],
-      await defaultBranch(row.commonDir)
-    )
-    if (!evidence || list[index].locked)
-      return { problem: { status: 'failed', message: text.disk.notFinished } }
+    const wt = list[index]
+    if (row.evidence === 'stale') {
+      if (wt.locked || (await staleDaysOf(row.commonDir, wt)) == null)
+        return { problem: { status: 'failed', message: text.disk.notStale } }
+    } else {
+      const evidence = await finishedEvidence(row.commonDir, wt, await defaultBranch(row.commonDir))
+      if (!evidence || wt.locked)
+        return { problem: { status: 'failed', message: text.disk.notFinished } }
+    }
 
     if (inUse(row)) return { problem: { status: 'failed', message: text.disk.inUse } }
     // 작업 폴더를 모르는 에이전트는 이 워크트리에서 일하고 있을 수 있다(불확실하면 지우지 않는다).

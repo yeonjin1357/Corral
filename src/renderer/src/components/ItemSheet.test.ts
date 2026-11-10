@@ -460,3 +460,15 @@ describe('상세 패널: 세션 파일로 안 에이전트', () => {
     expect(bodyText()).not.toContain('Claude 연동을 켜면')
   })
 })
+
+describe('상세 패널: 디스크 정리', () => {
+  const bodyText = (): string => document.body.textContent!.replace(/\s+/g, ' ')
+
+  test('오래 안 쓴 워크트리는 근거에 날수, 설명은 끝난 근거가 없다는 것', () => {
+    sheet({ kind: 'disk', row: diskRow({ evidence: 'stale', staleDays: 21 }) })
+    expect(bodyText()).toContain('오래 안 씀(21일)')
+    expect(bodyText()).toContain(
+      '끝났다는 근거는 없지만 21일 동안 커밋도 변경도 없었어요. 의존성 폴더만 지우고 워크트리와 소스는 그대로 둬요.'
+    )
+  })
+})
