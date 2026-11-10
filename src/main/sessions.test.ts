@@ -598,6 +598,88 @@ describe('Claude 세션 파일로 정확한 짝(G3a)', () => {
     })
     expect(sessions.get('cleared')?.processKey).toBe('p1')
   })
+
+  test('세션 파일이 있는 프로세스는 추측 짝의 후보가 아니다(빈 자리·바꿔치기 모두)', () => {
+    // 빈 자리: 세션보다 먼저·가장 가깝게 시작한 p1 은 파일로 다른 세션(훅이 모르는)을 쓰고 있다 → 파일 없는 p2 와 짝짓는다.
+    const free: Sessions = new Map()
+    start(free, 'n', 1000)
+    reconcileSessions(free, {
+      now: 3000,
+      sampledAt: 2000,
+      live: [claude('p1', 900), claude('p2', 100)],
+      rootOfCwd,
+      exact: new Set(['p1'])
+    })
+    expect(free.get('n')?.processKey).toBe('p2')
+
+    // 파일이 있는 프로세스뿐이면 짝짓지 않고(버리지도 않고) 둔다.
+    const only: Sessions = new Map()
+    start(only, 'n', 1000)
+    reconcileSessions(only, {
+      now: 3000,
+      sampledAt: 2000,
+      live: [claude('p1', 900)],
+      rootOfCwd,
+      exact: new Set(['p1'])
+    })
+    expect(only.get('n')).toMatchObject({ processKey: null })
+
+    // 바꿔치기: 모두 짝이 있어도 파일로 이은 짝(p1 ↔ a)은 새 세션에 넘기지 않는다.
+    const replace: Sessions = new Map()
+    start(replace, 'a', 1000)
+    pairBySessionFile(replace, files([11, 'a']), keyOfPid)
+    start(replace, 'n', 5000)
+    const opts = { now: 9000, sampledAt: 8000, live: [claude('p1', 900)], rootOfCwd }
+    const guessed = new Map([...replace].map(([id, s]) => [id, { ...s }]))
+    reconcileSessions(replace, { ...opts, exact: new Set(['p1']) })
+    expect([...replace.values()].map((s) => [s.id, s.processKey])).toEqual([
+      ['a', 'p1'],
+      ['n', null]
+    ])
+    // 파일이 없으면(빈 집합·없음) 지금처럼 오래 조용한 a 를 버리고 n 이 p1 을 넘겨받는다.
+    reconcileSessions(guessed, { ...opts, exact: new Set() })
+    expect([...guessed.values()].map((s) => [s.id, s.processKey])).toEqual([['n', 'p1']])
+  })
+
+  test('세션 파일로 아는 프로세스는 그 세션만 보고, 워크트리의 짝 없는 세션을 빌리지 않는다', () => {
+    const sessions: Sessions = new Map()
+    start(sessions, 'mine', 1000, 'Stop')
+    start(sessions, 'loose', 2000, 'PermissionRequest')
+    pairBySessionFile(sessions, files([11, 'mine']), keyOfPid)
+    const p1 = { key: 'p1', rootKey: ROOT, tool: 'claude' as const }
+    expect(hookViewForAgent(sessions, { ...p1, sessionId: 'mine' }, rootOfCwd)).toMatchObject({
+      state: 'idle',
+      sessionId: 'mine'
+    })
+    // 파일의 세션을 훅이 모르면 훅 상태가 없다(짝 없는 loose 를 빌리지 않는다).
+    expect(
+      hookViewForAgent(
+        sessions,
+        { key: 'p2', rootKey: ROOT, tool: 'claude', sessionId: 'x' },
+        rootOfCwd
+      )
+    ).toBeNull()
+    // 파일의 세션이 아직 짝지어지기 전(수집 사이에 처음 온 소식)이어도 그 세션이면 본다. 남과 짝지은 것은 아니다.
+    start(sessions, 'fresh', 3000, 'UserPromptSubmit')
+    expect(
+      hookViewForAgent(
+        sessions,
+        { key: 'p2', rootKey: ROOT, tool: 'claude', sessionId: 'fresh' },
+        rootOfCwd
+      )
+    ).toMatchObject({ state: 'working', sessionId: 'fresh' })
+    expect(
+      hookViewForAgent(
+        sessions,
+        { key: 'p2', rootKey: ROOT, tool: 'claude', sessionId: 'mine' },
+        rootOfCwd
+      )
+    ).toBeNull()
+    // 파일이 없는 에이전트는 지금처럼 워크트리의 짝 없는 세션을 본다.
+    expect(
+      hookViewForAgent(sessions, { key: 'p2', rootKey: ROOT, tool: 'claude' }, rootOfCwd)
+    ).toMatchObject({ state: 'waiting', sessionId: 'loose' })
+  })
 })
 
 describe('상태 시작 시각(F3)', () => {

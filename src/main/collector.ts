@@ -165,7 +165,15 @@ export function createCollector(deps: CollectorDeps): {
   /** 세션 작업 폴더 → 워크트리 키. 수집 때마다 다시 판별하고, 그 사이 새 세션은 restate 가 채운다. */
   let rootOfCwd = new Map<string, string | null>()
 
-  /** 그 에이전트 프로세스의 훅 세션(짝지은 세션, 없으면 그 워크트리의 짝 없는 세션 — G3a). */
+  /** 마지막 수집에서 읽은 Claude 세션 파일(pid → 파일). restate(수집 사이)는 새로 읽지 않고 이것과 견준다. */
+  let sessionFiles = new Map<number, ClaudeSessionFile>()
+  /** 세션 파일로 지금 세션을 아는 Claude 프로세스(agentKey → 세션 id). sessionFiles 와 같은 때 새로 한다. */
+  let fileSessionOf = new Map<string, string>()
+
+  /**
+   * 그 에이전트 프로세스의 훅 세션(G3a): 세션 파일이 있으면 그 파일의 세션만, 없으면 짝지은 세션, 그것도 없으면
+   * 그 워크트리의 짝 없는 세션.
+   */
   const hookFor =
     (roots: Map<string, string | null>) =>
     (agent: { key: string; worktreeRoot: string | null; tool: AgentTool }): HookView | null =>
@@ -174,7 +182,8 @@ export function createCollector(deps: CollectorDeps): {
         {
           key: agent.key,
           rootKey: agent.worktreeRoot === null ? null : worktreeKey(agent.worktreeRoot),
-          tool: agent.tool
+          tool: agent.tool,
+          sessionId: fileSessionOf.get(agent.key) ?? null
         },
         (cwd) => roots.get(cwd) ?? null
       )
@@ -184,8 +193,6 @@ export function createCollector(deps: CollectorDeps): {
       hookFor(roots)({ key: agentKey(a), worktreeRoot: a.worktree?.root ?? null, tool: a.tool })
   /** Codex 세션 기록으로 안 상태(pid → 상태). restate 가 덮어쓰지 않도록 기억한다. */
   let rollouts = new Map<number, RolloutState>()
-  /** 마지막 수집에서 읽은 Claude 세션 파일(pid → 파일). restate(수집 사이)는 새로 읽지 않고 이것과 견준다. */
-  let sessionFiles = new Map<number, ClaudeSessionFile>()
   /** 정확한 상태의 시작 시각: 훅은 이벤트 시각, Codex 세션 기록은 기록의 이벤트 시각, 세션 파일은 상태가 바뀐 시각. */
   const exactSinceFor =
     (roots: Map<string, string | null>) =>
@@ -443,6 +450,12 @@ export function createCollector(deps: CollectorDeps): {
     ])
     rootOfCwd = roots
     sessionFiles = files
+    fileSessionOf = new Map(
+      claudeProcs.flatMap((c) => {
+        const file = files.get(c.pid)
+        return file ? [[agentKey(c), file.sessionId] as const] : []
+      })
+    )
 
     // 세션을 이번 샘플의 에이전트 프로세스(Claude·Codex)와 짝짓고 끝난 세션을 버린 뒤 상태를 정한다(끝난 세션이 한 번도 섞이지 않게).
     const live: LiveClaude[] = agentProcs.flatMap(({ p, tool }) => {
@@ -459,11 +472,13 @@ export function createCollector(deps: CollectorDeps): {
         .map(({ p }) => [p.pid, agentKey(p)])
     )
     pairBySessionFile(deps.sessions, files, (pid) => claudeKeys.get(pid) ?? null)
+    // 세션 파일로 지금 세션을 아는 프로세스는 추측의 후보가 아니다(남의 세션을 넘겨받지 않게).
     reconcileSessions(deps.sessions, {
       now,
       sampledAt,
       live,
-      rootOfCwd: (cwd) => roots.get(cwd) ?? null
+      rootOfCwd: (cwd) => roots.get(cwd) ?? null,
+      exact: new Set(fileSessionOf.keys())
     })
 
     const { agents: hooked, cpu } = buildAgents({

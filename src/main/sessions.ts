@@ -213,6 +213,8 @@ export function applyHookEvent(
  *   - 모두 짝이 있으면, 이 세션보다 먼저 소식이 끊긴 세션 중 가장 오래된 것의 프로세스가 새 세션으로
  *     넘어온 것으로 보고(/clear 등) 그 예전 세션을 버린다.
  * - 샘플 뒤에 온 세션은 다음 샘플까지 두고, 워크트리를 모르는 세션은 어느 행에도 연결되지 않으니 만료까지 둔다.
+ * - 세션 파일로 지금 세션을 아는 프로세스(exact)는 추측의 후보가 아니다(빈 자리로도, 바꿔치기로도 넘기지 않는다).
+ *   그 워크트리에 그런 프로세스만 있으면 짝짓지도 버리지도 않고 둔다.
  */
 export function reconcileSessions(
   sessions: Sessions,
@@ -221,6 +223,8 @@ export function reconcileSessions(
     sampledAt: number
     live: LiveClaude[]
     rootOfCwd: (cwd: string) => string | null
+    /** 세션 파일로 지금 세션을 아는 프로세스 키(pairBySessionFile 이 이미 이었다). */
+    exact?: Set<string>
   }
 ): void {
   const liveKeys = new Set(opts.live.map((l) => l.key))
@@ -241,15 +245,17 @@ export function reconcileSessions(
       sessions.delete(session.id)
       continue
     }
+    const guessable = candidates.filter((c) => !opts.exact?.has(c.key))
+    if (guessable.length === 0) continue
     const owner = new Map<string, ClaudeSession>()
     for (const s of sessions.values()) if (s.processKey) owner.set(s.processKey, s)
 
-    const free = candidates.filter((c) => !owner.has(c.key))
+    const free = guessable.filter((c) => !owner.has(c.key))
     if (free.length) {
       session.processKey = closestBefore(free, session.firstSeen).key
       continue
     }
-    const replaced = candidates
+    const replaced = guessable
       .map((c) => owner.get(c.key)!)
       .filter((s) => s.updatedAt <= session.firstSeen)
       .sort((a, b) => a.updatedAt - b.updatedAt)[0]
@@ -309,20 +315,29 @@ export interface HookView {
  * 에이전트 프로세스 하나의 훅 상태(G3a). 그 프로세스(`pid:시작 시각`)와 짝지은 세션이 있으면 그 세션들에서,
  * 없으면 아직 짝이 없는 같은 워크트리·같은 도구 세션에서 고른다(다른 프로세스와 짝지은 세션은 쓰지 않는다).
  * 여럿이면 권한 대기 > 작업 중 > 오류 > 쉬는 중, 같은 상태면 가장 오래 이어진 것(가장 오래 기다린 권한 대기 등).
+ * 세션 파일로 그 프로세스의 세션(sessionId)을 알면 그 세션만 본다: 그 프로세스와 짝지었거나 아직 짝이 없는(수집
+ * 사이에 처음 소식이 온) 그 id 의 세션. 워크트리의 다른 짝 없는 세션은 빌리지 않는다(남의 세션 상태로 오가지 않게).
  * 붙는 세션이 없으면 null.
  */
 export function hookViewForAgent(
   sessions: Sessions,
-  agent: { key: string; rootKey: string | null; tool: AgentTool },
+  agent: { key: string; rootKey: string | null; tool: AgentTool; sessionId?: string | null },
   rootOfCwd: (cwd: string) => string | null
 ): HookView | null {
   const mine = [...sessions.values()].filter((s) => toolOf(s) === agent.tool)
-  const paired = mine.filter((s) => s.processKey === agent.key)
-  const pool = paired.length
-    ? paired
-    : agent.rootKey === null
+  const poolOf = (): ClaudeSession[] => {
+    const known = agent.sessionId
+    if (known)
+      return mine.filter(
+        (s) => s.id === known && (s.processKey === null || s.processKey === agent.key)
+      )
+    const paired = mine.filter((s) => s.processKey === agent.key)
+    if (paired.length) return paired
+    return agent.rootKey === null
       ? []
       : mine.filter((s) => !s.processKey && rootOfCwd(s.cwd) === agent.rootKey)
+  }
+  const pool = poolOf()
   const sinceOf = (s: ClaudeSession): number => s.stateSince ?? s.firstSeen
   let best: ClaudeSession | null = null
   let lastActivityAt = Number.NEGATIVE_INFINITY

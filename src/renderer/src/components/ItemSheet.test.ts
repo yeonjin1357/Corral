@@ -3,6 +3,7 @@ import { mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach } from 'vitest'
 import ItemSheet, { type Selected } from './ItemSheet.vue'
 import { MB, agentRow, diskRow, heavyJob, serverRow } from '../testing/fixtures'
+import type { ClaudeHookStatus } from '../../../shared/types'
 
 let wrapper: VueWrapper | null = null
 afterEach(() => {
@@ -11,7 +12,7 @@ afterEach(() => {
   document.body.innerHTML = ''
 })
 
-function sheet(item: Selected): VueWrapper {
+function sheet(item: Selected, hook: ClaudeHookStatus | null = null): VueWrapper {
   wrapper = mount(ItemSheet, {
     attachTo: document.body,
     props: {
@@ -20,7 +21,7 @@ function sheet(item: Selected): VueWrapper {
       memoryHistory: [],
       windowMs: 600_000,
       busy: false,
-      hook: null,
+      hook,
       platform: 'win32',
       cpuCount: 8,
       open: true
@@ -132,13 +133,35 @@ describe('상세 패널: 커밋', () => {
   })
 })
 
-test('상세 패널: 세션 파일로 안 에이전트는 상태 출처와 그 설명을 보인다', () => {
-  sheet({ kind: 'agent', row: agentRow({ state: 'idle', stateSource: 'file' }) })
-  const source = [...document.body.querySelectorAll('p')].find(
-    (p) => p.textContent?.trim() === '상태 출처'
-  )?.nextElementSibling
-  expect(source?.textContent?.trim()).toBe('Claude 세션 파일')
-  expect(document.body.textContent!.replace(/\s+/g, ' ')).toContain(
+describe('상세 패널: 세션 파일로 안 에이전트', () => {
+  const FILE_NOTE =
     'Claude Code 가 남기는 세션 파일로 작업 중·쉬는 중을 알아요. 권한 대기는 Claude 연동을 켜야 알 수 있어요.'
-  )
+  const fileAgent = (): Selected => ({
+    kind: 'agent',
+    row: agentRow({ state: 'idle', stateSource: 'file' })
+  })
+  const bodyText = (): string => document.body.textContent!.replace(/\s+/g, ' ')
+
+  test('상태 출처는 Claude 세션 파일', () => {
+    sheet(fileAgent())
+    const source = [...document.body.querySelectorAll('p')].find(
+      (p) => p.textContent?.trim() === '상태 출처'
+    )?.nextElementSibling
+    expect(source?.textContent?.trim()).toBe('Claude 세션 파일')
+  })
+
+  test('세션 파일 출처 설명은 Claude 연동이 꺼져 있을 때만', () => {
+    sheet(fileAgent(), { state: 'off', problem: null, allHooksDisabled: false, settingsPath: '' })
+    expect(bodyText()).toContain(FILE_NOTE)
+    wrapper?.unmount()
+    // 연동이 켜져 있는데 파일을 따르는 것은 그 세션의 훅 소식이 끊겼을 때다(연동을 켜라는 말은 맞지 않다).
+    sheet(fileAgent(), {
+      state: 'on',
+      problem: null,
+      allHooksDisabled: false,
+      settingsPath: 'C:\\Users\\dev\\.claude\\settings.json'
+    })
+    expect(bodyText()).not.toContain(FILE_NOTE)
+    expect(bodyText()).not.toContain('Claude 연동을 켜면')
+  })
 })

@@ -514,6 +514,80 @@ describe('Claude 세션 파일(G3a)', () => {
     })
   })
 
+  test('훅이 권한 대기면 파일이 더 늦게 idle 이어도 권한 대기로 둔다, 더 늦은 busy 는 따른다', async () => {
+    const current = { file: null as ClaudeSessionFile | null }
+    const { deps, sessions, clock } = setup({ claudeSessionFiles: filesFrom(current) })
+    clock.now = 60 * MIN
+    hookEvent(sessions, 'UserPromptSubmit', clock.now - 10 * MIN)
+    hookEvent(sessions, 'PermissionRequest', clock.now - 5 * MIN, { tool_name: 'Bash' })
+    // 권한 창이 떠 있는 동안 파일에 무엇이 쓰이는지 모른다: 훨씬 늦은 idle 이어도 권한 대기(끝은 Stop 으로 온다).
+    current.file = fileOf({ status: 'idle', statusUpdatedAt: clock.now - MIN })
+    const collector = createCollector(deps)
+    expect((await collector.collect()).agents[0]).toMatchObject({
+      pid: 5000,
+      state: 'waiting',
+      stateSource: 'hook',
+      stateSince: clock.now - 5 * MIN
+    })
+    // 더 늦은 busy 는 새 턴이 시작된 것이다.
+    current.file = fileOf({ status: 'busy', statusUpdatedAt: clock.now - 30_000 })
+    clock.now += 5000
+    expect((await collector.collect()).agents[0]).toMatchObject({
+      state: 'working',
+      stateSource: 'file',
+      stateSince: clock.now - 5000 - 30_000
+    })
+  })
+
+  test('세션 파일이 있는 에이전트는 그 파일의 세션에서만 훅 상태를 얻는다(같은 워크트리의 짝 없는 세션을 빌리지 않는다)', async () => {
+    const current = {
+      file: fileOf({
+        sessionId: 'f1',
+        status: 'idle',
+        statusUpdatedAt: 2 * MIN
+      }) as ClaudeSessionFile | null
+    }
+    const { deps, sessions, clock } = setup({ claudeSessionFiles: filesFrom(current) })
+    // 같은 워크트리의 다른 세션(어느 프로세스 것인지 모름)이 권한 대기다. 파일의 세션(f1)은 훅이 모른다.
+    applyHookEvent(
+      sessions,
+      { session_id: 'other', cwd: W1.root, hook_event_name: 'PermissionRequest' },
+      clock.now - 1
+    )
+    const collector = createCollector(deps)
+    const s = await collector.collect()
+    expect(s.agents[0]).toMatchObject({
+      pid: 5000,
+      state: 'idle',
+      stateSource: 'file',
+      stateSince: 2 * MIN
+    })
+    // 파일이 있는 프로세스는 추측 짝의 후보가 아니다.
+    expect(sessions.get('other')?.processKey).toBeNull()
+
+    // 수집 사이에 짝 없는 새 세션이 와도 빌리지 않는다.
+    clock.now += 10_000
+    applyHookEvent(
+      sessions,
+      { session_id: 'new', cwd: W1.root, hook_event_name: 'UserPromptSubmit' },
+      clock.now
+    )
+    const restated = await collector.restate(s)
+    expect(restated.agents[0]).toMatchObject({ state: 'idle', stateSource: 'file' })
+    // 파일의 세션 소식이 오면 그것은 이 프로세스의 훅 상태다.
+    clock.now += 10_000
+    hookEvent(sessions, 'UserPromptSubmit', clock.now)
+    expect((await collector.restate(restated)).agents[0]).toMatchObject({
+      state: 'working',
+      stateSource: 'hook',
+      stateSince: clock.now
+    })
+    // 다음 수집에서 파일의 세션과 정확히 짝짓는다.
+    clock.now += 10_000
+    await collector.collect()
+    expect(sessions.get('f1')?.processKey).toBe('5000:100')
+  })
+
   test('훅과 파일의 시각이 5초 안이면 훅', async () => {
     const current = { file: null as ClaudeSessionFile | null }
     const { deps, sessions, clock } = setup({ claudeSessionFiles: filesFrom(current) })

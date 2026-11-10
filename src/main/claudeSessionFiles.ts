@@ -1,5 +1,6 @@
 import { open } from 'fs/promises'
 import { join } from 'path'
+import type { AgentState } from '../shared/types'
 
 /**
  * Claude Code 의 실행 중 세션 파일(G3a). Claude Code 는 실행 중인 프로세스마다 `<Claude 설정 폴더>/sessions/<pid>.json` 을
@@ -116,14 +117,17 @@ export function createSessionFileReader(o: { dir: string; slackMs?: number; maxB
  * 세션 파일의 상태를 따를 때 그 에이전트 상태(busy → 작업 중, idle → 쉬는 중). 따르지 않으면 null.
  * 훅 상태가 있으면 더 늦은 근거를 따른다: 파일의 상태 시각이 훅 세션의 마지막 활동보다 FILE_NEWER_SLACK_MS 넘게
  * 늦을 때만 파일(훅 전달이 끊겼거나 끝 이벤트를 놓친 세션이 옛 상태로 굳지 않게). 상태를 모르는 파일은 따르지 않는다.
+ * 단 훅이 권한 대기면 파일의 idle 은 아무리 늦어도 따르지 않는다: 권한 창이 떠 있는 동안 파일에 무엇이 쓰이는지
+ * 모르고, 훅이 살아 있으니 턴의 끝은 Stop 으로 온다. 더 늦은 busy(새 턴)는 따른다.
  */
 export function fileStateOver(
   file: ClaudeSessionFile,
-  hook: { lastActivityAt: number } | null
+  hook: { state: AgentState; lastActivityAt: number } | null
 ): 'working' | 'idle' | null {
   if (file.status === null) return null
   const state = file.status === 'busy' ? 'working' : 'idle'
   if (!hook) return state
+  if (hook.state === 'waiting' && state === 'idle') return null
   return file.statusUpdatedAt !== null &&
     file.statusUpdatedAt - hook.lastActivityAt > FILE_NEWER_SLACK_MS
     ? state
