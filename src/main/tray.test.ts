@@ -96,7 +96,8 @@ describe('buildTrayMenu', () => {
       cpuPercent: 0,
       lastActiveAt: null,
       parked: false,
-      activity: null
+      activity: null,
+      quietSince: null
     })
     const base = snap()
     const s = snap({

@@ -433,6 +433,68 @@ describe('마지막 활동·오래 쉬는 세션(G2)', () => {
   })
 })
 
+describe('조용한 에이전트(G3c)', () => {
+  test('훅으로 작업 중인데 이벤트도 CPU 도 없이 15분이면 quietSince, 새 이벤트가 오면 restate 가 지우고 그때부터 다시 센다', async () => {
+    const { deps, sessions, clock } = setup()
+    const event = (cwd: string, name: string, extra: Record<string, unknown> = {}): void => {
+      applyHookEvent(
+        sessions,
+        { session_id: cwd === W1.root ? 's1' : 'elsewhere', cwd, hook_event_name: name, ...extra },
+        clock.now
+      )
+    }
+    event(W1.root, 'UserPromptSubmit')
+    const collector = createCollector(deps)
+    // 첫 수집은 CPU 를 아직 몰라 조용한지 모른다.
+    expect((await collector.collect()).agents[0]).toMatchObject({
+      pid: 5000,
+      state: 'working',
+      stateSource: 'hook',
+      cpuPercent: null,
+      quietSince: null
+    })
+    clock.now += 5000
+    const calmAt = clock.now
+    expect((await collector.collect()).agents[0]).toMatchObject({ cpuPercent: 0, quietSince: null })
+    clock.now = calmAt + 15 * MIN - 1
+    expect((await collector.collect()).agents[0].quietSince).toBeNull()
+    clock.now = calmAt + 15 * MIN
+    const quiet = await collector.collect()
+    expect(quiet.agents[0]).toMatchObject({
+      pid: 5000,
+      state: 'working',
+      stateSource: 'hook',
+      quietSince: calmAt
+    })
+    // CPU 추정인 Codex 는 아니다.
+    expect(quiet.agents[1]).toMatchObject({ pid: 6000, stateSource: 'cpu', quietSince: null })
+    // 조용함의 기억은 저장하지 않는다(다시 켜면 처음부터 본다).
+    expect(Object.keys(collector.exportState()).sort()).toEqual([
+      'agentSeen',
+      'agentStates',
+      'serverMemo',
+      'servers'
+    ])
+
+    // 다른 폴더의 세션 소식은 이 에이전트의 이벤트가 아니다.
+    clock.now += 1000
+    event('C:\\tmp', 'UserPromptSubmit')
+    const unrelated = await collector.restate(quiet)
+    expect(unrelated.agents[0].quietSince).toBe(calmAt)
+    // 새 이벤트(도구 시작)가 오면 수집 사이에도 바로 지운다.
+    clock.now += 1000
+    const eventAt = clock.now
+    event(W1.root, 'PreToolUse', { tool_name: 'Bash', tool_input: { command: 'npm test' } })
+    const next = await collector.restate(unrelated)
+    expect(next.agents[0]).toMatchObject({ state: 'working', quietSince: null })
+    // 다음 수집은 그 이벤트부터 다시 센다.
+    clock.now = eventAt + 15 * MIN - 1
+    expect((await collector.collect()).agents[0].quietSince).toBeNull()
+    clock.now = eventAt + 15 * MIN
+    expect((await collector.collect()).agents[0].quietSince).toBe(eventAt)
+  })
+})
+
 describe('Claude 세션 파일(G3a)', () => {
   const HOUR = 60 * MIN
   const fileOf = (over: Partial<ClaudeSessionFile> = {}): ClaudeSessionFile => ({

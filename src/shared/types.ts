@@ -286,6 +286,12 @@ export interface AgentRow {
   parked: boolean
   /** 하는 일(G3b). 설정 showAgentActivity 가 꺼져 있거나 아는 것이 없으면 null. */
   activity: AgentActivity | null
+  /**
+   * 조용해진 시각(G3c): 훅으로 작업 중인데 이벤트가 없고 트리 CPU 가 작업 기준 아래인 채 15분이 지났으면 그 상태가
+   * 시작된 시각(마지막 이벤트와 pitwall 이 CPU 가 낮은 것을 처음 본 때 가운데 늦은 쪽). 아니면 null.
+   * 멈췄다고 단정하지 않는다(오래 걸리는 명령을 기다리는 중일 수도 있다).
+   */
+  quietSince: number | null
 }
 
 export type ClaudeHookState = 'off' | 'on' | 'partial' | 'error'

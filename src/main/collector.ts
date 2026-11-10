@@ -23,7 +23,15 @@ import {
   type AgentStateMemo,
   type CpuMemo
 } from './agents'
-import { isParked, lastActiveOf, trackSeen, type SeenMemo } from './activity'
+import {
+  isParked,
+  lastActiveOf,
+  stillQuiet,
+  trackQuiet,
+  trackSeen,
+  type CalmMemo,
+  type SeenMemo
+} from './activity'
 import { fileStateOver, type ClaudeSessionFile } from './claudeSessionFiles'
 import { activityOf, judgeServers, type ServerMemo } from './judge'
 import { agentToolOf, topLevelAgentPids } from './processTree'
@@ -198,6 +206,8 @@ export function createCollector(deps: CollectorDeps): {
   let agentStates: AgentStateMemo = new Map()
   /** 에이전트별 pitwall 이 처음 본 시각·마지막으로 작업 중으로 본 시각(G2). */
   let agentSeen: SeenMemo = new Map()
+  /** 에이전트별 조용한 조건(훅으로 작업 중·CPU 낮음)이 이어진 첫 시각(G3c). 수집마다 새로 하고 저장하지 않는다. */
+  let calm: CalmMemo = new Map()
   /** 서버별 메모리 기록(F6, 1분 간격·60분). */
   const serverHistory = createServerHistory()
   let serverMemo: ServerMemo = new Map()
@@ -569,7 +579,14 @@ export function createCollector(deps: CollectorDeps): {
     })
     const stated = withStateSince(withRollout, agentStates, sampledAt, exactSinceFor(roots))
     agentStates = stated.memo
-    const active = withActivity(stated.agents, roots, sampledAt, options.agentParkedMs)
+    // 조용한 에이전트(G3c)는 최종 상태·CPU·마지막 활동이 정해진 뒤에 판단한다.
+    const quiet = trackQuiet(
+      withActivity(stated.agents, roots, sampledAt, options.agentParkedMs),
+      calm,
+      sampledAt
+    )
+    calm = quiet.memo
+    const active = quiet.agents
 
     // 작업 공간은 판단 전에 정한다: 같은 작업 공간에서 에이전트가 일하면 그 작업 공간의 서버·남은 프로세스는
     // 정리 후보로 올리지 않는다(스펙 §4 — 다른 저장소에서 일하는 에이전트가 이 서버를 쓰고 있을 수 있다).
@@ -663,10 +680,11 @@ export function createCollector(deps: CollectorDeps): {
     const now = deps.now()
     const stated = withStateSince(restated, agentStates, now, exactSinceFor(rootOfCwd))
     agentStates = stated.memo
-    const agents = withAgentActivity(
-      withActivity(stated.agents, rootOfCwd, now, deps.options().agentParkedMs),
-      rootOfCwd
+    // 조용함(G3c)은 새 이벤트가 왔으면 지우기만 한다(새로 붙이는 것은 다음 수집).
+    const active = withActivity(stated.agents, rootOfCwd, now, deps.options().agentParkedMs).map(
+      (a): AgentRow => ({ ...a, quietSince: stillQuiet(a) })
     )
+    const agents = withAgentActivity(active, rootOfCwd)
     return { ...snapshot, agents }
   }
 

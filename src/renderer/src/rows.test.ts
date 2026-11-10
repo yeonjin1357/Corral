@@ -220,6 +220,43 @@ describe('에이전트 표', () => {
     expect(rows[0].actions.map((a) => a.kind)).toEqual(['details'])
   })
 
+  test('조용한 에이전트의 상태 칸은 조용함 · 기간(주황 점)', () => {
+    const now = 5 * 60 * MIN
+    const working = { state: 'working' as const, stateSince: now - 49 * MIN, cpuPercent: 0.4 }
+    const s = snapshot({
+      takenAt: now,
+      agents: [
+        // 기간은 작업 시작이 아니라 조용해진 때부터. 130px 칸이라 배지 없이 글자로만.
+        agentRow({
+          ...working,
+          lastActiveAt: now - 18 * MIN,
+          quietSince: now - 18 * MIN,
+          activity: {
+            title: '로그인 버그',
+            prompt: null,
+            tool: { name: 'Bash', summary: 'npm run e2e', since: now - 18 * MIN },
+            waiting: null
+          }
+        }),
+        // 실행 중인 도구를 모르면 앞머리 없이.
+        agentRow({ ...working, pid: 2, quietSince: now - 16 * MIN - 30_000 }),
+        agentRow({ ...working, pid: 3 })
+      ]
+    })
+    const rows = tableFor('agents', s).rows
+    expect(rows[0].cells.status).toEqual({
+      text: '조용함 · 18분',
+      title: 'Bash 실행 중 · 18분째 이벤트가 없고 CPU 를 거의 쓰지 않아요',
+      dot: 'warn'
+    })
+    expect(rows[1].cells.status).toEqual({
+      text: '조용함 · 16분',
+      title: '16분째 이벤트가 없고 CPU 를 거의 쓰지 않아요',
+      dot: 'warn'
+    })
+    expect(rows[2].cells.status).toEqual({ text: '작업 중 · 49분', dot: 'running' })
+  })
+
   test('칸: 이름·브랜치·상태·하는 일·CPU·메모리·커밋·실행 시간', () => {
     const t = tableFor('agents', snapshot({ agents: [agentRow({ commitBytes: GB })] }))
     expect(t.columns.map((col) => [col.id, col.label, col.width])).toEqual([

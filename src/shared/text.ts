@@ -369,6 +369,11 @@ export const text = {
       parked: '오래 쉼',
       /** 오래 쉬는 에이전트 상태 칸의 title. */
       lastActive: (duration: string): string => `마지막 활동 ${duration} 전`,
+      /** 에이전트 상태 칸·상세 패널 배지의 조용한 에이전트(G3c, "조용함 · 18분"). */
+      quiet: '조용함',
+      /** 조용한 에이전트 상태 칸의 title. tool: 실행 중인 도구 이름(모르면 null). */
+      quietFor: (minutes: number, tool: string | null): string =>
+        `${tool ? `${tool} 실행 중 · ` : ''}${minutes}분째 이벤트가 없고 CPU 를 거의 쓰지 않아요`,
       unresolvable: '판별 불가',
       leftoverAgent: '에이전트 워크트리',
       leftoverFree: '끌 수 있음',
@@ -649,6 +654,9 @@ export const text = {
       noHookNote: 'Claude 연동을 켜면 권한 대기까지 정확히 알 수 있어요.',
       fileNote:
         'Claude Code 가 남기는 세션 파일로 작업 중·쉬는 중을 알아요. 권한 대기는 Claude 연동을 켜야 알 수 있어요.',
+      /** 조용한 에이전트(G3c)의 상세 패널 설명(상태 출처 설명보다 먼저). */
+      quietNote:
+        '작업 중인데 한동안 이벤트가 없고 CPU 도 거의 쓰지 않아요. 오래 걸리는 명령을 기다리는 중일 수도, 멈춘 것일 수도 있어요.',
       /** 하는 일(G3b)의 도구 한 줄: "Bash · npm run build"(요약을 모르면 이름만). */
       activityTool: (name: string | null, summary: string | null): string =>
         [name, summary].filter(Boolean).join(' · '),

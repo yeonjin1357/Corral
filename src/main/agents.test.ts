@@ -399,6 +399,7 @@ describe('상태 시작 시각(F3)', () => {
     lastActiveAt: null,
     parked: false,
     activity: null,
+    quietSince: null,
     ...over
   })
 

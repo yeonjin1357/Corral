@@ -197,21 +197,25 @@ const view = computed<View | null>(() => {
     }
     case 'agent': {
       const r = item.row
+      // 조용한 에이전트(G3c)면 그 설명이 상태 출처 설명보다 먼저다.
       const note =
-        r.tool === 'codex'
-          ? r.stateSource === 'cpu'
-            ? t.agent.codexNote
-            : r.stateSource === 'rollout'
-              ? t.agent.codexRolloutNote
-              : null
-          : props.hook?.state === 'on'
-            ? null
-            : r.stateSource === 'file'
-              ? t.agent.fileNote
-              : r.stateSource === 'cpu'
-                ? t.agent.noHookNote
+        r.quietSince != null
+          ? t.agent.quietNote
+          : r.tool === 'codex'
+            ? r.stateSource === 'cpu'
+              ? t.agent.codexNote
+              : r.stateSource === 'rollout'
+                ? t.agent.codexRolloutNote
                 : null
+            : props.hook?.state === 'on'
+              ? null
+              : r.stateSource === 'file'
+                ? t.agent.fileNote
+                : r.stateSource === 'cpu'
+                  ? t.agent.noHookNote
+                  : null
       const state = t.agent.states[r.state]
+      const ago = (since: number): string => formatDuration(Math.max(0, props.now - since))
       // 하는 일(G3b): 아는 줄만. 실행 중인 도구는 시작한 지 얼마나 됐는지 붙인다.
       const act = r.activity
       const ag = t.agent
@@ -229,7 +233,7 @@ const view = computed<View | null>(() => {
               label: ag.activityFacts.tool,
               value: t.rowStatus.withTime(
                 ag.activityTool(running.name, running.summary),
-                formatDuration(Math.max(0, props.now - running.since))
+                ago(running.since)
               )
             }
           : null,
@@ -240,11 +244,14 @@ const view = computed<View | null>(() => {
         icon: agentIcon(r),
         title: folder(r.worktree),
         description: `${t.agent.toolNames[r.tool]} · PID ${r.pid}`,
+        // 조용한 에이전트(G3c)는 표 상태 칸과 같이 "조용함 · 18분"(조용해진 때부터).
         badge: {
           text:
-            r.stateSince != null && r.state !== 'unknown'
-              ? t.rowStatus.withTime(state, formatDuration(Math.max(0, props.now - r.stateSince)))
-              : state,
+            r.quietSince != null
+              ? t.rowStatus.withTime(t.rowStatus.quiet, ago(r.quietSince))
+              : r.stateSince != null && r.state !== 'unknown'
+                ? t.rowStatus.withTime(state, ago(r.stateSince))
+                : state,
           variant: r.state === 'error' ? 'destructive' : 'secondary'
         },
         cards: [

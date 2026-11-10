@@ -1,4 +1,13 @@
-import { isParked, lastActiveOf, trackSeen, type SeenMemo } from './activity'
+import type { AgentRow } from '../shared/types'
+import {
+  isParked,
+  lastActiveOf,
+  stillQuiet,
+  trackQuiet,
+  trackSeen,
+  type CalmMemo,
+  type SeenMemo
+} from './activity'
 
 const MIN = 60_000
 const PARKED_MS = 180 * MIN
@@ -96,5 +105,133 @@ describe('오래 쉬는 세션', () => {
     expect(isParked({ state: 'unknown', lastActiveAt: now - 200 * MIN }, now, PARKED_MS)).toBe(true)
     // 마지막 활동을 모르면 판단하지 않는다.
     expect(isParked({ state: 'idle', lastActiveAt: null }, now, PARKED_MS)).toBe(false)
+  })
+})
+
+describe('조용한 에이전트(G3c)', () => {
+  /** 훅으로 작업 중이고 CPU 를 거의 쓰지 않는 에이전트(마지막 이벤트 0분). */
+  const row = (over: Partial<AgentRow> = {}): AgentRow => ({
+    pid: 1,
+    tool: 'claude',
+    worktree: null,
+    workspace: null,
+    startedAt: 100,
+    memoryBytes: 1,
+    commitBytes: null,
+    descendantCount: 0,
+    processes: [],
+    state: 'working',
+    stateSource: 'hook',
+    stateSince: 0,
+    cpuPercent: 0.5,
+    lastActiveAt: 0,
+    parked: false,
+    activity: null,
+    quietSince: null,
+    ...over
+  })
+  /** 수집을 차례로 흉내 낸다: [시각, 행] 마다 trackQuiet 를 돌려 그때의 quietSince. */
+  const run = (steps: [number, AgentRow][]): (number | null)[] => {
+    let memo: CalmMemo = new Map()
+    return steps.map(([now, a]) => {
+      const next = trackQuiet([a], memo, now)
+      memo = next.memo
+      return next.agents[0].quietSince
+    })
+  }
+
+  test('훅으로 작업 중이고 CPU 가 낮은 채 15분이면 조용함', () => {
+    // 이벤트는 0분, CPU 가 낮은 것을 처음 본 것은 1분: 그때부터 15분.
+    expect(
+      run([
+        [1 * MIN, row()],
+        [15 * MIN, row()],
+        [16 * MIN - 1, row()],
+        [16 * MIN, row()],
+        [40 * MIN, row()]
+      ])
+    ).toEqual([null, null, null, 1 * MIN, 1 * MIN])
+    // 막 켠 pitwall 은 이벤트가 오래전이어도 CPU 가 낮은 것을 직접 본 때부터 센다.
+    expect(trackQuiet([row()], new Map(), 60 * MIN).agents[0].quietSince).toBeNull()
+    // 기억에는 지금 조건이 이어지는 에이전트만 남는다(사라진 에이전트는 버린다).
+    const first = trackQuiet([row()], new Map(), MIN)
+    expect(first.memo).toEqual(new Map([['1:100', MIN]]))
+    expect(trackQuiet([], first.memo, 2 * MIN).memo.size).toBe(0)
+  })
+
+  test('그 사이 CPU 를 쓰면 처음부터', () => {
+    expect(
+      run([
+        [0, row()],
+        // 작업 기준(2%)에 닿으면 CPU 를 쓴 것이다.
+        [10 * MIN, row({ cpuPercent: 2 })],
+        [11 * MIN, row()],
+        [25 * MIN, row()],
+        [26 * MIN, row()]
+      ])
+    ).toEqual([null, null, null, null, 11 * MIN])
+  })
+
+  test('그 사이 이벤트가 오면 그 시각부터 다시 센다', () => {
+    expect(
+      run([
+        [0, row()],
+        [10 * MIN, row({ lastActiveAt: 5 * MIN })],
+        [20 * MIN - 1, row({ lastActiveAt: 5 * MIN })],
+        [20 * MIN, row({ lastActiveAt: 5 * MIN })],
+        // 조용하던 에이전트도 새 이벤트가 오면 다시 센다.
+        [36 * MIN, row({ lastActiveAt: 30 * MIN })],
+        [45 * MIN, row({ lastActiveAt: 30 * MIN })]
+      ])
+    ).toEqual([null, null, null, 5 * MIN, null, 30 * MIN])
+  })
+
+  test('CPU 추정·세션 기록 상태, 쉬는 중·권한 대기에는 붙지 않는다', () => {
+    const cases: Partial<AgentRow>[] = [
+      { stateSource: 'cpu' },
+      { stateSource: 'rollout' },
+      { stateSource: 'file' },
+      { state: 'idle' },
+      { state: 'waiting' }
+    ]
+    for (const over of cases) {
+      expect(
+        run([
+          [0, row(over)],
+          [30 * MIN, row(over)]
+        ])
+      ).toEqual([null, null])
+      // 조건이 끊기면 기억에서 뺀다.
+      const next = trackQuiet([row(over)], new Map([['1:100', 0]]), 30 * MIN)
+      expect(next.agents[0].quietSince).toBeNull()
+      expect(next.memo.size).toBe(0)
+    }
+  })
+
+  test('CPU 를 모르면(null) 붙지 않는다', () => {
+    expect(trackQuiet([row({ cpuPercent: null })], new Map(), 30 * MIN).agents[0].quietSince).toBe(
+      null
+    )
+    // 모르는 동안은 이어지지 않는다: 다시 낮은 것을 본 때부터 센다.
+    expect(
+      run([
+        [0, row()],
+        [10 * MIN, row({ cpuPercent: null })],
+        [15 * MIN, row()],
+        [30 * MIN - 1, row()],
+        [30 * MIN, row()]
+      ])
+    ).toEqual([null, null, null, null, 15 * MIN])
+  })
+
+  test('수집 사이에는 새 이벤트가 왔거나 더는 훅으로 작업 중이 아니면 지운다', () => {
+    const quiet = row({ lastActiveAt: 0, quietSince: MIN })
+    expect(stillQuiet(quiet)).toBe(MIN)
+    expect(stillQuiet({ ...quiet, lastActiveAt: MIN })).toBe(MIN)
+    expect(stillQuiet({ ...quiet, lastActiveAt: 20 * MIN })).toBeNull()
+    expect(stillQuiet({ ...quiet, state: 'idle' })).toBeNull()
+    expect(stillQuiet({ ...quiet, state: 'waiting' })).toBeNull()
+    expect(stillQuiet({ ...quiet, stateSource: 'file' })).toBeNull()
+    expect(stillQuiet(row())).toBeNull()
   })
 })

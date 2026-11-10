@@ -56,6 +56,7 @@ export function agentRow(over: Partial<AgentRow> = {}): AgentRow {
     lastActiveAt: null,
     parked: false,
     activity: null,
+    quietSince: null,
     ...over
   }
 }

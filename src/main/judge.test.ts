@@ -56,6 +56,7 @@ function agent(
     lastActiveAt: null,
     parked: false,
     activity: null,
+    quietSince: null,
     ...overrides
   }
 }

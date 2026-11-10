@@ -178,7 +178,9 @@ export function buildAgents(input: {
       lastActiveAt: null,
       parked: false,
       // 하는 일(G3b)은 최종 상태·세션 파일·설정을 아는 수집기가 채운다.
-      activity: null
+      activity: null,
+      // 조용함(G3c)은 조용한 조건이 이어진 시각을 기억하는 수집기가 채운다.
+      quietSince: null
     })
   }
 

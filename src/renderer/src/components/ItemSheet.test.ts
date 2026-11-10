@@ -277,6 +277,30 @@ describe('상세 패널: 하는 일(G3b)', () => {
   })
 })
 
+describe('상세 패널: 조용한 에이전트(G3c)', () => {
+  const QUIET_NOTE =
+    '작업 중인데 한동안 이벤트가 없고 CPU 도 거의 쓰지 않아요. 오래 걸리는 명령을 기다리는 중일 수도, 멈춘 것일 수도 있어요.'
+  const NOW = 10_000_000
+  const badge = (): string | undefined =>
+    document.body.querySelector('[data-slot=badge]')?.textContent?.trim()
+  const bodyText = (): string => document.body.textContent!.replace(/\s+/g, ' ')
+
+  test('배지는 조용함 · 기간이고, 설명으로 조용함을 알린다', () => {
+    sheet({
+      kind: 'agent',
+      row: agentRow({ stateSince: NOW - 49 * 60_000, quietSince: NOW - 18 * 60_000 })
+    })
+    expect(badge()).toBe('조용함 · 18분')
+    expect(bodyText()).toContain(QUIET_NOTE)
+  })
+
+  test('조용하지 않으면 지금처럼 작업 중 · 기간, 설명 없음', () => {
+    sheet({ kind: 'agent', row: agentRow({ stateSince: NOW - 49 * 60_000 }) })
+    expect(badge()).toBe('작업 중 · 49분')
+    expect(bodyText()).not.toContain(QUIET_NOTE)
+  })
+})
+
 describe('상세 패널: 세션 파일로 안 에이전트', () => {
   const FILE_NOTE =
     'Claude Code 가 남기는 세션 파일로 작업 중·쉬는 중을 알아요. 권한 대기는 Claude 연동을 켜야 알 수 있어요.'
