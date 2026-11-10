@@ -22,6 +22,13 @@ export function createHookHub(opts: {
   const owners = new Set<AgentTool>()
   let server: HookServer | null = null
   let serverHook: HookConfig | null = null
+  /** 잡기·놓기를 하나씩 처리한다. 시작할 때 두 연동이 동시에 잡으면 같은 포트를 두 번 열다 실패하므로. */
+  let queue: Promise<unknown> = Promise.resolve()
+  function serial<T>(work: () => Promise<T>): Promise<T> {
+    const run = queue.then(work, work)
+    queue = run.catch(() => {})
+    return run
+  }
 
   async function close(): Promise<void> {
     const s = server
@@ -31,21 +38,27 @@ export function createHookHub(opts: {
   }
 
   return {
-    async claim(owner, hook) {
-      if (!(server && serverHook?.port === hook.port && serverHook.token === hook.token)) {
+    claim(owner, hook) {
+      return serial(async () => {
+        if (!(server && serverHook?.port === hook.port && serverHook.token === hook.token)) {
+          await close()
+          server = await open({ port: hook.port, token: hook.token, onEvent: opts.onEvent })
+          serverHook = hook
+        }
+        owners.add(owner)
+      })
+    },
+    release(owner) {
+      return serial(async () => {
+        owners.delete(owner)
+        if (owners.size === 0) await close()
+      })
+    },
+    stop() {
+      return serial(async () => {
+        owners.clear()
         await close()
-        server = await open({ port: hook.port, token: hook.token, onEvent: opts.onEvent })
-        serverHook = hook
-      }
-      owners.add(owner)
-    },
-    async release(owner) {
-      owners.delete(owner)
-      if (owners.size === 0) await close()
-    },
-    async stop() {
-      owners.clear()
-      await close()
+      })
     }
   }
 }
