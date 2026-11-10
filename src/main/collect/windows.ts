@@ -2,7 +2,14 @@ import { createHash, randomBytes } from 'crypto'
 import { readFile, rm } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import type { CollectMode, ProcessInfo, RawSample, TcpEntry, TcpState } from '../../shared/types'
+import type {
+  CollectMode,
+  ProcessInfo,
+  RawSample,
+  SystemMemory,
+  TcpEntry,
+  TcpState
+} from '../../shared/types'
 import { COMMAND_TIMEOUT_MS } from '../../shared/defaults'
 import { runCommand, type CommandOptions, type CommandResult } from './runCommand'
 
@@ -115,13 +122,14 @@ public static class PitwallCwd {
 public class PitwallMemRow {
   public int Pid { get; set; }
   public long PrivateWs { get; set; }
+  public long Commit { get; set; }
 }
 public static class PitwallMem {
   [DllImport("kernel32.dll")] static extern IntPtr OpenProcess(int access, bool inherit, int pid);
   [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
   [DllImport("psapi.dll")] static extern bool GetProcessMemoryInfo(IntPtr h, IntPtr counters, int cb);
-  // PROCESS_MEMORY_COUNTERS_EX2(Windows 10 1809+): 96 바이트, PrivateWorkingSetSize 는 80 번째 바이트부터.
-  // 작업 관리자 "메모리" 열과 같은 값이라, 여러 프로세스가 같이 쓰는 메모리가 합계에 겹치지 않는다.
+  // PROCESS_MEMORY_COUNTERS_EX2(Windows 10 1809+): 96 바이트, PrivateUsage(커밋)는 72, PrivateWorkingSetSize 는 80 번째 바이트부터.
+  // 전용 작업 세트는 작업 관리자 "메모리" 열과 같은 값이라, 여러 프로세스가 같이 쓰는 메모리가 합계에 겹치지 않는다.
   public static PitwallMemRow[] Read() {
     var rows = new List<PitwallMemRow>();
     IntPtr buf = Marshal.AllocHGlobal(96);
@@ -134,11 +142,26 @@ public static class PitwallMem {
         if (h == IntPtr.Zero) continue;
         try {
           Marshal.WriteInt32(buf, 0, 96);
-          if (GetProcessMemoryInfo(h, buf, 96)) rows.Add(new PitwallMemRow { Pid = pid, PrivateWs = Marshal.ReadInt64(buf, 80) });
+          if (GetProcessMemoryInfo(h, buf, 96)) rows.Add(new PitwallMemRow { Pid = pid, PrivateWs = Marshal.ReadInt64(buf, 80), Commit = Marshal.ReadInt64(buf, 72) });
         } finally { CloseHandle(h); }
       }
     } finally { Marshal.FreeHGlobal(buf); }
     return rows.ToArray();
+  }
+}
+public static class PitwallSys {
+  [StructLayout(LayoutKind.Sequential)] struct PerfInfo { public uint cb; public UIntPtr CommitTotal, CommitLimit, CommitPeak, PhysicalTotal, PhysicalAvailable, SystemCache, KernelTotal, KernelPaged, KernelNonpaged, PageSize; public uint HandleCount, ProcessCount, ThreadCount; }
+  [DllImport("psapi.dll")] static extern bool GetPerformanceInfo(ref PerfInfo info, uint cb);
+  // 시스템 커밋 합계·한도와 커널 메모리(paged + nonpaged pool). 값은 쪽 수라 PageSize 를 곱해 바이트로 낸다. 실패하면 null.
+  public static System.Collections.Hashtable Read() {
+    var pi = new PerfInfo(); pi.cb = (uint)Marshal.SizeOf(typeof(PerfInfo));
+    if (!GetPerformanceInfo(ref pi, pi.cb)) return null;
+    ulong page = pi.PageSize.ToUInt64();
+    var r = new System.Collections.Hashtable();
+    r["commitTotal"] = (long)(pi.CommitTotal.ToUInt64() * page);
+    r["commitLimit"] = (long)(pi.CommitLimit.ToUInt64() * page);
+    r["kernel"] = (long)((pi.KernelPaged.ToUInt64() + pi.KernelNonpaged.ToUInt64()) * page);
+    return r;
   }
 }`
 
@@ -191,8 +214,11 @@ export function windowsSampleScript(helperDllPath: string | null): string {
     'foreach ($id in @($p | ForEach-Object { $_.ProcessId })) { if ($id -le 4) { continue }; try { $d = [PitwallCwd]::Get([int]$id); if ($d) { $cwds["$id"] = $d } } catch {} }',
     '}',
     '$privateWs = @{}',
-    'if (\'PitwallMem\' -as [type]) { try { foreach ($m in [PitwallMem]::Read()) { $privateWs["$($m.Pid)"] = $m.PrivateWs } } catch {} }',
-    '$json = @{ processes = $p; tcp = $t; cwds = $cwds; privateWs = $privateWs; helperMode = $helperMode } | ConvertTo-Json -Compress -Depth 3',
+    '$commit = @{}',
+    'if (\'PitwallMem\' -as [type]) { try { foreach ($m in [PitwallMem]::Read()) { $privateWs["$($m.Pid)"] = $m.PrivateWs; $commit["$($m.Pid)"] = $m.Commit } } catch {} }',
+    '$system = $null',
+    "if ('PitwallSys' -as [type]) { try { $system = [PitwallSys]::Read() } catch {} }",
+    '$json = @{ processes = $p; tcp = $t; cwds = $cwds; privateWs = $privateWs; commit = $commit; system = $system; helperMode = $helperMode } | ConvertTo-Json -Compress -Depth 3',
     // PowerShell 호스트 출력(Write-Output)으로 600KB 가 넘는 한 줄을 내면 2초 가까이 걸린다.
     // UTF-8 바이트를 표준 출력 스트림에 직접 써서 그 시간을 없애고, 콘솔 인코딩(한글 경로)에도 의존하지 않는다.
     '$bytes = (New-Object System.Text.UTF8Encoding($false)).GetBytes($json)',
@@ -308,6 +334,25 @@ function toText(value: unknown): string {
   return typeof value === 'string' ? value : ''
 }
 
+/** ConvertTo-Json 의 해시 테이블(pid → 값 등). 객체가 아니면 빈 객체. */
+function toRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {}
+}
+
+function isBytes(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+}
+
+/** 시스템 커밋·커널(바이트). 값이 하나라도 없거나 한도가 0 이하면 모르는 것(null)으로 둔다. */
+function parseSystemMemory(value: unknown): SystemMemory | null {
+  const { commitTotal, commitLimit, kernel } = toRecord(value)
+  if (!isBytes(commitTotal) || !isBytes(commitLimit) || !isBytes(kernel) || commitLimit <= 0)
+    return null
+  return { commitUsedBytes: commitTotal, commitLimitBytes: commitLimit, kernelBytes: kernel }
+}
+
 /** PowerShell 5.1 ConvertTo-Json 의 날짜: "/Date(ms)/" 문자열, 또는 { value: "/Date(ms)/", DisplayHint } 객체. */
 function parseCimDate(value: unknown): number | null {
   if (typeof value === 'string') {
@@ -347,15 +392,18 @@ export function parseWindowsSample(raw: string): RawSample {
   // 전용 작업 세트(작업 관리자 "메모리" 열)를 쓴다. 보조 코드가 돌았는데 값이 없는 프로세스는 열 수 없었던 것
   // (보안 프로그램·다른 사용자·보호된 프로세스)이라 0 으로 두어 "시스템·공유" 몫에 들어가게 한다 — 작업 세트로 채우면
   // 공유 메모리까지 세어 실제보다 몇 배 크게 보인다. 보조 코드가 아예 없으면(막힘·오래된 Windows) 작업 세트를 쓴다.
-  const privateWs =
-    data?.privateWs && typeof data.privateWs === 'object' && !Array.isArray(data.privateWs)
-      ? (data.privateWs as Record<string, unknown>)
-      : {}
+  const privateWs = toRecord(data?.privateWs)
   const helperRead = Object.keys(privateWs).length > 0
   const memoryOf = (p: Json): number => {
     const own = privateWs[String(toNumber(p.ProcessId))]
-    if (typeof own === 'number' && Number.isFinite(own) && own >= 0) return own
+    if (isBytes(own)) return own
     return helperRead ? 0 : toNumber(p.WorkingSetSize)
+  }
+  // 커밋(PrivateUsage)은 보조 코드가 연 프로세스만 안다. 나머지는 지어내지 않고 null.
+  const commit = toRecord(data?.commit)
+  const commitOf = (p: Json): number | null => {
+    const own = commit[String(toNumber(p.ProcessId))]
+    return isBytes(own) ? own : null
   }
 
   const processes: ProcessInfo[] = toArray(data?.processes).map((p) => ({
@@ -364,6 +412,7 @@ export function parseWindowsSample(raw: string): RawSample {
     name: toText(p.Name),
     commandLine: toText(p.CommandLine),
     memoryBytes: memoryOf(p),
+    commitBytes: commitOf(p),
     cpuMs: typeof p.CpuMs === 'number' && Number.isFinite(p.CpuMs) ? p.CpuMs : null,
     startedAt:
       typeof p.StartedAt === 'number' && Number.isFinite(p.StartedAt)
@@ -394,7 +443,13 @@ export function parseWindowsSample(raw: string): RawSample {
     }
   }
 
-  return { processes, tcp, cwds, collectMode: collectModeOf(data?.helperMode) }
+  return {
+    processes,
+    tcp,
+    cwds,
+    collectMode: collectModeOf(data?.helperMode),
+    system: parseSystemMemory(data?.system)
+  }
 }
 
 type Runner = (argv: string[], opts?: CommandOptions) => Promise<CommandResult>

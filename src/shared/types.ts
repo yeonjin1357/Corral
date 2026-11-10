@@ -13,6 +13,11 @@ export interface ProcessInfo {
   startedAt: number | null
   /** 누적 CPU 시간(ms). 에이전트가 작업 중인지(CPU 변화) 판단하는 데 쓴다. 모르면 null. */
   cpuMs?: number | null
+  /**
+   * 커밋 크기(바이트, Windows `PrivateUsage`): 프로세스가 차지하기로 한 전용 메모리 전체(RAM + 페이지 파일).
+   * 메모리가 부족해 RAM 에서 밀려나도 줄지 않는다. 모르면 null·없음(macOS·보조 코드가 막힌 PC·열 수 없는 프로세스).
+   */
+  commitBytes?: number | null
 }
 
 /** TimeWait: 최근 닫힌 연결(사용 흔적). Windows 는 소유 pid 가 0 이다. */
@@ -36,6 +41,15 @@ export interface RawSample {
    */
   cwds?: Record<number, string>
   collectMode?: CollectMode
+  /** 시스템 전체 커밋·커널 메모리. 모르면 null·없음(macOS·보조 코드가 막힌 PC). */
+  system?: SystemMemory | null
+}
+
+/** Windows `GetPerformanceInfo` 의 시스템 값(바이트). kernelBytes = paged + nonpaged pool. */
+export interface SystemMemory {
+  commitUsedBytes: number
+  commitLimitBytes: number
+  kernelBytes: number
 }
 
 /**

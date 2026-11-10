@@ -1,6 +1,6 @@
 import { spawn } from 'child_process'
 import { mkdtemp, rm } from 'fs/promises'
-import { tmpdir } from 'os'
+import { tmpdir, totalmem } from 'os'
 import { join } from 'path'
 import { existsSync, writeFileSync } from 'fs'
 import { runCommand } from './runCommand'
@@ -81,7 +81,8 @@ test('프로세스·TCP 파싱, 한글 경로 보존, null 명령줄은 빈 문�
     commandLine: vite,
     memoryBytes: 1048576000,
     startedAt: 1793945439824,
-    cpuMs: null
+    cpuMs: null,
+    commitBytes: null
   })
   expect(s.processes[1].commandLine).toBe('')
   expect(s.processes[1].startedAt).toBeNull()
@@ -126,7 +127,8 @@ test('이름·메모리가 null 인 프로세스는 빈 문자열·0 으로', ()
     commandLine: '',
     memoryBytes: 0,
     startedAt: null,
-    cpuMs: null
+    cpuMs: null,
+    commitBytes: null
   })
 })
 
@@ -468,6 +470,52 @@ test('스크립트는 GetProcessMemoryInfo(PROCESS_MEMORY_COUNTERS_EX2)로 전�
   expect(WINDOWS_SAMPLE_SCRIPT).toContain('privateWs = $privateWs')
 })
 
+test('커밋 크기(commit)를 프로세스마다 읽고, 없거나 숫자가 아니면 null', () => {
+  const processes = [10, 11, 12].map((id) => ({
+    ProcessId: id,
+    ParentProcessId: 0,
+    Name: 'a',
+    CommandLine: 'a',
+    WorkingSetSize: 900
+  }))
+  const s = parseWindowsSample(
+    JSON.stringify({
+      processes,
+      tcp: [],
+      privateWs: { '10': 300 },
+      commit: { '10': 4096, '12': '4096' }
+    })
+  )
+  expect(s.processes.map((p) => p.commitBytes)).toEqual([4096, null, null])
+  // 보조 코드가 없는 샘플(제한 모드 대체 스크립트 등)은 커밋을 모른다.
+  const safe = parseWindowsSample(JSON.stringify({ processes, tcp: [] }))
+  expect(safe.processes.map((p) => p.commitBytes)).toEqual([null, null, null])
+})
+
+test('시스템 커밋·커널을 읽고, 한도가 0 이하·값이 없으면 null', () => {
+  const withSystem = (system: unknown): string => JSON.stringify({ processes: [], tcp: [], system })
+  expect(
+    parseWindowsSample(withSystem({ commitTotal: 100, commitLimit: 200, kernel: 5 })).system
+  ).toEqual({
+    commitUsedBytes: 100,
+    commitLimitBytes: 200,
+    kernelBytes: 5
+  })
+  expect(parseWindowsSample(withSystem(null)).system).toBeNull()
+  expect(
+    parseWindowsSample(withSystem({ commitTotal: 100, commitLimit: 0, kernel: 5 })).system
+  ).toBeNull()
+  expect(parseWindowsSample(withSystem({ commitTotal: 100, commitLimit: 200 })).system).toBeNull()
+  expect(parseWindowsSample(JSON.stringify({ processes: [], tcp: [] })).system).toBeNull()
+})
+
+test('스크립트는 PrivateUsage(72)와 GetPerformanceInfo 를 읽는다', () => {
+  expect(WINDOWS_SAMPLE_SCRIPT).toContain('ReadInt64(buf, 72)')
+  expect(WINDOWS_SAMPLE_SCRIPT).toContain('GetPerformanceInfo')
+  expect(WINDOWS_SAMPLE_SCRIPT).toContain('commit = $commit')
+  expect(WINDOWS_SAMPLE_SCRIPT).toContain('system = $system')
+})
+
 test('TCP 목록은 빠른 OS API(GetExtendedTcpTable)로 읽고, 막히면 Get-NetTCPConnection 으로 대신한다', () => {
   expect(WINDOWS_SAMPLE_SCRIPT).toContain('GetExtendedTcpTable')
   expect(WINDOWS_SAMPLE_SCRIPT).toMatch(/if \(\$t -eq \$null\) \{[\s\S]*Get-NetTCPConnection/)
@@ -587,6 +635,18 @@ describe.runIf(process.platform === 'win32')('실제 Windows 에서', () => {
     const self = data.processes.find((p) => p.ProcessId === process.pid)!
     expect(data.privateWs[String(process.pid)]).toBeGreaterThan(0)
     expect(data.privateWs[String(process.pid)]).toBeLessThan(self.WorkingSetSize)
+  }, 30000)
+
+  test('실제 스크립트가 커밋과 시스템 커밋을 낸다', async () => {
+    const s = await sampleWindows()
+    const known = s.processes.filter((p) => (p.commitBytes ?? 0) > 0)
+    expect(known.length).toBeGreaterThanOrEqual(s.processes.length / 2)
+    const self = s.processes.find((p) => p.pid === process.pid)!
+    expect(self.commitBytes).toBeGreaterThanOrEqual(self.memoryBytes * 0.5)
+    expect(s.system?.commitLimitBytes).toBeGreaterThanOrEqual(totalmem())
+    expect(s.system?.commitUsedBytes).toBeGreaterThan(0)
+    expect(s.system!.commitUsedBytes).toBeLessThanOrEqual(s.system!.commitLimitBytes)
+    expect(s.system?.kernelBytes).toBeGreaterThan(0)
   }, 30000)
 
   test('제한 모드(ConstrainedLanguage)에서도 대체 스크립트로 수집되고 한글 인자가 보존된다', async () => {
