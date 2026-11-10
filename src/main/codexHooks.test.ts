@@ -29,8 +29,10 @@ test('Codex 훅 명령: 표준입력을 로컬 훅 서버의 codex 경로로 보
     async: true,
     timeout: 5
   })
+  // pitwall 이 꺼져 있어도 Codex 가 훅 실패로 보지 않게 종료 코드를 0 으로 둔다(cmd·PowerShell 어느 셸로 돌려도 같게:
+  // cmd 를 직접 부르고, 그 안의 경로는 역슬래시 — cmd 는 슬래시 경로 명령을 구문 오류로 본다).
   const win = codexHookCommand('win32', 45123, TOKEN, 'C:\\Windows')
-  const expected = `C:/Windows/System32/curl.exe -s -m 2 -o NUL --data-binary "@-" "http://127.0.0.1:45123/pitwall-hook/codex?t=${TOKEN}"`
+  const expected = `C:\\Windows\\System32\\cmd.exe /d /c "C:\\Windows\\System32\\curl.exe -s -m 2 -o NUL --data-binary @- http://127.0.0.1:45123/pitwall-hook/codex?t=${TOKEN} & exit /b 0"`
   expect(win).toEqual({
     type: 'command',
     command: expected,

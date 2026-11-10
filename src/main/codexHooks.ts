@@ -39,8 +39,9 @@ const SAFE_WINDOWS_DIR = /^[A-Za-z]:\\[A-Za-z0-9_.\\-]*$/
 
 /**
  * 훅 명령. 표준입력(이벤트 JSON)을 curl 이 직접 읽어 로컬 훅 서버로 보내고 출력은 버린다(Codex 에 끼어들지 않음).
- * Windows 명령은 큰따옴표만 써서 cmd·PowerShell·Git Bash 어느 셸로 돌려도 같게 동작한다. 백그라운드(async)로
- * 돌아 pitwall 이 꺼져 있어도 Codex 를 기다리게 하지 않는다.
+ * pitwall 이 꺼져 있어도 0 으로 끝나 Codex 가 훅 실패로 보지 않는다(Windows 는 cmd·PowerShell 두 셸에서 시험함:
+ * 켜져 있으면 이벤트가 오고, 꺼져 있으면 종료 코드 0). 백그라운드(async)로 돌아 Codex 를 기다리게 하지 않는다
+ * (항상 동기로 도는 SessionEnd 만 pitwall 이 꺼져 있을 때 최대 2초 걸린다).
  */
 export function codexHookCommand(
   platform: Platform,
@@ -52,11 +53,13 @@ export function codexHookCommand(
   if (!TOKEN_PATTERN.test(token)) throw new Error('invalid hook token')
   const url = `http://127.0.0.1:${port}${CODEX_HOOK_PATH}?t=${token}`
   if (platform === 'win32') {
-    const curl =
+    const system =
       systemRoot && SAFE_WINDOWS_DIR.test(systemRoot)
-        ? `${systemRoot.replace(/\\/g, '/').replace(/\/$/, '')}/System32/curl.exe`
-        : 'curl.exe'
-    const command = `${curl} -s -m 2 -o NUL --data-binary "@-" "${url}"`
+        ? `${systemRoot.replace(/\\$/, '')}\\System32\\`
+        : ''
+    // cmd 로 감싸 curl 이 실패해도(pitwall 이 꺼져 있음) 0 으로 끝낸다. Codex 가 어떤 셸(cmd·PowerShell)로
+    // 돌려도 같게 동작한다. cmd 는 슬래시 경로 명령을 구문 오류로 보므로 역슬래시, 주소는 cmd 특수 문자가 없다.
+    const command = `${system}cmd.exe /d /c "${system}curl.exe -s -m 2 -o NUL --data-binary @- ${url} & exit /b 0"`
     return { type: 'command', command, commandWindows: command, async: true, timeout: 5 }
   }
   return {

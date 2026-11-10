@@ -244,6 +244,35 @@ describe('검토 뒤 보강(긴 턴·다른 프로세스의 기록)', () => {
     })
   })
 
+  test('훅이 알려 준 기록 파일이 있으면 그 파일을 읽는다(같은 폴더의 다른 파일을 고르지 않는다)', async () => {
+    const start = new Date(2026, 10, 9, 11, 0, 0)
+    const own = await rolloutAt(new Date(2026, 10, 9, 11, 1, 0), [
+      event('task_started', '2026-11-09T02:01:00.000Z')
+    ])
+    // 같은 폴더에서 나중에 만들어진 다른 기록(끝난 턴) — 찾기 규칙으로는 이쪽이 골라질 수 있다.
+    await rolloutAt(new Date(2026, 10, 9, 11, 2, 0), [
+      event('task_complete', '2026-11-09T02:03:00.000Z')
+    ])
+    const reader = createCodexReader(home)
+    const agent = { cwd: CWD, startedAt: start.getTime(), transcriptPath: own }
+    expect(await reader.stateFor(agent, start.getTime() + 5 * MIN)).toEqual({
+      state: 'working',
+      since: Date.parse('2026-11-09T02:01:00.000Z')
+    })
+  })
+
+  test('sessions 폴더 밖의 경로는 따르지 않고 찾기 규칙을 쓴다', async () => {
+    const start = new Date(2026, 10, 9, 12, 0, 0)
+    await rolloutAt(new Date(2026, 10, 9, 12, 1, 0), [
+      event('task_complete', '2026-11-09T03:02:00.000Z')
+    ])
+    const outside = join(home, 'elsewhere.jsonl')
+    await writeFile(outside, event('task_started', '2026-11-09T03:01:00.000Z') + '\n')
+    const reader = createCodexReader(home)
+    const agent = { cwd: CWD, startedAt: start.getTime(), transcriptPath: outside }
+    expect((await reader.stateFor(agent, start.getTime() + 5 * MIN))?.state).toBe('idle')
+  })
+
   test('다른 Codex 프로세스가 살아 있던 동안 만든 기록 파일은 고르지 않는다(그 프로세스 것일 수 있다)', async () => {
     const start = new Date(2026, 10, 9, 9, 0, 0)
     const own = await rolloutAt(new Date(2026, 10, 9, 9, 1, 0), [

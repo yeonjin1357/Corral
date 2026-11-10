@@ -1,5 +1,5 @@
 import { open, readdir, stat } from 'fs/promises'
-import { join } from 'path'
+import { join, resolve, sep } from 'path'
 
 /**
  * Codex 세션 기록(rollout) 읽기(F7 기본). 사용자 설정을 바꾸지 않고 `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-*.jsonl`
@@ -184,10 +184,23 @@ const NEWLINE = 0x0a
  */
 export function createCodexReader(home: string): {
   stateFor(
-    agent: { cwd: string; startedAt: number | null; exclude?: { from: number; to: number }[] },
+    agent: {
+      cwd: string
+      startedAt: number | null
+      exclude?: { from: number; to: number }[]
+      /** 훅이 알려 준 그 세션의 기록 파일. sessions 폴더 안이면 찾지 않고 이 파일을 읽는다. */
+      transcriptPath?: string | null
+    },
     now: number
   ): Promise<RolloutState | null>
 } {
+  const sessionsDir = resolve(home, 'sessions') + sep
+  const insideSessions = (path: string): boolean => {
+    const full = resolve(path)
+    return process.platform === 'win32' || process.platform === 'darwin'
+      ? full.toLowerCase().startsWith(sessionsDir.toLowerCase())
+      : full.startsWith(sessionsDir)
+  }
   const progress = new Map<string, { offset: number; rest: Buffer; state: RolloutState | null }>()
 
   async function follow(path: string): Promise<RolloutState | null> {
@@ -242,7 +255,11 @@ export function createCodexReader(home: string): {
   }
   return {
     async stateFor(agent, now) {
-      const path = await findRollout(home, agent, now, cachedCwd)
+      const given = agent.transcriptPath
+      const path =
+        given && /\.jsonl$/i.test(given) && insideSessions(given)
+          ? resolve(given)
+          : await findRollout(home, agent, now, cachedCwd)
       return path ? follow(path).catch(() => null) : null
     }
   }

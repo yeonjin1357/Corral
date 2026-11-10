@@ -1,5 +1,6 @@
 import {
   applyHookEvent,
+  codexTranscriptFor,
   reconcileSessions,
   SESSION_EXPIRE_MS,
   hookStateForWorktree,
@@ -394,5 +395,70 @@ describe('Codex 훅 세션(F7)', () => {
     applyHookEvent(alone, codexEv('SessionStart'), 1000, 'codex')
     reconcileSessions(alone, { now: 3000, sampledAt: 2000, live: [live[0]], rootOfCwd: root })
     expect(alone.size).toBe(0)
+  })
+})
+
+describe('Codex 세션 기록 파일(transcript_path)', () => {
+  const PATH_A = '/home/dev/.codex/sessions/2026/11/10/rollout-a.jsonl'
+  const PATH_B = '/home/dev/.codex/sessions/2026/11/10/rollout-b.jsonl'
+  const rootOf = (cwd: string): string | null => (cwd.startsWith('/work/app') ? '/work/app' : null)
+
+  test('Codex 이벤트의 기록 파일 경로를 기억하고, 이후 경로 없는 이벤트에도 유지한다', () => {
+    const sessions: Sessions = new Map()
+    applyHookEvent(
+      sessions,
+      {
+        session_id: 'c1',
+        cwd: '/work/app',
+        hook_event_name: 'SessionStart',
+        transcript_path: PATH_A
+      },
+      1000,
+      'codex'
+    )
+    applyHookEvent(
+      sessions,
+      { session_id: 'c1', hook_event_name: 'UserPromptSubmit' },
+      2000,
+      'codex'
+    )
+    expect(sessions.get('c1')?.transcriptPath).toBe(PATH_A)
+  })
+
+  test('.jsonl 이 아니거나 너무 긴 경로, Claude 이벤트의 경로는 기억하지 않는다', () => {
+    const sessions: Sessions = new Map()
+    const ev = (id: string, transcript_path: unknown): Record<string, unknown> => ({
+      session_id: id,
+      cwd: '/work/app',
+      hook_event_name: 'SessionStart',
+      transcript_path
+    })
+    applyHookEvent(sessions, ev('a', '/etc/passwd'), 1000, 'codex')
+    applyHookEvent(sessions, ev('b', '/x/' + 'y'.repeat(5000) + '.jsonl'), 1000, 'codex')
+    applyHookEvent(sessions, ev('c', PATH_A), 1000, 'claude')
+    expect([...sessions.values()].map((s) => s.transcriptPath ?? null)).toEqual([null, null, null])
+  })
+
+  test('그 워크트리의 Codex 세션 중 프로세스 시작 뒤 소식이 온 가장 최근 세션의 기록 파일', () => {
+    const sessions: Sessions = new Map()
+    const start = (id: string, path: string, at: number): void => {
+      applyHookEvent(
+        sessions,
+        {
+          session_id: id,
+          cwd: '/work/app',
+          hook_event_name: 'SessionStart',
+          transcript_path: path
+        },
+        at,
+        'codex'
+      )
+    }
+    start('old', PATH_A, 1000)
+    start('new', PATH_B, 5000)
+    expect(codexTranscriptFor(sessions, '/work/app', rootOf, 4000)).toBe(PATH_B)
+    // 프로세스가 마지막 소식보다 뒤에 시작했으면 그 세션들은 이 프로세스 것이 아니다.
+    expect(codexTranscriptFor(sessions, '/work/app', rootOf, 6000)).toBeNull()
+    expect(codexTranscriptFor(sessions, '/work/other', rootOf, 0)).toBeNull()
   })
 })

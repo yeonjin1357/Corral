@@ -21,6 +21,8 @@ export interface ClaudeSession {
   stateSince?: number
   /** 어느 도구의 세션인지(없으면 claude). */
   tool?: AgentTool
+  /** Codex 세션 기록 파일(훅 이벤트의 transcript_path). 그 프로세스의 기록을 정확히 고르는 데 쓴다. */
+  transcriptPath?: string | null
 }
 
 /** 수집 때 본 최상위 에이전트 프로세스(Claude·Codex). */
@@ -131,6 +133,12 @@ export function applyHookEvent(
     typeof ev.cwd === 'string' && ev.cwd && ev.cwd.length <= MAX_CWD_LENGTH ? ev.cwd : null
   const cwd = given ?? existing?.cwd
   const state = nextState(ev, existing, now)
+  const transcript =
+    typeof ev.transcript_path === 'string' &&
+    ev.transcript_path.length <= MAX_CWD_LENGTH &&
+    /\.jsonl$/i.test(ev.transcript_path)
+      ? ev.transcript_path
+      : null
   if (!cwd || (!existing && !state)) return false
 
   const next = state ?? existing!.state
@@ -144,6 +152,7 @@ export function applyHookEvent(
     firstSeen: existing?.firstSeen ?? now,
     processKey: existing?.processKey ?? null,
     ...(tool === 'claude' ? {} : { tool }),
+    ...(tool === 'codex' ? { transcriptPath: transcript ?? existing?.transcriptPath ?? null } : {}),
     stateSince:
       existing && existing.state === next ? (existing.stateSince ?? existing.firstSeen) : now,
     ...(next === 'waiting' ? { waitingTool: waitingToolOf(ev, existing) } : {}),
@@ -249,6 +258,25 @@ export function hookStateForWorktree(
       best = { state: s.state, since }
   }
   return best
+}
+
+/**
+ * 워크트리의 Codex 세션 중 프로세스가 시작한 뒤 소식이 온 가장 최근 세션의 기록 파일. 없으면 null.
+ * (같은 폴더에 Codex 가 하나일 때만 쓴다 — 둘 이상이면 수집기가 기록을 읽지 않는다.)
+ */
+export function codexTranscriptFor(
+  sessions: Sessions,
+  root: string,
+  rootOfCwd: (cwd: string) => string | null,
+  startedAt: number | null
+): string | null {
+  let best: ClaudeSession | null = null
+  for (const s of sessions.values()) {
+    if (toolOf(s) !== 'codex' || !s.transcriptPath || rootOfCwd(s.cwd) !== root) continue
+    if (startedAt != null && s.updatedAt < startedAt) continue
+    if (!best || s.updatedAt > best.updatedAt) best = s
+  }
+  return best?.transcriptPath ?? null
 }
 
 /** 워크트리의 에이전트 상태(도구별, 기본 Claude). 그 워크트리 세션이 없으면 null. */

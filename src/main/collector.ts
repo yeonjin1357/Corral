@@ -24,7 +24,13 @@ import {
 } from './agents'
 import { activityOf, judgeServers, type ServerMemo } from './judge'
 import { agentToolOf, topLevelAgentPids } from './processTree'
-import { hookStateForWorktree, reconcileSessions, type LiveClaude, type Sessions } from './sessions'
+import {
+  codexTranscriptFor,
+  hookStateForWorktree,
+  reconcileSessions,
+  type LiveClaude,
+  type Sessions
+} from './sessions'
 import { buildSnapshot, pidsForWorktreeLookup } from './snapshot'
 import { createServerHistory, type ServerHistoryData } from './serverHistory'
 import { cwdKey, type RolloutState } from './codexRollout'
@@ -172,7 +178,8 @@ export function createCollector(deps: CollectorDeps): {
   async function readRollouts(
     agents: AgentRow[],
     cwds: Record<number, string>,
-    now: number
+    now: number,
+    rootOfCwd: (cwd: string) => string | null
   ): Promise<Map<number, RolloutState>> {
     const result = new Map<number, RolloutState>()
     const read = deps.codexState
@@ -203,11 +210,24 @@ export function createCollector(deps: CollectorDeps): {
         const exclude = [...(codexLives.get(cwdKey(cwd)) ?? new Map()).entries()]
           .filter(([id]) => id !== agentKey(a))
           .map(([, life]) => ({ from: life.startedAt, to: life.lastSeen + CODEX_LIFE_SLACK_MS }))
+        // 훅으로 아는 Codex 는 훅이 알려 준 그 세션의 기록 파일을 읽는다(같은 폴더의 다른 파일을 고르지 않게).
+        const transcriptPath =
+          a.stateSource === 'hook' && a.worktree
+            ? codexTranscriptFor(
+                deps.sessions,
+                worktreeKey(a.worktree.root),
+                rootOfCwd,
+                a.startedAt
+              )
+            : null
         try {
           const state = await read(
-            exclude.length
-              ? { cwd, startedAt: a.startedAt, exclude }
-              : { cwd, startedAt: a.startedAt },
+            {
+              cwd,
+              startedAt: a.startedAt,
+              ...(exclude.length ? { exclude } : {}),
+              ...(transcriptPath ? { transcriptPath } : {})
+            },
             now
           )
           if (state) result.set(a.pid, state)
@@ -351,7 +371,7 @@ export function createCollector(deps: CollectorDeps): {
       hookStates: hookStateFor(roots)
     })
     previousCpu = cpu
-    rollouts = await readRollouts(built, raw.cwds ?? {}, now)
+    rollouts = await readRollouts(built, raw.cwds ?? {}, now, (cwd) => roots.get(cwd) ?? null)
     const withRollout = built.map((a): AgentRow => {
       const r = rollouts.get(a.pid)
       if (!r) return a

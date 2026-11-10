@@ -602,6 +602,32 @@ describe('Codex 연동 훅(F7)', () => {
     expect(s.codexHook).toEqual(status)
   })
 
+  test('훅으로 작업 중인 Codex 는 훅이 알려 준 세션 기록 파일을 읽는다', async () => {
+    const codexState = vi.fn<NonNullable<CollectorDeps['codexState']>>(async () => null)
+    const { deps, sessions } = setup({
+      codexState,
+      resolveWorktree: async (path) =>
+        path.startsWith(W1.root) ? W1 : path.startsWith(W2.root) ? W2 : null
+    })
+    const transcript = 'C:\\Users\\dev\\.codex\\sessions\\2026\\11\\10\\rollout-x.jsonl'
+    applyHookEvent(
+      sessions,
+      {
+        session_id: 'c1',
+        cwd: W2.root,
+        hook_event_name: 'UserPromptSubmit',
+        transcript_path: transcript
+      },
+      MIN,
+      'codex'
+    )
+    await createCollector(deps).collect()
+    expect(codexState).toHaveBeenCalledWith(
+      expect.objectContaining({ cwd: W2.root, transcriptPath: transcript }),
+      expect.any(Number)
+    )
+  })
+
   test('연동 상태를 읽다 실패하면 error(settings), 연동이 없으면 null', async () => {
     const failing = setup({
       codexHookStatus: async () => {
