@@ -570,6 +570,46 @@
 - [ ] **Step 2–4:** 실패 확인 → 구현 → `npm run typecheck && npm test`
 - [ ] **Step 5: 커밋** — `feat: 세션 기록에서 토큰 숫자와 Codex 사용 한도를 읽는다`
 
+### Task 19b: 세션 파일의 입력 대기(waiting)·백그라운드 셸(shell) 상태 (G3a 보강)
+
+**배경(확인된 사실).** Claude Code 가 남기는 실행 중 세션 파일(`<Claude 설정 폴더>/sessions/<pid>.json`)의 `status` 값은
+`busy`·`idle` 만이 아니라 네 가지다: `busy`, `shell`, `idle`, `waiting`.
+- `shell` = 턴이 끝나 쉬는 중인데 그 세션이 띄운 백그라운드 셸(또는 모니터)이 돌고 있는 상태.
+- `waiting` = 사용자 응답을 기다리는 상태. 같은 파일에 `waitingFor`(짧은 영어 글)가 함께 적힌다. 알려진 값:
+  `permission prompt`(도구 권한·계획 승인 등 — 기본값), `input needed`(질문·입력 요청), `sandbox request`, `worker request`
+  (하위 작업의 요청), `goal proposal`, `dialog open`(슬래시 명령 창 등 — 대개 사용자가 직접 연 창).
+- 지금 구현(Task 6)은 `idle`·`busy` 만 받아들여, `shell` 인 세션은 CPU 추정으로 떨어지고 `waiting` 은 버려진다.
+- 문서화되지 않은 내부 형식이다. 모르는 값은 지어내지 않는다(지금처럼 `null`).
+
+**Files:**
+- Modify: `src/main/claudeSessionFiles.ts`, `src/main/collector.ts`, `src/main/notifier.ts`, `src/shared/types.ts`, `src/shared/text.ts`, `src/renderer/src/rows.ts`, `src/renderer/src/testing/fixtures.ts`(와 `AgentRow` 를 만드는 다른 테스트 표본)
+- Test: `src/main/claudeSessionFiles.test.ts`, `src/main/collector.test.ts`, `src/main/notifier.test.ts`, `src/renderer/src/rows.test.ts`
+
+**Interfaces:**
+- Produces:
+  - `type WaitReason = 'permission' | 'input' | 'sandbox' | 'worker' | 'goal' | 'other'` (`src/shared/types.ts`).
+  - `AgentRow.waitReason: WaitReason | null` — 상태가 `waiting` 이고 그 근거가 세션 파일(`stateSource: 'file'`)일 때만 값, 아니면 null.
+  - `ClaudeSessionFile.status: 'idle' | 'busy' | 'shell' | 'waiting' | null`, `ClaudeSessionFile.waitingFor: string | null`(문자열이고 1~40자일 때만, 아니면 null).
+  - `waitReasonOf(waitingFor: string | null): WaitReason | 'dialog'` — `permission prompt` → `permission`, `input needed` → `input`, `sandbox request` → `sandbox`, `worker request` → `worker`, `goal proposal` → `goal`, `dialog open` → `'dialog'`, 그 밖(null 포함) → `other`.
+  - `fileStateOver(file, hook): 'working' | 'idle' | 'waiting' | null` — 파일 상태의 뜻:
+    - `busy` → `working`
+    - `idle`·`shell` → `idle`
+    - `waiting` 이고 `waitReasonOf(waitingFor) === 'dialog'` → `idle`(사용자가 연 창일 수 있어 "기다림"으로 알리지 않는다)
+    - `waiting` 이고 그 밖 → `waiting`
+    - 훅과 함께일 때의 규칙은 그대로다: 파일의 `statusUpdatedAt` 이 훅의 `lastActivityAt` 보다 `FILE_NEWER_SLACK_MS` 넘게 늦을 때만 파일을 따르고, 훅이 `waiting` 이면 파일에서 나온 `idle` 은 따르지 않는다(이 규칙은 건드리지 않는다). 파일의 `waiting` 은 다른 상태와 같은 "더 늦은 근거" 규칙을 따른다(훅이 같은 때 권한 대기를 알렸으면 훅이 이긴다 — 도구 이름을 아는 쪽).
+  - 수집기: 파일을 따라 `waiting` 이 된 행은 `stateSource: 'file'`, `waitReason` = 그 이유. 마지막 활동 시각(`exactActivityOf`)은 `busy` 만 "지금"이고 `waiting`·`shell`·`idle` 은 `statusUpdatedAt`. `stateSince` 도 `statusUpdatedAt`. `restate()` 가 다시 만들 때도 같다. 그 밖의 행은 `waitReason: null`.
+  - 알림(`notifier.ts`): 권한 대기 알림·다시 알림의 대상을 `stateSource === 'hook'` 에서 `'hook' | 'file'` 로 넓힌다(설정·간격·묶음 규칙은 그대로). 제목은 이유에 따라: `waitReason` 이 null(훅)·`permission`·`sandbox`·`worker` 면 지금 문구(`text.notify.waitingTitle`), `input`·`goal`·`other` 면 새 문구 `text.notify.waitingInputTitle(tool)` = `${tool} 가 답을 기다려요`. 여러 개 묶음 제목·다시 알림 제목은 지금 문구 그대로 쓴다. 꺼진 알림(`goneBody.waiting`)도 그대로.
+  - 화면(`rows.ts`): 에이전트 표의 "하는 일" 칸에서, 권한을 기다리는 도구(`activity.waiting`)가 없고 `waitReason` 이 있으면 `text.ui.agents.waitReason[reason]` 을 보인다(하는 일 보기 설정 `showAgentActivity` 와 상관없이 — 내용이 아니라 상태 이유다). 문구: `permission: '권한 확인 대기'`, `input: '질문에 답 대기'`, `sandbox: '샌드박스 허용 대기'`, `worker: '하위 작업 요청 대기'`, `goal: '목표 제안에 답 대기'`, `other: '응답 대기'`. 상세 패널(ItemSheet)의 상태 근거 줄이 있으면 같은 문구를 덧붙인다(없으면 넘어간다).
+  - 문구 고침(`text.ts`): 세션 파일 근거 설명(지금 `'Claude Code 가 남기는 세션 파일로 작업 중·쉬는 중을 알아요. 권한 대기는 Claude 연동을 켜야 알 수 있어요.'`)을 `'Claude Code 가 남기는 세션 파일로 작업 중·쉬는 중·응답 대기를 알아요. 어떤 도구가 권한을 기다리는지는 Claude 연동을 켜야 알 수 있어요.'` 로. `types.ts` 의 `AgentState` 주석("훅으로만 앎")도 사실에 맞게 고친다.
+
+- [ ] **Step 1: 실패하는 테스트**
+  - `claudeSessionFiles.test.ts`: `test('status shell 은 쉬는 중으로 읽는다')`; `test('status waiting 과 waitingFor 를 읽는다')`; `test('waitingFor 가 문자열이 아니거나 40자를 넘으면 null')`; `test('모르는 status 는 null(지어내지 않음)')`(기존 것이 있으면 값만 넓힘); `test('waitReasonOf: 알려진 값 다섯 가지와 dialog, 그 밖은 other')`; `test('fileStateOver: waiting(permission prompt) 은 입력 대기, waiting(dialog open) 은 쉬는 중')`; `test('fileStateOver: 훅이 더 늦으면 파일의 waiting 을 따르지 않는다')`; `test('fileStateOver: 훅이 권한 대기면 파일의 shell 도 따르지 않는다')`.
+  - `collector.test.ts`: `test('세션 파일이 waiting 이면 훅 없이도 입력 대기(file)이고 waitReason 을 갖는다')`; `test('세션 파일이 shell 이면 쉬는 중(file)이고 마지막 활동은 상태가 바뀐 시각')`; `test('훅으로 권한 대기를 아는 행의 waitReason 은 null')`.
+  - `notifier.test.ts`: `test('세션 파일로 안 입력 대기도 알린다')`; `test('질문·입력 요청이면 제목은 "답을 기다려요"')`; `test('세션 파일로 안 입력 대기도 다시 알린다')`.
+  - `rows.test.ts`: `test('하는 일 칸: 기다리는 도구를 모르면 대기 이유를 보인다')`; `test('하는 일 보기를 꺼도 대기 이유는 보인다')`(행의 `activity` 가 null 일 때).
+- [ ] **Step 2–4:** 실패 확인 → 구현 → `npm run typecheck && npm run lint && npm test`
+- [ ] **Step 5: 커밋** — `feat: 세션 파일의 응답 대기·백그라운드 셸 상태를 읽어 훅 없이도 기다리는 에이전트를 안다`
+
 ### Task 20: 토큰 화면 (G6)
 
 **Files:**
