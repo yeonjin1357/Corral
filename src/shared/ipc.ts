@@ -23,6 +23,7 @@ export const IPC = {
   diskRemove: 'pitwall:disk-remove',
   refreshNow: 'pitwall:refresh-now',
   openPort: 'pitwall:open-port',
+  quick: 'pitwall:quick',
   claudeHookStatus: 'pitwall:claude-hook-status',
   claudeHookEnable: 'pitwall:claude-hook-enable',
   claudeHookDisable: 'pitwall:claude-hook-disable',
@@ -41,6 +42,9 @@ export const IPC = {
   updateInstall: 'pitwall:update-install',
   updateChanged: 'pitwall:update-changed'
 } as const
+
+/** 바로 가기(G3f): 경로 복사·폴더 열기·터미널 열기. */
+export type QuickKind = 'copy' | 'folder' | 'terminal'
 
 /** 알림·트레이에서 창을 열며 보여 줄 곳. key 는 목록 선택 키(null 이면 한눈에 보기). */
 export type NavigateTarget = { page: 'dashboard'; key: string | null } | { page: 'settings' }
@@ -78,6 +82,11 @@ export interface PitwallApi {
   refreshNow(): Promise<void>
   /** 목록에 있는 개발 서버 포트를 기본 브라우저로 연다. 열었으면 true. */
   openPort(port: number): Promise<boolean>
+  /**
+   * 바로 가기: 그 폴더의 경로를 복사하거나 탐색기(Finder)·터미널로 연다. 메인은 지금 스냅샷에 있는 폴더만 다룬다
+   * (path 는 찾는 열쇠일 뿐 그대로 열지 않는다). 했으면 true.
+   */
+  quick(kind: QuickKind, path: string): Promise<boolean>
   /** Claude 훅 연동. 켜기·끄기는 메인에서 설정 파일 경로와 백업을 알리는 확인 창을 띄운다. */
   claudeHook: {
     status(): Promise<ClaudeHookStatus | null>

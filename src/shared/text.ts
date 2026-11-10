@@ -454,6 +454,14 @@ export const text = {
       killLeftover: '끄기',
       remove: '의존성 폴더 지우기'
     },
+    /** 상세 패널의 바로 가기(G3f). */
+    quick: {
+      copy: '경로 복사',
+      folder: '폴더 열기',
+      terminal: '터미널 열기',
+      copied: '경로를 복사했어요.',
+      failed: '열지 못했어요. 폴더가 없어졌을 수 있어요.'
+    },
     footer: {
       count: (label: string, n: number): string => `${label} ${n}개`,
       takenAt: (time: string): string => `${time} 기준`

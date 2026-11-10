@@ -2,7 +2,7 @@
 import { mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach } from 'vitest'
 import ItemSheet, { type Selected } from './ItemSheet.vue'
-import { MB, agentRow, diskRow, heavyJob, serverRow } from '../testing/fixtures'
+import { MB, agentRow, diskRow, heavyJob, leftoverRow, serverRow } from '../testing/fixtures'
 import type { ClaudeHookStatus } from '../../../shared/types'
 
 let wrapper: VueWrapper | null = null
@@ -52,6 +52,71 @@ describe('상세 패널: 포트별 열기', () => {
     expect(buttons.map((b) => b.textContent!.trim())).toEqual(['브라우저로 열기'])
     buttons[0].click()
     expect(w.emitted('open')).toEqual([[3000]])
+  })
+})
+
+describe('상세 패널: 바로 가기(G3f)', () => {
+  const quickButtons = (): HTMLElement[] => [
+    ...document.body.querySelectorAll<HTMLElement>('[data-quick]')
+  ]
+
+  test('워크트리를 아는 항목은 경로 복사·폴더 열기·터미널 열기, 누르면 그 폴더로', () => {
+    const w = sheet({ kind: 'server', row: serverRow() })
+    expect(quickButtons().map((b) => b.textContent!.trim())).toEqual([
+      '경로 복사',
+      '폴더 열기',
+      '터미널 열기'
+    ])
+    for (const b of quickButtons()) b.click()
+    expect(w.emitted('quick')).toEqual([
+      ['copy', 'C:\\work\\shop-web'],
+      ['folder', 'C:\\work\\shop-web'],
+      ['terminal', 'C:\\work\\shop-web']
+    ])
+  })
+
+  test('에이전트·무거운 작업·남은 프로세스·디스크 정리도 그 폴더로', () => {
+    const cases: [Selected, string][] = [
+      [{ kind: 'agent', row: agentRow() }, 'C:\\work\\wt-a'],
+      [
+        {
+          kind: 'heavy',
+          row: heavyJob({
+            worktree: { root: 'C:\\work\\heavy', branch: 'main', isLinkedWorktree: false }
+          })
+        },
+        'C:\\work\\heavy'
+      ],
+      [
+        {
+          kind: 'leftover',
+          row: leftoverRow({
+            worktree: { root: 'C:\\work\\left', branch: 'main', isLinkedWorktree: false }
+          })
+        },
+        'C:\\work\\left'
+      ],
+      [{ kind: 'disk', row: diskRow() }, 'C:\\work\\old-feature']
+    ]
+    for (const [item, path] of cases) {
+      wrapper?.unmount()
+      const w = sheet(item)
+      quickButtons()
+        .find((b) => b.dataset.quick === 'folder')!
+        .click()
+      expect(w.emitted('quick')).toEqual([['folder', path]])
+    }
+  })
+
+  test('폴더를 모르면(판별 불가 서버·주인 폴더를 모르는 남은 프로세스) 바로 가기가 없다', () => {
+    sheet({
+      kind: 'server',
+      row: serverRow({ worktree: null, unresolvable: true, processName: 'wslrelay.exe' })
+    })
+    expect(quickButtons()).toEqual([])
+    wrapper?.unmount()
+    sheet({ kind: 'leftover', row: leftoverRow({ worktree: null }) })
+    expect(quickButtons()).toEqual([])
   })
 })
 

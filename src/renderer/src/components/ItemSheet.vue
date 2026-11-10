@@ -1,24 +1,29 @@
 <!--
   NeoHtop (MIT) modals/ProcessDetailsModal.svelte 의 오른쪽 패널(아이콘 상자 + 제목, 두 숫자 카드, 정보 카드, 명령줄 카드).
   바꾼 점: 프로세스 하나 대신 pitwall 항목(포트·에이전트·남은 프로세스·무거운 작업·디스크 정리)을 보여 주고,
-  제목 아래에 그 항목의 동작(브라우저로 열기·내리기·끄기·지우기) 버튼을 둔다. 모두 OS 확인 창을 거친다.
+  제목 아래에 그 항목의 동작(브라우저로 열기·내리기·끄기·지우기) 버튼을 둔다. 끄기·지우기는 OS 확인 창을 거친다.
+  폴더를 아는 항목에는 바로 가기(경로 복사·폴더 열기·터미널 열기)도 둔다.
 -->
 <script setup lang="ts">
 import { computed } from 'vue'
 import {
+  Copy,
   Cpu,
   EyeOff,
   ExternalLink,
   FolderGit2,
+  FolderOpen,
   HardDrive,
   Layers,
   MemoryStick,
   Plug,
+  SquareTerminal,
   Terminal,
   Timer,
   Trash2,
   X
 } from '@lucide/vue'
+import type { QuickKind } from '../../../shared/ipc'
 import type {
   AgentRow,
   ClaudeHookStatus,
@@ -70,10 +75,28 @@ const props = defineProps<{
   platform: Platform | null
   cpuCount: number
 }>()
-const emit = defineEmits<{ open: [port: number]; kill: []; remove: []; hide: [] }>()
+const emit = defineEmits<{
+  open: [port: number]
+  kill: []
+  remove: []
+  hide: []
+  quick: [kind: QuickKind, path: string]
+}>()
 const open = defineModel<boolean>('open', { required: true })
 
 const t = text.ui
+
+/** 바로 가기로 다룰 그 항목의 폴더(워크트리). 모르면(판별 불가 등) null 이고 바로 가기를 보이지 않는다. */
+const quickPath = computed(() => {
+  const item = props.item
+  if (!item) return null
+  return item.kind === 'disk' ? item.row.worktreeRoot : (item.row.worktree?.root ?? null)
+})
+const QUICK: { kind: QuickKind; icon: unknown; label: string }[] = [
+  { kind: 'copy', icon: Copy, label: t.quick.copy },
+  { kind: 'folder', icon: FolderOpen, label: t.quick.folder },
+  { kind: 'terminal', icon: SquareTerminal, label: t.quick.terminal }
+]
 /** 11월 9일 오전 9:10 */
 const time = (ms: number): string =>
   new Date(ms).toLocaleString('ko-KR', {
@@ -437,7 +460,9 @@ const folderSize = (f: DiskRow['folders'][number]): string =>
       </div>
 
       <div
-        v-if="item.kind === 'server' || item.kind === 'leftover' || item.kind === 'disk'"
+        v-if="
+          item.kind === 'server' || item.kind === 'leftover' || item.kind === 'disk' || quickPath
+        "
         class="flex flex-wrap gap-2"
       >
         <template v-if="item.kind === 'server'">
@@ -494,6 +519,19 @@ const folderSize = (f: DiskRow['folders'][number]): string =>
         >
           <Trash2 />{{ t.actions.remove }}
         </Button>
+        <template v-if="quickPath">
+          <Button
+            v-for="q in QUICK"
+            :key="q.kind"
+            variant="outline"
+            size="sm"
+            :data-quick="q.kind"
+            :title="quickPath"
+            @click="emit('quick', q.kind, quickPath)"
+          >
+            <component :is="q.icon" />{{ q.label }}
+          </Button>
+        </template>
       </div>
 
       <div class="grid grid-cols-2 gap-4">

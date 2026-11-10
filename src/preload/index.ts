@@ -47,6 +47,7 @@ const api: PitwallApi = {
   diskRemove: (worktreeRoot) => ipcRenderer.invoke(IPC.diskRemove, worktreeRoot),
   refreshNow: () => ipcRenderer.invoke(IPC.refreshNow),
   openPort: (port) => ipcRenderer.invoke(IPC.openPort, port),
+  quick: (kind, path) => ipcRenderer.invoke(IPC.quick, kind, path),
   claudeHook: {
     status: () => ipcRenderer.invoke(IPC.claudeHookStatus),
     enable: () => ipcRenderer.invoke(IPC.claudeHookEnable),

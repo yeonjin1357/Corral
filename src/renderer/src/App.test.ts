@@ -53,6 +53,7 @@ function fake(over: Partial<PitwallApi> = {}): Fake {
     diskRemove: vi.fn(async () => ({ status: 'killed' as const, message: '1.2 GB 를 지웠어요.' })),
     refreshNow: vi.fn(async () => {}),
     openPort: vi.fn(async () => true),
+    quick: vi.fn(async () => true),
     claudeHook: { status: async () => null, enable: vi.fn(), disable: vi.fn() },
     codexHook: { status: async () => null, enable: vi.fn(), disable: vi.fn() },
     appInfo: async () => ({ version: '0.1.0' }),
@@ -382,6 +383,32 @@ test('상세 패널의 숨기기는 그 워크트리의 첫 포트로 숨긴다(
   await flushPromises()
   expect(f.saved.at(-1)?.hiddenServers).toEqual(['C:\\work\\ws\\api:8081'])
   expect(notice(w)).toContain('api :8081')
+  w.unmount()
+})
+
+test('상세 패널의 바로 가기: 경로를 복사하면 알리고, 열지 못하면 실패를 한 줄로 알린다', async () => {
+  const f = fake()
+  const w = await start(f)
+  await w
+    .find(`tr[data-key="${selectionKey.server(api)}"] [data-action="details"]`)
+    .trigger('click')
+  await flushPromises()
+  const button = (kind: string): HTMLElement =>
+    document.body.querySelector<HTMLElement>(`[data-quick="${kind}"]`)!
+  button('copy').click()
+  await flushPromises()
+  expect(f.api.quick).toHaveBeenCalledWith('copy', 'C:\\work\\ws\\api')
+  expect(notice(w)).toContain('경로를 복사했어요.')
+  // 폴더·터미널은 열리는 것으로 충분하다(알림 없음).
+  button('terminal').click()
+  await flushPromises()
+  expect(f.api.quick).toHaveBeenLastCalledWith('terminal', 'C:\\work\\ws\\api')
+  expect(notice(w)).toBe('')
+  vi.mocked(f.api.quick).mockResolvedValueOnce(false)
+  button('folder').click()
+  await flushPromises()
+  expect(f.api.quick).toHaveBeenLastCalledWith('folder', 'C:\\work\\ws\\api')
+  expect(notice(w)).toContain('열지 못했어요. 폴더가 없어졌을 수 있어요.')
   w.unmount()
 })
 

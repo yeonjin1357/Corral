@@ -2,6 +2,7 @@ import {
   screen,
   app,
   shell,
+  clipboard,
   BrowserWindow,
   ipcMain,
   dialog,
@@ -13,6 +14,7 @@ import {
   Notification
 } from 'electron'
 import { autoUpdater } from 'electron-updater'
+import { spawn } from 'child_process'
 import { join } from 'path'
 import { cpus, homedir } from 'os'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
@@ -48,6 +50,7 @@ import { createNotifier, type Notice } from './notifier'
 import { loginItemOptions, shouldStartHidden } from './startup'
 import { createUpdater } from './updates'
 import { localUrlFor } from './open'
+import { createQuickActions, isQuickKind } from './quickActions'
 import { backgroundFor, overlayFor, windowChrome } from './windowChrome'
 import { createIconSource } from './icons'
 import { createRamHistory, loadHistory, saveHistory } from './historyStore'
@@ -183,6 +186,15 @@ const scheduler = createScheduler({
 const icons = createIconSource({
   latest: () => scheduler.latest(),
   getFileIcon: (path) => app.getFileIcon(path, { size: 'normal' })
+})
+
+/** 상세 패널의 바로 가기(경로 복사·폴더 열기·터미널 열기). 지금 스냅샷에 있는 폴더만 다룬다. */
+const quickActions = createQuickActions({
+  latest: () => scheduler.latest(),
+  platform: platform ?? 'win32',
+  openPath: (path) => shell.openPath(path),
+  writeClipboard: (value) => clipboard.writeText(value),
+  spawn: (command, args, options) => spawn(command, args, options)
 })
 
 /** 창을 열고(없으면 만들고) 화면에 보여 줄 곳을 알린다. 창이 아직 로딩 중이면 다 뜬 뒤에 보낸다. */
@@ -640,6 +652,11 @@ function registerIpc(): void {
     if (!url) return false
     await shell.openExternal(url)
     return true
+  })
+  ipcMain.handle(IPC.quick, async (event, kind: unknown, path: unknown) => {
+    if (!fromMainWindow(event.sender) || !isQuickKind(kind) || typeof path !== 'string')
+      return false
+    return quickActions.run(kind, path)
   })
 }
 

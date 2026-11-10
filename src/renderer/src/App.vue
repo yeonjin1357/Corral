@@ -17,6 +17,7 @@ import {
 } from '../../shared/settings'
 import { describeKillResult, formatBytes, formatFreed, pressureText } from '../../shared/format'
 import { cleanupRecommendation } from '../../shared/recommend'
+import type { QuickKind } from '../../shared/ipc'
 import { text } from '../../shared/text'
 import { watchColorScheme } from './theme'
 import { toIpc } from './ipc'
@@ -327,6 +328,21 @@ async function act(kind: ActionKind, key: string, port?: number): Promise<void> 
 
 function sheetAction(kind: ActionKind, port?: number): void {
   if (selectedKey.value) void act(kind, selectedKey.value, port)
+}
+
+/**
+ * 바로 가기(경로 복사·폴더 열기·터미널 열기). 메인은 지금 스냅샷에 있는 폴더만 다룬다.
+ * 폴더·터미널은 열리는 것으로 충분하고, 복사는 눈에 보이지 않아 한 줄로 알린다.
+ */
+async function quick(kind: QuickKind, path: string): Promise<void> {
+  say('action', null)
+  try {
+    if (!(await window.pitwall.quick(kind, path)))
+      say('action', { text: text.ui.quick.failed, tone: 'error' })
+    else if (kind === 'copy') say('action', { text: text.ui.quick.copied, tone: 'success' })
+  } catch (e) {
+    say('action', { text: failureText(e), tone: 'error' })
+  }
 }
 
 // ── 묶음 보기·숨기기·별칭(F1·F2·F11) ──
@@ -815,6 +831,7 @@ const takenAt = computed(() =>
       @kill="sheetAction('kill')"
       @remove="sheetAction('remove')"
       @hide="hideSelected"
+      @quick="quick"
     />
     <MemorySheet
       v-if="snapshot"
