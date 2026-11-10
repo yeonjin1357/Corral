@@ -234,6 +234,17 @@ describe('createWorktreeResolver', () => {
       expect(await r.resolveWorkspace(w)).toMatchObject({ root: x, outer: false })
     })
 
+    test('공용 폴더의 실제 경로를 구하지 못하면(사라진 gitdir 등) 같은 저장소인지 몰라 묶지 않는다', async () => {
+      const ws = await makeRepo(join(tmp, 'ws'))
+      const x = join(ws, 'repos', 'x')
+      await mkdir(x, { recursive: true })
+      await writeFile(join(x, '.git'), `gitdir: ${join(tmp, 'gone', '.git', 'worktrees', 'x')}\n`)
+      const r = createWorktreeResolver({ homeDir: join(tmp, 'home') })
+      const w = (await r.resolveWorktree(x))!
+      expect(w.commonDir).toBeTruthy()
+      expect(await r.resolveWorkspace(w)).toMatchObject({ root: x, outer: false })
+    })
+
     test('바깥 저장소가 없으면 자기 자신', async () => {
       const repo = await makeRepo(join(tmp, 'shop-web'))
       const r = createWorktreeResolver({ homeDir: join(tmp, 'home') })

@@ -261,19 +261,13 @@ export function hookStateForWorktree(
 }
 
 /**
- * 워크트리의 Codex 세션 중 프로세스가 시작한 뒤 소식이 온 가장 최근 세션의 기록 파일. 없으면 null.
- * (같은 폴더에 Codex 가 하나일 때만 쓴다 — 둘 이상이면 수집기가 기록을 읽지 않는다.)
+ * 그 Codex 프로세스(`pid:시작 시각`)와 짝지은 세션 가운데 가장 최근 소식이 온 세션의 기록 파일. 없으면 null.
+ * 같은 워크트리의 다른 Codex(다른 하위 폴더에서 돈 것)의 기록을 고르지 않도록 프로세스로 고른다.
  */
-export function codexTranscriptFor(
-  sessions: Sessions,
-  root: string,
-  rootOfCwd: (cwd: string) => string | null,
-  startedAt: number | null
-): string | null {
+export function codexTranscriptFor(sessions: Sessions, processKey: string): string | null {
   let best: ClaudeSession | null = null
   for (const s of sessions.values()) {
-    if (toolOf(s) !== 'codex' || !s.transcriptPath || rootOfCwd(s.cwd) !== root) continue
-    if (startedAt != null && s.updatedAt < startedAt) continue
+    if (toolOf(s) !== 'codex' || !s.transcriptPath || s.processKey !== processKey) continue
     if (!best || s.updatedAt > best.updatedAt) best = s
   }
   return best?.transcriptPath ?? null

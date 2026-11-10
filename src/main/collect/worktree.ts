@@ -96,12 +96,12 @@ async function readGitAt(dir: string): Promise<WorktreeInfo | null> {
   }
 }
 
-/** 실제 경로(정션·심볼릭 링크·subst 드라이브·8.3 이름을 푼 것). 못 풀면 그대로. */
-async function canonical(path: string): Promise<string> {
+/** 실제 경로(정션·심볼릭 링크·subst 드라이브·8.3 이름을 푼 것). 못 풀면 null. */
+async function canonical(path: string): Promise<string | null> {
   try {
     return await realpath(path)
   } catch {
-    return path
+    return null
   }
 }
 
@@ -206,9 +206,11 @@ export function createWorktreeResolver(options: WorktreeResolverOptions = {}): W
     if (!worktree.commonDir || parent === root) return selfWorkspace(worktree)
     const outer = await resolveDir(parent, 0)
     if (!outer?.commonDir) return selfWorkspace(worktree)
-    // 같은 저장소를 다른 경로(정션·subst·8.3 이름)로 가리킬 수 있어 실제 경로로 비교한다.
+    if (keyOf(outer.commonDir) === keyOf(worktree.commonDir)) return selfWorkspace(worktree)
+    // 같은 저장소를 다른 경로(정션·subst·8.3 이름)로 가리킬 수 있어 실제 경로로 비교한다. 실제 경로를 못 구하면
+    // 같은 저장소인지 알 수 없어 묶지 않는다(묶으면 정리 범위가 넓어진다).
     const [a, b] = await Promise.all([canonical(outer.commonDir), canonical(worktree.commonDir)])
-    if (keyOf(a) === keyOf(b)) return selfWorkspace(worktree)
+    if (!a || !b || keyOf(a) === keyOf(b)) return selfWorkspace(worktree)
     return { root: outer.root, name: folderName(outer.root), branch: outer.branch, outer: true }
   }
 

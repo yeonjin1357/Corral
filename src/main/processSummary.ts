@@ -46,6 +46,38 @@ function withoutVersion(pkg: string): string {
 }
 
 const RUNNER = /^(npx|uvx|bunx|pipx)(\.cmd|\.exe)?$/i
+/** 러너 옵션 가운데 다음 낱말을 값으로 받는 것(그 값은 패키지 이름이 아니다 — 주소·토큰이 들어갈 수 있다). */
+const RUNNER_VALUE_OPTIONS = new Set([
+  '--from',
+  '--with',
+  '--registry',
+  '--package',
+  '-p',
+  '--spec',
+  '--python',
+  '--index-url',
+  '--extra-index-url',
+  '--cache',
+  '--prefix',
+  '--userconfig',
+  '-c',
+  '--call',
+  '-w',
+  '--workspace'
+])
+/** 패키지 이름 모양(@범위/이름, 버전 꼬리 허용). */
+const PACKAGE_NAME = /^(@[\w.-]+\/)?[\w.-]+(@[\w.^~<>=*-]+)?$/
+/** `-m 모듈` 을 쓰는 실행 파일(python 만 — git -m 은 커밋 메시지, curl -m 은 시간). */
+const PYTHON = /^(python[\d.]*|pythonw|py)(\.exe)?$/i
+/** 이렇게 생긴 것만 짧은 이름으로 쓴다(공백·콜론·따옴표 = 다른 인자가 섞였을 수 있음). */
+const SAFE_HINT = /^[@\w.+/-]+$/
+/** processLabel 이 돌려주는 고정 이름(직접 만든 문구라 그대로 써도 된다). */
+const FIXED_LABELS = new Set<string>([
+  ...Object.values(text.leftoverLabels),
+  'Vitest',
+  'esbuild',
+  'webpack'
+])
 /** 셸·콘솔: 무엇을 띄웠든 짧은 이름을 붙이지 않는다(띄운 프로세스가 목록에 따로 있어, 붙이면 같은 것이 여럿처럼 보인다). */
 const SHELL = /^(cmd|bash|sh|zsh|dash|fish|powershell|pwsh|conhost)(\.exe)?$/i
 const SCRIPT = /\.(m?js|cjs|ts|mts|py|jar)$/i
@@ -58,7 +90,9 @@ const PACKAGE = /node_modules\/((?:@[^/\s]+\/)?[^/\s.][^/\s]*)\//g
  */
 export function processHint(p: ProcessInfo): string | null {
   const hint = findHint(p)
-  return hint ? hint.slice(0, MAX_HINT) : null
+  if (!hint) return null
+  if (!FIXED_LABELS.has(hint) && !SAFE_HINT.test(hint)) return null
+  return hint.slice(0, MAX_HINT)
 }
 
 function findHint(p: ProcessInfo): string | null {
@@ -69,13 +103,18 @@ function findHint(p: ProcessInfo): string | null {
   const packages = [...cmd.matchAll(PACKAGE)].map((m) => m[1])
   if (packages.length) return packages[packages.length - 1]
   const list = words(p.commandLine)
+  const python = PYTHON.test(p.name) || PYTHON.test(baseName(list[0] ?? ''))
   for (let i = 0; i < list.length; i++) {
     const w = list[i]
     if (RUNNER.test(baseName(w))) {
-      const pkg = list.slice(i + 1).find((x) => !x.startsWith('-'))
-      if (pkg) return withoutVersion(pkg)
+      for (let j = i + 1; j < list.length; j++) {
+        const x = list[j]
+        if (RUNNER_VALUE_OPTIONS.has(x)) j++
+        else if (!x.startsWith('-')) return PACKAGE_NAME.test(x) ? withoutVersion(x) : null
+      }
+      return null
     }
-    if (w === '-m' && list[i + 1]) return list[i + 1]
+    if (python && w === '-m' && list[i + 1]) return list[i + 1]
   }
   // 첫 낱말(실행 파일) 뒤에서 처음 나오는 스크립트 파일.
   const script = list.slice(1).find((w) => !w.startsWith('-') && SCRIPT.test(w))

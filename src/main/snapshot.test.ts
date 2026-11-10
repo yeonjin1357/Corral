@@ -259,22 +259,32 @@ describe('서버 행', () => {
     expect(s.groups.find((g) => g.group === 'devServer')!.memoryBytes).toBe(855 * MB)
   })
 
-  test('서버 트리 안의 프로세스가 자기 포트에 붙은 루프백 연결은 연결 수에 넣지 않는다', () => {
+  test('서버를 이루는 포트 프로세스끼리의 루프백 연결은 연결 수에 넣지 않는다', () => {
+    // java 부모(8080)와 자식 JVM(8081)이 한 서버. 자식이 부모 포트에 붙은 연결은 내부 연결이다.
+    // 서버가 띄운 앱 창(electron-vite 처럼 dev 서버 아래의 electron)은 포트를 열지 않아 클라이언트로 센다.
     const s = buildSnapshot({
       ...input,
       sample: {
-        processes: [proc(7000, 1, 'java.exe', 500, 100), proc(7001, 7000, 'java.exe', 300, 110)],
+        processes: [
+          proc(7000, 1, 'java.exe', 500, 100),
+          proc(7001, 7000, 'java.exe', 300, 110),
+          proc(7002, 7000, 'electron.exe', 200, 120)
+        ],
         tcp: [
           listen(7000, 8080),
+          listen(7001, 8081),
           est(7000, 8080, 55000),
           est(7001, 55000, 8080),
           est(7000, 8080, 55001),
-          est(9999, 55001, 8080)
+          est(9999, 55001, 8080),
+          est(7000, 8080, 55002),
+          est(7002, 55002, 8080)
         ]
       },
       worktrees: new Map<number, WorktreeInfo>([[7000, W1]])
     })
-    expect(s.servers[0].clientCount).toBe(1)
+    expect(s.servers.map((r) => r.ports)).toEqual([[8080, 8081]])
+    expect(s.servers[0].clientCount).toBe(2)
   })
 
   test('연결 수는 서버의 모든 포트 연결 합', () => {

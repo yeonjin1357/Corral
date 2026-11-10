@@ -29,15 +29,21 @@ export function activityOf(
     const ports = new Set(row.ports)
     const pids = new Set([row.pid, ...row.descendantPids])
     const peers = new Set<string>()
+    // 이 서버의 포트를 연 프로세스(부모·자식 JVM 등). 이들끼리의 연결은 사용이 아니다.
+    const listeners = new Set(
+      tcp
+        .filter((t) => t.state === 'Listen' && ports.has(t.localPort) && pids.has(t.pid))
+        .map((t) => t.pid)
+    )
     let traced = false
     for (const t of tcp) {
       if (t.state === 'TimeWait') {
         if (ports.has(t.localPort) || (ports.has(t.remotePort) && LOOPBACK.test(t.remoteAddress)))
           traced = true
       } else if (t.state === 'Established' && ports.has(t.localPort) && pids.has(t.pid)) {
-        // 서버 트리 안의 프로세스가 자기 포트에 붙은 루프백 연결은 사용이 아니다.
+        // 서버를 이루는 포트 프로세스끼리의 루프백 연결은 사용이 아니다(서버가 띄운 앱 창 등은 사용).
         const peer = peerPid(t, owners)
-        if (peer == null || !pids.has(peer)) peers.add(`${t.remoteAddress}:${t.remotePort}`)
+        if (peer == null || !listeners.has(peer)) peers.add(`${t.remoteAddress}:${t.remotePort}`)
       }
     }
     const before = previous.get(key)

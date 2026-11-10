@@ -1,4 +1,4 @@
-import { appendFile, mkdir, mkdtemp, rm, writeFile } from 'fs/promises'
+import { appendFile, mkdir, mkdtemp, rm, writeFile, symlink } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import {
@@ -259,6 +259,40 @@ describe('검토 뒤 보강(긴 턴·다른 프로세스의 기록)', () => {
       state: 'working',
       since: Date.parse('2026-11-09T02:01:00.000Z')
     })
+  })
+
+  test.runIf(process.platform === 'win32')(
+    '\\\\?\\ 로 시작하는 Windows 경로도 sessions 폴더 안이면 읽는다',
+    async () => {
+      const start = new Date(2026, 10, 9, 13, 0, 0)
+      const own = await rolloutAt(new Date(2026, 10, 9, 13, 1, 0), [
+        event('task_started', '2026-11-09T04:01:00.000Z')
+      ])
+      await rolloutAt(new Date(2026, 10, 9, 13, 2, 0), [
+        event('task_complete', '2026-11-09T04:03:00.000Z')
+      ])
+      const reader = createCodexReader(home)
+      const agent = { cwd: CWD, startedAt: start.getTime(), transcriptPath: '\\\\?\\' + own }
+      expect((await reader.stateFor(agent, start.getTime() + 5 * MIN))?.state).toBe('working')
+    }
+  )
+
+  test('sessions 폴더 안의 링크가 밖을 가리키면 따르지 않는다', async () => {
+    const start = new Date(2026, 10, 9, 14, 0, 0)
+    await rolloutAt(new Date(2026, 10, 9, 14, 1, 0), [
+      event('task_complete', '2026-11-09T05:02:00.000Z')
+    ])
+    const outsideDir = join(home, 'outside')
+    await mkdir(outsideDir, { recursive: true })
+    await writeFile(
+      join(outsideDir, 'x.jsonl'),
+      event('task_started', '2026-11-09T05:01:00.000Z') + '\n'
+    )
+    const link = join(home, 'sessions', 'link')
+    await symlink(outsideDir, link, 'junction')
+    const reader = createCodexReader(home)
+    const agent = { cwd: CWD, startedAt: start.getTime(), transcriptPath: join(link, 'x.jsonl') }
+    expect((await reader.stateFor(agent, start.getTime() + 5 * MIN))?.state).toBe('idle')
   })
 
   test('sessions 폴더 밖의 경로는 따르지 않고 찾기 규칙을 쓴다', async () => {

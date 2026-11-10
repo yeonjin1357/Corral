@@ -68,15 +68,19 @@ export function planKill(
   const p = fresh.processes.find((x) => x.pid === target.pid)
   if (!p) return { ok: false, reason: 'gone' }
   if (!isSameProcess(target, p)) return { ok: false, reason: 'changed' }
+  const all = descendantsOf(fresh.processes, target.pid)
+  // 남길 것은 대상 아래에 있는 다른 서버(와 그 자손)만. 조상 서버를 남겨도 대상의 자손은 그대로 끈다.
+  const below = new Set(all)
   const spared = new Set<number>()
   for (const pid of spare)
-    if (pid !== target.pid)
+    if (pid !== target.pid && below.has(pid))
       for (const x of [pid, ...descendantsOf(fresh.processes, pid)]) spared.add(x)
-  const descendants = descendantsOf(fresh.processes, target.pid).filter((d) => !spared.has(d))
+  const descendants = all.filter((d) => !spared.has(d))
   // 예: worktree 에서 띄운 IDE 를 내리면 그 터미널 안의 Claude·Codex 세션까지 같이 꺼진다.
+  // 남길 서버 아래의 에이전트도 막는다: Windows 는 부모를 끄면 같은 작업 개체의 자식이 같이 꺼질 수 있다.
   const byPid = new Map(fresh.processes.map((x) => [x.pid, x]))
   if (
-    descendants.some((pid) => {
+    all.some((pid) => {
       const d = byPid.get(pid)
       return !!d && classifyAgent(d)
     })

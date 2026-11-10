@@ -439,26 +439,29 @@ describe('Codex 세션 기록 파일(transcript_path)', () => {
     expect([...sessions.values()].map((s) => s.transcriptPath ?? null)).toEqual([null, null, null])
   })
 
-  test('그 워크트리의 Codex 세션 중 프로세스 시작 뒤 소식이 온 가장 최근 세션의 기록 파일', () => {
+  test('그 프로세스와 짝지은 Codex 세션의 기록 파일(같은 워크트리의 다른 Codex 세션 것은 고르지 않는다)', () => {
     const sessions: Sessions = new Map()
-    const start = (id: string, path: string, at: number): void => {
+    const start = (id: string, cwd: string, path: string, at: number): void => {
       applyHookEvent(
         sessions,
-        {
-          session_id: id,
-          cwd: '/work/app',
-          hook_event_name: 'SessionStart',
-          transcript_path: path
-        },
+        { session_id: id, cwd, hook_event_name: 'SessionStart', transcript_path: path },
         at,
         'codex'
       )
     }
-    start('old', PATH_A, 1000)
-    start('new', PATH_B, 5000)
-    expect(codexTranscriptFor(sessions, '/work/app', rootOf, 4000)).toBe(PATH_B)
-    // 프로세스가 마지막 소식보다 뒤에 시작했으면 그 세션들은 이 프로세스 것이 아니다.
-    expect(codexTranscriptFor(sessions, '/work/app', rootOf, 6000)).toBeNull()
-    expect(codexTranscriptFor(sessions, '/work/other', rootOf, 0)).toBeNull()
+    start('a', '/work/app', PATH_A, 1000)
+    start('b', '/work/app/packages/api', PATH_B, 5000)
+    reconcileSessions(sessions, {
+      now: 6000,
+      sampledAt: 6000,
+      live: [
+        { key: '10:100', rootKey: '/work/app', startedAt: 100, tool: 'codex' },
+        { key: '20:4000', rootKey: '/work/app', startedAt: 4000, tool: 'codex' }
+      ],
+      rootOfCwd: rootOf
+    })
+    expect(codexTranscriptFor(sessions, '10:100')).toBe(PATH_A)
+    expect(codexTranscriptFor(sessions, '20:4000')).toBe(PATH_B)
+    expect(codexTranscriptFor(sessions, '30:1')).toBeNull()
   })
 })

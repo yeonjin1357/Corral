@@ -113,6 +113,21 @@ function snapshotWith(servers: ServerRow[], leftovers: LeftoverRow[] = []): Dash
 }
 
 describe('planKill', () => {
+  test('조상 서버가 남길 목록에 있어도 대상의 자손은 끈다(대상 아래의 것만 남긴다)', () => {
+    const outer = proc(4000, 1, 'node.exe', 'node ide.js', 100)
+    const fresh = { processes: [outer, vite, esbuild], tcp: [] }
+    expect(planKill(row, fresh, [4000])).toEqual({ ok: true, pids: [4100, 4101] })
+  })
+
+  test('남길 서버 아래에 에이전트가 있으면 끄지 않는다(같이 꺼질 수 있어서)', () => {
+    const nested = proc(4300, 4100, 'node.exe', 'node other.js', 300)
+    const claude = proc(4301, 4300, 'claude.exe', '"C:\\Users\\a\\.local\\bin\\claude.exe"', 310)
+    expect(planKill(row, { processes: [vite, esbuild, nested, claude], tcp: [] }, [4300])).toEqual({
+      ok: false,
+      reason: 'agent'
+    })
+  })
+
   test('남길 프로세스(다른 서버)와 그 자손은 끌 목록에서 뺀다', () => {
     const shell = proc(4300, 4100, 'cmd.exe', 'cmd', 300)
     const other = proc(4301, 4300, 'node.exe', 'node other.js', 310)

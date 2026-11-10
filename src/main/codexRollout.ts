@@ -1,4 +1,4 @@
-import { open, readdir, stat } from 'fs/promises'
+import { open, readdir, realpath, stat } from 'fs/promises'
 import { join, resolve, sep } from 'path'
 
 /**
@@ -195,11 +195,34 @@ export function createCodexReader(home: string): {
   ): Promise<RolloutState | null>
 } {
   const sessionsDir = resolve(home, 'sessions') + sep
+  /** Windows·macOS 는 경로 대소문자를 가리지 않는다. */
+  const sameCase = process.platform === 'win32' || process.platform === 'darwin'
   const insideSessions = (path: string): boolean => {
     const full = resolve(path)
-    return process.platform === 'win32' || process.platform === 'darwin'
+    return sameCase
       ? full.toLowerCase().startsWith(sessionsDir.toLowerCase())
       : full.startsWith(sessionsDir)
+  }
+  /**
+   * 훅이 알려 준 기록 파일을 쓸 수 있으면 그 실제 경로. sessions 폴더 안의 .jsonl 만(링크를 풀어도 안이어야 한다).
+   * Windows 의 `\\?\\` 앞머리는 뗀다.
+   */
+  async function givenRollout(given: string | null | undefined): Promise<string | null> {
+    const path = given?.replace(/^\\\\\?\\/, '')
+    if (!path || !/\.jsonl$/i.test(path) || !insideSessions(path)) return null
+    const [real, realDir] = await Promise.all([
+      realpath(path).catch(() => null),
+      realpath(sessionsDir).catch(() => null)
+    ])
+    if (!real || !realDir) return null
+    const dir = realDir.endsWith(sep) ? realDir : realDir + sep
+    return sameCase
+      ? real.toLowerCase().startsWith(dir.toLowerCase())
+        ? real
+        : null
+      : real.startsWith(dir)
+        ? real
+        : null
   }
   const progress = new Map<string, { offset: number; rest: Buffer; state: RolloutState | null }>()
 
@@ -255,11 +278,9 @@ export function createCodexReader(home: string): {
   }
   return {
     async stateFor(agent, now) {
-      const given = agent.transcriptPath
       const path =
-        given && /\.jsonl$/i.test(given) && insideSessions(given)
-          ? resolve(given)
-          : await findRollout(home, agent, now, cachedCwd)
+        (await givenRollout(agent.transcriptPath)) ??
+        (await findRollout(home, agent, now, cachedCwd))
       return path ? follow(path).catch(() => null) : null
     }
   }

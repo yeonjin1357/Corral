@@ -68,6 +68,21 @@ describe('processHint: 무엇인지 알 수 있는 짧은 이름(패키지·스�
     expect(processHint(proc('zsh', 'zsh -c vitest'))).toBeNull()
   })
 
+  test('러너의 값을 받는 옵션·python 이 아닌 -m·공백 든 낱말에서 인자가 새지 않는다', () => {
+    expect(
+      processHint(proc('uvx.exe', 'uvx --from git+https://user:TOKEN123@github.com/org/repo tool'))
+    ).toBe('tool')
+    expect(processHint(proc('node.exe', 'npx --registry https://u:pw@reg.example.com pkg'))).toBe(
+      'pkg'
+    )
+    expect(processHint(proc('git.exe', 'git commit -m "secret release note"'))).toBeNull()
+    expect(processHint(proc('curl.exe', 'curl -m 2 http://x'))).toBeNull()
+    expect(
+      processHint(proc('wsl.exe', 'wsl.exe -e bash -lc "cd /x && python app.py --api-key=X x.py"'))
+    ).toBeNull()
+    expect(processHint(proc('python3', 'python3 -m uvicorn app:main'))).toBe('uvicorn')
+  })
+
   test('명령줄의 다른 인자(토큰·주소 등)는 담지 않는다', () => {
     const p = proc('node.exe', 'node server.js --token=abc123secret --db postgres://u:pw@host/db')
     expect(processHint(p)).toBe('server.js')

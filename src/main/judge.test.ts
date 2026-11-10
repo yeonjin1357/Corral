@@ -214,17 +214,22 @@ describe('사용 흔적(F9)', () => {
     expect(activityOf([server()], [outbound], new Map()).activity.get(KEY)).toBe(false)
   })
 
-  test('서버 트리 안의 프로세스가 자기 포트에 붙은 루프백 연결은 사용 흔적이 아니다', () => {
-    const row = server({ descendantPids: [4101] })
+  test('서버를 이루는 포트 프로세스끼리의 루프백 연결은 사용 흔적이 아니다(앱 창 같은 다른 자식은 흔적)', () => {
+    const row = server({ ports: [3000, 3001], descendantPids: [4101, 4102] })
     const serverSide = tcp('Established', ['::1', 3000], ['::1', 51000], 4100)
+    const childListens = tcp('Listen', ['::', 3001], ['::', 0], 4101)
     const ownChild = tcp('Established', ['::1', 51000], ['::1', 3000], 4101)
     // 이전 샘플에 연결이 없던 서버: 새 상대가 생기면 흔적이다.
     const seen = (): Map<string, Set<string>> => new Map([[KEY, new Set<string>()]])
-    const own = activityOf([row], [serverSide, ownChild], seen())
+    const own = activityOf([row], [serverSide, childListens, ownChild], seen())
     expect(own.connections.get(KEY)).toEqual(new Set())
     expect(own.activity.get(KEY)).toBe(false)
     const browser = tcp('Established', ['::1', 51000], ['::1', 3000], 9999)
     expect(activityOf([row], [serverSide, browser], seen()).activity.get(KEY)).toBe(true)
+    const appWindow = tcp('Established', ['::1', 51000], ['::1', 3000], 4102)
+    expect(activityOf([row], [serverSide, childListens, appWindow], seen()).activity.get(KEY)).toBe(
+      true
+    )
   })
 
   test('새 연결이 생기면 연결 0 시간을 다시 센다', () => {

@@ -183,6 +183,8 @@ function serversOf(ports: PortEntry[], tree: ProcessTree): ServerRow[] {
     // 포트 행은 (포트, pid) 마다 하나라 연결이 겹쳐 세지지 않는다.
     group.peers.push(...row.peers)
   }
+  /** 판별된 포트 프로세스(어느 서버든 포트를 연 프로세스). */
+  const portPids = new Set(ports.map((r) => r.pid))
   // 서버의 자손에서 그 아래에 있는 다른 서버(의 트리)는 뺀다. 메모리·프로세스를 두 서버가 겹쳐 세지 않게.
   const heads = new Set(groups.keys())
   const ownDescendants = (pid: number): number[] => {
@@ -197,8 +199,9 @@ function serversOf(ports: PortEntry[], tree: ProcessTree): ServerRow[] {
       const descendantPids = ownDescendants(head.pid)
       const own = new Set([head.pid, ...descendantPids])
       const members = [...own].flatMap((pid) => tree.byPid.get(pid) ?? [])
-      // 서버 트리 안의 프로세스가 자기 포트에 붙은 루프백 연결은 클라이언트가 아니다.
-      const clientCount = peers.filter((p) => p == null || !own.has(p)).length
+      // 서버를 이루는 포트 프로세스끼리의 루프백 연결(부모·자식 JVM 등)은 클라이언트가 아니다. 서버가 띄운
+      // 다른 자식(electron-vite 의 앱 창 등)은 포트를 열지 않으므로 클라이언트로 센다.
+      const clientCount = peers.filter((p) => p == null || !(own.has(p) && portPids.has(p))).length
       return { head, set, clientCount, descendantPids, members }
     })
     .map(({ head, set: portSet, clientCount, descendantPids, members }) => ({
@@ -270,7 +273,9 @@ export function buildSnapshot(input: {
   for (const t of sample.tcp) {
     if (t.state !== 'Established') continue
     const key = `${t.pid}:${t.localPort}`
-    clients.set(key, [...(clients.get(key) ?? []), peerPid(t, owners)])
+    const list = clients.get(key)
+    if (list) list.push(peerPid(t, owners))
+    else clients.set(key, [peerPid(t, owners)])
   }
 
   const ports: PortEntry[] = []
