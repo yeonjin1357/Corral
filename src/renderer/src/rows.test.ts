@@ -5,6 +5,7 @@ import {
   sortRows,
   tableFor,
   TABS,
+  type SnapshotTab,
   workspaceSummary
 } from './rows'
 import {
@@ -405,7 +406,8 @@ describe('남은 프로세스·무거운 작업·디스크·다른 앱 표', () 
 
   test('모든 탭이 빈 스냅샷에서도 표를 만든다', () => {
     const empty = snapshot({ servers: [], apps: [], disk: null })
-    for (const tab of TABS) expect(tableFor(tab, empty).rows).toEqual([])
+    for (const tab of TABS.filter((t): t is SnapshotTab => t !== 'events'))
+      expect(tableFor(tab, empty).rows).toEqual([])
   })
 })
 

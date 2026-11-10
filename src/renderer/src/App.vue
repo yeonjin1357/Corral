@@ -18,6 +18,7 @@ import {
 import { describeKillResult, formatBytes, formatFreed, pressureText } from '../../shared/format'
 import { cleanupRecommendation } from '../../shared/recommend'
 import type { QuickKind } from '../../shared/ipc'
+import type { PitEvent } from '../../shared/events'
 import { text } from '../../shared/text'
 import { watchColorScheme } from './theme'
 import { toIpc } from './ipc'
@@ -32,6 +33,7 @@ import {
   selectionKey
 } from './history'
 import { hookControls } from './hook'
+import { awaySummary, awayText, eventsTable, type AwaySummary } from './events'
 import {
   TABS,
   filterRows,
@@ -60,6 +62,8 @@ import Button from './ui/Button.vue'
 
 const snapshot = ref<DashboardSnapshot | null>(null)
 const history = ref(emptyHistory())
+/** 기록(G3g): 메인이 기억한 일어난 일(오래된 것부터). */
+const events = ref<PitEvent[]>([])
 const selectedKey = ref<string | null>(null)
 const busyKey = ref<string | null>(null)
 const refreshing = ref(false)
@@ -111,6 +115,7 @@ let unsubscribe: () => void = () => {}
 let unsubscribeSettings: () => void = () => {}
 let unsubscribeNavigate: () => void = () => {}
 let unsubscribeUpdate: () => void = () => {}
+let unsubscribeEvents: () => void = () => {}
 let stopTheme: () => void = () => {}
 
 function shortcut(event: KeyboardEvent): void {
@@ -120,10 +125,45 @@ function shortcut(event: KeyboardEvent): void {
   }
 }
 
+/** 기록을 합친다(같은 id 는 한 번만, 오래된 것부터). */
+function addEvents(added: PitEvent[]): void {
+  const have = new Set(events.value.map((e) => e.id))
+  const fresh = added.filter((e) => !have.has(e.id))
+  if (fresh.length) events.value = [...events.value, ...fresh].sort((a, b) => a.id - b.id)
+}
+
+// ── 자리 비운 사이(G3g) ──
+/** 창을 이만큼 안 보다가 다시 보면 그 사이 일을 요약해 준다. */
+const AWAY_MS = 10 * 60_000
+let hiddenAt: number | null = null
+const away = ref<AwaySummary | null>(null)
+function onVisibility(): void {
+  if (document.visibilityState === 'hidden') {
+    hiddenAt = Date.now()
+    away.value = null
+    return
+  }
+  const since = hiddenAt
+  hiddenAt = null
+  const now = Date.now()
+  if (since == null || now - since < AWAY_MS) return
+  away.value = awaySummary(events.value, history.value.ram, since, now)
+}
+function showEvents(): void {
+  away.value = null
+  goToTab('events')
+}
+
 onMounted(async () => {
   stopTheme = watchColorScheme((q) => window.matchMedia(q), document.documentElement)
   window.addEventListener('keydown', shortcut)
   unsubscribe = window.pitwall.onSnapshot(receive)
+  document.addEventListener('visibilitychange', onVisibility)
+  unsubscribeEvents = window.pitwall.events.onAdded(addEvents)
+  void window.pitwall.events
+    .get()
+    .then(addEvents)
+    .catch(() => {})
   unsubscribeSettings = window.pitwall.settings.onChange((s) => (settings.value = s))
   // 알림·트레이에서 온 이동 요청: 그 항목을 고르거나(없으면 대시보드) 다른 화면으로.
   unsubscribeNavigate = window.pitwall.onNavigate((target) => {
@@ -154,6 +194,8 @@ onUnmounted(() => {
   unsubscribeSettings()
   unsubscribeNavigate()
   unsubscribeUpdate()
+  unsubscribeEvents()
+  document.removeEventListener('visibilitychange', onVisibility)
   stopTheme()
   window.removeEventListener('keydown', shortcut)
 })
@@ -469,6 +511,7 @@ watch(hiddenCount, (n) => {
 const table = computed(() => {
   const s = snapshot.value
   if (!s) return null
+  if (tab.value === 'events') return eventsTable(events.value, s)
   return tab.value === 'ports' && showHidden.value ? hiddenServerTable(s) : tableFor(tab.value, s)
 })
 const rows = computed(() => (table.value ? filterRows(table.value.rows, query.value) : []))
@@ -501,6 +544,7 @@ const sort = computed<SortState>({
 const counts = computed<Record<TabKey, number>>(() => {
   const s = snapshot.value
   const zero = Object.fromEntries(TABS.map((t) => [t, 0])) as Record<TabKey, number>
+  zero.events = events.value.length
   if (!s) return zero
   return {
     ports: s.servers.length,
@@ -508,7 +552,8 @@ const counts = computed<Record<TabKey, number>>(() => {
     leftovers: s.leftovers.length,
     heavy: s.heavyJobs.length,
     disk: s.disk?.rows.length ?? 0,
-    apps: s.apps.length
+    apps: s.apps.length,
+    events: events.value.length
   }
 })
 const emptyText = computed(() => {
@@ -524,6 +569,8 @@ const emptyText = computed(() => {
       return L.emptyHeavy
     case 'apps':
       return L.emptyApps
+    case 'events':
+      return L.emptyEvents
     case 'disk': {
       const d = snapshot.value?.disk
       if (d?.error) return d.error
@@ -680,6 +727,21 @@ const takenAt = computed(() =>
           @disk-scan="diskScan"
           @select="select"
         />
+
+        <NoticeCard
+          v-if="away"
+          data-away
+          dismissible
+          :title="text.ui.away.title"
+          @dismiss="away = null"
+        >
+          {{ awayText(away) }}
+          <template #actions>
+            <Button variant="outline" size="sm" @click="showEvents">
+              {{ text.ui.away.show }}
+            </Button>
+          </template>
+        </NoticeCard>
 
         <NoticeCard
           v-if="showRecommend"

@@ -366,6 +366,15 @@ const G = text.ui.group
                     </Button>
                     <span v-else class="truncate text-[13px]">{{ row.cells.name.text }}</span>
                   </div>
+                  <Button
+                    v-else-if="col.id === 'target' && row.key"
+                    variant="link"
+                    class="h-auto min-w-0 max-w-full justify-start truncate p-0 text-left text-[13px] font-normal text-foreground"
+                    :title="row.cells.target.title ?? row.cells.target.text"
+                    @click="emit('select', row.key)"
+                  >
+                    <span class="truncate">{{ row.cells.target.text }}</span>
+                  </Button>
                   <span
                     v-else-if="row.cells[col.id]?.dot"
                     class="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground"

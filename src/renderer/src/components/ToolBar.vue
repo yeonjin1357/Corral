@@ -34,7 +34,7 @@ const viewValue = computed({
 })
 
 const options = computed<ToggleOption[]>(() =>
-  (['ports', 'agents', 'leftovers', 'heavy', 'disk', 'apps'] as TabKey[]).map((key) => ({
+  (['ports', 'agents', 'leftovers', 'heavy', 'disk', 'apps', 'events'] as TabKey[]).map((key) => ({
     value: key,
     label: text.ui.tabs[key],
     count: props.counts[key]

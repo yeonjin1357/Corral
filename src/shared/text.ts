@@ -1,3 +1,6 @@
+import type { PitEventKind } from './events'
+import type { MemoryLevel } from './types'
+
 /** 화면·트레이·확인 창에 나오는 문구는 모두 여기 모은다(나중에 다국어로 넓힐 때 이 파일만 바꾸면 되도록). */
 export const text = {
   appName: 'pitwall',
@@ -337,7 +340,49 @@ export const text = {
       leftovers: '남은 프로세스',
       heavy: '무거운 작업',
       disk: '디스크 정리',
-      apps: '다른 앱'
+      apps: '다른 앱',
+      events: '기록'
+    },
+    /** 기록 탭(G3g): 종류 이름과 내용 문구. 내용(프롬프트·명령)은 기록에 없으니 숫자·이름만 쓴다. */
+    events: {
+      kinds: {
+        'agent-start': '시작',
+        'agent-end': '꺼짐',
+        'agent-done': '작업 끝남',
+        'agent-waiting': '권한 대기',
+        'agent-error': '오류',
+        'agent-quiet': '조용함',
+        'server-start': '서버 시작',
+        'server-end': '서버 꺼짐',
+        'heavy-start': '무거운 작업 시작',
+        'heavy-end': '무거운 작업 끝',
+        cleanup: '정리',
+        'disk-remove': '디스크 정리',
+        'heavy-defer': '에이전트를 기다리게 함'
+      } satisfies Partial<Record<PitEventKind, string>>,
+      memoryLevel: (level: string): string => `메모리 ${level}`,
+      levels: { normal: '정상', warn: '경고', danger: '위험' } satisfies Record<
+        MemoryLevel,
+        string
+      >,
+      worked: (duration: string): string => `${duration} 동안 일했어요`,
+      wasWorking: '작업 중이었어요',
+      quiet: '한동안 이벤트가 없었어요',
+      peak: (bytes: string): string => `최대 ${bytes}`,
+      ram: (percent: number): string => `RAM ${percent}%`,
+      cleanupCount: (count: number): string => `${count}개를 껐어요`
+    },
+    /** 창을 오래 안 보다가 다시 볼 때 카드(G3g). */
+    away: {
+      title: '자리 비운 사이',
+      summary: (minutes: number, parts: string[]): string =>
+        `${minutes}분 동안: ${parts.join(' · ')}`,
+      done: (n: number): string => `작업 끝남 ${n}`,
+      waiting: (n: number): string => `권한 대기 ${n}`,
+      gone: (n: number): string => `꺼진 에이전트 ${n}`,
+      quiet: (n: number): string => `조용함 ${n}`,
+      maxRam: (percent: number): string => `RAM 최고 ${percent}%`,
+      show: '기록 보기'
     },
     search: {
       placeholder: '이름·포트·브랜치로 찾기…',
@@ -364,6 +409,10 @@ export const text = {
       name: '이름',
       command: '명령',
       worktree: '워크트리',
+      time: '시각',
+      kind: '종류',
+      target: '대상',
+      detail: '내용',
       evidence: '끝난 근거',
       folders: '의존성 폴더',
       size: '크기',
@@ -650,6 +699,7 @@ export const text = {
       emptyLeftovers: '남은 프로세스가 없어요.',
       emptyHeavy: '돌고 있는 무거운 작업이 없어요.',
       emptyApps: '메모리를 많이 쓰는 다른 앱이 없어요.',
+      emptyEvents: '아직 기록이 없어요.',
       noMatch: '찾는 항목이 없어요.',
       groups: {
         ports: '개발 서버 포트',

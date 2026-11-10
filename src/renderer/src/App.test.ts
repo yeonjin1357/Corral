@@ -5,6 +5,7 @@ import App from './App.vue'
 import MemorySheet from './components/MemorySheet.vue'
 import { DEFAULT_SETTINGS, type Settings } from '../../shared/settings'
 import type { NavigateTarget, PitwallApi } from '../../shared/ipc'
+import type { PitEvent } from '../../shared/events'
 import type { DashboardSnapshot } from '../../shared/types'
 import { selectionKey } from '../../shared/keys'
 import { MB, agentRow, diskRow, serverRow, snapshot } from './testing/fixtures'
@@ -44,6 +45,7 @@ function fake(over: Partial<PitwallApi> = {}): Fake {
     onSnapshot: off,
     getLatest: async () => snap(),
     historyRam: async () => [],
+    events: { get: vi.fn(async () => [] as PitEvent[]), onAdded: () => () => {} },
     tray: { action: vi.fn() },
     killServer: vi.fn(async () => ({ status: 'killed' as const })),
     killLeftover: vi.fn(async () => ({ status: 'killed' as const })),
@@ -469,4 +471,104 @@ test('상세 패널에서 고른 포트를 연다', async () => {
   await flushPromises()
   expect(f.api.openPort).toHaveBeenCalledWith(8081)
   w.unmount()
+})
+
+// ── 자리 비운 사이(G3g) ──
+function setVisibility(state: 'hidden' | 'visible'): void {
+  Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state })
+  document.dispatchEvent(new Event('visibilitychange'))
+}
+
+describe('자리 비운 사이', () => {
+  const T0 = new Date(2026, 10, 10, 15, 0).getTime()
+  const done = (id: number, t: number): PitEvent => ({
+    id,
+    t,
+    kind: 'agent-done',
+    tool: 'claude',
+    ms: 60_000
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    setVisibility('visible')
+  })
+
+  test('10분 넘게 숨겼다가 다시 보면 자리 비운 사이 카드, 기록 보기로 기록 탭', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(T0)
+    const events = [done(1, T0 + 5 * 60_000), done(2, T0 + 20 * 60_000)]
+    const f = fake({ events: { get: async () => events, onAdded: () => () => {} } })
+    const w = await start(f)
+    setVisibility('hidden')
+    vi.setSystemTime(T0 + 30 * 60_000)
+    setVisibility('visible')
+    await flushPromises()
+    const card = w.find('[data-away]')
+    expect(card.exists()).toBe(true)
+    expect(card.text()).toContain('자리 비운 사이')
+    expect(card.text()).toContain('30분 동안: 작업 끝남 2')
+    await card
+      .findAll('button')
+      .find((b) => b.text() === '기록 보기')!
+      .trigger('click')
+    const pressed = w.find('[data-slot="toggle-group-item"][aria-pressed="true"]')
+    expect(pressed.text()).toContain('기록')
+    expect(w.findAll('tbody tr').length).toBe(2)
+    expect(w.find('[data-away]').exists()).toBe(false)
+    w.unmount()
+  })
+
+  test('닫을 수 있고, 다시 숨기면 사라진다', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(T0)
+    const events = [done(1, T0 + 5 * 60_000)]
+    const f = fake({ events: { get: async () => events, onAdded: () => () => {} } })
+    const w = await start(f)
+    setVisibility('hidden')
+    vi.setSystemTime(T0 + 15 * 60_000)
+    setVisibility('visible')
+    await flushPromises()
+    expect(w.find('[data-away]').exists()).toBe(true)
+    await w.find('[data-away] [aria-label="닫기"]').trigger('click')
+    expect(w.find('[data-away]').exists()).toBe(false)
+    setVisibility('hidden')
+    setVisibility('visible')
+    await flushPromises()
+    expect(w.find('[data-away]').exists()).toBe(false)
+    w.unmount()
+  })
+
+  test('10분이 안 됐으면 카드가 없다', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(T0)
+    const events = [done(1, T0 + 2 * 60_000)]
+    const f = fake({ events: { get: async () => events, onAdded: () => () => {} } })
+    const w = await start(f)
+    setVisibility('hidden')
+    vi.setSystemTime(T0 + 9 * 60_000)
+    setVisibility('visible')
+    await flushPromises()
+    expect(w.find('[data-away]').exists()).toBe(false)
+    w.unmount()
+  })
+
+  test('새 기록은 기록 탭에 바로 더해진다', async () => {
+    let push: (e: PitEvent[]) => void = () => {}
+    const f = fake({
+      events: {
+        get: async () => [],
+        onAdded: (cb: (e: PitEvent[]) => void) => ((push = cb), () => {})
+      }
+    })
+    const w = await start(f)
+    const tab = w
+      .findAll('[data-slot="toggle-group-item"]')
+      .find((b) => b.text().startsWith('기록'))!
+    expect(tab.text()).toContain('0')
+    push([done(1, T0)])
+    await flushPromises()
+    expect(tab.text()).toContain('1')
+    w.unmount()
+  })
 })

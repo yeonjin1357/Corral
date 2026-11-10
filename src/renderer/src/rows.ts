@@ -32,8 +32,10 @@ import { appBrand, devServerBrand, heavyBrand, leftoverBrand, type Brand } from 
 import claudeCodeLogo from './assets/brands/claude-code.svg'
 import codexLogo from './assets/brands/codex.svg'
 
-export type TabKey = 'ports' | 'agents' | 'leftovers' | 'heavy' | 'disk' | 'apps'
-export const TABS: TabKey[] = ['ports', 'agents', 'leftovers', 'heavy', 'disk', 'apps']
+export type TabKey = 'ports' | 'agents' | 'leftovers' | 'heavy' | 'disk' | 'apps' | 'events'
+export const TABS: TabKey[] = ['ports', 'agents', 'leftovers', 'heavy', 'disk', 'apps', 'events']
+/** 스냅샷으로 표를 만드는 탭(기록은 따로 `eventsTable`). */
+export type SnapshotTab = Exclude<TabKey, 'events'>
 
 /** 상태 점 색: running 초록 · idle 회색 · stopped 빨강 · warn 주황(NeoHtop status-* 와 peach). */
 export type Tone = 'running' | 'idle' | 'stopped' | 'warn'
@@ -287,11 +289,11 @@ function dropEmptyCommit(table: Table): Table {
   }
 }
 
-export function tableFor(tab: TabKey, s: DashboardSnapshot): Table {
+export function tableFor(tab: SnapshotTab, s: DashboardSnapshot): Table {
   return dropEmptyCommit(buildTable(tab, s))
 }
 
-function buildTable(tab: TabKey, s: DashboardSnapshot): Table {
+function buildTable(tab: SnapshotTab, s: DashboardSnapshot): Table {
   const now = s.takenAt
   switch (tab) {
     case 'ports':
