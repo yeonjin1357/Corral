@@ -92,7 +92,7 @@ const rank = (a: Agent): number => (a.quietSince != null ? ORDER.quiet : ORDER[a
 const agents = computed(() =>
   [...(s.value?.agents ?? [])].sort((a, b) => rank(a) - rank(b)).slice(0, 4)
 )
-/** 표(에이전트 탭)와 같은 상태 글자: "권한 대기 · 3분", "조용함 · 18분", "오래 쉼 · 3시간". */
+/** 표(에이전트 탭)와 같은 상태 글자: "응답 대기 · 3분", "조용함 · 18분", "오래 쉼 · 3시간". */
 const agentState = (a: Agent): string => agentStatus(a, s.value?.takenAt ?? 0).text
 /** 사용자를 기다리는(권한 대기·조용함) 줄은 주황. */
 const needsAttention = (a: Agent): boolean => a.state === 'waiting' || a.quietSince != null

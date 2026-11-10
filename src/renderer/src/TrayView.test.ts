@@ -64,12 +64,12 @@ describe('TrayView', () => {
     await flushPromises()
     expect(w.find('[data-metric="ram"]').text()).toContain('82%')
     expect(w.find('[data-metric="servers"]').text()).toContain('3')
-    expect(w.find('[data-metric="agents"]').text()).toContain('권한 대기 1')
+    expect(w.find('[data-metric="agents"]').text()).toContain('응답 대기 1')
     expect(w.findAll('[data-workspace]').map((r) => r.text())).toEqual([
       expect.stringContaining('ws'),
       expect.stringContaining('shop-web')
     ])
-    expect(w.find('[data-agent]').text()).toContain('권한 대기 · 3분')
+    expect(w.find('[data-agent]').text()).toContain('응답 대기 · 3분')
     w.unmount()
   })
 
@@ -87,7 +87,7 @@ describe('TrayView', () => {
     w.unmount()
   })
 
-  test('요약 창의 에이전트 줄은 표와 같은 상태 글자, 권한 대기 다음에 조용함', async () => {
+  test('요약 창의 에이전트 줄은 표와 같은 상태 글자, 응답 대기 다음에 조용함', async () => {
     const MIN = 60_000
     const now = 4 * 60 * MIN
     const at = (pid: number, root: string): Partial<AgentRow> => ({
@@ -122,7 +122,7 @@ describe('TrayView', () => {
     await flushPromises()
     const rows = w.findAll('[data-agent]')
     expect(rows.map((r) => r.text())).toEqual([
-      expect.stringMatching(/asking.*권한 대기 · 3분/),
+      expect.stringMatching(/asking.*응답 대기 · 3분/),
       expect.stringMatching(/quiet.*조용함 · 18분/),
       expect.stringMatching(/broken.*오류 · 1분/),
       expect.stringMatching(/busy.*작업 중 · 5분/)

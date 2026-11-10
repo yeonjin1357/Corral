@@ -290,7 +290,7 @@ test('설정 > 기준값에서 오래 쉬는 세션 기준(분)을 바꿔 저장
   w.unmount()
 })
 
-test('설정 > 알림에서 조용함·꺼짐 알림을 끄고 권한 대기 다시 알림(분)을 바꿔 저장한다', async () => {
+test('설정 > 알림에서 조용함·꺼짐 알림을 끄고 응답 대기 다시 알림(분)을 바꿔 저장한다', async () => {
   const f = fake()
   const w = await start(f)
   f.navigate({ page: 'settings' })
@@ -302,9 +302,9 @@ test('설정 > 알림에서 조용함·꺼짐 알림을 끄고 권한 대기 다
   expect(w.text()).toContain(
     '훅으로 작업 중인 에이전트가 15분 넘게 이벤트도 CPU 사용도 없으면 알려요. 오래 걸리는 명령을 기다리는 중일 수도 있어요.'
   )
-  expect(w.text()).toContain('작업 중이거나 권한을 기다리던 에이전트가 꺼지면 알려요.')
+  expect(w.text()).toContain('작업 중이거나 응답을 기다리던 에이전트가 꺼지면 알려요.')
   expect(w.text()).toContain(
-    '권한 대기가 이 시간 넘게 이어지면 다시 알려요. 0 이면 다시 알리지 않아요.'
+    '응답 대기가 이 시간 넘게 이어지면 다시 알려요. 0 이면 다시 알리지 않아요.'
   )
   const quiet = w.find('#notify-quiet')
   const gone = w.find('#notify-gone')

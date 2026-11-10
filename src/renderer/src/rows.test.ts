@@ -171,7 +171,7 @@ describe('에이전트 표', () => {
       ]
     })
     const rows = tableFor('agents', s).rows
-    expect(rows[0].cells.status).toEqual({ text: '권한 대기', dot: 'warn' })
+    expect(rows[0].cells.status).toEqual({ text: '응답 대기', dot: 'warn' })
     expect(rows[0].cells.runtime.text).toBe('3시간')
     expect(rows[1].cells.status).toEqual({ text: '오류', dot: 'stopped' })
     expect(rows[1].cells.runtime.text).toBe('—')
@@ -925,7 +925,7 @@ describe('작업 공간 탭(G4)', () => {
     expect(head([waiting], { changedFiles: null, lastActiveAt: now - MIN })).toBe('')
   })
 
-  test('권한 대기 에이전트가 있으면 머리 상태가 권한 대기', () => {
+  test('응답을 기다리는 에이전트가 있으면 머리 상태가 응답 대기', () => {
     const status = (agents: ReturnType<typeof agentRow>[], servers = [front]): unknown => {
       const t = snapshot({
         takenAt: now,
@@ -948,7 +948,7 @@ describe('작업 공간 탭(G4)', () => {
     const waiting = agentRow({ pid: 52, workspace: SHOP, state: 'waiting', stateSince: now })
     const idle = agentRow({ pid: 53, workspace: SHOP, state: 'idle' })
     // 권한 대기 > 조용함 > 작업 중 > 서버 요약.
-    expect(status([working, quiet, waiting])).toEqual({ text: '권한 대기', dot: 'warn' })
+    expect(status([working, quiet, waiting])).toEqual({ text: '응답 대기', dot: 'warn' })
     expect(status([working, quiet])).toEqual({ text: '조용함', dot: 'warn' })
     expect(status([idle, working])).toEqual({ text: '작업 중', dot: 'running' })
     expect(status([idle])).toEqual({ text: '사용 중 1', dot: 'running' })
@@ -972,7 +972,7 @@ describe('새 정보 표시(F3·F5·F6)', () => {
     })
     expect(tableFor('agents', s).rows.map((r) => r.cells.status.text)).toEqual([
       '작업 중 · 12분',
-      '권한 대기 · 3분',
+      '응답 대기 · 3분',
       '확인 중'
     ])
   })

@@ -173,7 +173,7 @@ export function awaySummary(
   }
 }
 
-/** 카드 한 줄: `42분 동안: 작업 끝남 2 · 권한 대기 1 · RAM 최고 96%`(0 인 것은 뺀다). */
+/** 카드 한 줄: `42분 동안: 작업 끝남 2 · 응답 대기 1 · RAM 최고 96%`(0 인 것은 뺀다). */
 export function awayText(a: AwaySummary): string {
   const A = text.ui.away
   const parts = [

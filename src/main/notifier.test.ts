@@ -312,7 +312,7 @@ describe('Claude 권한 대기', () => {
     const mixed = setup()
     mixed.update(snap({ agents: [codex(6000, 'working'), agent(5000, 'working')] }))
     mixed.update(snap({ agents: [codex(6000, 'waiting'), agent(5000, 'waiting')] }))
-    expect(mixed.shown[0].title).toBe('에이전트 2개가 권한을 기다려요')
+    expect(mixed.shown[0].title).toBe('에이전트 2개가 응답을 기다려요')
   })
 
   test('한꺼번에 여럿이 기다리면 하나로 묶는다', () => {
@@ -321,7 +321,7 @@ describe('Claude 권한 대기', () => {
     update(snap({ agents: [agent(5000, 'waiting'), agent(5100, 'waiting', 'C:\\work\\wt-a')] }))
     expect(shown).toEqual([
       {
-        title: 'Claude 2개가 권한을 기다려요',
+        title: 'Claude 2개가 응답을 기다려요',
         body: 'shop-web · develop, wt-a · develop',
         target: null
       }
@@ -521,7 +521,7 @@ describe('권한 대기 본문·다시 알림(G3e)', () => {
     clock.now = 10 * MIN
     update(snap({ agents: [waitingOn(5000, 0)] }))
     expect(shown[1]).toEqual({
-      title: 'Claude 가 10분째 권한을 기다려요',
+      title: 'Claude 가 10분째 응답을 기다려요',
       body: 'shop-web · develop — Bash',
       target: 'agent:5000:5000',
       focusAgentKey: 'agent:5000:5000'
@@ -532,7 +532,7 @@ describe('권한 대기 본문·다시 알림(G3e)', () => {
     expect(shown).toHaveLength(2)
     clock.now = 20 * MIN
     update(snap({ agents: [waitingOn(5000, 0)] }))
-    expect(shown.slice(2).map((n) => n.title)).toEqual(['Claude 가 20분째 권한을 기다려요'])
+    expect(shown.slice(2).map((n) => n.title)).toEqual(['Claude 가 20분째 응답을 기다려요'])
     // 풀렸다가 다시 기다리면 새 대기라 첫 알림부터 다시 센다.
     clock.now = 21 * MIN
     update(snap({ agents: [hooked(5000, 'working', 21 * MIN)] }))
@@ -544,7 +544,7 @@ describe('권한 대기 본문·다시 알림(G3e)', () => {
     update(snap({ agents: [waitingOn(5000, 22 * MIN)] }))
     expect(shown.slice(3).map((n) => n.title)).toEqual([
       'Claude 가 권한을 기다려요',
-      'Claude 가 10분째 권한을 기다려요'
+      'Claude 가 10분째 응답을 기다려요'
     ])
 
     const never = setup({ reminderMs: 0 })
@@ -572,7 +572,7 @@ describe('권한 대기 본문·다시 알림(G3e)', () => {
     update(snap({ agents: [waitingOn(5000, 0)] }))
     expect(shown.map((n) => n.title)).toEqual([
       'Claude 가 권한을 기다려요',
-      'Claude 가 20분째 권한을 기다려요'
+      'Claude 가 20분째 응답을 기다려요'
     ])
 
     const off = setup({ notify: { claudeWaiting: false } })
@@ -590,7 +590,7 @@ describe('권한 대기 본문·다시 알림(G3e)', () => {
     expect(shown).toEqual([])
     clock.now = 40 * MIN
     update(snap({ agents: [waitingOn(5000, 0)] }))
-    expect(shown.map((n) => n.title)).toEqual(['Claude 가 40분째 권한을 기다려요'])
+    expect(shown.map((n) => n.title)).toEqual(['Claude 가 40분째 응답을 기다려요'])
   })
 
   /** 세션 파일로 기다림을 아는 에이전트(기다리는 도구는 모르고 이유만 안다). */
@@ -664,7 +664,7 @@ describe('권한 대기 본문·다시 알림(G3e)', () => {
     )
     expect(many.shown).toEqual([
       {
-        title: 'Claude 2개가 권한을 기다려요',
+        title: 'Claude 2개가 응답을 기다려요',
         body: 'shop-web · develop, wt-a · develop',
         target: null
       }
@@ -682,7 +682,7 @@ describe('권한 대기 본문·다시 알림(G3e)', () => {
     update(snap({ agents: [fileWaiting(5000, 'input')] }))
     // 다시 알림 제목은 지금 문구 그대로.
     expect(shown[1]).toEqual({
-      title: 'Claude 가 10분째 권한을 기다려요',
+      title: 'Claude 가 10분째 응답을 기다려요',
       body: 'shop-web · develop',
       target: 'agent:5000:5000',
       focusAgentKey: 'agent:5000:5000'
@@ -704,7 +704,7 @@ describe('권한 대기 본문·다시 알림(G3e)', () => {
     clock.now = 10 * MIN
     update(both())
     const many = {
-      title: 'Claude 2개가 권한을 기다려요',
+      title: 'Claude 2개가 응답을 기다려요',
       body: 'shop-web · develop, wt-a · develop',
       target: null
     }
@@ -789,7 +789,7 @@ describe('조용함·꺼짐 알림(G3e)', () => {
     const waiting = setup({ notify: { claudeWaiting: false } })
     waiting.update(snap({ agents: [hooked(1, 'waiting')] }))
     waiting.update(snap({ agents: [] }))
-    expect(waiting.shown.map((n) => n.body)).toEqual(['권한을 기다리던 중이었어요.'])
+    expect(waiting.shown.map((n) => n.body)).toEqual(['응답을 기다리던 중이었어요.'])
     const codex = setup()
     codex.update(
       snap({ agents: [{ ...agent(3, 'working'), tool: 'codex', stateSource: 'rollout' }] })
@@ -885,8 +885,8 @@ test('어떤 알림에도 명령·요청·세션 제목이 들어가지 않는�
   expect(shown.map((n) => n.title)).toEqual(
     expect.arrayContaining([
       'Claude 가 권한을 기다려요',
-      'Claude 2개가 권한을 기다려요',
-      'Claude 가 10분째 권한을 기다려요',
+      'Claude 2개가 응답을 기다려요',
+      'Claude 가 10분째 응답을 기다려요',
       'wt-4 의 Claude 가 조용해요',
       '에이전트 2개가 조용해요',
       'wt-7 의 Claude 가 작업을 끝냈어요',

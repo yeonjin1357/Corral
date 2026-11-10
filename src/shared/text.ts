@@ -99,17 +99,17 @@ export const text = {
     waitingBody: (where: string, waitingTool: string | null): string =>
       waitingTool ? `${where} — ${waitingTool}` : where,
     waitingManyTitle: (n: number, tool: string | null): string =>
-      `${tool ?? '에이전트'} ${n}개가 권한을 기다려요`,
-    /** 계속 권한 대기일 때 다시 알림. duration: 기다린 시간(formatDuration). */
+      `${tool ?? '에이전트'} ${n}개가 응답을 기다려요`,
+    /** 계속 응답 대기일 때 다시 알림. duration: 기다린 시간(formatDuration). */
     waitingStillTitle: (tool: string, duration: string): string =>
-      `${tool} 가 ${duration}째 권한을 기다려요`,
+      `${tool} 가 ${duration}째 응답을 기다려요`,
     quietTitle: (folder: string, tool: string): string => `${folder} 의 ${tool} 가 조용해요`,
     quietBody: (duration: string): string =>
       `${duration}째 이벤트가 없어요. 멈췄는지 확인해 보세요.`,
     quietManyTitle: (n: number): string => `에이전트 ${n}개가 조용해요`,
     goneTitle: (folder: string, tool: string): string => `${folder} 의 ${tool} 가 꺼졌어요`,
-    /** 꺼지기 전 상태(작업 중·권한 대기)별 본문. */
-    goneBody: { working: '작업 중이었어요.', waiting: '권한을 기다리던 중이었어요.' },
+    /** 꺼지기 전 상태(작업 중·응답 대기)별 본문. */
+    goneBody: { working: '작업 중이었어요.', waiting: '응답을 기다리던 중이었어요.' },
     goneManyTitle: (n: number): string => `에이전트 ${n}개가 꺼졌어요`,
     /** pressure: pressureText 결과("RAM 85%" 또는 "커밋 86%"). */
     heavyTitle: (pressure: string): string => `무거운 작업이 겹쳤어요 (${pressure})`,
@@ -233,7 +233,7 @@ export const text = {
     staleSuffix: ' · 업데이트 지연',
     servers: (n: number): string => `개발 서버 ${n}개`,
     agents: (n: number, waiting: number): string =>
-      waiting > 0 ? `에이전트 ${n}개 (권한 대기 ${waiting})` : `에이전트 ${n}개`,
+      waiting > 0 ? `에이전트 ${n}개 (응답 대기 ${waiting})` : `에이전트 ${n}개`,
     candidates: (n: number): string => `정리 후보 ${n}개`,
     leftovers: (n: number): string => `남은 프로세스 ${n}개`,
     heavy: (n: number, overlap: boolean): string =>
@@ -244,9 +244,9 @@ export const text = {
     open: '앱 열기',
     settings: '설정',
     quit: '종료',
-    /** pressure: pressureText 결과("RAM 82%" 또는 "커밋 91%"), waiting: 권한을 기다리는 에이전트 수. */
+    /** pressure: pressureText 결과("RAM 82%" 또는 "커밋 91%"), waiting: 응답을 기다리는 에이전트 수. */
     tooltip: (pressure: string, waiting: number): string =>
-      waiting > 0 ? `pitwall — ${pressure} · 권한 대기 ${waiting}` : `pitwall — ${pressure}`,
+      waiting > 0 ? `pitwall — ${pressure} · 응답 대기 ${waiting}` : `pitwall — ${pressure}`,
     stillRunning:
       'pitwall 은 트레이에서 계속 실행돼요. 끄려면 트레이 아이콘 메뉴에서 종료를 누르세요.'
   },
@@ -359,7 +359,7 @@ export const text = {
         'memory-level': '메모리',
         'agent-end': '꺼짐',
         'agent-done': '작업 끝남',
-        'agent-waiting': '권한 대기',
+        'agent-waiting': '응답 대기',
         'agent-error': '오류',
         'agent-quiet': '조용함',
         'server-start': '서버 시작',
@@ -388,7 +388,7 @@ export const text = {
       summary: (minutes: number, parts: string[]): string =>
         `${minutes}분 동안: ${parts.join(' · ')}`,
       done: (n: number): string => `작업 끝남 ${n}`,
-      waiting: (n: number): string => `권한 대기 ${n}`,
+      waiting: (n: number): string => `응답 대기 ${n}`,
       gone: (n: number): string => `꺼진 에이전트 ${n}`,
       quiet: (n: number): string => `조용함 ${n}`,
       maxRam: (percent: number): string => `RAM 최고 ${percent}%`,
@@ -477,7 +477,7 @@ export const text = {
       ports: (n: number): string => `포트 ${n}개`,
       agents: '에이전트',
       agentStates: (working: number, waiting: number): string =>
-        waiting > 0 ? `작업 중 ${working} · 권한 대기 ${waiting}` : `작업 중 ${working}`,
+        waiting > 0 ? `작업 중 ${working} · 응답 대기 ${waiting}` : `작업 중 ${working}`,
       /** freed: formatFreed 결과. */
       recommend: (n: number, freed: string): string => `정리 추천 ${n}개 · ${freed} 확보`,
       workspaces: '작업 공간',
@@ -614,7 +614,7 @@ export const text = {
         heavy: '겹쳐 돌면 알려 줄 무거운 명령이에요.',
         notifications: '어떤 때 OS 알림을 보낼지 골라요.',
         disk: '끝난 워크트리에서 지울 폴더와 더 살펴볼 저장소예요.',
-        claude: 'Claude Code·Codex 훅으로 작업 중·권한 대기를 정확히 알아요.',
+        claude: 'Claude Code·Codex 훅으로 작업 중·응답 대기와 기다리는 도구를 정확히 알아요.',
         about:
           '로컬 AI 코딩 에이전트·개발 서버 포트·RAM·디스크를 한눈에 보고 정리하는 트레이 앱이에요.'
       },
@@ -675,20 +675,19 @@ export const text = {
       showAgentActivity: '에이전트가 하는 일 보기',
       showAgentActivityHelp:
         '훅이 알려 주는 세션 제목·요청 첫 줄·도구 이름을 화면에 보여요. 메모리에만 두고 파일로 남기지 않아요.',
-      notifyClaudeWaiting: '에이전트 권한 대기',
-      notifyClaudeWaitingHelp:
-        'Claude·Codex 연동을 켜 두었을 때, 세션이 권한을 기다리기 시작하면 알려요.',
+      notifyClaudeWaiting: '에이전트 응답 대기',
+      notifyClaudeWaitingHelp: '에이전트가 권한 확인이나 답을 기다리기 시작하면 알려요.',
       notifyAgentQuiet: '조용한 에이전트',
       notifyAgentQuietHelp:
         '훅으로 작업 중인 에이전트가 15분 넘게 이벤트도 CPU 사용도 없으면 알려요. 오래 걸리는 명령을 기다리는 중일 수도 있어요.',
       notifyAgentGone: '에이전트 꺼짐',
-      notifyAgentGoneHelp: '작업 중이거나 권한을 기다리던 에이전트가 꺼지면 알려요.',
+      notifyAgentGoneHelp: '작업 중이거나 응답을 기다리던 에이전트가 꺼지면 알려요.',
       notifyClickFocus: '알림을 누르면 그 에이전트의 창으로',
       notifyClickFocusHelp:
         '에이전트 알림을 누르면 그 에이전트가 떠 있는 터미널·에디터 창을 앞으로 가져와요. 창을 찾지 못하면 pitwall 을 열어요. 탭까지 고르지는 못해요.',
-      waitingReminder: '권한 대기 다시 알림',
+      waitingReminder: '응답 대기 다시 알림',
       waitingReminderHelp:
-        '권한 대기가 이 시간 넘게 이어지면 다시 알려요. 0 이면 다시 알리지 않아요.',
+        '응답 대기가 이 시간 넘게 이어지면 다시 알려요. 0 이면 다시 알리지 않아요.',
       notifyHeavy: '무거운 작업 겹침',
       notifyHeavyHelp: '무거운 작업이 둘 이상 겹치고 RAM 이 경고 기준 이상이 되면 알려요.',
       dependencyDirs: '지울 의존성 폴더 이름',
@@ -759,7 +758,7 @@ export const text = {
       toolNames: { claude: 'Claude Code', codex: 'Codex' },
       states: {
         working: '작업 중',
-        waiting: '권한 대기',
+        waiting: '응답 대기',
         idle: '쉬는 중',
         error: '오류',
         unknown: '확인 중'
@@ -776,10 +775,10 @@ export const text = {
       cpuSubWindows: '작업 관리자처럼 전체 CPU 대비',
       stateSource: '상태 출처',
       codexNote:
-        'Codex 세션 기록을 찾지 못해 CPU 사용량으로 짐작해요. Codex 연동을 켜면 권한 대기까지 알 수 있어요.',
+        'Codex 세션 기록을 찾지 못해 CPU 사용량으로 짐작해요. Codex 연동을 켜면 응답 대기까지 알 수 있어요.',
       codexRolloutNote:
-        'Codex 세션 기록으로 상태를 알아요. 권한 대기는 Codex 연동을 켜야 알 수 있어요.',
-      noHookNote: 'Claude 연동을 켜면 권한 대기까지 정확히 알 수 있어요.',
+        'Codex 세션 기록으로 상태를 알아요. 응답 대기는 Codex 연동을 켜야 알 수 있어요.',
+      noHookNote: 'Claude 연동을 켜면 응답 대기와 기다리는 도구까지 정확히 알 수 있어요.',
       fileNote:
         'Claude Code 가 남기는 세션 파일로 작업 중·쉬는 중·응답 대기를 알아요. 어떤 도구가 권한을 기다리는지는 Claude 연동을 켜야 알 수 있어요.',
       /** 세션 파일로 안 응답 대기의 이유(하는 일 칸·상세 패널의 상태 출처). */
@@ -855,8 +854,8 @@ export const text = {
       reenable: 'Claude 연동 다시 켜기',
       disable: 'Claude 연동 끄기',
       states: {
-        on: '켜짐 — Claude 훅으로 작업 중·권한 대기를 알아요.',
-        off: '꺼짐 — 지금은 CPU 사용량으로 짐작해요. 켜면 권한 대기까지 알 수 있어요.',
+        on: '켜짐 — Claude 훅으로 작업 중·응답 대기와 기다리는 도구·하는 일을 알아요.',
+        off: '꺼짐 — 지금은 Claude Code 의 세션 파일(없으면 CPU 사용량)로 상태를 알아요. 켜면 어떤 도구가 권한을 기다리는지와 하는 일까지 알 수 있어요.',
         partial: '예전 설정이 남아 있어요. 다시 켜 주세요.',
         server: '훅을 받을 포트를 열지 못했어요. 다시 켜면 새 포트로 바꿔요.',
         settings: 'Claude 설정 파일(settings.json)을 읽을 수 없어요.'
@@ -870,8 +869,8 @@ export const text = {
       reenable: 'Codex 연동 다시 켜기',
       disable: 'Codex 연동 끄기',
       states: {
-        on: '켜짐 — Codex 훅으로 작업 중·권한 대기를 알아요. 상태가 안 오면 Codex 에서 /hooks 를 열어 pitwall 훅을 승인해 주세요.',
-        off: '꺼짐 — 지금은 Codex 세션 기록(없으면 CPU 사용량)으로 짐작해요. 켜면 권한 대기까지 알 수 있어요.',
+        on: '켜짐 — Codex 훅으로 작업 중·응답 대기를 알아요. 상태가 안 오면 Codex 에서 /hooks 를 열어 pitwall 훅을 승인해 주세요.',
+        off: '꺼짐 — 지금은 Codex 세션 기록(없으면 CPU 사용량)으로 짐작해요. 켜면 응답 대기까지 알 수 있어요.',
         partial: '예전 설정이 남아 있어요. 다시 켜 주세요.',
         server: '훅을 받을 포트를 열지 못했어요. 다시 켜면 새 포트로 바꿔요.',
         settings: 'Codex 훅 설정 파일(hooks.json)을 읽을 수 없어요.'
@@ -886,7 +885,7 @@ export const text = {
       agents: '에이전트',
       leftovers: '남은 프로세스',
       candidates: '정리 후보',
-      waiting: (n: number): string => `권한 대기 ${n}`,
+      waiting: (n: number): string => `응답 대기 ${n}`,
       checks: (n: number): string => `확인해볼 것 ${n}`,
       agentLeftovers: (n: number): string => `에이전트 워크트리 ${n}`,
       current: '(현재)',

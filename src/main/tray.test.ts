@@ -153,7 +153,7 @@ describe('buildTrayMenu', () => {
     const items = buildTrayMenu(s, actions)
     expect(labels(items).slice(1, 5)).toEqual([
       '개발 서버 2개',
-      '에이전트 2개 (권한 대기 1)',
+      '에이전트 2개 (응답 대기 1)',
       '정리 후보 1개',
       '남은 프로세스 1개'
     ])
@@ -265,10 +265,10 @@ test('툴팁', () => {
   ).toBe('pitwall — 커밋 91%')
 })
 
-test('풍선말에 권한 대기 수', () => {
+test('풍선말에 응답 대기 수', () => {
   expect(
     trayTooltip(snap({ agents: [agentRow('waiting'), agentRow('working'), agentRow('waiting')] }))
-  ).toBe('pitwall — RAM 82% · 권한 대기 2')
+  ).toBe('pitwall — RAM 82% · 응답 대기 2')
   // 조용한 에이전트는 점으로만 보이고 풍선말에는 세지 않는다.
   expect(trayTooltip(snap({ agents: [agentRow('working', 1)] }))).toBe('pitwall — RAM 82%')
 })

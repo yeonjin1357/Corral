@@ -71,7 +71,7 @@ test('종류마다 문구가 있다', () => {
     kind: '시작',
     detail: 'Claude'
   })
-  expect(eventText(ev({ kind: 'agent-waiting' })).kind).toBe('권한 대기')
+  expect(eventText(ev({ kind: 'agent-waiting' })).kind).toBe('응답 대기')
   expect(eventText(ev({ kind: 'agent-error' })).kind).toBe('오류')
   expect(eventText(ev({ kind: 'agent-quiet' })).detail).toBe('한동안 이벤트가 없었어요')
   expect(eventText(ev({ kind: 'heavy-start', label: 'vitest' }))).toEqual({
@@ -116,7 +116,7 @@ test('자리 비운 사이: since 뒤의 것만 세고, 셀 것이 없으면 nul
   ]
   const a = awaySummary(events, ram, since, NOW)
   expect(a).toEqual({ minutes: 42, done: 2, waiting: 1, gone: 0, quiet: 1, maxRam: 96 })
-  expect(awayText(a!)).toBe('42분 동안: 작업 끝남 2 · 권한 대기 1 · 조용함 1 · RAM 최고 96%')
+  expect(awayText(a!)).toBe('42분 동안: 작업 끝남 2 · 응답 대기 1 · 조용함 1 · RAM 최고 96%')
   expect(awaySummary([ev({ kind: 'server-start', t: since + MIN })], ram, since, NOW)).toBeNull()
   expect(awaySummary([], [], since, NOW)).toBeNull()
   expect(awaySummary(events, [], since, NOW)?.maxRam).toBeNull()
