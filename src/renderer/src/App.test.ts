@@ -628,6 +628,36 @@ test('다른 포트 보기는 숨긴 서버 보기와 하나만 켜지고, 탭�
   w.unmount()
 })
 
+test('다른 포트 보기에서 검색하면 전체 수는 다른 포트 수', async () => {
+  // 개발 서버 3개, 다른 포트 5개(postgres 하나, 디버깅 브라우저 넷).
+  const chrome = [9222, 9223, 9224, 9225].map((port, i) =>
+    otherPort({ port, pid: 4400 + i, processName: 'chrome.exe' })
+  )
+  const w = await start(
+    fake({ getLatest: async () => ({ ...snap(), otherPorts: [otherPort(), ...chrome] }) })
+  )
+  await openTab(w, 'ports')
+  await w.find('[data-action="toggle-other"]').trigger('click')
+  await w.find('input[placeholder^="이름"]').setValue('chrome')
+  expect(w.find('.toolbar').text()).toContain('5개 중 4개')
+  // 탭 숫자는 그대로 개발 서버 수.
+  expect(w.find('[data-slot="toggle-group-item"][data-value="ports"]').text()).toBe('개발 서버 3')
+  w.unmount()
+})
+
+test('숨긴 서버 보기에서 검색하면 전체 수는 숨긴 서버 수', async () => {
+  const hidden = [2375, 2376].map((port, i) =>
+    serverRow({ pid: 70 + i, ports: [port], processName: 'docker.exe' })
+  )
+  const w = await start(fake({ getLatest: async () => ({ ...snap(), hiddenServers: hidden }) }))
+  await openTab(w, 'ports')
+  await w.find('[data-action="toggle-hidden"]').trigger('click')
+  await w.find('input[placeholder^="이름"]').setValue(':2375')
+  expect(w.find('.toolbar').text()).toContain('2개 중 1개')
+  expect(w.find('[data-slot="toggle-group-item"][data-value="ports"]').text()).toBe('개발 서버 3')
+  w.unmount()
+})
+
 test('상세 패널에서 고른 포트를 연다', async () => {
   const multi = serverRow({ pid: 9, ports: [6176, 8081], workspace: null })
   const f = fake({ getLatest: async () => snapshot({ servers: [multi] }) })

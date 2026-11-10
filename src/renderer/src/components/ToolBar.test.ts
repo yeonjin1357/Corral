@@ -50,3 +50,23 @@ test('기록이 탭의 맨 끝에 있고 숫자는 기록 수다', () => {
   expect(last.text()).toContain('기록')
   expect(last.text()).toContain('7')
 })
+
+test('검색 결과 줄의 전체 수는 지금 보이는 표의 수', async () => {
+  const w = mount(ToolBar, {
+    props: {
+      tab: 'ports',
+      query: '5432',
+      counts: { ...counts, ports: 2 },
+      matching: 1,
+      view: 'group',
+      total: 300
+    }
+  })
+  expect(w.text()).toContain('300개 중 1개')
+  // 탭 숫자는 그대로 탭의 수.
+  const ports = w.find('[data-slot="toggle-group-item"][data-value="ports"]')
+  expect(ports.text()).toBe('개발 서버 2')
+  // 따로 주지 않으면 탭의 수.
+  await w.setProps({ total: undefined })
+  expect(w.text()).toContain('2개 중 1개')
+})

@@ -601,6 +601,15 @@ const shown = computed(() =>
     ? grouping.value(rows.value).length
     : rows.value.length
 )
+/**
+ * 도구줄 "n개 중 m개"의 전체 수: 다른 포트·숨긴 서버 보기는 그 표의 수(탭 숫자는 그대로 개발 서버 수),
+ * 다른 화면은 탭의 수(작업 공간 탭은 작업 공간 수).
+ */
+const searchTotal = computed(() => {
+  if (otherView.value) return otherCount.value
+  if (tab.value === 'ports' && showHidden.value) return hiddenCount.value
+  return undefined
+})
 const NO_SORT: SortState = { id: 'name', dir: 'asc' }
 /** 다른 포트 보기의 정렬. 칸이 달라 개발 서버 정렬과 따로 두고 저장하지 않는다(처음은 포트 순). */
 const otherSort = ref<SortState | undefined>(undefined)
@@ -898,6 +907,7 @@ const takenAt = computed(() =>
           v-model:view="serverView"
           :counts="counts"
           :matching="shown"
+          :total="searchTotal"
         >
           <template #actions>
             <Button

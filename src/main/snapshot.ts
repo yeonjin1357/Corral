@@ -152,8 +152,11 @@ function summarizeMemory(
 
 /** 런타임: 자기 이름만으로는 누가 쓰는지 알 수 없는 프로세스(에디터의 언어 서버·확장 호스트 등). */
 const RUNTIME_NAME = /^(node|javaw?|python[\d.]*w?|bun|deno|dotnet|ruby|php)(\.exe)?$/i
-/** 셸·콘솔: 런타임을 띄운 앱을 찾을 때 건너뛴다. macOS 의 로그인 셸은 이름이 `-zsh` 처럼 보인다. */
-const SHELL_NAME = /^-?(cmd|bash|sh|zsh|pwsh|powershell|conhost|openconsole)(\.exe)?$/i
+/**
+ * 셸·콘솔: 런타임을 띄운 앱을 찾을 때 건너뛴다. macOS 의 로그인 셸은 이름이 `-zsh` 처럼 보이고, Terminal.app·iTerm2 는
+ * /usr/bin/login 으로 셸을 띄운다.
+ */
+const SHELL_NAME = /^-?(cmd|bash|sh|zsh|pwsh|powershell|conhost|openconsole|login)(\.exe)?$/i
 /** 여기에 먼저 닿으면 사용자가 직접(탐색기·서비스·Dock) 띄운 것이라 띄운 앱을 모른다. */
 const LAUNCHER_NAME = /^(explorer\.exe|services\.exe|launchd|systemd)$/i
 const OWNER_DEPTH = 8

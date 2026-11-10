@@ -19,6 +19,8 @@ const props = defineProps<{
   counts: Record<TabKey, number>
   /** 검색에 맞는 행 수. */
   matching: number
+  /** 검색 결과 줄의 전체 수: 지금 보이는 표의 수(다른 포트·숨긴 서버 보기). 없으면 탭의 수. */
+  total?: number
 }>()
 const tab = defineModel<TabKey>('tab', { required: true })
 const query = defineModel<string>('query', { required: true })
@@ -110,7 +112,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', focusSearch))
       v-if="query.trim()"
       class="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground"
     >
-      <span>{{ text.ui.search.matches(matching, counts[tab]) }}</span>
+      <span>{{ text.ui.search.matches(matching, total ?? counts[tab]) }}</span>
       <Badge variant="secondary" class="max-w-64 font-normal">
         <span class="truncate" :title="query">{{ text.ui.search.chip(query.trim()) }}</span>
       </Badge>

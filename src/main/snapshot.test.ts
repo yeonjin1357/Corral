@@ -460,6 +460,72 @@ describe('묶음과 에이전트', () => {
       expect(apps.find((a) => a.name === 'java.exe')?.owner).toBeNull()
       expect(apps.find((a) => a.name === 'node')?.owner).toBeNull()
     })
+
+    test('login 을 거친 셸에서 띄운 런타임은 터미널 앱이 띄운 것으로 본다', () => {
+      // macOS 의 Terminal.app·iTerm2 는 /usr/bin/login 으로 셸을 띄운다.
+      const TERMINAL_APP = '/System/Applications/Utilities/Terminal.app'
+      const apps = buildSnapshot({
+        ...input,
+        platform: 'darwin',
+        sample: {
+          processes: [
+            proc(1, 0, 'launchd', 10, 0),
+            proc(400, 1, 'Terminal', 80, 100, `${TERMINAL_APP}/Contents/MacOS/Terminal`),
+            proc(401, 400, 'login', 2, 110, 'login -pf dev'),
+            proc(402, 401, '-zsh', 5, 120),
+            proc(403, 402, 'node', 50, 130, 'node server.js'),
+            proc(410, 1, 'iTerm2', 90, 100, '/Applications/iTerm.app/Contents/MacOS/iTerm2'),
+            proc(411, 410, 'login', 2, 110, 'login -fpl dev /bin/zsh'),
+            proc(412, 411, '-zsh', 5, 120),
+            proc(413, 412, 'python3', 40, 130, 'python3 app.py')
+          ],
+          tcp: []
+        },
+        worktrees: new Map()
+      }).apps
+      expect(apps.find((a) => a.name === 'node')).toMatchObject({
+        owner: 'Terminal',
+        exePath: TERMINAL_APP
+      })
+      expect(apps.find((a) => a.name === 'python3')?.owner).toBe('iTerm2')
+    })
+
+    test('런타임을 띄운 앱별로 나눠도 메모리 묶음 합은 그대로다', () => {
+      // 같은 프로세스들을 에디터(Cursor)가 띄운 경우와, 그 조상이 탐색기라 띄운 앱을 모르는 경우.
+      const editor = (launcher: string): ProcessInfo[] =>
+        [
+          proc(100, 1, launcher, 400, 100, `"${CURSOR}"`),
+          proc(101, 100, launcher, 300, 110),
+          proc(110, 101, 'node.exe', 300, 120),
+          proc(111, 110, 'node.exe', 200, 130),
+          proc(120, 101, 'cmd.exe', 5, 120),
+          proc(121, 120, 'node.exe', 100, 130),
+          proc(130, 101, 'python.exe', 70, 120)
+        ].map((p, i) => ({ ...p, commitBytes: i % 3 === 0 ? null : p.memoryBytes * 2 }))
+      const build = (launcher: string): ReturnType<typeof buildSnapshot> =>
+        buildSnapshot({
+          ...input,
+          platform: 'win32',
+          sample: { processes: [...processes, ...editor(launcher)], tcp }
+        })
+      const split = build('Cursor.exe')
+      const plain = build('explorer.exe')
+      expect(split.apps.some((a) => a.owner === 'Cursor.exe')).toBe(true)
+      expect(plain.apps.some((a) => a.owner === 'Cursor.exe')).toBe(false)
+      // 다섯 묶음(메모리·커밋·프로세스 수) 모두 같다.
+      expect(split.groups).toEqual(plain.groups)
+      // 다른 앱 묶음의 합은 앱별 합과 같다(프로세스마다 한 번).
+      const other = split.groups.find((g) => g.group === 'otherApps')!
+      expect(other.memoryBytes).toBe(split.apps.reduce((n, a) => n + a.memoryBytes, 0))
+      expect(other.processCount).toBe(split.apps.reduce((n, a) => n + a.processCount, 0))
+      expect(other.commitBytes).toBe(
+        split.apps.reduce<number | null>(
+          (n, a) => (a.commitBytes == null ? n : (n ?? 0) + a.commitBytes),
+          null
+        )
+      )
+      expect(other.commitBytes).not.toBeNull()
+    })
   })
 
   test('다른 앱은 상위 몇 개로 자르지 않는다: 앱별 프로세스 수 합이 다른 앱 묶음의 프로세스 수와 같다', () => {
