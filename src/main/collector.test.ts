@@ -343,6 +343,41 @@ describe('마지막 활동·오래 쉬는 세션(G2)', () => {
     })
   })
 
+  test('오래 쉬는 에이전트만 있는 워크트리의 서버는 확인해볼 것까지만, 그 전에는 판단 없이 연결 타이머만 잰다', async () => {
+    // 서버(3000)와 Claude(5000)는 shop-web, Codex(6000)는 다른 워크트리.
+    const { deps, sessions, clock } = setup({
+      options: () => ({
+        thresholds: { ramWarnPercent: 80, ramDangerPercent: 90 },
+        idlePortMs: 20 * MIN,
+        agentParkedMs: 30 * MIN,
+        heavyPatterns: []
+      })
+    })
+    const stoppedAt = clock.now - 1
+    hookEvent(sessions, 'Stop', stoppedAt)
+    const collector = createCollector(deps)
+    const first = await collector.collect()
+    expect(first.servers[0]).toMatchObject({
+      judgement: null,
+      idleSince: 10 * MIN,
+      agentInWorktree: true,
+      parkedAgent: false
+    })
+    expect(collector.exportState().serverMemo).toEqual({
+      'server:4100:100': { state: 'idle', since: 10 * MIN, shielded: true }
+    })
+    clock.now = stoppedAt + 30 * MIN
+    const s = await collector.collect()
+    expect(s.servers[0]).toMatchObject({
+      judgement: 'check',
+      idleSince: 10 * MIN,
+      agentInWorktree: true,
+      parkedAgent: true,
+      parkedSince: stoppedAt
+    })
+    expect(cleanupRecommendation(s).items).toEqual([])
+  })
+
   test('처음 본 시각·마지막 작업 시각을 내보내고, 다시 켜면 이어 쓴다(지금보다 뒤의 시각은 버림)', async () => {
     const { deps, clock } = setup()
     const before = createCollector(deps)

@@ -104,6 +104,8 @@ const row: ServerRow = {
   judgement: null,
   idleSince: null,
   agentInWorktree: false,
+  parkedAgent: false,
+  parkedSince: null,
   cpuPercent: null,
   memoryGrowth: null
 }

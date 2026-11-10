@@ -133,6 +133,40 @@ describe('상세 패널: 커밋', () => {
   })
 })
 
+describe('상세 패널: 서버 판단과 에이전트(G2)', () => {
+  const NOW = 10_000_000
+  const HOUR = 60 * 60_000
+  const badge = (): string | undefined =>
+    document.body.querySelector('[data-slot=badge]')?.textContent?.trim()
+  const bodyText = (): string => document.body.textContent!.replace(/\s+/g, ' ')
+  const parked = { agentInWorktree: true, parkedAgent: true, parkedSince: NOW - 2 * HOUR }
+
+  test('오래 쉬는 에이전트만 있어 확인해볼 것이면 배지에 에이전트가 쉰 기간', () => {
+    sheet({
+      kind: 'server',
+      row: serverRow({ judgement: 'check', clientCount: 0, idleSince: NOW - HOUR, ...parked })
+    })
+    expect(badge()).toBe('확인해볼 것 · 에이전트가 2시간째 쉼')
+  })
+
+  test('판단 전이면 "에이전트 오래 쉼"', () => {
+    sheet({
+      kind: 'server',
+      row: serverRow({ clientCount: 0, idleSince: NOW - 60_000, ...parked })
+    })
+    expect(badge()).toBe('에이전트 오래 쉼')
+  })
+
+  test('활동 중인 에이전트가 있어도 연결 카드에 연결이 없던 시간을 보인다', () => {
+    sheet({
+      kind: 'server',
+      row: serverRow({ clientCount: 0, idleSince: NOW - 2 * HOUR, agentInWorktree: true })
+    })
+    expect(badge()).toBe('에이전트 작업 중')
+    expect(bodyText()).toContain('지금 연결이 없어요 · 2시간')
+  })
+})
+
 describe('상세 패널: 세션 파일로 안 에이전트', () => {
   const FILE_NOTE =
     'Claude Code 가 남기는 세션 파일로 작업 중·쉬는 중을 알아요. 권한 대기는 Claude 연동을 켜야 알 수 있어요.'

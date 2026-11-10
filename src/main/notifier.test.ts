@@ -105,6 +105,8 @@ const candidate = {
   judgement: 'candidate',
   idleSince: 0,
   agentInWorktree: false,
+  parkedAgent: false,
+  parkedSince: null,
   cpuPercent: null,
   memoryGrowth: null
 } as ServerRow

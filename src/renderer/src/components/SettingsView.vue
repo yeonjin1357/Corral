@@ -359,7 +359,7 @@ const NOTICES_URL = `${REPO_URL}/blob/main/THIRD_PARTY_NOTICES.md`
             <CardHeader
               ><CardTitle>{{ S.groups.ports }}</CardTitle></CardHeader
             >
-            <CardContent>
+            <CardContent class="gap-5">
               <div class="flex items-center justify-between gap-6">
                 <div>
                   <Label for="idle-port">{{ S.idlePort }}</Label>
@@ -375,6 +375,26 @@ const NOTICES_URL = `${REPO_URL}/blob/main/THIRD_PARTY_NOTICES.md`
                     class="w-20 text-right tabular-nums"
                     :min="SETTINGS_LIMITS.idlePortMinutes.min"
                     :max="SETTINGS_LIMITS.idlePortMinutes.max"
+                    required
+                  />
+                  <span class="w-6 text-sm text-muted-foreground">{{ S.minutes }}</span>
+                </div>
+              </div>
+              <div class="flex items-center justify-between gap-6">
+                <div>
+                  <Label for="agent-parked">{{ S.agentParked }}</Label>
+                  <p class="mt-1 text-xs leading-relaxed text-muted-foreground">
+                    {{ S.agentParkedHelp }}
+                  </p>
+                </div>
+                <div class="flex shrink-0 items-center gap-2">
+                  <Input
+                    id="agent-parked"
+                    v-model.number="draft.agentParkedMinutes"
+                    type="number"
+                    class="w-20 text-right tabular-nums"
+                    :min="SETTINGS_LIMITS.agentParkedMinutes.min"
+                    :max="SETTINGS_LIMITS.agentParkedMinutes.max"
                     required
                   />
                   <span class="w-6 text-sm text-muted-foreground">{{ S.minutes }}</span>

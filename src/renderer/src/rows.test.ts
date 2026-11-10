@@ -62,6 +62,32 @@ describe('개발 서버 표', () => {
     expect(status[':6']).toEqual({ text: '판별 불가', dot: 'idle' })
   })
 
+  test('오래 쉬는 에이전트만 있는 서버: 확인해볼 것이면 에이전트가 쉰 기간, 판단 전이면 "에이전트 오래 쉼"', () => {
+    const now = 300 * MIN
+    const parked = { agentInWorktree: true, parkedAgent: true, parkedSince: now - 192 * MIN }
+    const s = snapshot({
+      takenAt: now,
+      servers: [
+        serverRow({
+          ports: [1],
+          judgement: 'check',
+          clientCount: 0,
+          idleSince: now - 25 * MIN,
+          ...parked
+        }),
+        serverRow({ ports: [2], clientCount: 0, idleSince: now - 5 * MIN, ...parked }),
+        // 탭이 열려 있으면 판단 전에는 지금처럼 사용 중.
+        serverRow({ ports: [3], clientCount: 1, idleSince: now - 5 * MIN, ...parked })
+      ]
+    })
+    const status = Object.fromEntries(
+      tableFor('ports', s).rows.map((r) => [r.cells.port.text, r.cells.status])
+    )
+    expect(status[':1']).toEqual({ text: '확인해볼 것 · 에이전트가 3시간 12분째 쉼', dot: 'warn' })
+    expect(status[':2']).toEqual({ text: '에이전트 오래 쉼', dot: 'idle' })
+    expect(status[':3']).toEqual({ text: '사용 중', dot: 'running' })
+  })
+
   test('한 서버의 여러 포트를 한 칸에', () => {
     const s = snapshot({ servers: [serverRow({ ports: [6176, 8081, 9091] })] })
     const row = tableFor('ports', s).rows[0]
@@ -113,6 +139,26 @@ describe('에이전트 표', () => {
     expect(rows[0].cells.runtime.text).toBe('3시간')
     expect(rows[1].cells.status).toEqual({ text: '오류', dot: 'stopped' })
     expect(rows[1].cells.runtime.text).toBe('—')
+  })
+
+  test('오래 쉬는 세션은 상태 칸에 "오래 쉼" 배지(끄는 버튼은 여전히 없다)', () => {
+    const now = 4 * 60 * MIN
+    const s = snapshot({
+      takenAt: now,
+      agents: [
+        agentRow({
+          state: 'idle',
+          stateSince: now - 3 * 60 * MIN,
+          lastActiveAt: now - 3 * 60 * MIN,
+          parked: true
+        }),
+        agentRow({ pid: 2, state: 'idle', stateSince: now - 10 * MIN })
+      ]
+    })
+    const rows = tableFor('agents', s).rows
+    expect(rows[0].cells.status).toMatchObject({ text: '쉬는 중 · 3시간', badge: '오래 쉼' })
+    expect(rows[0].actions.map((a) => a.kind)).toEqual(['details'])
+    expect(rows[1].cells.status.badge).toBeUndefined()
   })
 
   test('작업 폴더를 모르면 그렇게 보이고, 동작은 자세히만(에이전트는 끄지 않는다)', () => {

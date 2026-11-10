@@ -23,6 +23,8 @@ function server(over: Partial<ServerRow>): ServerRow {
     judgement: 'candidate',
     idleSince: 0,
     agentInWorktree: false,
+    parkedAgent: false,
+    parkedSince: null,
     cpuPercent: null,
     memoryGrowth: null,
     ...over
@@ -84,6 +86,22 @@ test('정리 후보 서버와 에이전트 없는 워크트리의 남은 프로�
     }
   ])
   expect(r.totalBytes).toBe(1900 * MB)
+})
+
+test('오래 쉬는 에이전트만 있는 서버는 연결이 없어도 추천하지 않는다(확인해볼 것까지만, G2)', () => {
+  const r = cleanupRecommendation({
+    ...blankSnapshot(1),
+    servers: [
+      server({
+        judgement: 'check',
+        clientCount: 0,
+        agentInWorktree: true,
+        parkedAgent: true,
+        parkedSince: 0
+      })
+    ]
+  })
+  expect(r.items).toEqual([])
 })
 
 test('추천할 것이 없으면 빈 목록과 0', () => {

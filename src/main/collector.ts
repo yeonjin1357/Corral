@@ -45,7 +45,7 @@ import { normalizeCandidate, selfWorkspace } from './collect/worktree'
 /** 수집마다 새로 읽는 사용자 기준값(설정 화면에서 바꾸면 다음 수집부터 반영). */
 export interface CollectOptions {
   thresholds: { ramWarnPercent: number; ramDangerPercent: number }
-  /** 에이전트 없는 워크트리의 포트가 이 시간 이상 안 쓰이면 정리 후보. */
+  /** 에이전트 없는 워크트리의 포트가 이 시간 이상 안 쓰이면 정리 후보(오래 쉬는 에이전트만 있으면 확인해볼 것). */
   idlePortMs: number
   /** 쉬는 에이전트의 마지막 활동이 이 시간 이상 전이면 오래 쉬는 세션(G2). */
   agentParkedMs: number
@@ -511,6 +511,7 @@ export function createCollector(deps: CollectorDeps): {
 
     // 작업 공간은 판단 전에 정한다: 같은 작업 공간에서 에이전트가 일하면 그 작업 공간의 서버·남은 프로세스는
     // 정리 후보로 올리지 않는다(스펙 §4 — 다른 저장소에서 일하는 에이전트가 이 서버를 쓰고 있을 수 있다).
+    // 덮는 에이전트가 모두 오래 쉬는 세션이면 서버는 확인해볼 것까지만 오른다(G2, judgeServers).
     const workspaceOf = await resolveWorkspaces(
       [
         ...snapshot.servers.map((r) => r.worktree),

@@ -290,6 +290,8 @@ export const text = {
       sourceCpu: 'CPU 추정',
       agentStates: '상태',
       agentOthers: '그 외',
+      /** 셋째 칸(쉬는 중·그 외) 가운데 오래 쉬는 세션 수. */
+      agentParked: (n: number): string => `오래 쉼 ${n}`,
       heavy: '무거운 작업',
       heavyRunning: '실행 중',
       overlap: '겹침',
@@ -356,6 +358,12 @@ export const text = {
       candidate: '정리 후보',
       check: '확인해볼 것',
       agent: '에이전트 작업 중',
+      /** 덮는 에이전트가 모두 오래 쉬는 세션인데 아직 판단 전(G2). */
+      agentParked: '에이전트 오래 쉼',
+      /** 덮는 에이전트가 모두 오래 쉬는 세션이라 확인해볼 것까지만 올린 서버. duration: 가장 늦은 마지막 활동부터. */
+      checkParked: (duration: string): string => `확인해볼 것 · 에이전트가 ${duration}째 쉼`,
+      /** 에이전트 상태 칸의 오래 쉬는 세션 배지. */
+      parked: '오래 쉼',
       unresolvable: '판별 불가',
       leftoverAgent: '에이전트 워크트리',
       leftoverFree: '끌 수 있음',
@@ -525,6 +533,9 @@ export const text = {
       idlePort: '안 쓰는 포트 기준',
       idlePortHelp:
         '에이전트가 없는 워크트리의 포트가 이 시간 동안 연결이 없으면 정리 후보, 브라우저 탭만 연결돼 있으면 확인해볼 것으로 표시해요.',
+      agentParked: '오래 쉬는 세션 기준',
+      agentParkedHelp:
+        '에이전트가 이 시간 넘게 입력·도구 사용이 없으면 오래 쉬는 세션으로 봐요. 그 에이전트만 있는 워크트리의 서버는 정리 후보가 아니라 확인해볼 것까지만 올려요.',
       minutes: '분',
       heavyPatterns: '무거운 명령',
       heavyHelp:

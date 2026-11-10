@@ -125,3 +125,24 @@ describe('작업 공간 묶음 보기', () => {
     expect(w.find('[data-slot="badge"]').text()).toBe('메모리 증가')
   })
 })
+
+test('상태 칸의 긴 문구(오래 쉬는 에이전트)는 칸에서 잘리고 title 에 다 보인다', () => {
+  const now = 300 * 60_000
+  const s = snapshot({
+    takenAt: now,
+    servers: [
+      serverRow({
+        judgement: 'check',
+        clientCount: 0,
+        idleSince: now - 25 * 60_000,
+        agentInWorktree: true,
+        parkedAgent: true,
+        parkedSince: now - 192 * 60_000
+      })
+    ]
+  })
+  const w = mount(ItemTable, { props: props(s, { id: 'port', dir: 'asc' }) })
+  const full = '확인해볼 것 · 에이전트가 3시간 12분째 쉼'
+  const cell = w.find(`span[title="${full}"]`)
+  expect(cell.find('.truncate').text()).toBe(full)
+})

@@ -1,4 +1,6 @@
 import { activityOf, judgeServers, type ServerMemo } from './judge'
+import { cleanupRecommendation } from '../shared/recommend'
+import { blankSnapshot } from '../shared/snapshot'
 import type { AgentRow, ServerRow, TcpEntry, WorktreeInfo } from '../shared/types'
 
 const MIN = 60 * 1000
@@ -24,13 +26,19 @@ function server(overrides: Partial<ServerRow> = {}): ServerRow {
     judgement: null,
     idleSince: null,
     agentInWorktree: false,
+    parkedAgent: false,
+    parkedSince: null,
     cpuPercent: null,
     memoryGrowth: null,
     ...overrides
   }
 }
 
-function agent(worktree: WorktreeInfo | null, tool: AgentRow['tool'] = 'claude'): AgentRow {
+function agent(
+  worktree: WorktreeInfo | null,
+  tool: AgentRow['tool'] = 'claude',
+  overrides: Partial<AgentRow> = {}
+): AgentRow {
   return {
     pid: 5000,
     tool,
@@ -46,8 +54,14 @@ function agent(worktree: WorktreeInfo | null, tool: AgentRow['tool'] = 'claude')
     stateSince: null,
     cpuPercent: 0,
     lastActiveAt: null,
-    parked: false
+    parked: false,
+    ...overrides
   }
+}
+
+/** 오래 쉬는 세션(마지막 활동 lastActiveAt). */
+function parked(worktree: WorktreeInfo | null, lastActiveAt: number, pid = 5001): AgentRow {
+  return agent(worktree, 'claude', { pid, state: 'idle', lastActiveAt, parked: true })
 }
 
 /** 같은 상태로 여러 샘플을 흘려보낸다. */
@@ -88,12 +102,14 @@ test('연결 수가 바뀌어도(1→3) 탭만 열린 상태는 이어지고, �
   expect(switched.rows[0]).toMatchObject({ judgement: null, idleSince: 20 * MIN })
 })
 
-test('같은 워크트리에 에이전트가 있으면(쉬는 중이어도) 판단하지 않고, 떠나면 처음부터 센다', () => {
+test('같은 워크트리에 오래 쉬지 않은 에이전트가 있으면(쉬는 중이어도) 판단하지 않고, 떠나면 처음부터 센다', () => {
   const withAgent = over([0, 30 * MIN], () => [server()], [agent(W1, 'codex')])
   expect(withAgent.rows[0]).toMatchObject({
     judgement: null,
-    idleSince: null,
-    agentInWorktree: true
+    idleSince: 0,
+    agentInWorktree: true,
+    parkedAgent: false,
+    parkedSince: null
   })
   let memo = withAgent.memo
   const left = judgeServers([server()], [], memo, 31 * MIN, THRESHOLD)
@@ -163,6 +179,115 @@ test('에이전트가 상위 저장소에서 일하면(하위 저장소를 다�
 test('기억 키는 서버 선택 키(server:<pid>:<시작 시각>)', () => {
   const r = judgeServers([server()], [], new Map(), 0, THRESHOLD)
   expect([...r.memo.keys()]).toEqual(['server:4100:100'])
+})
+
+describe('오래 쉬는 에이전트(G2)', () => {
+  const KEY = 'server:4100:100'
+  const WS = { root: 'C:\\work\\shop', name: 'shop', branch: 'main', outer: true }
+
+  test('활동 중인 에이전트가 있으면 판단하지 않지만 연결 타이머는 잰다', () => {
+    const working = agent(W1, 'claude', { state: 'working', lastActiveAt: 30 * MIN })
+    const r = over([0, 10 * MIN, 30 * MIN], () => [server()], [working])
+    expect(r.rows[0]).toMatchObject({
+      judgement: null,
+      idleSince: 0,
+      agentInWorktree: true,
+      parkedAgent: false,
+      parkedSince: null
+    })
+    // 활동 중인 에이전트가 덮고 있었다는 것을 기억한다(떠나면 처음부터 세려고).
+    expect(r.memo.get(KEY)).toEqual({ state: 'idle', since: 0, shielded: true })
+  })
+
+  test('덮는 에이전트가 모두 오래 쉬면 확인해볼 것까지만(연결 0 이어도 정리 후보가 아니다)', () => {
+    // 둘 다 오래 쉬는 세션. 기간은 둘 가운데 더 늦은 마지막 활동부터.
+    const agents = [parked(W1, -300 * MIN), parked(W1, -200 * MIN, 5002)]
+    const idle = over([0, 30 * MIN], () => [server()], agents)
+    expect(idle.rows[0]).toMatchObject({
+      judgement: 'check',
+      idleSince: 0,
+      agentInWorktree: true,
+      parkedAgent: true,
+      parkedSince: -200 * MIN
+    })
+    // 오래 쉬는 에이전트는 보호하지 않으므로 기억에 shielded 를 남기지 않는다.
+    expect(idle.memo.get(KEY)).toEqual({ state: 'idle', since: 0 })
+    const tabs = over([0, 30 * MIN], () => [server({ clientCount: 2 })], agents)
+    expect(tabs.rows[0]).toMatchObject({ judgement: 'check', parkedAgent: true })
+  })
+
+  test('오래 쉬는 세션이 된 서버의 타이머는 그 에이전트의 마지막 활동보다 앞설 수 없다', () => {
+    // 서버는 0분부터 연결 0. 에이전트는 50분에 마지막으로 일했고, 60분 샘플에서 오래 쉬는 세션이 됐다.
+    const active = agent(W1, 'claude', { state: 'idle', lastActiveAt: 50 * MIN })
+    let memo: ServerMemo = new Map()
+    for (const t of [0, 30 * MIN, 55 * MIN])
+      memo = judgeServers([server()], [active], memo, t, THRESHOLD).memo
+    const resting = parked(W1, 50 * MIN)
+    const justParked = judgeServers([server()], [resting], memo, 60 * MIN, THRESHOLD)
+    // 판단 전: 보호가 끝난 시각(마지막 활동 50분)부터 10분.
+    expect(justParked.rows[0]).toMatchObject({
+      judgement: null,
+      idleSince: 50 * MIN,
+      parkedAgent: true,
+      parkedSince: 50 * MIN
+    })
+    const later = judgeServers([server()], [resting], justParked.memo, 70 * MIN, THRESHOLD)
+    expect(later.rows[0]).toMatchObject({ judgement: 'check', idleSince: 50 * MIN })
+  })
+
+  test('에이전트가 꺼지면 그때부터 다시 센다', () => {
+    const previous: ServerMemo = new Map([[KEY, { state: 'idle', since: 0, shielded: true }]])
+    const r = judgeServers([server()], [], previous, 30 * MIN, THRESHOLD)
+    expect(r.rows[0]).toMatchObject({
+      judgement: null,
+      idleSince: 30 * MIN,
+      agentInWorktree: false,
+      parkedAgent: false
+    })
+    expect(r.memo.get(KEY)).toEqual({ state: 'idle', since: 30 * MIN })
+  })
+
+  test('오래 쉬는 에이전트와 활동 중인 에이전트가 같이 있으면 판단하지 않는다', () => {
+    const working = agent(W1, 'codex', { state: 'working', lastActiveAt: 30 * MIN })
+    const r = over([0, 30 * MIN], () => [server()], [parked(W1, -200 * MIN), working])
+    expect(r.rows[0]).toMatchObject({
+      judgement: null,
+      idleSince: 0,
+      agentInWorktree: true,
+      parkedAgent: false,
+      parkedSince: null
+    })
+  })
+
+  test('같은 작업 공간의 오래 쉬는 에이전트도 같은 규칙', () => {
+    // 서버는 W1, 에이전트는 다른 워크트리(W2)지만 같은 작업 공간에서 일한다.
+    const row = (): ServerRow[] => [server({ workspace: WS })]
+    const resting = { ...parked(W2, -200 * MIN), workspace: WS }
+    const r = over([0, 30 * MIN], row, [resting])
+    expect(r.rows[0]).toMatchObject({
+      judgement: 'check',
+      agentInWorktree: true,
+      parkedAgent: true,
+      parkedSince: -200 * MIN
+    })
+    const working = agent(W2, 'claude', { state: 'working', lastActiveAt: 0, workspace: WS })
+    const shielded = over([0, 30 * MIN], row, [resting, working])
+    expect(shielded.rows[0]).toMatchObject({ judgement: null, idleSince: 0, parkedAgent: false })
+  })
+
+  test('오래 쉬는 에이전트의 서버는 정리 추천에 들지 않는다', () => {
+    const r = over([0, 60 * MIN], () => [server()], [parked(W1, -200 * MIN)])
+    expect(cleanupRecommendation({ ...blankSnapshot(1), servers: r.rows }).items).toEqual([])
+    // 같은 서버라도 에이전트가 없으면 추천한다.
+    const free = over([0, 60 * MIN], () => [server()])
+    expect(cleanupRecommendation({ ...blankSnapshot(1), servers: free.rows }).items).toHaveLength(1)
+  })
+
+  test('마지막 활동을 모르는 오래 쉬는 에이전트는 보호한다(불확실하면 후보에서 뺀다)', () => {
+    const unknown = agent(W1, 'claude', { parked: true, lastActiveAt: null })
+    const r = over([0, 30 * MIN], () => [server()], [unknown])
+    expect(r.rows[0]).toMatchObject({ judgement: null, agentInWorktree: true, parkedAgent: false })
+  })
 })
 
 describe('사용 흔적(F9)', () => {

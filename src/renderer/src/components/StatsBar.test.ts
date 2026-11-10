@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { mount, type VueWrapper } from '@vue/test-utils'
+import { mount, type DOMWrapper, type VueWrapper } from '@vue/test-utils'
 import StatsBar from './StatsBar.vue'
 import type { DashboardSnapshot } from '../../../shared/types'
 import { GB, MB, agentRow, heavyJob, serverRow, snapshot } from '../testing/fixtures'
@@ -78,6 +78,29 @@ test('에이전트 카드의 상태 줄: 훅이 켜져 있으면 Claude 훅, 아
   )
   expect(stateLine(snapshot({ agents: [fromFile, fromCpu] }))).toBe('상태 · 세션 파일')
   expect(stateLine(snapshot({ agents: [fromCpu] }))).toBe('상태 · CPU 추정')
+})
+
+test('에이전트 카드: 오래 쉬는 세션이 있으면 셋째 칸 쪽에 "오래 쉼 n", 없으면 없다', () => {
+  const agentCard = (s: DashboardSnapshot): DOMWrapper<Element> =>
+    bar(s)
+      .findAll('[data-slot=card]')
+      .find((c) => c.find('[data-slot=card-title]').text().trim() === '에이전트')!
+  const parked = (pid: number): ReturnType<typeof agentRow> =>
+    agentRow({ pid, state: 'idle', lastActiveAt: 0, parked: true })
+  const card = agentCard(
+    snapshot({
+      agents: [agentRow({ pid: 1 }), parked(2), parked(3), agentRow({ pid: 4, state: 'idle' })]
+    })
+  )
+  expect(card.find('[data-parked]').text()).toBe('오래 쉼 2')
+  // 셋째 칸(쉬는 중)은 오래 쉬는 세션을 포함한 수 그대로.
+  const third = card.findAll('dl > div').at(-1)!
+  expect([third.find('dt').text(), third.find('dd').text()]).toEqual(['쉬는 중', '3'])
+  const none = agentCard(
+    snapshot({ agents: [agentRow({ pid: 1 }), agentRow({ pid: 4, state: 'idle' })] })
+  )
+  expect(none.find('[data-parked]').exists()).toBe(false)
+  expect(none.text()).not.toContain('오래 쉼')
 })
 
 test('개발 서버 카드: 큰 숫자는 서버 수, 아래 줄은 포트 수', () => {

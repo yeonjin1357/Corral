@@ -3,8 +3,11 @@ import type { AgentRow, ServerRow, TcpEntry } from '../shared/types'
 import { agentCovers, worktreeKey } from '../shared/format'
 import { selectionKey } from '../shared/keys'
 
-/** 서버별로 지금 상태(연결 0 / 탭만)가 시작된 시각. 키는 서버 선택 키(다시 뜬 서버는 새로 센다). */
-export type ServerMemo = Map<string, { state: 'idle' | 'tabs'; since: number }>
+/**
+ * 서버별로 지금 상태(연결 0 / 탭만)가 시작된 시각. 키는 서버 선택 키(다시 뜬 서버는 새로 센다).
+ * shielded: 이 샘플에 활동 중인 에이전트가 그 서버를 덮고 있었다(다음 샘플에 떠났으면 처음부터 센다). 없으면 아님.
+ */
+export type ServerMemo = Map<string, { state: 'idle' | 'tabs'; since: number; shielded?: boolean }>
 
 const LOOPBACK = /^(127\.|::1$|::ffff:127\.)/
 
@@ -55,11 +58,23 @@ export function activityOf(
 }
 
 /**
- * 안 쓰는 서버를 두 단계로 판단한다(스펙 §3-4). 서버(포트를 연 프로세스 트리) 단위라 포트가 여럿이어도 한 번만 센다.
- * - 같은 워크트리(또는 상위 폴더 저장소)나 같은 작업 공간에 에이전트가 실행 중이면(쉬는 중이어도) 판단하지 않는다.
- *   떠나면 처음부터 센다.
- * - 연결 0 이 기준 시간 이상 → 정리 후보, 탭 연결만 기준 시간 이상 → 확인해볼 것.
- * - 판별 불가 서버는 판단하지 않는다(불확실하면 후보에서 빼는 쪽).
+ * 오래 쉬는 세션이고 마지막 활동을 아는 에이전트(G2). 마지막 활동을 모르면 언제부터 쉬었는지 몰라 보호하는
+ * 쪽(활동 중)으로 본다(불확실하면 후보에서 빼는 쪽).
+ */
+function resting(agent: AgentRow): agent is AgentRow & { lastActiveAt: number } {
+  return agent.parked && agent.lastActiveAt != null
+}
+
+/**
+ * 안 쓰는 서버를 두 단계로 판단한다(스펙 §3-4, G2). 서버(포트를 연 프로세스 트리) 단위라 포트가 여럿이어도 한 번만 센다.
+ * - 덮는 에이전트 = 같은 워크트리(또는 상위 폴더 저장소)나 같은 작업 공간의 에이전트. 그 가운데 오래 쉬는 세션이
+ *   아닌 것(쉬는 중이어도)이 활동 중이다.
+ * - 연결 타이머는 늘 잰다. 활동 중인 에이전트가 덮고 있으면 판단만 하지 않는다.
+ * - 타이머는 보호가 끝난 때보다 앞서지 않는다: 덮는 에이전트가 모두 오래 쉬면 그들의 마지막 활동 가운데 가장 늦은
+ *   시각, 덮는 에이전트가 없고 지난 샘플에 보호받았으면(에이전트가 떠났으면) 지금부터 센다.
+ * - 연결 0 이 기준 시간 이상 → 정리 후보, 탭 연결만 기준 시간 이상 → 확인해볼 것. 덮는 에이전트가 모두 오래 쉬는
+ *   세션이면 연결 0 이어도 확인해볼 것까지만(정리 후보·정리 추천에 넣지 않는다).
+ * - 판별 불가·워크트리를 모르는 서버는 판단하지 않는다(불확실하면 후보에서 빼는 쪽).
  * - 워크트리를 모르는 에이전트(작업 폴더를 못 읽는 수집 방식·관리자 권한 등)가 하나라도 있으면 그 에이전트의
  *   서버일 수 있어 정리 후보를 확인해볼 것으로 낮춘다.
  * 처음 본 서버는 그때부터 센다 — pitwall 이 켜지기 전 상태는 모르므로.
@@ -74,34 +89,64 @@ export function judgeServers(
   thresholdMs: number,
   activity: Map<string, boolean> = new Map()
 ): { rows: ServerRow[]; memo: ServerMemo } {
-  const agentRoots = agents.flatMap((a) => (a.worktree ? [worktreeKey(a.worktree.root)] : []))
-  /** 에이전트가 일하는 작업 공간(작업 공간을 판단 전에 붙여 둔 경우). */
-  const agentWorkspaces = new Set(
-    agents.flatMap((a) => (a.workspace ? [worktreeKey(a.workspace.root)] : []))
-  )
   const unknownAgent = agents.some((a) => !a.worktree)
   const memo: ServerMemo = new Map()
   const judged = rows.map((row): ServerRow => {
     if (row.unresolvable || !row.worktree)
-      return { ...row, judgement: null, idleSince: null, agentInWorktree: false }
-    if (
-      agentCovers(agentRoots, row.worktree.root) ||
-      (row.workspace && agentWorkspaces.has(worktreeKey(row.workspace.root)))
+      return {
+        ...row,
+        judgement: null,
+        idleSince: null,
+        agentInWorktree: false,
+        parkedAgent: false,
+        parkedSince: null
+      }
+    const root = row.worktree.root
+    const workspace = row.workspace ? worktreeKey(row.workspace.root) : null
+    const covering = agents.filter(
+      (a) =>
+        (a.worktree && agentCovers([a.worktree.root], root)) ||
+        (workspace !== null && a.workspace && worktreeKey(a.workspace.root) === workspace)
     )
-      return { ...row, judgement: null, idleSince: null, agentInWorktree: true }
 
     const key = selectionKey.server(row)
     const state = row.clientCount > 0 ? 'tabs' : 'idle'
     const prev = previous.get(key)
     const traced = state === 'idle' && activity.get(key) === true
-    const since = prev && prev.state === state && !traced ? prev.since : now
+    const counted = prev && prev.state === state && !traced ? prev.since : now
+
+    // 활동 중인 에이전트가 하나라도 덮으면 판단하지 않는다(타이머는 잰다).
+    if (!covering.every(resting)) {
+      memo.set(key, { state, since: counted, shielded: true })
+      return {
+        ...row,
+        judgement: null,
+        idleSince: counted,
+        agentInWorktree: true,
+        parkedAgent: false,
+        parkedSince: null
+      }
+    }
+
+    // 여기서 덮는 에이전트는 모두 오래 쉬는 세션(마지막 활동을 앎). 기간은 그 가운데 가장 늦은 활동부터.
+    const parkedSince = covering.length ? Math.max(...covering.map((a) => a.lastActiveAt)) : null
+    // 보호가 끝난 때: 오래 쉬는 세션이 된 에이전트의 마지막 활동, 에이전트가 떠났으면 지금.
+    const floor = parkedSince ?? (prev?.shielded ? now : null)
+    const since = floor === null ? counted : Math.max(counted, floor)
     memo.set(key, { state, since })
+    const parked = parkedSince !== null
     const due = now - since >= thresholdMs
     return {
       ...row,
-      judgement: due ? (state === 'idle' && !unknownAgent ? 'candidate' : 'check') : null,
+      judgement: due
+        ? state === 'idle' && !parked && !unknownAgent
+          ? 'candidate'
+          : 'check'
+        : null,
       idleSince: since,
-      agentInWorktree: false
+      agentInWorktree: parked,
+      parkedAgent: parked,
+      parkedSince
     }
   })
   return { rows: judged, memo }

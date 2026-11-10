@@ -154,13 +154,21 @@ export interface ServerRow {
   startedAt: number | null
   /**
    * 안 쓰는 서버 판단. candidate: 정리 후보(에이전트 없음 + 연결 0 이 기준 시간 이상),
-   * check: 확인해볼 것(에이전트 없음 + 탭 연결만 기준 시간 이상), null: 판단 없음.
+   * check: 확인해볼 것(에이전트 없음 + 탭 연결만 기준 시간 이상, 또는 덮는 에이전트가 모두 오래 쉬는 세션이고
+   * 연결 0·탭만이 기준 시간 이상), null: 판단 없음(활동 중인 에이전트가 덮고 있거나 아직 기준 시간 전).
    */
   judgement: PortJudgement | null
-  /** 지금 상태(연결 0 또는 탭만)가 시작된 시각. 에이전트가 있거나 판별 불가면 null. */
+  /**
+   * 지금 상태(연결 0 또는 탭만)가 시작된 시각. 활동 중인 에이전트가 덮고 있어도 잰다(판단만 막는다).
+   * 판별 불가·워크트리를 모르면 null.
+   */
   idleSince: number | null
-  /** 같은 워크트리에 에이전트(Claude·Codex)가 실행 중. */
+  /** 같은 워크트리(또는 상위 폴더)나 같은 작업 공간에 에이전트(Claude·Codex)가 실행 중(오래 쉬는 세션 포함). */
   agentInWorktree: boolean
+  /** 덮는 에이전트가 있고 모두 오래 쉬는 세션(G2). 그래서 "확인해볼 것"까지만 오른다. */
+  parkedAgent: boolean
+  /** parkedAgent 일 때 덮는 에이전트들의 마지막 활동 가운데 가장 늦은 시각. 아니면 null. */
+  parkedSince: number | null
   /** 서버 트리 CPU 사용률(에이전트와 같은 기준). 모르면 null. */
   cpuPercent: number | null
   /** 메모리가 계속 늘고 있으면 그 근거. */

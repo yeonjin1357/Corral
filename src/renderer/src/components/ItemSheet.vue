@@ -130,17 +130,26 @@ const view = computed<View | null>(() => {
   switch (item.kind) {
     case 'server': {
       const r = item.row
+      // 덮는 에이전트가 모두 오래 쉬는 세션이면(G2) 확인해볼 것에 에이전트가 쉰 기간을 붙인다(표의 상태 칸과 같은 규칙).
+      const parkedFor =
+        r.parkedAgent && r.parkedSince != null
+          ? formatDuration(Math.max(0, props.now - r.parkedSince))
+          : null
       const status = r.unresolvable
         ? t.rowStatus.unresolvable
         : r.judgement === 'candidate'
           ? t.rowStatus.candidate
           : r.judgement === 'check'
-            ? t.rowStatus.check
+            ? parkedFor != null
+              ? t.rowStatus.checkParked(parkedFor)
+              : t.rowStatus.check
             : r.clientCount > 0
               ? t.rowStatus.inUse
-              : r.agentInWorktree
-                ? t.rowStatus.agent
-                : t.rowStatus.idle
+              : r.parkedAgent
+                ? t.rowStatus.agentParked
+                : r.agentInWorktree
+                  ? t.rowStatus.agent
+                  : t.rowStatus.idle
       return {
         icon: serverIcon(r, props.platform),
         title: r.unresolvable ? portList(r.ports) : folder(r.worktree),

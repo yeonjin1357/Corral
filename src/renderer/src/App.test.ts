@@ -161,6 +161,29 @@ test('저장 안 한 설정은 대시보드를 다녀와도 남는다', async ()
   w.unmount()
 })
 
+test('설정 > 기준값에서 오래 쉬는 세션 기준(분)을 바꿔 저장한다', async () => {
+  const f = fake()
+  const w = await start(f)
+  f.navigate({ page: 'settings' })
+  await flushPromises()
+  await w
+    .findAll('button')
+    .find((b) => b.text().includes('기준값'))!
+    .trigger('click')
+  const input = w.find('#agent-parked')
+  expect((input.element as HTMLInputElement).value).toBe('180')
+  expect(input.attributes()).toMatchObject({ min: '10', max: '10080' })
+  expect(w.text()).toContain('오래 쉬는 세션 기준')
+  expect(w.text()).toContain(
+    '그 에이전트만 있는 워크트리의 서버는 정리 후보가 아니라 확인해볼 것까지만'
+  )
+  await input.setValue('240')
+  await w.find('form').trigger('submit')
+  await flushPromises()
+  expect(f.saved.at(-1)?.agentParkedMinutes).toBe(240)
+  w.unmount()
+})
+
 test('설정 저장은 IPC 로 보낼 수 있는 값(반응형 아닌 순수 값)으로 보낸다', async () => {
   const f = fake()
   const w = await start(f)

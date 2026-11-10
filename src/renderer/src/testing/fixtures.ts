@@ -30,6 +30,8 @@ export function serverRow(over: Partial<ServerRow> = {}): ServerRow {
     judgement: null,
     idleSince: null,
     agentInWorktree: false,
+    parkedAgent: false,
+    parkedSince: null,
     cpuPercent: null,
     memoryGrowth: null,
     ...over

@@ -125,12 +125,24 @@ const searchOf = (...parts: (string | number | null | undefined)[]): string =>
     .join(' ')
     .toLowerCase()
 
+/**
+ * 서버 판단 칸. 덮는 에이전트가 모두 오래 쉬는 세션이면(G2) 확인해볼 것에 연결 없는 시간 대신 에이전트가 쉰 기간을
+ * 붙이고, 판단 전이면 "에이전트 오래 쉼". 긴 문구는 칸에서 잘리고 title 로 다 보인다.
+ */
 function judgedStatus(row: ServerRow, now: number): Cell {
   const idle = row.idleSince != null ? ` · ${formatDuration(now - row.idleSince)}` : ''
   if (row.unresolvable) return { text: st.unresolvable, dot: 'idle' }
   if (row.judgement === 'candidate') return { text: `${st.candidate}${idle}`, dot: 'stopped' }
-  if (row.judgement === 'check') return { text: `${st.check}${idle}`, dot: 'warn' }
+  if (row.judgement === 'check')
+    return {
+      text:
+        row.parkedAgent && row.parkedSince != null
+          ? st.checkParked(formatDuration(Math.max(0, now - row.parkedSince)))
+          : `${st.check}${idle}`,
+      dot: 'warn'
+    }
   if (row.clientCount > 0) return { text: st.inUse, dot: 'running' }
+  if (row.parkedAgent) return { text: st.agentParked, dot: 'idle' }
   if (row.agentInWorktree) return { text: st.agent, dot: 'idle' }
   return { text: `${st.idle}${idle}`, dot: 'idle' }
 }
@@ -155,7 +167,7 @@ function cpuCell(cpuPercent: number | null, s: DashboardSnapshot): Cell {
     : { text: `${cpu.toFixed(1)}%`, sort: cpu, mono: true }
 }
 
-/** 에이전트 상태 칸: "작업 중 · 12분"(F3). 아직 모르는 상태는 시간 없이. */
+/** 에이전트 상태 칸: "작업 중 · 12분"(F3). 아직 모르는 상태는 시간 없이. 오래 쉬는 세션이면 배지(G2). */
 function agentStatus(a: AgentRow, now: number): Cell {
   const label = text.ui.agent.states[a.state]
   return {
@@ -163,7 +175,8 @@ function agentStatus(a: AgentRow, now: number): Cell {
       a.stateSince != null && a.state !== 'unknown'
         ? st.withTime(label, formatDuration(Math.max(0, now - a.stateSince)))
         : label,
-    dot: AGENT_TONE[a.state]
+    dot: AGENT_TONE[a.state],
+    ...(a.parked ? { badge: st.parked } : {})
   }
 }
 

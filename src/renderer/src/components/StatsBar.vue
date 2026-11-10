@@ -140,7 +140,9 @@ const agentCounts = computed(() => {
     rest: rest.length,
     restLabel: rest.every((a) => a.state === 'idle')
       ? text.ui.agent.states.idle
-      : text.ui.cards.agentOthers
+      : text.ui.cards.agentOthers,
+    // 오래 쉬는 세션(G2)은 작업 중·권한 대기가 아니므로 모두 셋째 칸에 든다.
+    parked: rest.filter((a) => a.parked).length
   }
 })
 const agentMemory = computed(() => groupBytes('agent'))
@@ -395,10 +397,18 @@ const diskSub = computed(() =>
         </div>
         <StatItem :label="text.ui.cards.memorySum" :value="formatBytes(agentMemory)" />
         <div class="mt-auto border-t border-border/60 pt-3">
-          <p class="mb-2 text-[11px] text-muted-foreground" :title="text.ui.cards.stateSource">
-            {{ text.ui.cards.agentStates }} ·
-            {{ stateSourceLabel }}
-          </p>
+          <!-- 카드 높이(h-60)가 이미 꽉 차, 오래 쉬는 세션 수는 셋째 칸 아래 새 줄 대신 이 줄 오른쪽(셋째 칸 위)에 둔다. -->
+          <div
+            class="mb-2 flex items-baseline justify-between gap-2 text-[11px] text-muted-foreground"
+          >
+            <p class="min-w-0 truncate" :title="text.ui.cards.stateSource">
+              {{ text.ui.cards.agentStates }} ·
+              {{ stateSourceLabel }}
+            </p>
+            <span v-if="agentCounts.parked > 0" data-parked class="shrink-0 tabular-nums">{{
+              text.ui.cards.agentParked(agentCounts.parked)
+            }}</span>
+          </div>
           <dl class="flex justify-between gap-2">
             <div>
               <dt class="whitespace-nowrap text-[10px] text-muted-foreground">

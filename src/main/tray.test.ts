@@ -46,6 +46,8 @@ function snap(over: Partial<DashboardSnapshot> = {}): DashboardSnapshot {
       judgement: null,
       idleSince: null,
       agentInWorktree: false,
+      parkedAgent: false,
+      parkedSince: null,
       cpuPercent: null,
       memoryGrowth: null
     })),
