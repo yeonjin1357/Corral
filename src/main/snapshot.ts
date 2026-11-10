@@ -145,21 +145,25 @@ interface PortEntry {
   commandLine: string
   worktree: WorktreeInfo | null
   unresolvable: boolean
-  memoryBytes: number
-  descendantPids: number[]
-  processes: ProcessSummary[]
   clientCount: number
   startedAt: number | null
 }
 
 function serversOf(ports: PortEntry[], tree: ProcessTree): ServerRow[] {
-  const portPids = new Set(ports.filter((r) => !r.unresolvable).map((r) => r.pid))
+  // 판별된 포트 프로세스 → 워크트리 키. 같은 워크트리의 조상 포트 프로세스에만 합친다(다른 프로젝트의 서버를
+  // 띄운 셸이 우연히 어떤 서버 아래에 있어도 따로 센다).
+  const portRoots = new Map(
+    ports
+      .filter((r) => !r.unresolvable && r.worktree)
+      .map((r) => [r.pid, worktreeKey(r.worktree!.root)])
+  )
   const topOf = (row: PortEntry): number => {
     if (row.unresolvable) return row.pid
+    const root = portRoots.get(row.pid)
     let top = row.pid
     // 가까운 조상부터 나오므로 마지막으로 맞는 것이 가장 위.
     for (const a of tree.ancestors(row.pid, Number.MAX_SAFE_INTEGER))
-      if (portPids.has(a.pid)) top = a.pid
+      if (root != null && portRoots.get(a.pid) === root) top = a.pid
     return top
   }
   const groups = new Map<number, { head: PortEntry; ports: Set<number>; clientCount: number }>()
@@ -175,19 +179,33 @@ function serversOf(ports: PortEntry[], tree: ProcessTree): ServerRow[] {
     // 포트 행은 (포트, pid) 마다 하나라 연결이 겹쳐 세지지 않는다.
     group.clientCount += row.clientCount
   }
+  // 서버의 자손에서 그 아래에 있는 다른 서버(의 트리)는 뺀다. 메모리·프로세스를 두 서버가 겹쳐 세지 않게.
+  const heads = new Set(groups.keys())
+  const ownDescendants = (pid: number): number[] => {
+    const all = tree.descendants(pid)
+    const nested = new Set<number>()
+    for (const d of all)
+      if (heads.has(d)) for (const x of [d, ...tree.descendants(d)]) nested.add(x)
+    return all.filter((d) => !nested.has(d))
+  }
   return [...groups.values()]
-    .map(({ head, ports: set, clientCount }) => ({
+    .map(({ head, ports: set, clientCount }) => {
+      const descendantPids = ownDescendants(head.pid)
+      const members = [head.pid, ...descendantPids].flatMap((pid) => tree.byPid.get(pid) ?? [])
+      return { head, set, clientCount, descendantPids, members }
+    })
+    .map(({ head, set: portSet, clientCount, descendantPids, members }) => ({
       pid: head.pid,
-      ports: [...set].sort((a, b) => a - b),
+      ports: [...portSet].sort((a, b) => a - b),
       processName: head.processName,
       commandLine: head.commandLine,
       worktree: head.worktree,
       // 작업 공간·CPU·메모리 증가·판단은 이전 샘플과 파일 시스템을 아는 수집기가 채운다.
       workspace: null,
       unresolvable: head.unresolvable,
-      memoryBytes: head.memoryBytes,
-      descendantPids: head.descendantPids,
-      processes: head.processes,
+      memoryBytes: members.reduce((sum, m) => sum + m.memoryBytes, 0),
+      descendantPids,
+      processes: summarizeProcesses(members),
       clientCount,
       startedAt: head.startedAt,
       judgement: null,
@@ -266,7 +284,6 @@ export function buildSnapshot(input: {
     const worktree = worktreeOf(p.pid)
     const relay = RELAY_SET.has(p.name.toLowerCase())
     if (!worktree && !relay) continue
-    const descendantPids = tree.descendants(p.pid)
     ports.push({
       port: t.localPort,
       pid: p.pid,
@@ -274,9 +291,6 @@ export function buildSnapshot(input: {
       commandLine: p.commandLine,
       worktree,
       unresolvable: !worktree,
-      memoryBytes: p.memoryBytes + memoryOf(descendantPids),
-      descendantPids,
-      processes: summarizeProcesses([p, ...descendantPids.flatMap((d) => tree.byPid.get(d) ?? [])]),
       clientCount: clients.get(`${p.pid}:${t.localPort}`) ?? 0,
       startedAt: p.startedAt
     })

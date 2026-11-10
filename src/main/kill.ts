@@ -57,12 +57,21 @@ function isSameProcess(target: KillTarget, p: ProcessInfo): boolean {
 /**
  * 종료 직전 최신 샘플로 "아직 그 프로세스가 맞는지"를 확인하고, 자손도 최신 샘플에서 다시 계산한다.
  * 스냅샷 이후 그 pid 가 다른 프로세스에 재사용됐으면 끄지 않는다.
+ * spare 는 남길 프로세스(트리 아래에서 따로 도는 다른 서버)로, 그와 그 자손은 끄지 않는다.
  */
-export function planKill(target: KillTarget, fresh: RawSample): KillPlan {
+export function planKill(
+  target: KillTarget,
+  fresh: RawSample,
+  spare: Iterable<number> = []
+): KillPlan {
   const p = fresh.processes.find((x) => x.pid === target.pid)
   if (!p) return { ok: false, reason: 'gone' }
   if (!isSameProcess(target, p)) return { ok: false, reason: 'changed' }
-  const descendants = descendantsOf(fresh.processes, target.pid)
+  const spared = new Set<number>()
+  for (const pid of spare)
+    if (pid !== target.pid)
+      for (const x of [pid, ...descendantsOf(fresh.processes, pid)]) spared.add(x)
+  const descendants = descendantsOf(fresh.processes, target.pid).filter((d) => !spared.has(d))
   // 예: worktree 에서 띄운 IDE 를 내리면 그 터미널 안의 Claude·Codex 세션까지 같이 꺼진다.
   const byPid = new Map(fresh.processes.map((x) => [x.pid, x]))
   if (
@@ -195,9 +204,22 @@ export function createKiller(deps: KillDeps): {
 } {
   const busy = new Set<number>()
 
-  async function freshPlan(target: KillTarget): Promise<{ plan: KillPlan; sample: RawSample }> {
+  /** 이번에 끄지 않는 서버(숨긴 서버 포함). 끌 서버 트리 아래에 있어도 남긴다. */
+  function spareFor(targetPids: number[]): number[] {
+    const latest = deps.latest()
+    if (!latest) return []
+    const targets = new Set(targetPids)
+    return [...latest.servers, ...latest.hiddenServers]
+      .map((r) => r.pid)
+      .filter((pid) => !targets.has(pid))
+  }
+
+  async function freshPlan(
+    target: KillTarget,
+    spare: number[]
+  ): Promise<{ plan: KillPlan; sample: RawSample }> {
     const sample = await deps.resample()
-    return { plan: planKill(target, sample), sample }
+    return { plan: planKill(target, sample, spare), sample }
   }
 
   async function escalateOnDarwin(pids: number[], planned: RawSample): Promise<void> {
@@ -255,12 +277,13 @@ export function createKiller(deps: KillDeps): {
       if (found === 'gone') return { status: 'gone' }
       if ('status' in found) return found
 
-      const before = await freshPlan(found.target)
+      const spare = spareFor([pid])
+      const before = await freshPlan(found.target, spare)
       if (!before.plan.ok) return planFailure(before.plan.reason)
       if (!(await deps.confirm(found.confirm))) return { status: 'cancelled' }
 
       // 확인 창을 띄운 동안 시간이 지났으니 한 번 더 확인한다.
-      const after = await freshPlan(found.target)
+      const after = await freshPlan(found.target, spare)
       if (!after.plan.ok) return planFailure(after.plan.reason)
       const result = terminate(after.plan.pids)
       if (result.status === 'killed' && deps.platform === 'darwin')
@@ -343,8 +366,9 @@ export function createKiller(deps: KillDeps): {
 
     for (const t of mine) busy.add(t.item.pid)
     try {
+      const spare = spareFor(mine.map((t) => t.item.pid))
       const before = await deps.resample()
-      const ready = mine.filter((t) => planKill(t.target, before).ok)
+      const ready = mine.filter((t) => planKill(t.target, before, spare).ok)
       if (ready.length === 0) return { status: 'gone' }
       if (!(await deps.confirm(confirmFor(ready.map((t) => t.item)))))
         return { status: 'cancelled' }
@@ -357,7 +381,7 @@ export function createKiller(deps: KillDeps): {
       let skipped = mine.length - ready.length
       const killedPids: number[] = []
       for (const t of ready) {
-        const plan = planKill(t.target, after)
+        const plan = planKill(t.target, after, spare)
         if (!plan.ok) {
           skipped++
           continue

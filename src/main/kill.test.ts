@@ -113,6 +113,14 @@ function snapshotWith(servers: ServerRow[], leftovers: LeftoverRow[] = []): Dash
 }
 
 describe('planKill', () => {
+  test('남길 프로세스(다른 서버)와 그 자손은 끌 목록에서 뺀다', () => {
+    const shell = proc(4300, 4100, 'cmd.exe', 'cmd', 300)
+    const other = proc(4301, 4300, 'node.exe', 'node other.js', 310)
+    const otherChild = proc(4302, 4301, 'esbuild.exe', 'esbuild', 320)
+    const fresh = { processes: [vite, esbuild, shell, other, otherChild], tcp: [] }
+    expect(planKill(row, fresh, [4301])).toEqual({ ok: true, pids: [4100, 4101, 4300] })
+  })
+
   test('최신 샘플에 없으면 gone', () => {
     expect(planKill(row, { processes: [], tcp: [] })).toEqual({ ok: false, reason: 'gone' })
   })
@@ -212,6 +220,40 @@ describe('killServer', () => {
     ])
     // 자식 JVM 의 pid 로는 서버를 찾지 않는다(같은 서버를 두 번 끄지 않도록).
     await expect(createKiller(d).killServer(6101)).resolves.toEqual({ status: 'gone' })
+  })
+
+  test('서버 아래에서 따로 도는 다른 서버(다른 워크트리)는 같이 끄지 않는다', async () => {
+    const a = proc(7000, 1, 'node.exe', 'node a.js', 100)
+    const shell = proc(7001, 7000, 'cmd.exe', 'cmd', 110)
+    const b = proc(7002, 7001, 'node.exe', 'node b.js', 120)
+    const bChild = proc(7003, 7002, 'esbuild.exe', 'esbuild', 130)
+    const rowA: ServerRow = {
+      ...row,
+      pid: 7000,
+      ports: [3000],
+      processName: 'node.exe',
+      commandLine: 'node a.js',
+      descendantPids: [7001],
+      startedAt: 100
+    }
+    const rowB: ServerRow = {
+      ...row,
+      pid: 7002,
+      ports: [4000],
+      processName: 'node.exe',
+      commandLine: 'node b.js',
+      descendantPids: [7003],
+      startedAt: 120
+    }
+    const d = deps({
+      latest: () => snapshotWith([rowA, rowB]),
+      resample: async () => ({ processes: [a, shell, b, bChild], tcp: [] })
+    })
+    await expect(createKiller(d).killServer(7000)).resolves.toEqual({ status: 'killed' })
+    expect(d.signal.mock.calls).toEqual([
+      [7000, 'SIGTERM'],
+      [7001, 'SIGTERM']
+    ])
   })
 
   test('Windows: 확인 후 루트와 자손을 각각 종료', async () => {

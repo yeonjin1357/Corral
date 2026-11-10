@@ -229,6 +229,36 @@ describe('서버 행', () => {
     expect(api.worktree).toEqual(W5)
   })
 
+  test('다른 워크트리의 서버는 조상 서버에 합치지 않고, 조상 서버의 메모리에도 넣지 않는다', () => {
+    // 7000(W1 서버) 아래 셸 7001 에서 다른 워크트리(W2)의 서버 7002 를 띄웠다.
+    const s = buildSnapshot({
+      ...input,
+      sample: {
+        processes: [
+          proc(7000, 1, 'node.exe', 100, 100),
+          proc(7001, 7000, 'cmd.exe', 5, 110),
+          proc(7002, 7001, 'node.exe', 700, 120),
+          proc(7003, 7002, 'esbuild.exe', 50, 130)
+        ],
+        tcp: [listen(7000, 3000), listen(7002, 4000)]
+      },
+      worktrees: new Map<number, WorktreeInfo>([
+        [7000, W1],
+        [7002, W2]
+      ])
+    })
+    expect(s.servers.map((r) => [r.pid, r.ports, r.worktree?.root])).toEqual([
+      [7000, [3000], W1.root],
+      [7002, [4000], W2.root]
+    ])
+    const a = s.servers[0]
+    expect(a.descendantPids).toEqual([7001])
+    expect(a.memoryBytes).toBe(105 * MB)
+    expect(a.processes.map((p) => p.name)).toEqual(['node.exe', 'cmd.exe'])
+    expect(s.servers[1].memoryBytes).toBe(750 * MB)
+    expect(s.groups.find((g) => g.group === 'devServer')!.memoryBytes).toBe(855 * MB)
+  })
+
   test('연결 수는 서버의 모든 포트 연결 합', () => {
     const s = buildSnapshot(serverInput)
     expect(s.servers.find((r) => r.pid === 4100)?.clientCount).toBe(3)
