@@ -209,14 +209,16 @@
   - `pairBySessionFile(sessions: Sessions, files: Map<number, ClaudeSessionFile>, keyOfPid: (pid: number) => string | null): void`(`sessions.ts`) — 파일의 `sessionId` 와 같은 세션이 있으면 `processKey` 를 그 프로세스로 고친다. 같은 `processKey` 를 가진 다른 Claude 세션은 버린다(그 프로세스가 새 세션으로 넘어감). Codex 세션은 건드리지 않는다.
   - `AgentRow.stateSource: 'hook' | 'cpu' | 'rollout' | 'file'`. `text.ui.agent.sources.file` = `Claude 세션 파일`.
   - `CollectorDeps.claudeSessionFiles?: (agents: { pid: number; startedAt: number | null }[], now: number) => Promise<Map<number, ClaudeSessionFile>>`.
-  - 수집 순서: 세션 파일 읽기 → `pairBySessionFile` → `reconcileSessions` → `buildAgents`(훅) → 훅 상태가 없는 Claude 에이전트(`stateSource === 'cpu'`)에 파일 상태를 입힌다: `busy` → `working`, `idle` → `idle`, `stateSource: 'file'`, 상태 시작 시각 = `statusUpdatedAt`(없으면 지금처럼 처음 본 시각). 마지막 활동: `busy` 면 수집 시각, `idle` 이면 `statusUpdatedAt`. 훅 상태가 있으면 훅이 이긴다. `restate()` 는 훅 상태가 생기지 않은 `file` 행을 그대로 둔다.
+  - 수집 순서: 세션 파일 읽기 → `pairBySessionFile` → `reconcileSessions` → `buildAgents`(훅) → 훅 상태가 없는 Claude 에이전트(`stateSource === 'cpu'`)에 파일 상태를 입힌다: `busy` → `working`, `idle` → `idle`, `stateSource: 'file'`, 상태 시작 시각 = `statusUpdatedAt`(없으면 지금처럼 처음 본 시각). 마지막 활동: `busy` 면 수집 시각, `idle` 이면 `statusUpdatedAt`. `restate()` 는 훅 상태가 생기지 않은 `file` 행을 그대로 둔다.
+  - **훅과 파일이 둘 다 있을 때**: 더 늦은 근거를 따른다 — 파일의 `statusUpdatedAt` 이 훅 세션의 `lastActivityAt` 보다 5초(`FILE_NEWER_SLACK_MS`) 넘게 늦으면 파일 상태(`stateSource: 'file'`), 아니면 훅. 훅 전달이 끊겼거나(그 세션은 훅을 켜기 전에 시작됨) 끝 이벤트를 놓친 세션이 옛 상태로 굳지 않게 한다. 권한 대기는 훅만 알므로, 권한 요청 이벤트가 파일의 busy 시각보다 늦으면 그대로 훅이 이긴다.
+  - CPU 를 한 번도 읽지 못해 상태가 `unknown` 인 CPU 추정 에이전트는 `lastActiveAt: null`(오래 쉬는 세션으로 보지 않는다 — 근거가 없다). `lastActiveOf` 가 그 경우 null 을 돌려주게 고친다(반환 타입 `number | null`).
   - 화면: 상세 패널의 상태 출처에 "Claude 세션 파일", 설명 `text.ui.agent.fileNote` = `Claude Code 가 남기는 세션 파일로 작업 중·쉬는 중을 알아요. 권한 대기는 Claude 연동을 켜야 알 수 있어요.` 에이전트 카드의 "상태 · …" 줄은 훅이 켜져 있으면 지금 문구, 아니고 `file` 출처 에이전트가 있으면 `세션 파일`, 아니면 `CPU 추정`.
 - 작업 끝남 알림은 `stateSource !== 'cpu'` 를 정확한 상태로 보므로 `file` 도 포함된다(훅 없이도 "작업 끝남"을 안다). 조용함(Task 9)은 훅 상태에만 붙는다.
 
 - [ ] **Step 1: 실패하는 테스트**
   - `claudeSessionFiles.test.ts`(임시 폴더): `test('pid.json 에서 세션 id·상태·시각을 읽는다')`; `test('.key 파일과 목록에 없는 pid 의 파일은 열지 않는다')`; `test('파일의 pid 가 이름과 다르거나 시작 시각이 60초 넘게 다르면 버린다(다시 쓰인 pid)')`; `test('모르는 상태 글자는 null, 미래 시각은 null')`; `test('깨진 JSON·너무 큰 파일은 그 pid 만 건너뛴다')`.
   - `sessions.test.ts`: `test('세션 파일이 가리키는 프로세스로 짝을 고치고, 그 프로세스의 예전 세션은 버린다')`.
-  - `collector.test.ts`: `test('훅이 없어도 세션 파일로 작업 중·쉬는 중과 그 시작 시각을 안다')`; `test('훅 상태가 있으면 훅이 이긴다')`; `test('막 켠 pitwall 도 세션 파일의 시각으로 오래 쉬는 세션을 안다')`; `test('세션 파일이 없으면 지금처럼 CPU 추정')`.
+  - `collector.test.ts`: `test('훅이 없어도 세션 파일로 작업 중·쉬는 중과 그 시작 시각을 안다')`; `test('훅과 파일이 둘 다 있으면 더 늦은 근거를 따른다: 훅은 쉬는 중(5시간 전)인데 파일이 방금 busy 면 작업 중')`; `test('권한 요청이 파일의 busy 시각보다 늦으면 권한 대기(훅)')`; `test('훅과 파일의 시각이 5초 안이면 훅')`; `test('CPU 를 읽지 못해 확인 중인 에이전트는 lastActiveAt 이 null 이고 오래 쉬는 세션이 아니다')`; `test('막 켠 pitwall 도 세션 파일의 시각으로 오래 쉬는 세션을 안다')`; `test('세션 파일이 없으면 지금처럼 CPU 추정')`.
   - `notifier.test.ts`: `test('세션 파일로 안 상태도 2분 넘게 일하고 끝나면 작업 끝남을 알린다')`.
   - 실제 Windows 묶음: `test('실제 세션 폴더를 읽어도 예외가 없다(폴더가 없으면 빈 결과)')`.
 - [ ] **Step 2: 실패 확인** — `npx vitest run src/main/claudeSessionFiles.test.ts src/main/sessions.test.ts src/main/collector.test.ts`
