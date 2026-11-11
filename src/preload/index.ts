@@ -59,6 +59,13 @@ const api: PitwallApi = {
         ipcRenderer.removeListener(IPC.confirmRequest, handler)
       }
     },
+    onWithdraw(callback) {
+      const handler = (_event: IpcRendererEvent, id: number): void => callback(id)
+      ipcRenderer.on(IPC.confirmWithdraw, handler)
+      return () => {
+        ipcRenderer.removeListener(IPC.confirmWithdraw, handler)
+      }
+    },
     pending: () => ipcRenderer.invoke(IPC.confirmPending),
     shown: (id) => ipcRenderer.send(IPC.confirmShown, id),
     reply: (id, index) => ipcRenderer.send(IPC.confirmReply, id, index)

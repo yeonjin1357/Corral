@@ -55,7 +55,9 @@ export const IPC = {
   /** 화면 → 메인: 누른 버튼 번호(id, index). */
   confirmReply: 'pitwall:confirm-reply',
   /** 화면 → 메인: 아직 답이 없는 요청(→ ConfirmRequest[]). */
-  confirmPending: 'pitwall:confirm-pending'
+  confirmPending: 'pitwall:confirm-pending',
+  /** 메인 → 화면: 그 요청을 거둔다(id) — OS 창으로 넘겼거나 취소해 더는 화면에서 답할 수 없다. */
+  confirmWithdraw: 'pitwall:confirm-withdraw'
 } as const
 
 /** 바로 가기(G3f): 경로 복사·폴더 열기·터미널 열기. */
@@ -151,6 +153,8 @@ export interface PitwallApi {
   confirm: {
     /** 메인이 물어볼 때 호출된다. 반환 함수로 구독을 끊는다. */
     onRequest(callback: (request: ConfirmRequest) => void): () => void
+    /** 메인이 그 요청을 거둘 때(OS 창으로 넘김·취소) 호출된다. 답하지 말고 닫는다. 반환 함수로 구독을 끊는다. */
+    onWithdraw(callback: (id: number) => void): () => void
     /** 아직 답이 없는 요청(처음 그려질 때·다시 로드됐을 때 받아 간다). */
     pending(): Promise<ConfirmRequest[]>
     /** 그 요청을 화면에 그렸다. */

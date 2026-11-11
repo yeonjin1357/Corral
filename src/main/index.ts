@@ -57,7 +57,7 @@ import { applyHookEvent, clearActivity } from './sessions'
 import type { Sessions } from './sessions'
 import { createScheduler } from './scheduler'
 import { createKiller } from './kill'
-import { confirmIpcHandlers, createConfirmBroker } from './confirmBroker'
+import { confirmIpcHandlers, confirmed, createConfirmBroker } from './confirmBroker'
 import { createDiskManager, createRepoMemory, pathExists, snapshotWorktrees } from './disk'
 import { createNotifier, type Notice } from './notifier'
 import { loginItemOptions, shouldStartHidden } from './startup'
@@ -481,6 +481,10 @@ const confirms = createConfirmBroker({
     if (mainWindow && !mainWindow.isDestroyed())
       mainWindow.webContents.send(IPC.confirmRequest, request)
   },
+  withdraw: (id) => {
+    if (mainWindow && !mainWindow.isDestroyed())
+      mainWindow.webContents.send(IPC.confirmWithdraw, id)
+  },
   ready: mainWindowReady,
   showWindow,
   native: async (options) => {
@@ -494,17 +498,18 @@ const confirms = createConfirmBroker({
       defaultId: options.defaultId,
       cancelId: options.cancelId
     }
+    // 숨긴 창에 붙이면 OS 창도 보이지 않을 수 있어, 창이 보일 때만 그 창에 붙인다.
     const result =
-      mainWindow && !mainWindow.isDestroyed()
+      mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()
         ? await dialog.showMessageBox(mainWindow, box)
         : await dialog.showMessageBox(box)
     return result.response
   }
 })
 
-/** 끄기·설정 바꾸기 전에 묻는 확인 창. 첫 번째 버튼이면 true. */
+/** 끄기·설정 바꾸기 전에 묻는 확인 창. 첫 번째 버튼(취소 버튼이 아닌)이면 true. */
 async function confirmDialog(options: ConfirmOptions): Promise<boolean> {
-  return (await confirms.ask(options)) === 0
+  return confirmed(options, await confirms.ask(options))
 }
 
 /** 디스크 정리: 시작 1분 뒤, 30분마다, 화면에서 요청할 때, 관련 설정을 바꿀 때 다시 찾는다. */
@@ -911,6 +916,8 @@ function createWindow(): void {
   mainWindow.on('close', (event) => {
     if (quitting) return
     event.preventDefault()
+    // 확인 창이 떠 있는 채로 닫으면(숨김) 취소로 끝낸다 — 기다리던 끄기·지우기가 몇 시간 뒤에 다시 뜨지 않게.
+    confirms.cancelAll()
     hideWindow()
   })
   mainWindow.on('closed', () => {

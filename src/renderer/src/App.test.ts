@@ -65,11 +65,14 @@ interface Fake {
   saved: Settings[]
   /** 메인이 확인 요청을 보낸다(pitwall:confirm-request). */
   requestConfirm: (r: ConfirmRequest) => void
+  /** 메인이 확인 요청을 거둔다(pitwall:confirm-withdraw). */
+  withdrawConfirm: (id: number) => void
 }
 
 function fake(over: Partial<PitwallApi> = {}): Fake {
   let navigate: (t: NavigateTarget) => void = () => {}
   let requestConfirm: (r: ConfirmRequest) => void = () => {}
+  let withdrawConfirm: (id: number) => void = () => {}
   const saved: Settings[] = []
   let current: Settings = structuredClone(DEFAULT_SETTINGS)
   const off = (): (() => void) => () => {}
@@ -79,6 +82,12 @@ function fake(over: Partial<PitwallApi> = {}): Fake {
         requestConfirm = cb
         return () => {
           requestConfirm = () => {}
+        }
+      },
+      onWithdraw: (cb: (id: number) => void) => {
+        withdrawConfirm = cb
+        return () => {
+          withdrawConfirm = () => {}
         }
       },
       pending: vi.fn(async () => [] as ConfirmRequest[]),
@@ -128,7 +137,13 @@ function fake(over: Partial<PitwallApi> = {}): Fake {
     },
     ...over
   } as unknown as PitwallApi
-  return { api, navigate: (t) => navigate(t), saved, requestConfirm: (r) => requestConfirm(r) }
+  return {
+    api,
+    navigate: (t) => navigate(t),
+    saved,
+    requestConfirm: (r) => requestConfirm(r),
+    withdrawConfirm: (id) => withdrawConfirm(id)
+  }
 }
 
 async function start(f: Fake): Promise<VueWrapper> {
@@ -1276,7 +1291,12 @@ describe('앱 안 확인 창', () => {
     )
   }
 
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   test('요청 이벤트가 오면 확인 창이 보이고, 그린 뒤 shown, 누른 버튼 번호로 reply', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
     const f = fake()
     const w = await start(f)
     expect(dialog()).toBeNull()
@@ -1284,6 +1304,8 @@ describe('앱 안 확인 창', () => {
     await flushPromises()
     expect(dialog()!.textContent).toContain(KILL.message)
     expect(f.api.confirm.shown).toHaveBeenCalledWith(KILL.id)
+    // 열린 직후의 실수 누름 막기(300ms)가 지난 뒤.
+    vi.setSystemTime(Date.now() + 300)
     confirmButton(0).click()
     await flushPromises()
     expect(f.api.confirm.reply).toHaveBeenCalledWith(KILL.id, 0)
@@ -1351,6 +1373,46 @@ describe('앱 안 확인 창', () => {
     expect(f.api.confirm.reply).toHaveBeenCalledWith(KILL.id, 1)
     expect(dialog()).toBeNull()
     expect(document.querySelector('[data-slot="sheet-content"]')).not.toBeNull()
+    w.unmount()
+  })
+
+  test('메인이 거두면 확인 창을 닫고 답을 보내지 않으며, 같은 요청이 늦게 와도 다시 띄우지 않는다', async () => {
+    const before = document.createElement('button')
+    const f = fake()
+    const w = await start(f)
+    document.body.appendChild(before)
+    before.focus()
+    f.requestConfirm(KILL)
+    await flushPromises()
+    expect(dialog()).not.toBeNull()
+    f.withdrawConfirm(KILL.id)
+    await flushPromises()
+    expect(dialog()).toBeNull()
+    expect(f.api.confirm.reply).not.toHaveBeenCalled()
+    // 닫히면 원래 초점으로.
+    expect(document.activeElement).toBe(before)
+    f.requestConfirm(KILL)
+    await flushPromises()
+    expect(dialog()).toBeNull()
+    // 다른(지금 보이지 않는) 요청을 거두는 것은 지금 창에 영향이 없다.
+    f.requestConfirm({ ...KILL, id: KILL.id + 1 })
+    await flushPromises()
+    f.withdrawConfirm(KILL.id)
+    await flushPromises()
+    expect(dialog()).not.toBeNull()
+    w.unmount()
+  })
+
+  test('지금 보이는 요청보다 id 가 작은 요청은 무시한다', async () => {
+    const f = fake()
+    const w = await start(f)
+    f.requestConfirm({ ...KILL, id: 5, message: '새 질문' })
+    await flushPromises()
+    f.requestConfirm({ ...KILL, id: 4, message: '옛 질문' })
+    await flushPromises()
+    expect(document.querySelectorAll('[role="alertdialog"]')).toHaveLength(1)
+    expect(dialog()!.textContent).toContain('새 질문')
+    expect(dialog()!.textContent).not.toContain('옛 질문')
     w.unmount()
   })
 })

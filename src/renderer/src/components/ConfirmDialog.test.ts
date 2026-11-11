@@ -51,10 +51,20 @@ function press(key: string, init: KeyboardEventInit = {}): KeyboardEvent {
   return event
 }
 
+/** 열린 직후의 실수 누름 막기(300ms)가 지나게 한다. */
+function settle(): void {
+  vi.setSystemTime(Date.now() + 300)
+}
+
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] })
+})
+
 afterEach(() => {
   wrapper?.unmount()
   wrapper = null
   document.body.innerHTML = ''
+  vi.useRealTimers()
 })
 
 test('제목·질문·문단·목록을 그린다(• 줄은 목록, 빈 줄은 문단 나눔)', () => {
@@ -108,6 +118,7 @@ test('Esc 는 cancelId 로 답하고, 아래 화면(상세 패널 등)에는 키
 
 test('버튼을 누르면 그 번호로 답한다(한 번만)', async () => {
   const { w, button } = open(MANY)
+  settle()
   button(0).click()
   button(0).click()
   press('Escape')
@@ -116,6 +127,7 @@ test('버튼을 누르면 그 번호로 답한다(한 번만)', async () => {
 
 test('Enter 는 초점이 있는 버튼으로 답한다', () => {
   const { w, button } = open(MANY)
+  settle()
   button(0).focus()
   const event = press('Enter')
   expect(w.emitted('answer')).toEqual([[0]])
@@ -196,14 +208,20 @@ test('Tab 은 카드 안에서 돈다(Shift+Tab 은 거꾸로)', () => {
     defaultId: 2,
     cancelId: 2
   })
+  const body = document.querySelector<HTMLElement>('[data-confirm-body]')!
   expect(document.activeElement).toBe(button(2))
   const tab = press('Tab')
   expect(tab.defaultPrevented).toBe(true)
   expect(document.activeElement).toBe(button(1))
   press('Tab')
   expect(document.activeElement).toBe(button(0))
+  // 버튼 다음은 본문(키보드로 스크롤), 그다음 처음 버튼으로.
+  press('Tab')
+  expect(document.activeElement).toBe(body)
   press('Tab')
   expect(document.activeElement).toBe(button(2))
+  press('Tab', { shiftKey: true })
+  expect(document.activeElement).toBe(body)
   press('Tab', { shiftKey: true })
   expect(document.activeElement).toBe(button(0))
   // 초점이 카드 밖에 있어도 카드 안으로 돌아온다.
@@ -221,4 +239,66 @@ test('닫히면 원래 초점으로 돌아간다', () => {
   w.unmount()
   wrapper = null
   expect(document.activeElement).toBe(before)
+})
+
+test('열린 직후 300ms 동안은 확인 쪽 버튼을 받지 않는다(Esc·취소 버튼은 바로 된다)', () => {
+  const first = open({ ...MANY, defaultId: 0 })
+  // 앞 화면에서 누르던 두 번 누름·Enter 가 이어져 들어와도 실행하지 않는다.
+  first.button(0).click()
+  press('Enter')
+  expect(first.w.emitted('answer')).toBeUndefined()
+  vi.setSystemTime(Date.now() + 299)
+  first.button(0).click()
+  expect(first.w.emitted('answer')).toBeUndefined()
+  settle()
+  first.button(0).click()
+  expect(first.w.emitted('answer')).toEqual([[0]])
+  first.w.unmount()
+  wrapper = null
+
+  const cancel = open(MANY)
+  cancel.button(1).click()
+  expect(cancel.w.emitted('answer')).toEqual([[1]])
+  cancel.w.unmount()
+  wrapper = null
+
+  const escape = open({ ...MANY, defaultId: 0 })
+  press('Escape')
+  expect(escape.w.emitted('answer')).toEqual([[1]])
+})
+
+test('긴 본문은 초점을 받아 키보드로 스크롤할 수 있다(Enter 로는 답하지 않는다)', () => {
+  const { w } = open(MANY)
+  const body = document.querySelector<HTMLElement>('[data-confirm-body]')!
+  expect(body.getAttribute('tabindex')).toBe('0')
+  expect(body.className).toContain('focus-visible:')
+  settle()
+  body.focus()
+  // 스크롤 키는 막지 않는다(브라우저가 본문을 스크롤한다).
+  for (const key of ['ArrowDown', 'PageDown', 'End', ' '])
+    expect(press(key).defaultPrevented).toBe(false)
+  press('Enter')
+  expect(w.emitted('answer')).toBeUndefined()
+})
+
+test('본문이 없으면 Tab 은 버튼 사이에서만 돈다', () => {
+  const { button } = open({
+    id: 10,
+    kind: 'error',
+    title: '오류',
+    message: '바꾸지 못했어요.',
+    detail: '',
+    buttons: ['확인'],
+    defaultId: 0,
+    cancelId: 0
+  })
+  expect(document.querySelector('[data-confirm-body]')).toBeNull()
+  press('Tab')
+  expect(document.activeElement).toBe(button(0))
+})
+
+test('질문의 긴 낱말(경로)도 카드 안에서 줄을 바꾼다', () => {
+  const { dialog } = open(MANY)
+  const header = dialog.querySelector<HTMLElement>('[data-confirm-title]')!.parentElement!
+  expect(header.className).toContain('[overflow-wrap:anywhere]')
 })

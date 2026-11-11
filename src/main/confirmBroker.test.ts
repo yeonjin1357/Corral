@@ -2,6 +2,7 @@ import type { Mock } from 'vitest'
 import {
   CONFIRM_ACK_TIMEOUT_MS,
   confirmIpcHandlers,
+  confirmed,
   createConfirmBroker,
   type ConfirmBroker
 } from './confirmBroker'
@@ -31,6 +32,7 @@ interface Setup {
   sent: ConfirmRequest[]
   native: Mock<(o: ConfirmOptions) => Promise<number>>
   showWindow: Mock<() => void>
+  withdraw: Mock<(id: number) => void>
   setReady: (v: boolean) => void
 }
 
@@ -41,8 +43,10 @@ function setup(
   const sent: ConfirmRequest[] = []
   const native = vi.fn<(o: ConfirmOptions) => Promise<number>>(over.native ?? (async () => 1))
   const showWindow = vi.fn<() => void>()
+  const withdraw = vi.fn<(id: number) => void>()
   const broker = createConfirmBroker({
     send: (request) => sent.push(request),
+    withdraw,
     ready: () => ready,
     showWindow,
     native,
@@ -54,6 +58,7 @@ function setup(
     sent,
     native,
     showWindow,
+    withdraw,
     setReady: (v) => {
       ready = v
     }
@@ -250,6 +255,143 @@ test('flush 는 답을 기다리는 요청을 다시 보낸다(창이 다시 로
   broker.reply(sent[0].id, 1)
   broker.flush()
   expect(sent).toHaveLength(2)
+})
+
+test('그린 뒤에도 cancelAll(창을 닫아 숨김)이면 취소로 끝내고 화면에서도 거둔다', async () => {
+  const { broker, sent, withdraw } = setup()
+  const answer = track(broker.ask(KILL))
+  broker.shown(sent[0].id)
+  broker.cancelAll()
+  await vi.advanceTimersByTimeAsync(0)
+  expect(answer.value).toBe(KILL.cancelId)
+  expect(withdraw.mock.calls).toEqual([[sent[0].id]])
+})
+
+describe('거두기(withdraw): 화면에 건넨 요청이 더는 화면에서 답할 수 없게 될 때만', () => {
+  test('OS 창으로 넘길 때 거둔다(OS 창보다 먼저)', async () => {
+    const order: string[] = []
+    const { broker, sent, withdraw, native } = setup({
+      native: async () => {
+        order.push('native')
+        return 1
+      }
+    })
+    withdraw.mockImplementation(() => order.push('withdraw'))
+    broker.ask(KILL)
+    await vi.advanceTimersByTimeAsync(CONFIRM_ACK_TIMEOUT_MS)
+    expect(native).toHaveBeenCalledTimes(1)
+    expect(withdraw.mock.calls).toEqual([[sent[0].id]])
+    expect(order).toEqual(['withdraw', 'native'])
+  })
+
+  test('화면에 건네지 않은 요청은 OS 창으로 넘겨도 거두지 않는다', async () => {
+    const { broker, withdraw, native } = setup({ ready: false })
+    broker.ask(KILL)
+    await vi.advanceTimersByTimeAsync(CONFIRM_ACK_TIMEOUT_MS)
+    expect(native).toHaveBeenCalledTimes(1)
+    expect(withdraw).not.toHaveBeenCalled()
+  })
+
+  test('cancelAll 은 건넨 요청만 거둔다(차례를 기다리던 것·건네지 않은 것은 거두지 않는다)', async () => {
+    const delivered = setup()
+    delivered.broker.ask(KILL)
+    delivered.broker.ask(HOOK)
+    delivered.broker.cancelAll()
+    expect(delivered.withdraw.mock.calls).toEqual([[delivered.sent[0].id]])
+
+    const waiting = setup({ ready: false })
+    waiting.broker.ask(KILL)
+    waiting.broker.cancelAll()
+    expect(waiting.withdraw).not.toHaveBeenCalled()
+  })
+
+  test('OS 창이 떠 있는 중에 cancelAll: 다시 거두지 않고 취소로 끝내며, 늦게 온 OS 창 답은 버린다', async () => {
+    let answerNative: (index: number) => void = () => {}
+    const { broker, sent, withdraw } = setup({
+      native: () => new Promise<number>((resolve) => (answerNative = resolve))
+    })
+    const answer = track(broker.ask(KILL))
+    await vi.advanceTimersByTimeAsync(CONFIRM_ACK_TIMEOUT_MS)
+    expect(withdraw).toHaveBeenCalledTimes(1)
+    broker.cancelAll()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(answer.value).toBe(KILL.cancelId)
+    expect(withdraw).toHaveBeenCalledTimes(1)
+    answerNative(0)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(answer.value).toBe(KILL.cancelId)
+    // 다음 요청은 그대로 묻는다.
+    broker.ask(HOOK)
+    expect(sent.map((r) => r.title)).toEqual([KILL.title, HOOK.title])
+  })
+})
+
+test('OS 창이 범위 밖 번호를 돌려주면 취소(cancelId)', async () => {
+  const { broker } = setup({ native: async () => 7 })
+  const answer = track(broker.ask(KILL))
+  await vi.advanceTimersByTimeAsync(CONFIRM_ACK_TIMEOUT_MS)
+  await vi.advanceTimersByTimeAsync(0)
+  expect(answer.value).toBe(KILL.cancelId)
+})
+
+test('defaultId·cancelId 가 버튼 범위 밖이면 묻지 않고 바로 취소로 끝낸다', async () => {
+  const { broker, sent, showWindow, native } = setup()
+  // 기본 버튼이 잘못됐으면 cancelId 로.
+  await expect(broker.ask({ ...KILL, defaultId: 2 })).resolves.toBe(KILL.cancelId)
+  await expect(broker.ask({ ...KILL, defaultId: 0.5 })).resolves.toBe(KILL.cancelId)
+  // 취소 버튼이 잘못됐으면 어느 버튼도 아닌 -1 로.
+  await expect(broker.ask({ ...KILL, cancelId: 2 })).resolves.toBe(-1)
+  await expect(broker.ask({ ...KILL, cancelId: -1 })).resolves.toBe(-1)
+  await expect(broker.ask({ ...KILL, buttons: [], defaultId: 0, cancelId: 0 })).resolves.toBe(-1)
+  expect(sent).toEqual([])
+  expect(showWindow).not.toHaveBeenCalled()
+  await vi.advanceTimersByTimeAsync(CONFIRM_ACK_TIMEOUT_MS)
+  expect(native).not.toHaveBeenCalled()
+  // 다음 정상 요청은 그대로 묻는다.
+  broker.ask(KILL)
+  expect(sent).toHaveLength(1)
+})
+
+test('confirmed: 첫 버튼이고 첫 버튼이 취소가 아닐 때만 "예"', () => {
+  expect(confirmed(KILL, 0)).toBe(true)
+  expect(confirmed(KILL, 1)).toBe(false)
+  expect(confirmed(KILL, -1)).toBe(false)
+  expect(confirmed({ ...KILL, cancelId: 0, defaultId: 0 }, 0)).toBe(false)
+})
+
+test('다시 로드된 화면(flush)이 다시 그렸다고 알리지 않으면 OS 창으로 묻는다', async () => {
+  const { broker, sent, native } = setup()
+  const answer = track(broker.ask(KILL))
+  broker.shown(sent[0].id)
+  await vi.advanceTimersByTimeAsync(60 * 60 * 1000)
+  expect(native).not.toHaveBeenCalled()
+  broker.flush()
+  await vi.advanceTimersByTimeAsync(CONFIRM_ACK_TIMEOUT_MS - 1)
+  expect(native).not.toHaveBeenCalled()
+  await vi.advanceTimersByTimeAsync(1)
+  expect(native).toHaveBeenCalledTimes(1)
+  await vi.advanceTimersByTimeAsync(0)
+  expect(answer.value).toBe(1)
+})
+
+test('다시 로드된 화면이 다시 그렸다고 알리면 시간 제한이 다시 없어진다', async () => {
+  const { broker, sent, native } = setup()
+  broker.ask(KILL)
+  broker.shown(sent[0].id)
+  broker.flush()
+  broker.shown(sent[0].id)
+  await vi.advanceTimersByTimeAsync(CONFIRM_ACK_TIMEOUT_MS * 3)
+  expect(native).not.toHaveBeenCalled()
+})
+
+test('처음 뜰 때의 flush 는 이미 도는 시계를 늘리지 않는다', async () => {
+  const { broker, native, setReady } = setup({ ready: false })
+  broker.ask(KILL)
+  await vi.advanceTimersByTimeAsync(CONFIRM_ACK_TIMEOUT_MS - 1000)
+  setReady(true)
+  broker.flush()
+  await vi.advanceTimersByTimeAsync(1000)
+  expect(native).toHaveBeenCalledTimes(1)
 })
 
 describe('IPC 핸들러', () => {

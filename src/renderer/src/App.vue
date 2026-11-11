@@ -153,6 +153,7 @@ let unsubscribeNavigate: () => void = () => {}
 let unsubscribeUpdate: () => void = () => {}
 let unsubscribeEvents: () => void = () => {}
 let unsubscribeConfirm: () => void = () => {}
+let unsubscribeWithdraw: () => void = () => {}
 let stopTheme: () => void = () => {}
 
 // ── 확인 창: 메인이 묻고(끄기·지우기·연동 바꾸기) 화면은 그려서 누른 버튼 번호만 돌려준다 ──
@@ -182,6 +183,17 @@ function confirmShown(): void {
   if (!request) return
   confirmDrawn = request.id
   window.pitwall.confirm.shown(request.id)
+}
+
+/**
+ * 메인이 그 요청을 거뒀다(OS 창으로 넘김·창을 닫아 취소): 답하지 않고 닫는다(초점은 열기 전으로). 늦게 다시 와도
+ * 띄우지 않게 답한 것으로 센다(id 는 늘어만 가므로 아직 받지 못한 요청이어도 그렇다).
+ */
+function withdrawConfirm(id: number): void {
+  confirmAnswered = Math.max(confirmAnswered, id)
+  if (confirmRequest.value?.id !== id) return
+  confirmRequest.value = null
+  confirmDrawn = null
 }
 
 function answerConfirm(index: number): void {
@@ -240,6 +252,8 @@ function showEvents(): void {
 onMounted(async () => {
   // 확인 요청을 먼저 받는다: 구독한 뒤 그 사이(창이 뜨는 동안) 보낸 요청도 pending 으로 받아 간다.
   unsubscribeConfirm = window.pitwall.confirm.onRequest(receiveConfirm)
+  // 예전 preload(거두기가 없음)여도 화면은 뜬다.
+  unsubscribeWithdraw = window.pitwall.confirm.onWithdraw?.(withdrawConfirm) ?? (() => {})
   void window.pitwall.confirm
     .pending()
     .then((requests) => requests.forEach(receiveConfirm))
@@ -299,6 +313,7 @@ onUnmounted(() => {
   unsubscribeUpdate()
   unsubscribeEvents()
   unsubscribeConfirm()
+  unsubscribeWithdraw()
   document.removeEventListener('visibilitychange', onVisibility)
   stopTheme()
   window.removeEventListener('keydown', shortcut)

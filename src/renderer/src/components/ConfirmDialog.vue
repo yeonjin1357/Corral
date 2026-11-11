@@ -72,13 +72,22 @@ const buttons = computed(() =>
 const messageId = computed(() => `confirm-${props.request.id}-message`)
 const detailId = computed(() => `confirm-${props.request.id}-detail`)
 
+/**
+ * 열린 직후 이 시간 동안은 취소가 아닌 버튼을 받지 않는다: 앞 화면에서 누르던 두 번 누름·Enter 가 이어져
+ * 들어와 바로 실행되지 않게(Esc·취소 버튼은 바로 된다).
+ */
+const ARM_MS = 300
+
 const root = ref<HTMLElement | null>(null)
 let answered = false
+/** 연 시각(Date.now — 실수 누름 막기). */
+let openedAt = 0
 /** 열기 전 초점(닫히면 돌려준다). */
 let before: HTMLElement | null = null
 
 function answer(index: number): void {
   if (answered) return
+  if (index !== props.request.cancelId && Date.now() - openedAt < ARM_MS) return
   answered = true
   emit('answer', index)
 }
@@ -87,18 +96,25 @@ function buttonElements(): HTMLButtonElement[] {
   return [...(root.value?.querySelectorAll<HTMLButtonElement>('[data-confirm-button]') ?? [])]
 }
 
-/** Tab 은 카드 안 버튼 사이에서만 돈다(카드 밖에 있으면 처음·끝 버튼으로). */
+/** Tab 으로 갈 곳: 버튼들(왼쪽부터), 그다음 본문(키보드로 스크롤). */
+function focusables(): HTMLElement[] {
+  const body = root.value?.querySelector<HTMLElement>('[data-confirm-body]')
+  return [...buttonElements(), ...(body ? [body] : [])]
+}
+
+/** Tab 은 카드 안에서만 돈다(카드 밖에 있으면 처음·끝으로). */
 function cycle(step: 1 | -1): void {
-  const list = buttonElements()
+  const list = focusables()
   if (list.length === 0) return
-  const at = list.indexOf(document.activeElement as HTMLButtonElement)
+  const at = list.indexOf(document.activeElement as HTMLElement)
   const next = at < 0 ? (step > 0 ? 0 : list.length - 1) : (at + step + list.length) % list.length
   list[next].focus()
 }
 
 /**
  * 창 전체의 키를 먼저 받는다(캡처). 확인 창이 떠 있는 동안 아래 화면(상세 패널의 Esc·단축키)에는 키를 넘기지 않는다.
- * Esc = cancelId, Enter = 초점이 있는 버튼, Tab = 카드 안에서 돈다.
+ * Esc = cancelId, Enter = 초점이 있는 버튼, Tab = 카드 안에서 돈다. 본문에 초점이 있으면 화살표·PageUp/Down·Space
+ * 는 막지 않아 브라우저가 본문을 스크롤한다.
  */
 function onKey(event: KeyboardEvent): void {
   event.stopPropagation()
@@ -117,6 +133,7 @@ function onKey(event: KeyboardEvent): void {
 }
 
 onMounted(() => {
+  openedAt = Date.now()
   before = document.activeElement instanceof HTMLElement ? document.activeElement : null
   window.addEventListener('keydown', onKey, true)
   const first = root.value?.querySelector<HTMLElement>(
@@ -161,7 +178,7 @@ onUnmounted(() => {
           >
             <component :is="LOOKS[look].icon" class="size-5" />
           </span>
-          <div class="min-w-0 flex-1 pt-0.5">
+          <div class="min-w-0 flex-1 pt-0.5 [overflow-wrap:anywhere]">
             <p data-confirm-title class="text-xs text-muted-foreground">{{ request.title }}</p>
             <h2 :id="messageId" class="mt-0.5 text-base leading-snug font-semibold">
               {{ request.message }}
@@ -169,10 +186,13 @@ onUnmounted(() => {
           </div>
         </div>
 
+        <!-- 본문: 길면 카드 안에서만 스크롤. 키보드로도 스크롤하게 초점을 받는다(Tab 은 버튼 다음). -->
         <div
           v-if="paragraphs.length"
           :id="detailId"
-          class="min-h-0 space-y-3 overflow-y-auto px-(--card-spacing) text-sm leading-relaxed text-muted-foreground [overflow-wrap:anywhere]"
+          tabindex="0"
+          data-confirm-body
+          class="min-h-0 space-y-3 overflow-y-auto px-(--card-spacing) text-sm leading-relaxed text-muted-foreground [overflow-wrap:anywhere] outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/50"
           data-selectable
         >
           <div v-for="(blocks, p) in paragraphs" :key="p" data-confirm-paragraph class="space-y-1">
