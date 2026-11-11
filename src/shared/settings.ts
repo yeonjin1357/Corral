@@ -110,7 +110,7 @@ export const SETTINGS_LIMITS = {
 
 export const DEFAULT_SETTINGS: Settings = {
   refresh: 'normal',
-  theme: 'auto',
+  theme: 'dark',
   launchAtLogin: true,
   updateCheck: true,
   ramWarnPercent: 80,

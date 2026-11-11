@@ -38,6 +38,12 @@ test('일반 쪽의 새 버전 확인 설명에 GitHub 이 나오지 않는다',
   expect(w.text()).not.toContain('GitHub')
 })
 
+test('드롭다운 목록은 테마의 팝오버 색으로 그린다(반투명 바탕이 흰색 위에 깔려 글자가 안 보이지 않게)', () => {
+  const select = view('general').find('select#refresh')
+  expect(select.classes()).toContain('[&_option]:bg-popover')
+  expect(select.classes()).toContain('[&_option]:text-popover-foreground')
+})
+
 describe('설정 > 정보', () => {
   test('현재 버전과 업데이트 확인 버튼만 있고, 저장소·라이선스 링크는 없다', async () => {
     const w = about()

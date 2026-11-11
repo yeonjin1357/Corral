@@ -11,10 +11,10 @@ test('값이 없거나 객체가 아니면 기본값', () => {
     expect(normalizeSettings(value)).toEqual(DEFAULT_SETTINGS)
 })
 
-test('기본값: 보통 갱신, 자동 테마, 로그인 시 실행·업데이트 확인 켬, RAM 80/90%, 20분, 알림 모두 켬, 의존성·빌드 결과 폴더', () => {
+test('기본값: 보통 갱신, 어두운 테마, 로그인 시 실행·업데이트 확인 켬, RAM 80/90%, 20분, 알림 모두 켬, 의존성·빌드 결과 폴더', () => {
   expect(DEFAULT_SETTINGS).toMatchObject({
     refresh: 'normal',
-    theme: 'auto',
+    theme: 'dark',
     launchAtLogin: true,
     updateCheck: true,
     ramWarnPercent: 80,
@@ -74,12 +74,14 @@ test('고를 수 있는 값이 아니면 기본값', () => {
     normalizeSettings({ refresh: 'turbo', theme: 'pink', launchAtLogin: 'yes' })
   ).toMatchObject({
     refresh: 'normal',
-    theme: 'auto',
+    theme: 'dark',
     launchAtLogin: true
   })
   expect(
-    normalizeSettings({ refresh: 'saver', theme: 'dark', launchAtLogin: false, updateCheck: false })
-  ).toMatchObject({ refresh: 'saver', theme: 'dark', launchAtLogin: false, updateCheck: false })
+    normalizeSettings({ refresh: 'saver', theme: 'auto', launchAtLogin: false, updateCheck: false })
+  ).toMatchObject({ refresh: 'saver', theme: 'auto', launchAtLogin: false, updateCheck: false })
+  // 이미 고른 테마는 기본값이 바뀌어도 그대로.
+  expect(normalizeSettings({ theme: 'light' }).theme).toBe('light')
 })
 
 test('RAM 기준: 경고 50~98, 위험은 경고+1~99, 반올림', () => {

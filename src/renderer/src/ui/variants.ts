@@ -93,9 +93,13 @@ export const INPUT_CLASS =
 export const TEXTAREA_CLASS =
   'dark:bg-input/30 border-input focus-visible:border-ring focus-visible:ring-ring/50 aria-invalid:ring-destructive/20 aria-invalid:border-destructive flex field-sizing-content min-h-16 w-full rounded-md border bg-transparent px-2.5 py-2 text-sm shadow-xs transition-[color,box-shadow] outline-none focus-visible:ring-3 placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50'
 
-/** NeoHtop ui/native-select/native-select.svelte */
+/**
+ * NeoHtop ui/native-select/native-select.svelte
+ * 바꾼 점: 펼친 목록(option)에 팝오버 색을 준다. 주지 않으면 Chromium 이 select 의 반투명 바탕(dark:bg-input/30)을
+ * 흰색 위에 깔아 밝은 회색 목록에 밝은 글자가 되어 어두운 테마에서 거의 보이지 않는다.
+ */
 export const SELECT_CLASS =
-  'border-input placeholder:text-muted-foreground dark:bg-input/30 dark:hover:bg-input/50 focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full min-w-0 appearance-none rounded-md border bg-transparent py-1 pr-8 pl-2.5 text-sm shadow-xs transition-[color,box-shadow] select-none focus-visible:ring-3 data-[size=sm]:h-8 outline-none disabled:pointer-events-none disabled:cursor-not-allowed'
+  'border-input placeholder:text-muted-foreground dark:bg-input/30 dark:hover:bg-input/50 focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full min-w-0 appearance-none rounded-md border bg-transparent py-1 pr-8 pl-2.5 text-sm shadow-xs transition-[color,box-shadow] select-none focus-visible:ring-3 data-[size=sm]:h-8 outline-none disabled:pointer-events-none disabled:cursor-not-allowed [&_option]:bg-popover [&_option]:text-popover-foreground'
 
 /** NeoHtop ui/checkbox/checkbox.svelte */
 export const CHECKBOX_CLASS =
