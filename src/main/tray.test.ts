@@ -416,7 +416,7 @@ describe('새 버전', () => {
   ): UpdateStatus => ({
     state,
     version,
-    url: 'https://github.com/yeonjin1357/pitwall/releases/tag/v0.2.0',
+    url: 'https://github.com/yeonjin1357/Corral/releases/tag/v0.2.0',
     error: null,
     checkedAt: 1
   })
@@ -439,7 +439,7 @@ describe('새 버전', () => {
       {} as never
     )
     expect(openRelease).toHaveBeenCalledWith(
-      'https://github.com/yeonjin1357/pitwall/releases/tag/v0.2.0'
+      'https://github.com/yeonjin1357/Corral/releases/tag/v0.2.0'
     )
     for (const state of ['none', 'checking', 'downloading', 'error', 'disabled'] as const)
       expect(labels(buildTrayMenu(snap(), acts, status(state))).join()).not.toContain('새 버전')

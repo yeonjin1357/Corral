@@ -57,5 +57,5 @@ releaseInfo:
 publish:
   provider: github
   owner: yeonjin1357
-  repo: pitwall
+  repo: Corral
   releaseType: draft

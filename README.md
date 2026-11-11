@@ -32,7 +32,7 @@ AI 코딩 에이전트(Claude Code, Codex)를 여러 git 워크트리에서 동�
 
 ## 설치
 
-[Releases](https://github.com/yeonjin1357/pitwall/releases) 에서 내려받습니다. 코드 서명 인증서가 없어 처음 실행할 때 OS 경고가 나옵니다.
+[Releases](https://github.com/yeonjin1357/Corral/releases) 에서 내려받습니다. 코드 서명 인증서가 없어 처음 실행할 때 OS 경고가 나옵니다.
 
 ### Windows
 

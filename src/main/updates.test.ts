@@ -24,13 +24,13 @@ describe('latestRelease', () => {
   test('GitHub 최신 릴리스의 버전과 페이지 주소', async () => {
     const fetchJson = vi.fn(async () => ({
       tag_name: 'v0.2.0',
-      html_url: 'https://github.com/yeonjin1357/pitwall/releases/tag/v0.2.0',
+      html_url: 'https://github.com/yeonjin1357/Corral/releases/tag/v0.2.0',
       draft: false,
       prerelease: false
     }))
     expect(await latestRelease(fetchJson)).toEqual({
       version: '0.2.0',
-      url: 'https://github.com/yeonjin1357/pitwall/releases/tag/v0.2.0'
+      url: 'https://github.com/yeonjin1357/Corral/releases/tag/v0.2.0'
     })
     expect(fetchJson).toHaveBeenCalledWith(RELEASES_API)
   })
@@ -40,6 +40,27 @@ describe('latestRelease', () => {
     expect(
       await latestRelease(async () => ({ tag_name: 'v9.0.0', html_url: 'https://evil.example/x' }))
     ).toBeNull()
+    // 같은 GitHub 이라도 다른 저장소의 릴리스는 알려 주지 않는다.
+    expect(
+      await latestRelease(async () => ({
+        tag_name: 'v9.0.0',
+        html_url: 'https://github.com/someone/else/releases/tag/v9.0.0'
+      }))
+    ).toBeNull()
+  })
+
+  test('저장소 이름이 Corral 로 바뀐 뒤 GitHub 이 주는 새 주소를 받아들이고, 새 이름으로 묻는다', async () => {
+    // GitHub 는 저장소 이름을 바꾸면 API 에서 새 이름(대소문자 그대로)의 주소를 돌려준다.
+    for (const html_url of [
+      'https://github.com/yeonjin1357/Corral/releases/tag/v0.3.0',
+      'https://github.com/yeonjin1357/corral/releases/tag/v0.3.0'
+    ]) {
+      expect(await latestRelease(async () => ({ tag_name: 'v0.3.0', html_url }))).toEqual({
+        version: '0.3.0',
+        url: html_url
+      })
+    }
+    expect(RELEASES_API).toBe('https://api.github.com/repos/yeonjin1357/Corral/releases/latest')
   })
 })
 
@@ -70,7 +91,7 @@ function deps(
     enabled: () => true,
     fetchJson: async () => ({
       tag_name: 'v0.2.0',
-      html_url: 'https://github.com/yeonjin1357/pitwall/releases/tag/v0.2.0'
+      html_url: 'https://github.com/yeonjin1357/Corral/releases/tag/v0.2.0'
     }),
     autoUpdater: null,
     now: () => 1000,
@@ -142,7 +163,7 @@ describe('createUpdater', () => {
     expect(await updater.check()).toMatchObject({
       state: 'available',
       version: '0.2.0',
-      url: 'https://github.com/yeonjin1357/pitwall/releases/tag/v0.2.0'
+      url: 'https://github.com/yeonjin1357/Corral/releases/tag/v0.2.0'
     })
     const same = createUpdater(deps({ platform: 'darwin', currentVersion: '0.2.0' }))
     expect((await same.check()).state).toBe('none')

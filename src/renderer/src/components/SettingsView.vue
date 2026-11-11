@@ -222,7 +222,7 @@ const status = computed(() => {
   return { text: dirty.value ? S.dirty : S.clean, failed: false }
 })
 
-const REPO_URL = 'https://github.com/yeonjin1357/pitwall'
+const REPO_URL = 'https://github.com/yeonjin1357/Corral'
 const NOTICES_URL = `${REPO_URL}/blob/main/THIRD_PARTY_NOTICES.md`
 </script>
 
