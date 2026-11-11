@@ -29,6 +29,7 @@ import {
   agentKey,
   appendSnapshot,
   emptyHistory,
+  seedGroups,
   seedRam,
   selectionKey
 } from './history'
@@ -217,6 +218,11 @@ onMounted(async () => {
     .historyRam()
     .then((points) => (history.value = seedRam(history.value, points)))
     .catch(() => {})
+  // 묶음별 추이도 같은 방식으로(G6). 이 IPC 가 없는 예전 메인이나 실패여도 화면은 그대로 뜬다.
+  void window.pitwall
+    .historyGroups?.()
+    .then((points) => (history.value = seedGroups(history.value, points)))
+    .catch(() => {})
   // 트레이로만 시작한 뒤 처음 연 창은 숨긴 적이 없어도 앱이 시작된 때부터의 일을 요약한다(기록·RAM 추이를 받은 뒤).
   void Promise.all([info, eventsLoaded, ramLoaded])
     .then(() => {
@@ -295,6 +301,12 @@ function select(key: string): void {
 function pick(key: string): void {
   if (tab.value === 'workspaces') selectedKey.value = key
   else select(key)
+}
+
+/** 메모리 지도에서 고른 줄(G6): 메모리 상세를 닫고 그 줄의 탭·상세 패널로. */
+function selectFromMap(key: string): void {
+  memoryOpen.value = false
+  select(key)
 }
 
 /** 메모리 상세의 묶음에서 그 탭으로(숨긴 서버·다른 포트 보기와 검색은 풀어 묶음 전체가 보이게). */
@@ -1144,11 +1156,13 @@ const takenAt = computed(() =>
       v-model:open="memoryOpen"
       :snapshot="snapshot"
       :ram-history="history.ram"
+      :group-history="history.groups"
       :window-ms="memoryWindowMs"
       :gap-ms="gapMs"
       :refreshing="refreshing"
       @refresh="refresh"
       @go="goToTab"
+      @select="selectFromMap"
     />
   </div>
 </template>

@@ -2,7 +2,9 @@
 import { mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach } from 'vitest'
 import MemorySheet from './MemorySheet.vue'
-import type { DashboardSnapshot } from '../../../shared/types'
+import MemoryMap from './MemoryMap.vue'
+import StackedTrend from './StackedTrend.vue'
+import type { DashboardSnapshot, GroupPoint } from '../../../shared/types'
 import { GB, MB, agentRow, heavyJob, serverRow, snapshot } from '../testing/fixtures'
 
 let wrapper: VueWrapper | null = null
@@ -12,10 +14,17 @@ afterEach(() => {
   document.body.innerHTML = ''
 })
 
-function sheet(s: DashboardSnapshot): VueWrapper {
+function sheet(s: DashboardSnapshot, groupHistory: GroupPoint[] = []): VueWrapper {
   wrapper = mount(MemorySheet, {
     attachTo: document.body,
-    props: { snapshot: s, ramHistory: [], windowMs: 600_000, refreshing: false, open: true }
+    props: {
+      snapshot: s,
+      ramHistory: [],
+      groupHistory,
+      windowMs: 600_000,
+      refreshing: false,
+      open: true
+    }
   })
   return wrapper
 }
@@ -142,6 +151,27 @@ describe('메모리 상세: 어디에 쓰고 있나', () => {
     ])
     expect(rows[0].querySelector('td')!.getAttribute('title')).toBe('node.exe — Cursor.exe')
   })
+})
+
+test('맨 위에 남은 메모리 한 줄과 메모리 지도, RAM 추이 아래에 묶음별 추이', () => {
+  const points: GroupPoint[] = [
+    { t: 1, devServer: GB, agent: GB, heavy: 0, otherApps: 4 * GB, system: 2 * GB }
+  ]
+  const w = sheet(s, points)
+  const body = document.body.textContent!.replace(/\s+/g, ' ')
+  // 남은 메모리 = 전체 − 사용(fixtures: 32 GB − 26.3 GB).
+  expect(body).toContain('메모리 지도')
+  expect(body).toContain('남은 메모리 5.7 GB')
+  const order = [...document.body.querySelectorAll('h3')].map((h) => h.textContent!.trim())
+  expect(order.slice(0, 3)).toEqual(['메모리 지도', '사용 추이', '묶음별 추이'])
+  expect(w.findComponent(StackedTrend).props()).toMatchObject({
+    points,
+    windowMs: 600_000,
+    totalBytes: 32 * GB
+  })
+  // 지도에서 고른 줄은 그대로 올린다(App 이 메모리 상세를 닫고 그 줄의 상세를 연다).
+  w.findComponent(MemoryMap).vm.$emit('select', 'server:1:200')
+  expect(w.emitted('select')).toEqual([['server:1:200']])
 })
 
 test('커밋·한도·남은 메모리·커널 몫을 보인다, 모르면 숨긴다', () => {

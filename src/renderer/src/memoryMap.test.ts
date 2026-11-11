@@ -1,0 +1,137 @@
+import { memoryMapGroups, type MapGroup } from './memoryMap'
+import { selectionKey } from '../../shared/keys'
+import type { AppUsage, GroupUsage, ProcessGroup } from '../../shared/types'
+import { GB, MB, agentRow, heavyJob, serverRow, snapshot } from './testing/fixtures'
+
+const WS = { root: 'C:\\work\\shop', name: 'shop', branch: 'main', outer: true }
+const web = serverRow({
+  pid: 1,
+  memoryBytes: 1200 * MB,
+  workspace: WS,
+  worktree: { root: 'C:\\work\\shop\\web', branch: 'main', isLinkedWorktree: false }
+})
+const api = serverRow({
+  pid: 2,
+  memoryBytes: 800 * MB,
+  workspace: null,
+  worktree: { root: 'C:\\work\\api', branch: 'main', isLinkedWorktree: false }
+})
+const hidden = serverRow({ pid: 3, memoryBytes: 400 * MB })
+const agent = agentRow({ pid: 10, memoryBytes: 300 * MB })
+const job = heavyJob({ pid: 20, memoryBytes: GB })
+
+function app(name: string, memoryBytes: number, owner: string | null = null): AppUsage {
+  return { name, owner, memoryBytes, commitBytes: null, processCount: 1, exePath: null }
+}
+function groups(bytes: Partial<Record<ProcessGroup, number>>): GroupUsage[] {
+  return (Object.keys(bytes) as ProcessGroup[]).map((group) => ({
+    group,
+    memoryBytes: bytes[group]!,
+    commitBytes: null,
+    processCount: 1
+  }))
+}
+const group = (map: MapGroup[], key: ProcessGroup): MapGroup => map.find((g) => g.group === key)!
+const sum = (g: MapGroup): number => g.tiles.reduce((n, t) => n + t.bytes, 0)
+
+const base = snapshot({
+  servers: [web, api],
+  hiddenServers: [hidden],
+  agents: [agent],
+  heavyJobs: [job],
+  apps: [app('chrome.exe', 5 * GB), app('node.exe', 2 * GB, 'Cursor.exe')],
+  groups: groups({
+    devServer: 2200 * MB,
+    agent: 500 * MB,
+    heavy: GB,
+    otherApps: 7 * GB,
+    system: 2 * GB
+  })
+})
+
+test('2단계 합이 묶음보다 크면 줄여 맞추고 작으면 그 밖 칸', () => {
+  const map = memoryMapGroups(base)
+  // 개발 서버 줄 합(1200 + 800 + 숨김 400 = 2400 MB) > 묶음 2200 MB: 같은 비율로 줄인다.
+  const dev = group(map, 'devServer')
+  expect(dev.bytes).toBe(2200 * MB)
+  expect(sum(dev)).toBeCloseTo(2200 * MB, 0)
+  expect(dev.tiles.map((t) => t.bytes / (2200 * MB))).toEqual([
+    expect.closeTo(1200 / 2400, 9),
+    expect.closeTo(800 / 2400, 9),
+    expect.closeTo(400 / 2400, 9)
+  ])
+  expect(dev.tiles.some((t) => t.label === '그 밖')).toBe(false)
+  // 에이전트 줄 합(300 MB) < 묶음 500 MB: 남는 200 MB 는 그 밖 칸.
+  const agents = group(map, 'agent')
+  expect(agents.tiles.map((t) => [t.label, t.bytes, t.key])).toEqual([
+    ['wt-a', 300 * MB, selectionKey.agent(agent)],
+    ['그 밖', 200 * MB, null]
+  ])
+  // 시스템·공유는 한 칸. 모든 묶음에서 칸 합 = 묶음.
+  expect(group(map, 'system').tiles).toHaveLength(1)
+  for (const g of map) expect(sum(g)).toBeCloseTo(g.bytes, 0)
+})
+
+test('다른 앱은 큰 순 12개 + 기타 n개', () => {
+  const apps = Array.from({ length: 15 }, (_, i) => app(`app${i}.exe`, (i + 1) * 100 * MB))
+  const total = apps.reduce((n, a) => n + a.memoryBytes, 0)
+  const map = memoryMapGroups({
+    ...base,
+    // 일부러 섞어 둔다.
+    apps: [...apps.slice(5), ...apps.slice(0, 5)],
+    groups: groups({ otherApps: total, system: GB })
+  })
+  const tiles = group(map, 'otherApps').tiles
+  expect(tiles.map((t) => t.label)).toEqual([
+    'app14',
+    'app13',
+    'app12',
+    'app11',
+    'app10',
+    'app9',
+    'app8',
+    'app7',
+    'app6',
+    'app5',
+    'app4',
+    'app3',
+    '기타 3개'
+  ])
+  // 기타는 남은 세 앱(100 + 200 + 300 MB)의 합.
+  expect(tiles.at(-1)!.bytes).toBe(600 * MB)
+  // 다른 앱 탭과 같은 이름(띄운 앱까지).
+  const named = group(memoryMapGroups(base), 'otherApps').tiles.map((t) => t.label)
+  expect(named).toEqual(['chrome', 'node (Cursor)'])
+})
+
+test('누를 수 있는 칸만 선택 키를 가진다', () => {
+  const map = memoryMapGroups(base)
+  const keyed = map.flatMap((g) => g.tiles.filter((t) => t.key != null))
+  expect(keyed.map((t) => [t.label, t.key])).toEqual([
+    // 개발 서버: 이름 · 작업 공간(작업 공간을 모르면 이름만).
+    ['web · shop', selectionKey.server(web)],
+    ['api', selectionKey.server(api)],
+    ['wt-a', selectionKey.agent(agent)],
+    ['vue-tsc', selectionKey.heavy(job)]
+  ])
+  // 숨긴 서버·다른 앱·그 밖·시스템은 누를 수 없다.
+  expect(group(map, 'devServer').tiles[2]).toMatchObject({ key: null, label: 'shop-web' })
+  expect(group(map, 'otherApps').tiles.every((t) => t.key === null)).toBe(true)
+  expect(group(map, 'system').tiles).toEqual([
+    expect.objectContaining({ key: null, label: '시스템·공유 메모리', bytes: 2 * GB })
+  ])
+  // 칸 id 는 지도 안에서 겹치지 않는다.
+  const ids = map.flatMap((g) => g.tiles.map((t) => t.id))
+  expect(new Set(ids).size).toBe(ids.length)
+})
+
+test('0 인 묶음은 지도에 없다', () => {
+  const map = memoryMapGroups({
+    ...base,
+    heavyJobs: [],
+    groups: groups({ devServer: 2200 * MB, agent: 0, heavy: 0, otherApps: 7 * GB, system: GB })
+  })
+  expect(map.map((g) => g.group)).toEqual(['devServer', 'otherApps', 'system'])
+  // 전체 RAM 을 모르면(아직 수집 전) 지도가 없다.
+  expect(memoryMapGroups({ ...base, memory: { ...base.memory, totalBytes: 0 } })).toEqual([])
+})

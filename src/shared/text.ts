@@ -682,6 +682,18 @@ export const text = {
       trendTitle: '사용 추이',
       done: '닫기'
     },
+    /** 메모리 상세의 메모리 지도·묶음별 추이(G6). */
+    memorySheet: {
+      mapTitle: '메모리 지도',
+      mapHint: '사각형 크기 = 쓰는 메모리. 누르면 그 줄의 상세',
+      /** 큰 순 12개 밖의 다른 앱을 모은 칸. */
+      mapOthers: (n: number): string => `기타 ${n}개`,
+      /** 묶음 안 줄들의 합이 묶음보다 작을 때 남는 몫. */
+      mapRest: '그 밖',
+      trendGroupsTitle: '묶음별 추이',
+      /** 지도 위 한 줄(남은 메모리는 지도에 넣지 않는다). */
+      freeLine: (free: string): string => `남은 메모리 ${free}`
+    },
     recommend: {
       more: (n: number): string => `외 ${n}개`,
       overlapTitle: '무거운 작업이 겹쳐 돌고 있어요'

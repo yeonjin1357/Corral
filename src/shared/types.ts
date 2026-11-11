@@ -234,6 +234,16 @@ export interface GroupUsage {
   processCount: number
 }
 
+/** 묶음별 메모리 추이의 점(G6, 바이트). 메인이 RAM 추이와 함께 남긴다. */
+export interface GroupPoint {
+  t: number
+  devServer: number
+  agent: number
+  heavy: number
+  otherApps: number
+  system: number
+}
+
 /** 한 행(서버·에이전트·무거운 작업·남은 프로세스)을 이루는 프로세스를 이름·짧은 이름별로 묶은 것(상세 패널용). */
 export interface ProcessSummary {
   /** 프로세스 이름(예: node.exe). */

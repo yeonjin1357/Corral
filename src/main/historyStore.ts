@@ -1,12 +1,13 @@
 import { readFile, rename, rm, writeFile } from 'fs/promises'
-import type { AgentState, TrendPoint } from '../shared/types'
+import type { AgentState, GroupPoint, GroupUsage, TrendPoint } from '../shared/types'
 import type { PitEvent } from '../shared/events'
+import { groupPoint } from '../shared/snapshot'
 import type { ServerHistoryData } from './serverHistory'
 
 const MIN = 60_000
 /** 꺼져 있던 시간이 이보다 길면 정리 판단 기억은 버린다(꺼진 동안 쓰였는지 모르므로). */
 export const RESUME_JUDGEMENT_MS = 10 * MIN
-/** RAM 추이: 30초 간격으로 줄여 2시간. */
+/** RAM·묶음 추이: 30초 간격으로 줄여 2시간. */
 const RAM_EVERY_MS = 30_000
 const RAM_KEEP_MS = 120 * MIN
 const MAX_ENTRIES = 500
@@ -25,11 +26,14 @@ export type AgentSeenData = Record<string, { firstSeen: number; lastWorking: num
 /**
  * userData/history.json 의 모양. version 2: 서버 메모리 기록이 커밋(알 때)으로 바뀌었다.
  * version 1 의 작업 세트 기록 뒤에 커밋 기록을 이어 붙이면 가짜 메모리 증가가 되므로 예전 파일은 버린다.
+ * 나중에 더한 칸은 판을 올리지 않는다: 예전 버전은 모르는 칸을 버리고 읽으므로 기록이 사라지지 않는다.
  */
 export interface HistoryFile {
   version: 2
   savedAt: number
   ram: TrendPoint[]
+  /** 묶음별 메모리 추이(G6). 나중에 더한 값이라 예전에 저장한 파일에는 없다. */
+  groups?: GroupPoint[]
   servers: ServerHistoryData
   serverMemo: ServerMemoData
   agentStates: AgentStateData
@@ -41,6 +45,8 @@ export interface HistoryFile {
 
 export interface LoadedHistory {
   ram: TrendPoint[]
+  /** 묶음별 메모리 추이(G6). 없거나(예전 파일) 모양이 틀린 점은 버린다. */
+  groups: GroupPoint[]
   servers: ServerHistoryData
   /** 꺼져 있던 시간이 10분을 넘었거나 시계가 뒤로 갔으면 null(판단 기억을 버림). */
   serverMemo: ServerMemoData | null
@@ -62,6 +68,28 @@ function validPoints(value: unknown): TrendPoint[] {
     .filter((p): p is TrendPoint => isRecord(p) && Number.isFinite(p.t) && Number.isFinite(p.value))
     .slice(-MAX_ENTRIES * 2)
     .map((p) => ({ t: p.t, value: p.value }))
+}
+
+const GROUP_KEYS = ['devServer', 'agent', 'heavy', 'otherApps', 'system'] as const
+const bytesOk = (v: unknown): boolean => Number.isFinite(v) && (v as number) >= 0
+
+/** 묶음 추이: 시각이 수이고 다섯 묶음이 모두 0 이상의 수인 점만, 아는 칸만 남긴다. */
+function validGroupPoints(value: unknown): GroupPoint[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .filter(
+      (p): p is GroupPoint =>
+        isRecord(p) && Number.isFinite(p.t) && GROUP_KEYS.every((k) => bytesOk(p[k]))
+    )
+    .slice(-MAX_ENTRIES * 2)
+    .map((p) => ({
+      t: p.t,
+      devServer: p.devServer,
+      agent: p.agent,
+      heavy: p.heavy,
+      otherApps: p.otherApps,
+      system: p.system
+    }))
 }
 
 /** 상태·시각이 맞는 항목만 남긴다. */
@@ -122,6 +150,7 @@ export async function loadHistory(path: string, now: number): Promise<LoadedHist
   const resume = savedAt <= now && now - savedAt <= RESUME_JUDGEMENT_MS
   return {
     ram: validPoints(raw.ram),
+    groups: validGroupPoints(raw.groups),
     servers: isRecord(raw.servers) ? (raw.servers as ServerHistoryData) : {},
     serverMemo: resume ? validServerMemo(raw.serverMemo) : null,
     agentStates: resume ? validStates(raw.agentStates, AGENT_STATES) : null,
@@ -142,6 +171,28 @@ export async function saveHistory(path: string, data: HistoryFile): Promise<void
   }
 }
 
+/** 30초에 한 점, 2시간까지 남기는 추이(RAM·묶음 추이가 같은 규칙을 쓴다). */
+function createTimedHistory<P extends { t: number }>(
+  valid: (list: unknown) => P[]
+): { add(point: P): void; points(): P[]; import(list: P[], now: number): void } {
+  let points: P[] = []
+  return {
+    add(point) {
+      const last = points[points.length - 1]
+      if (last && point.t - last.t < RAM_EVERY_MS) return
+      points = [...points.filter((p) => point.t - p.t <= RAM_KEEP_MS), point]
+    },
+    points() {
+      return points.map((p) => ({ ...p }))
+    },
+    import(list, now) {
+      points = valid(list)
+        .filter((p) => p.t <= now && now - p.t <= RAM_KEEP_MS)
+        .sort((a, b) => a.t - b.t)
+    }
+  }
+}
+
 /**
  * RAM 사용률 추이(메인 프로세스). 30초에 한 점, 2시간까지. 창을 다시 열거나 앱을 다시 켜도 그래프를 채운다.
  */
@@ -150,20 +201,24 @@ export function createRamHistory(): {
   points(): TrendPoint[]
   import(points: TrendPoint[], now: number): void
 } {
-  let points: TrendPoint[] = []
+  const history = createTimedHistory(validPoints)
   return {
-    record(t, value) {
-      const last = points[points.length - 1]
-      if (last && t - last.t < RAM_EVERY_MS) return
-      points = [...points.filter((p) => t - p.t <= RAM_KEEP_MS), { t, value }]
-    },
-    points() {
-      return points.map((p) => ({ ...p }))
-    },
-    import(list, now) {
-      points = validPoints(list)
-        .filter((p) => p.t <= now && now - p.t <= RAM_KEEP_MS)
-        .sort((a, b) => a.t - b.t)
-    }
+    record: (t, value) => history.add({ t, value }),
+    points: history.points,
+    import: history.import
+  }
+}
+
+/** 묶음별 메모리 추이(G6, 메인 프로세스). RAM 추이와 같이 30초에 한 점, 2시간까지. */
+export function createGroupHistory(): {
+  record(t: number, groups: GroupUsage[]): void
+  points(): GroupPoint[]
+  import(points: GroupPoint[], now: number): void
+} {
+  const history = createTimedHistory(validGroupPoints)
+  return {
+    record: (t, groups) => history.add(groupPoint(t, groups)),
+    points: history.points,
+    import: history.import
   }
 }

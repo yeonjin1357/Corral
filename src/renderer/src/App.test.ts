@@ -74,6 +74,7 @@ function fake(over: Partial<PitwallApi> = {}): Fake {
     onSnapshot: off,
     getLatest: async () => snap(),
     historyRam: async () => [],
+    historyGroups: async () => [],
     events: { get: vi.fn(async () => [] as PitEvent[]), onAdded: () => () => {} },
     tray: { action: vi.fn() },
     killServer: vi.fn(async () => ({ status: 'killed' as const })),
@@ -617,6 +618,49 @@ test('메모리 상세의 묶음을 누르면 상세를 닫고 그 탭으로 간
   ).toBe('on')
   expect((w.find('input[type="search"], input').element as HTMLInputElement).value).toBe('')
   w.unmount()
+})
+
+test('메모리 지도에서 서버를 누르면 메모리 상세를 닫고 그 서버의 상세 패널', async () => {
+  // happy-dom 은 배치를 하지 않아 너비가 0 이다. 지도를 그리도록 너비를 준다.
+  const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth')
+  Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
+    configurable: true,
+    get: () => 600
+  })
+  try {
+    const w = await start(fake())
+    await w.find('[aria-label="메모리 자세히 보기"]').trigger('click')
+    await flushPromises()
+    const tile = document.body.querySelector<HTMLElement>(
+      `button[data-map-tile="${selectionKey.server(api)}"]`
+    )!
+    tile.click()
+    await flushPromises()
+    expect(document.body.querySelector('[data-memory-map]')).toBeNull()
+    expect(pressedTab(w)).toBe('ports')
+    expect(document.body.textContent).toContain('node.exe · PID 2')
+    expect(w.find(`tr[data-key="${selectionKey.server(api)}"]`).attributes('data-selected')).toBe(
+      'true'
+    )
+    w.unmount()
+  } finally {
+    if (original) Object.defineProperty(HTMLElement.prototype, 'clientWidth', original)
+  }
+})
+
+test('묶음 기록을 받지 못해도(예전 메인·실패) 화면은 그대로', async () => {
+  // 이 IPC 가 없는 메인(예전 preload): 부르지 않고 스냅샷으로 쌓은 기록만 쓴다.
+  const w = await start(
+    fake({ historyGroups: undefined as unknown as PitwallApi['historyGroups'] })
+  )
+  await w.find('[aria-label="메모리 자세히 보기"]').trigger('click')
+  await flushPromises()
+  expect(document.body.querySelector('[data-memory-map]')).not.toBeNull()
+  expect(w.findComponent(MemorySheet).props('groupHistory')).toHaveLength(1)
+  w.unmount()
+  const failed = await start(fake({ historyGroups: async () => Promise.reject(new Error('x')) }))
+  expect(failed.find('[aria-label="메모리 자세히 보기"]').exists()).toBe(true)
+  failed.unmount()
 })
 
 test('메모리 상세의 RAM 추이는 쌓인 기록만큼(최소 작은 그래프 길이, 최대 2시간), 끊긴 구간은 비운다', async () => {

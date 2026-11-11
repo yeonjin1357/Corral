@@ -2,15 +2,16 @@
   NeoHtop (MIT) stats/ResourceDetails.svelte · ResourceDetailsContent.svelte 의 메모리 패널
   (머리 + 측정 시각, 큰 숫자, 넓은 추이 그래프, 사실 카드, 막대 카드, 설명 상자, 바닥 버튼).
   바꾼 점: 스왑 대신 pitwall 의 메모리 묶음(개발 서버·에이전트·무거운 작업·다른 앱·시스템)과 많이 쓰는 다른 앱 표.
+  맨 위에 메모리 지도(G6), RAM 추이 아래에 묶음별 추이(G6).
 -->
 <script setup lang="ts">
 import { computed } from 'vue'
 import { ChevronRight, RefreshCw } from '@lucide/vue'
-import type { DashboardSnapshot, ProcessGroup } from '../../../shared/types'
+import type { DashboardSnapshot, GroupPoint, ProcessGroup } from '../../../shared/types'
 import { formatBytes } from '../../../shared/format'
 import { text } from '../../../shared/text'
 import type { Point } from '../history'
-import { GROUP_COLOR } from '../memory'
+import { GROUP_COLOR, memoryComposition } from '../memory'
 import { appName, appRowId, appTitle, type TabKey } from '../rows'
 import Sheet from '../ui/Sheet.vue'
 import Card from '../ui/Card.vue'
@@ -23,21 +24,29 @@ import Badge from '../ui/Badge.vue'
 import Progress from '../ui/Progress.vue'
 import { TABLE } from '../ui/variants'
 import ResourceTrend from './ResourceTrend.vue'
+import MemoryMap from './MemoryMap.vue'
+import StackedTrend from './StackedTrend.vue'
 
 const props = defineProps<{
   snapshot: DashboardSnapshot
   ramHistory: Point[]
+  /** 묶음별 메모리 추이(RAM 추이와 같은 시간 창). */
+  groupHistory: GroupPoint[]
   windowMs: number
   /** 기록이 이보다 끊기면 그래프를 잇지 않는다(앱이 꺼져 있었음). */
   gapMs?: number | null
   refreshing: boolean
 }>()
-const emit = defineEmits<{ refresh: []; go: [tab: TabKey] }>()
+/** select: 메모리 지도에서 고른 줄의 선택 키(App 이 메모리 상세를 닫고 그 줄의 상세를 연다). */
+const emit = defineEmits<{ refresh: []; go: [tab: TabKey]; select: [key: string] }>()
 const open = defineModel<boolean>('open', { required: true })
 
 const t = text.ui
+const ms = text.ui.memorySheet
 const m = computed(() => props.snapshot.memory)
 const hasMemory = computed(() => m.value.totalBytes > 0)
+/** 지도 위 한 줄의 남은 메모리(전체 − 사용, 메모리 카드의 쌓은 막대와 같은 값). 전체를 모르면 지도가 없다. */
+const composition = computed(() => memoryComposition(m.value, props.snapshot.groups))
 const percent = computed(() => Math.floor(m.value.usedPercent))
 const reading = computed(() =>
   new Date(props.snapshot.takenAt).toLocaleTimeString('ko-KR', {
@@ -106,7 +115,7 @@ const groups = computed(() =>
     v-model:open="open"
     :close-label="t.sheet.done"
     :aria-label="t.sheet.memoryTitle"
-    class="sm:max-w-md"
+    class="sm:max-w-2xl"
   >
     <div
       data-slot="sheet-header"
@@ -128,6 +137,16 @@ const groups = computed(() =>
     </div>
 
     <div class="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 pb-5">
+      <section v-if="composition" class="space-y-2">
+        <div class="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+          <h3 class="text-sm font-medium">{{ ms.mapTitle }}</h3>
+          <p class="text-xs text-muted-foreground">{{ ms.mapHint }}</p>
+        </div>
+        <p data-memory-free class="text-xs text-muted-foreground tabular-nums">
+          {{ ms.freeLine(formatBytes(composition.freeBytes)) }}
+        </p>
+        <MemoryMap :snapshot="snapshot" @select="(key) => emit('select', key)" />
+      </section>
       <div>
         <p class="text-3xl font-semibold tracking-tight tabular-nums">
           {{ hasMemory ? formatBytes(m.usedBytes) : t.none }}
@@ -148,6 +167,15 @@ const groups = computed(() =>
           :label="t.cards.memory"
           :format="(v) => `${Math.floor(v)}%`"
           range="0–100%"
+        />
+      </section>
+      <section class="space-y-2">
+        <h3 class="text-sm font-medium">{{ ms.trendGroupsTitle }}</h3>
+        <StackedTrend
+          :points="groupHistory"
+          :window-ms="windowMs"
+          :total-bytes="m.totalBytes"
+          :gap-ms="gapMs"
         />
       </section>
       <Card size="sm">

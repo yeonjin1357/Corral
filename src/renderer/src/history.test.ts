@@ -1,5 +1,14 @@
-import { agentKey, appendSnapshot, emptyHistory, seedRam, selectionKey } from './history'
-import { agentRow, leftoverRow, serverRow, snapshot } from './testing/fixtures'
+import {
+  POINT_LIMIT,
+  agentKey,
+  appendSnapshot,
+  emptyHistory,
+  seedGroups,
+  seedRam,
+  selectionKey
+} from './history'
+import { GB, MB, agentRow, leftoverRow, serverRow, snapshot } from './testing/fixtures'
+import type { GroupPoint } from '../../shared/types'
 
 test('서버별 하트비트: 연결 있으면 up, 없으면 idle, 최신이 맨 뒤', () => {
   let h = emptyHistory()
@@ -118,4 +127,41 @@ test('앱이 기억한 RAM 기록으로 처음 추이를 채운다(겹치는 시
   ])
   // 기록이 없으면 그대로.
   expect(seedRam(h, [])).toBe(h)
+})
+
+test('스냅샷마다 묶음 점을 더하고 메인 기록으로 처음 채운다', () => {
+  // fixtures 의 snapshot(): 개발 서버 2200 MB·에이전트 500 MB·무거운 작업 0·다른 앱 18 GB·시스템 2 GB.
+  const at = (t: number): GroupPoint => ({
+    t,
+    devServer: 2200 * MB,
+    agent: 500 * MB,
+    heavy: 0,
+    otherApps: 18 * GB,
+    system: 2 * GB
+  })
+  let h = emptyHistory()
+  expect(h.groups).toEqual([])
+  h = appendSnapshot(h, snapshot({ takenAt: 100 }))
+  // 같은 takenAt·지연 스냅샷은 RAM 처럼 건너뛴다.
+  h = appendSnapshot(h, snapshot({ takenAt: 100 }))
+  h = appendSnapshot(h, snapshot({ takenAt: 105, stale: true, error: 'timeout' }))
+  expect(h.groups).toEqual([at(100)])
+
+  // 메인이 기억한 기록으로 채운다: 겹치는 시각은 방금 받은 점을 쓰고 시간 순.
+  h = seedGroups(h, [{ ...at(70), devServer: 1 }, { ...at(100), devServer: 99 }, at(40)])
+  expect(h.groups).toEqual([at(40), { ...at(70), devServer: 1 }, at(100)])
+  expect(seedGroups(h, [])).toBe(h)
+
+  // RAM 과 같은 규칙으로 솎는다: 최근 120점은 그대로, 그보다 오래된 것은 30초에 하나, 2시간까지.
+  const SEC = 1000
+  let long = emptyHistory()
+  for (let i = 0; i <= (3 * 3600) / 5; i++)
+    long = appendSnapshot(long, snapshot({ takenAt: i * 5 * SEC }))
+  expect(long.groups.map((p) => p.t)).toEqual(long.ram.map((p) => p.t))
+  expect(
+    long.groups.slice(-POINT_LIMIT).every((p, i, all) => i === 0 || p.t - all[i - 1].t === 5 * SEC)
+  ).toBe(true)
+  // 앱이 기억한 2시간 기록(30초 간격 240점)은 자르지 않는다.
+  const seeds = Array.from({ length: 240 }, (_, i) => at(i * 30_000))
+  expect(seedGroups(emptyHistory(), seeds).groups).toHaveLength(240)
 })

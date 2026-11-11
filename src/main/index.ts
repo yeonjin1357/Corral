@@ -65,7 +65,7 @@ import { createQuickActions, isQuickKind } from './quickActions'
 import { createFocuser, openNoticeTarget } from './focusWindow'
 import { backgroundFor, overlayFor, windowChrome } from './windowChrome'
 import { createIconSource } from './icons'
-import { createRamHistory, loadHistory, saveHistory } from './historyStore'
+import { createGroupHistory, createRamHistory, loadHistory, saveHistory } from './historyStore'
 import { cleanupEvent, createEventLog, diffEvents, diskRemoveEvent } from './events'
 import { codexHome, createCodexReader } from './codexRollout'
 import { BADGE_COLOR, createTrayController, LEVEL_COLORS } from './tray'
@@ -176,11 +176,12 @@ async function collect(): Promise<DashboardSnapshot> {
   return { ...snapshot, disk: disk.report() }
 }
 
-/** RAM 추이(30초·2시간)와 수집기 기억을 userData/history.json 에 이어 쓴다(F8). */
+/** RAM·묶음 추이(30초·2시간)와 수집기 기억을 userData/history.json 에 이어 쓴다(F8). */
 const HISTORY_SAVE_EVERY_MS = 5 * 60 * 1000
 const HISTORY_SAVE_TIMEOUT_MS = 2000
 const historyPath = join(app.getPath('userData'), 'history.json')
 const ramHistory = createRamHistory()
+const groupHistory = createGroupHistory()
 
 /** 기록(G3g): 스냅샷 변화와 정리 동작. 새 기록은 앱 창에 바로 보낸다. */
 const eventLog = createEventLog({
@@ -213,6 +214,7 @@ async function restoreHistory(): Promise<void> {
   const loaded = await loadHistory(historyPath, now)
   if (!loaded) return
   ramHistory.import(loaded.ram, now)
+  groupHistory.import(loaded.groups, now)
   collector?.importState(loaded, now)
   eventLog.import(loaded.events, now)
 }
@@ -224,6 +226,7 @@ async function persistHistory(): Promise<void> {
       version: 2,
       savedAt: Date.now(),
       ram: ramHistory.points(),
+      groups: groupHistory.points(),
       ...collector.exportState(),
       events: eventLog.export()
     })
@@ -236,8 +239,10 @@ const scheduler = createScheduler({
   collect,
   intervals: REFRESH_INTERVALS[settings.refresh],
   onSnapshot: (snapshot) => {
-    if (!snapshot.stale && snapshot.memory.totalBytes > 0)
+    if (!snapshot.stale && snapshot.memory.totalBytes > 0) {
       ramHistory.record(snapshot.takenAt, snapshot.memory.usedPercent)
+      groupHistory.record(snapshot.takenAt, snapshot.groups)
+    }
     recordSnapshot(snapshot)
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.snapshot, snapshot)
     if (trayWindow && !trayWindow.isDestroyed() && trayWindow.isVisible())
@@ -699,6 +704,9 @@ function registerIpc(): void {
   })
   ipcMain.handle(IPC.historyRam, (event) =>
     fromMainWindow(event.sender) ? ramHistory.points() : []
+  )
+  ipcMain.handle(IPC.historyGroups, (event) =>
+    fromMainWindow(event.sender) ? groupHistory.points() : []
   )
   ipcMain.handle(IPC.eventsGet, (event) => (fromMainWindow(event.sender) ? eventLog.list() : []))
   ipcMain.handle(IPC.killServer, async (event, pid: unknown) => {

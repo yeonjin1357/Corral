@@ -3,6 +3,7 @@ import type {
   CodexHookStatus,
   DashboardSnapshot,
   DiskReport,
+  GroupPoint,
   KillResult,
   TrendPoint,
   UpdateStatus
@@ -15,6 +16,7 @@ export const IPC = {
   snapshot: 'pitwall:snapshot',
   getLatest: 'pitwall:get-latest',
   historyRam: 'pitwall:history-ram',
+  historyGroups: 'pitwall:history-groups',
   trayAction: 'pitwall:tray-action',
   killServer: 'pitwall:kill-server',
   killLeftover: 'pitwall:kill-leftover',
@@ -71,6 +73,8 @@ export interface PitwallApi {
   }
   /** 앱이 기억한 RAM 사용률 추이(30초 간격·2시간, 다시 켜도 이어짐). */
   historyRam(): Promise<TrendPoint[]>
+  /** 앱이 기억한 묶음별 메모리 추이(G6, RAM 추이와 같이 30초 간격·2시간). */
+  historyGroups(): Promise<GroupPoint[]>
   killServer(pid: number): Promise<KillResult>
   /** 주인 없이 남은 프로세스를 끈다(메인에서 확인 창). */
   killLeftover(pid: number): Promise<KillResult>
