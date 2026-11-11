@@ -184,21 +184,24 @@ describe('createRepoMemory', () => {
 
   test('임시 폴더의 실제 경로(다른 표기) 아래 저장소도 기억하지 않는다', async () => {
     // macOS 의 /var/folders → /private/var/folders, Windows 의 8.3 짧은 이름처럼 같은 폴더를 다르게 쓴다.
-    const real = join(dir, 'real-temp')
+    // 테스트 폴더는 실제 경로로 잡는다: OS 임시 폴더부터 다른 표기(CI 의 RUNNER~1·/var)면 real 이
+    // 실제 경로도 링크 표기도 아닌 세 번째 표기가 되어, 링크 하나만 다루려는 이 테스트의 전제가 깨진다.
+    const base = await realpath(dir)
+    const real = join(base, 'real-temp')
     await mkdir(real)
-    const alias = join(dir, 'temp-alias')
+    const alias = join(base, 'temp-alias')
     await symlink(real, alias, LINK_TYPE)
-    const memory = createRepoMemory(join(dir, 'a.json'), 200, { tempDir: alias })
+    const memory = createRepoMemory(join(base, 'a.json'), 200, { tempDir: alias })
     memory.add([
       join(real, 'pitwall-git-1', 'main', '.git'),
       join(alias, 'pitwall-git-2', 'main', '.git'),
-      join(dir, 'work', '.git')
+      join(base, 'work', '.git')
     ])
-    expect(memory.list()).toEqual([join(dir, 'work', '.git')])
+    expect(memory.list()).toEqual([join(base, 'work', '.git')])
     // 실제 경로를 알 수 없는(없는) 임시 폴더는 주어진 그대로만 비교한다.
-    const missing = createRepoMemory(join(dir, 'b.json'), 200, { tempDir: join(dir, 'no-temp') })
-    missing.add([join(dir, 'no-temp', 'x', '.git'), join(dir, 'work', '.git')])
-    expect(missing.list()).toEqual([join(dir, 'work', '.git')])
+    const missing = createRepoMemory(join(base, 'b.json'), 200, { tempDir: join(base, 'no-temp') })
+    missing.add([join(base, 'no-temp', 'x', '.git'), join(base, 'work', '.git')])
+    expect(missing.list()).toEqual([join(base, 'work', '.git')])
     await Promise.all([memory.flush(), missing.flush()])
   })
 

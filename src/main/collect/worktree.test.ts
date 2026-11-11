@@ -1,6 +1,6 @@
 import { mkdtemp, mkdir, writeFile, rm, symlink } from 'fs/promises'
 import { tmpdir } from 'os'
-import { join } from 'path'
+import { join, sep } from 'path'
 import { extractPathCandidates, createWorktreeResolver } from './worktree'
 import type { ProcessInfo } from '../../shared/types'
 
@@ -331,7 +331,8 @@ describe('createWorktreeResolver', () => {
         proc(2, `node "${join(other, 'server.js')}"`),
         proc(3, 'python app.py')
       ],
-      { 1: repo + '\\', 2: repo, 3: '\\\\wsl.localhost\\Ubuntu\\home\\dev' }
+      // 끝 구분자는 그 OS 의 것으로: macOS 에서 `\` 는 구분자가 아니라 이름의 일부(shop-web\ 라는 다른 폴더)다.
+      { 1: repo + sep, 2: repo, 3: '\\\\wsl.localhost\\Ubuntu\\home\\dev' }
     )
     expect(map.get(1)?.root).toBe(repo)
     expect(map.get(2)?.root).toBe(other)
