@@ -3,6 +3,7 @@ import {
   EXTRA_CARDS,
   TOP_HEIGHTS,
   addCard,
+  cardColumns,
   moveCard,
   normalizeCardLayout,
   readCardLayout,
@@ -11,6 +12,7 @@ import {
   setCardHidden,
   snapTopMode,
   visibleCards,
+  withScrollbar,
   writeCardLayout,
   writeTopMode,
   type CardLayout
@@ -74,7 +76,43 @@ test('놓은 높이에 가장 가까운 단계', () => {
   expect(TOP_HEIGHTS.collapsed).toBe(0)
 })
 
+test('카드 줄에 가로 스크롤바가 있으면 자세히·간단히 높이에 그만큼 더한다(접기는 그대로)', () => {
+  const heights = { full: 260, compact: 92, collapsed: 0 }
+  expect(withScrollbar(heights, 6)).toEqual({ full: 266, compact: 98, collapsed: 0 })
+  // 스크롤바가 없으면 같은 값. 숫자가 아니거나 음수면 없는 것으로.
+  expect(withScrollbar(heights, 0)).toEqual(heights)
+  expect(withScrollbar(heights, -3)).toEqual(heights)
+  expect(withScrollbar(heights, NaN)).toEqual(heights)
+  // 받은 값은 바꾸지 않는다.
+  expect(heights).toEqual({ full: 260, compact: 92, collapsed: 0 })
+})
+
 // ── 카드 고르기(G3) ──
+test('카드 열 너비: 카드마다 비중과 최소 너비, 순서는 배치대로', () => {
+  // 기본 여섯 장: 지금까지의 비율(메모리 1.5, 남은 프로세스 1.05, 디스크 정리 1.2), 메모리는 240px·나머지는 160px 아래로 줄지 않는다.
+  expect(cardColumns(DEFAULT_CARDS)).toBe(
+    [
+      'minmax(240px, 1.5fr)',
+      'minmax(160px, 1fr)',
+      'minmax(160px, 1fr)',
+      'minmax(160px, 1fr)',
+      'minmax(160px, 1.05fr)',
+      'minmax(160px, 1.2fr)'
+    ].join(' ')
+  )
+  // 새 카드는 1 몫, 순서는 받은 대로.
+  expect(cardColumns(['events', 'disk', 'waiting', 'memory', 'tokens'])).toBe(
+    [
+      'minmax(160px, 1fr)',
+      'minmax(160px, 1.2fr)',
+      'minmax(160px, 1fr)',
+      'minmax(240px, 1.5fr)',
+      'minmax(160px, 1fr)'
+    ].join(' ')
+  )
+  expect(cardColumns([])).toBe('')
+})
+
 const DEFAULT_LAYOUT: CardLayout = { order: DEFAULT_CARDS, hidden: [] }
 
 test('모르는 이름·중복은 버리고 빠진 기본 카드는 끝에 붙인다', () => {

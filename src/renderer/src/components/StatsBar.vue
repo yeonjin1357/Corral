@@ -5,11 +5,13 @@
   아래 칸 구분선 + 세 숫자(NeoHtop System 카드의 Load average)는 개발 서버 판단·에이전트 상태 개수에 쓴다.
   간단히 단계(compact, G2)에서는 카드마다 CompactCard 한 장(제목·큰 값·설명 한 줄)으로 그린다.
   카드 줄은 배치(layout, G3)의 순서대로 그린다. 새 카드(응답 대기·토큰·한도·최근 기록)는 cards/ 의 작은 컴포넌트다.
-  편집 모드(editing)에서는 숨긴 카드도 흐리게 보이고, 카드마다 오른쪽 위에 앞으로·뒤로·숨기기/보이기·빼기 단추,
-  끌어서 놓으면 놓은 카드 자리로 옮긴다. 편집 중에는 카드 안을 누를 수 없다(inert).
+  편집 모드(editing)에서는 숨긴 카드도 흐리게 보이고, 카드마다 아래 가장자리 가운데에 앞으로·뒤로·숨기기/보이기·빼기
+  막대(제목·큰 값을 가리지 않게, 간단히 카드에서는 설명 줄 자리), 끌어서 놓으면 놓은 카드 자리로 옮긴다.
+  편집 중에는 카드 안을 누를 수 없다(inert).
+  카드 줄의 가로 스크롤바 높이를 재어 알린다(scrollbar) — 손잡이의 끄는·붙는 높이에 더한다.
 -->
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import {
   ChevronLeft,
   ChevronRight,
@@ -29,6 +31,7 @@ import type { Point } from '../history'
 import {
   DEFAULT_CARDS,
   EXTRA_CARDS,
+  cardColumns,
   moveCard,
   removeCard,
   setCardHidden,
@@ -78,6 +81,8 @@ const emit = defineEmits<{
   tab: [key: TabKey]
   diskScan: []
   select: [key: string]
+  /** 카드 줄의 가로 스크롤바 높이(px, 없으면 0). 바뀔 때만(처음 한 번은 늘). */
+  scrollbar: [heightPx: number]
 }>()
 
 // ── 카드 배치(G3) ──
@@ -87,16 +92,33 @@ const shownCards = computed(() => (props.editing ? layout.value.order : visibleC
 const isHidden = (id: CardId): boolean => layout.value.hidden.includes(id)
 /** 하나 남은 보이는 카드는 숨기거나 뺄 수 없다(조작 함수도 그대로 돌려준다 — 단추도 막아 둔다). */
 const lastVisible = computed(() => visibleCards(layout.value).length <= 1)
-/**
- * 열 너비: 메모리 1.5 몫·나머지 1 몫(지금 비율), 한 장은 200px 아래로 줄지 않는다. 몇 장이든 한 줄이라(카드 영역
- * 높이 TOP_HEIGHTS 가 한 줄을 가정) 다 들어가지 않으면 카드 줄만 가로로 스크롤한다(app.css `.resource-grid`).
- */
-const CARD_MIN_PX = 200
-const columns = computed(() =>
-  shownCards.value.map((id) => `minmax(${CARD_MIN_PX}px, ${id === 'memory' ? 1.5 : 1}fr)`).join(' ')
-)
+/** 열 너비: 카드마다 비중과 최소 너비(cardColumns). 다 들어가지 않으면 카드 줄만 가로로 스크롤한다. */
+const columns = computed(() => cardColumns(shownCards.value))
 
 const grid = ref<HTMLElement | null>(null)
+
+/**
+ * 카드 줄의 가로 스크롤바 높이 = 바깥 높이 − 안쪽 높이(카드 줄에는 테두리가 없다). 카드가 넘치거나 창 너비가 바뀌어
+ * 스크롤바가 생기고 없어지면 바깥 높이만 바뀌므로 테두리 상자를 지켜본다.
+ */
+let observer: ResizeObserver | null = null
+let lastScrollbar: number | null = null
+function measureScrollbar(): void {
+  const el = grid.value
+  if (!el) return
+  const px = Math.max(0, el.offsetHeight - el.clientHeight)
+  if (px === lastScrollbar) return
+  lastScrollbar = px
+  emit('scrollbar', px)
+}
+onMounted(() => {
+  measureScrollbar()
+  if (typeof ResizeObserver !== 'undefined' && grid.value) {
+    observer = new ResizeObserver(measureScrollbar)
+    observer.observe(grid.value, { box: 'border-box' })
+  }
+})
+onBeforeUnmount(() => observer?.disconnect())
 /**
  * 앞으로·뒤로. 칸이 자리를 옮기며 누른 단추가 초점을 잃을 수 있어, 다시 그린 뒤 같은 단추(끝에 닿아 막혔으면
  * 반대쪽 단추)로 초점을 돌려준다 — 키보드로 이어서 옮길 수 있게.
@@ -153,9 +175,9 @@ function onDragEnd(): void {
   dragging.value = null
   dropTarget.value = null
 }
-/** 카드 오른쪽 위 편집 단추(작게, 아이콘 단추는 정사각형). */
+/** 카드 아래 편집 막대의 단추(작게, 아이콘 단추는 정사각형). */
 const CONTROL =
-  'flex h-5 shrink-0 items-center justify-center rounded-[5px] text-[10px] leading-none text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-40'
+  'flex h-5 shrink-0 items-center justify-center rounded-full text-[10px] leading-none text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-40'
 
 const s = computed(() => props.snapshot)
 const hasMemory = computed(() => s.value.memory.totalBytes > 0)
@@ -414,7 +436,14 @@ const diskSub = computed(() => {
       @drop="onDrop($event, id)"
       @dragend="onDragEnd"
     >
-      <div :inert="editing || undefined" :class="{ 'opacity-40': editing && isHidden(id) }">
+      <!-- 간단히 카드는 편집 중 설명 줄을 숨기고 그 자리에 편집 막대를 둔다. -->
+      <div
+        :inert="editing || undefined"
+        :class="{
+          'opacity-40': editing && isHidden(id),
+          '[&_[data-compact-sub]]:invisible': editing && compact
+        }"
+      >
         <!-- 메모리(넓은 칸) -->
         <template v-if="id === 'memory'">
           <CompactCard
@@ -983,12 +1012,16 @@ const diskSub = computed(() => {
         />
       </div>
 
-      <!-- 편집 단추: 카드(간단히 카드는 카드 전체가 단추) 밖, 칸 오른쪽 위. -->
+      <!--
+        편집 막대: 카드(간단히 카드는 카드 전체가 단추) 밖, 칸 아래 가장자리 가운데. 제목·큰 값을 가리지 않고,
+        가리는 아래쪽 내용 위에서도 읽히게 바탕(popover)을 깐다.
+      -->
       <div
         v-if="editing"
         role="group"
+        data-card-controls
         :aria-label="T.title[id]"
-        class="absolute top-2 right-2 flex items-center gap-0.5 rounded-md bg-card p-0.5 shadow-xs ring-1 ring-border"
+        class="absolute bottom-2 left-1/2 flex -translate-x-1/2 items-center gap-0.5 rounded-full border border-border bg-popover px-1 py-0.5 text-popover-foreground shadow-sm"
       >
         <button
           type="button"

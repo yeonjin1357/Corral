@@ -5,6 +5,7 @@ import ResourceTrend from './ResourceTrend.vue'
 import type { DashboardSnapshot, DiskRow, ProcessGroup } from '../../../shared/types'
 import { GB, MB, agentRow, diskRow, heavyJob, serverRow, snapshot } from '../testing/fixtures'
 import { DEFAULT_CARDS, type CardLayout } from '../layoutState'
+import { fakeResizeObserver, setBoxHeights } from '../testing/resizeObserver'
 
 function bar(s: DashboardSnapshot): VueWrapper {
   return mount(StatsBar, { props: { snapshot: s, ramHistory: [], windowMs: 600_000 } })
@@ -501,15 +502,15 @@ describe('카드 배치', () => {
       '남은 프로세스',
       '최근 기록'
     ])
-    // 열은 보이는 카드로 만든다: 메모리는 1.5 몫, 나머지는 1 몫, 한 장은 200px 아래로 줄지 않는다.
+    // 열은 보이는 카드로 만든다(cardColumns: 카드마다 비중과 최소 너비).
     expect(w.find('.resource-grid').attributes('style')).toContain(
       [
-        'minmax(200px, 1fr)',
-        'minmax(200px, 1fr)',
-        'minmax(200px, 1.5fr)',
-        'minmax(200px, 1fr)',
-        'minmax(200px, 1fr)',
-        'minmax(200px, 1fr)'
+        'minmax(160px, 1.2fr)',
+        'minmax(160px, 1fr)',
+        'minmax(240px, 1.5fr)',
+        'minmax(160px, 1fr)',
+        'minmax(160px, 1.05fr)',
+        'minmax(160px, 1fr)'
       ].join(' ')
     )
     // 편집 중이 아니면 편집 단추가 없고 카드를 누를 수 있으며 끌 수 없다.
@@ -543,6 +544,12 @@ describe('카드 배치', () => {
     expect(cell(w, 'heavy').find('[inert]').classes()).toContain('opacity-40')
     expect(cell(w, 'memory').attributes('data-hidden')).toBeUndefined()
     expect(cell(w, 'memory').find('[inert]').classes()).not.toContain('opacity-40')
+    // 편집 단추는 카드 아래 가장자리 가운데의 작은 막대(제목·큰 값을 가리지 않게).
+    const controls = cell(w, 'memory').find('[data-card-controls]')
+    expect(controls.classes()).toEqual(
+      expect.arrayContaining(['bottom-2', 'left-1/2', '-translate-x-1/2', 'bg-popover'])
+    )
+    expect(controls.classes().some((c) => c.startsWith('top-'))).toBe(false)
     // 편집 중에는 카드 안을 누를 수 없다(누르면 다른 곳으로 가는 대신 끌어서 옮긴다).
     for (const c of w.findAll('[data-card]')) {
       expect(c.find('[inert]').find('[data-slot=card]').exists()).toBe(true)
@@ -647,11 +654,37 @@ describe('카드 배치', () => {
       '디스크 정리',
       '최근 기록'
     ])
-    // 간단히 카드는 카드 전체가 단추라, 편집 단추는 그 밖에 둔다.
+    // 간단히 카드는 카드 전체가 단추라, 편집 단추는 그 밖에 둔다. 막대가 설명 줄 자리를 대신한다(설명 줄은 숨김).
     for (const c of w.findAll('[data-card]')) {
       expect(c.find('[data-compact-body]').exists()).toBe(true)
       expect(c.find('[data-compact-body] [data-card-action]').exists()).toBe(false)
       expect(c.find('[data-card-action="hide"]').exists()).toBe(true)
+      expect(c.find('[inert]').classes()).toContain('[&_[data-compact-sub]]:invisible')
+    }
+  })
+
+  test('카드 줄의 가로 스크롤바 높이를 알린다(바뀔 때만)', () => {
+    const resize = fakeResizeObserver()
+    try {
+      const w = bar(snapshot())
+      const grid = w.find('.resource-grid').element
+      const watch = resize.watches.find((x) => x.el === grid)!
+      // 테두리 상자를 지켜봐야 스크롤바가 생겨 바깥 높이만 늘 때도 알 수 있다.
+      expect(watch.options).toEqual({ box: 'border-box' })
+      // 처음엔 스크롤바가 없다.
+      expect(w.emitted('scrollbar')).toEqual([[0]])
+      // 카드가 넘쳐 6px 스크롤바가 생긴다(바깥 높이 - 안쪽 높이). 같은 값이면 다시 알리지 않는다.
+      setBoxHeights(grid, 266, 260)
+      watch.fire()
+      watch.fire()
+      setBoxHeights(grid, 260, 260)
+      watch.fire()
+      expect(w.emitted('scrollbar')).toEqual([[0], [6], [0]])
+      const before = resize.disconnected()
+      w.unmount()
+      expect(resize.disconnected()).toBeGreaterThan(before)
+    } finally {
+      resize.restore()
     }
   })
 })

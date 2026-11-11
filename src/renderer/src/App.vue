@@ -60,6 +60,7 @@ import {
   readCardLayout,
   readTopMode,
   snapTopMode,
+  withScrollbar,
   writeCardLayout,
   writeTopMode,
   type CardId,
@@ -640,13 +641,17 @@ const topMode = ref<TopMode>(readTopMode(storage))
 watch(topMode, (m) => writeTopMode(storage, m))
 /** 손잡이를 끄는 동안의 카드 영역 높이(px). 끌지 않을 때는 null(카드 영역은 제 높이). */
 const topDrag = ref<number | null>(null)
+/** 카드 줄의 가로 스크롤바 높이(px). 카드가 한 줄에 다 들어가면 0(StatsBar 가 잰다). */
+const cardScrollbar = ref(0)
+/** 끄는 높이·붙는 높이: 단계 높이(TOP_HEIGHTS)에 카드 줄의 스크롤바만큼 더한 실제 카드 영역 높이. */
+const topHeights = computed(() => withScrollbar(TOP_HEIGHTS, cardScrollbar.value))
 const showCards = computed(() =>
   topDrag.value != null ? topDrag.value > 0 : topMode.value !== 'collapsed'
 )
 /** 끄는 동안은 놓으면 붙을 단계의 모양으로 미리 보인다(자세히가 아니면 간단히 카드를 잘라 보인다). */
 const compactCards = computed(() =>
   topDrag.value != null
-    ? snapTopMode(topDrag.value, TOP_HEIGHTS) !== 'full'
+    ? snapTopMode(topDrag.value, topHeights.value) !== 'full'
     : topMode.value === 'compact'
 )
 /** 카드 배치(G3): 순서·숨김·더한 새 카드. 다시 켜도 기억한다. */
@@ -921,11 +926,12 @@ const takenAt = computed(() =>
             @tab="(key) => ((tab = key), (query = ''))"
             @disk-scan="diskScan"
             @select="select"
+            @scrollbar="(px) => (cardScrollbar = px)"
           />
         </div>
         <TopSplitter
           v-model:mode="topMode"
-          :heights="TOP_HEIGHTS"
+          :heights="topHeights"
           :editing="editingCards"
           :addable="addableCards"
           @drag="(h) => (topDrag = h)"

@@ -261,16 +261,23 @@
 
 /*
   NeoHtop app.css: 맨 위 카드 줄. 카드는 고른 배치(G3)대로 몇 장이든 한 줄에 놓인다.
-  열은 StatsBar 가 보이는 카드로 만든다(메모리 1.5 몫·나머지 1 몫, 한 장 최소 200px). 다 들어가지 않으면
+  열은 StatsBar 가 보이는 카드로 만든다(layoutState.ts cardColumns: 카드마다 비중·최소 너비). 다 들어가지 않으면
   (좁은 창·카드가 많을 때) 카드 줄만 옆으로 스크롤한다 — NeoHtop 처럼 여러 줄로 접으면 표 자리가 없어진다.
   아래 여백은 바로 밑 손잡이 줄(TopSplitter)이 맡아 4px 만 둔다. 위·아래 여백(16px·4px)은 창 너비와 상관없이
   그대로다 — layoutState.ts 의 TOP_HEIGHTS(끄는 높이·붙는 단계)가 이 값으로 카드 영역 높이를 센다.
+  가로 스크롤바는 얇게(6px) 두고, 생기면 그 높이를 재어 TOP_HEIGHTS 에 더한다(App.vue topHeights).
 */
 .resource-grid {
   display: grid;
   gap: 12px;
   padding: 16px 16px 4px;
   overflow-x: auto;
+  /* 모든 요소의 scrollbar-width·scrollbar-color(base 층)가 있으면 Chromium 은 ::-webkit-scrollbar 를 무시하므로 이 줄만 푼다. */
+  scrollbar-width: auto;
+  scrollbar-color: auto;
+}
+.resource-grid::-webkit-scrollbar:horizontal {
+  height: 6px;
 }
 .resource-grid > [data-card] {
   min-width: 0;
@@ -345,11 +352,7 @@
   background-size: var(--memory-share, 0%) calc(100% - 8px);
 }
 
-/*
-  기본 창(1280px) 언저리부터 카드 사이·바깥 여백을 좁힌다: 기본 여섯 장이 한 장 200px 이상으로 스크롤 없이 들어가게
-  (좁힌 여백 200 × 6 + 8 × 5 + 12 × 2 = 1264px, 원래 여백은 200 × 6 + 12 × 5 + 16 × 2 = 1292px 라 그보다 넓은 1300px 까지).
-*/
-@media (max-width: 1300px) {
+@media (max-width: 1200px) {
   .resource-grid {
     gap: 8px;
     padding-inline: 12px;

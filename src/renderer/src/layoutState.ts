@@ -11,6 +11,8 @@ export const TOP_MODES: TopMode[] = ['full', 'compact', 'collapsed']
  * 단계마다 카드 영역 높이(px) = 카드 높이 + 카드 줄 위·아래 여백. 끄는 동안 보이는 높이와 놓을 때 붙는 단계가 이 값을 같이 쓴다.
  * - 카드 높이: StatsBar 자세히 카드 `h-60`(240px), 간단히 카드 `h-18`(72px, CompactCard).
  * - 여백: app.css `.resource-grid` 의 위 16px + 아래 4px(창 너비가 바뀌어도 위아래는 그대로 둔다).
+ * 카드가 한 줄에 다 들어가지 않으면 카드 줄에 가로 스크롤바가 생겨 그만큼 높아진다 — 화면은 잰 스크롤바 높이를
+ * withScrollbar 로 더해 쓴다.
  */
 const CARD_FULL = 240
 const CARD_COMPACT = 72
@@ -19,6 +21,19 @@ export const TOP_HEIGHTS: Record<TopMode, number> = {
   full: CARD_FULL + GRID_PADDING_Y,
   compact: CARD_COMPACT + GRID_PADDING_Y,
   collapsed: 0
+}
+
+/** 카드 줄의 가로 스크롤바 높이(px)만큼 카드가 있는 단계(자세히·간단히)를 높인다. 숫자가 아니거나 0 이하면 그대로. */
+export function withScrollbar(
+  heights: Record<TopMode, number>,
+  scrollbarPx: number
+): Record<TopMode, number> {
+  const extra = Number.isFinite(scrollbarPx) && scrollbarPx > 0 ? scrollbarPx : 0
+  return {
+    full: heights.full + extra,
+    compact: heights.compact + extra,
+    collapsed: heights.collapsed
+  }
 }
 
 interface StorageLike {
@@ -114,6 +129,31 @@ export function writeCardLayout(storage: StorageLike | null, layout: CardLayout)
 /** 카드 줄에 보이는 카드(숨긴 것을 뺀 order). */
 export function visibleCards(l: CardLayout): CardId[] {
   return l.order.filter((id) => !l.hidden.includes(id))
+}
+
+/**
+ * 카드마다 열 너비의 비중(fr)과 최소 너비(px). 비중은 여섯 장일 때의 예전 비율 그대로(메모리 1.5·남은 프로세스 1.05·
+ * 디스크 정리 1.2), 새 카드는 1. 최소 너비는 메모리 240px(범례·커밋 줄), 나머지 160px(1180~1280px 창에서 카드가
+ * 161~176px 로 잘 보였다).
+ */
+const CARD_WIDTH: Record<CardId, { weight: number; minPx: number }> = {
+  memory: { weight: 1.5, minPx: 240 },
+  servers: { weight: 1, minPx: 160 },
+  agents: { weight: 1, minPx: 160 },
+  heavy: { weight: 1, minPx: 160 },
+  leftovers: { weight: 1.05, minPx: 160 },
+  disk: { weight: 1.2, minPx: 160 },
+  waiting: { weight: 1, minPx: 160 },
+  tokens: { weight: 1, minPx: 160 },
+  events: { weight: 1, minPx: 160 }
+}
+
+/**
+ * 카드 줄의 grid-template-columns: 받은 카드 순서대로 `minmax(최소, 비중fr)`. 카드는 몇 장이든 한 줄이라
+ * 최소 너비의 합이 창보다 넓으면 카드 줄만 가로로 스크롤한다(app.css `.resource-grid`).
+ */
+export function cardColumns(ids: CardId[]): string {
+  return ids.map((id) => `minmax(${CARD_WIDTH[id].minPx}px, ${CARD_WIDTH[id].weight}fr)`).join(' ')
 }
 
 /** 숨기거나 다시 보인다. 마지막 보이는 카드를 숨기려 하면 그대로. */

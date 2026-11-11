@@ -9,6 +9,7 @@ import type { PitEvent } from '../../shared/events'
 import type { DashboardSnapshot } from '../../shared/types'
 import { selectionKey } from '../../shared/keys'
 import { TOP_HEIGHTS } from './layoutState'
+import { fakeResizeObserver, setBoxHeights } from './testing/resizeObserver'
 import {
   MB,
   agentRow,
@@ -900,6 +901,32 @@ test('손잡이를 끄는 동안 카드 영역이 그 높이를 따르고 놓으
   expect(area().style.height).toBe('')
   expect(w.find('[data-mode="compact"]').attributes('aria-pressed')).toBe('true')
   w.unmount()
+})
+
+test('카드 줄에 가로 스크롤바가 생기면 끄는 높이·붙는 높이에 그만큼 더한다', async () => {
+  const resize = fakeResizeObserver()
+  try {
+    const w = await start(fake())
+    const handle = w.find('[role="separator"]')
+    expect(handle.attributes('aria-valuemax')).toBe(String(TOP_HEIGHTS.full))
+    // 카드가 넘쳐 카드 줄에 6px 스크롤바가 생긴다.
+    const grid = w.find('.resource-grid').element
+    setBoxHeights(grid, TOP_HEIGHTS.full + 6, TOP_HEIGHTS.full)
+    resize.watches.find((x) => x.el === grid)!.fire()
+    await flushPromises()
+    expect(handle.attributes('aria-valuemax')).toBe(String(TOP_HEIGHTS.full + 6))
+    expect(handle.attributes('aria-valuenow')).toBe(String(TOP_HEIGHTS.full + 6))
+    // 끌기는 늘어난 높이에서 시작한다(위로 6px 끌면 스크롤바를 뺀 자세히 높이).
+    await handle.trigger('pointerdown', { clientY: 500, button: 0, pointerId: 1 })
+    await handle.trigger('pointermove', { clientY: 494, pointerId: 1 })
+    const area = grid.parentElement!
+    expect(area.style.height).toBe(`${TOP_HEIGHTS.full}px`)
+    await handle.trigger('pointerup', { clientY: 494, pointerId: 1 })
+    expect(w.find('[data-mode="full"]').attributes('aria-pressed')).toBe('true')
+    w.unmount()
+  } finally {
+    resize.restore()
+  }
 })
 
 // ── 카드 고르기(G3) ──
