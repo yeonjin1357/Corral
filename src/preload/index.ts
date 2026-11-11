@@ -76,6 +76,7 @@ const api: PitwallApi = {
   cleanupWorkspace: (root) => ipcRenderer.invoke(IPC.cleanupWorkspace, root),
   diskScan: () => ipcRenderer.invoke(IPC.diskScan),
   diskRemove: (worktreeRoot) => ipcRenderer.invoke(IPC.diskRemove, worktreeRoot),
+  diskRemoveAll: () => ipcRenderer.invoke(IPC.diskRemoveAll),
   refreshNow: () => ipcRenderer.invoke(IPC.refreshNow),
   openPort: (port) => ipcRenderer.invoke(IPC.openPort, port),
   quick: (kind, path) => ipcRenderer.invoke(IPC.quick, kind, path),

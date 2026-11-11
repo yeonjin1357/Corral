@@ -792,6 +792,16 @@ function registerIpc(): void {
     void scheduler.refreshNow()
     return result
   })
+  ipcMain.handle(IPC.diskRemoveAll, async (event) => {
+    if (!fromMainWindow(event.sender)) return { status: 'failed', message: text.killResult.invalid }
+    const { result, removed } = await disk.removeAll()
+    // 기록은 워크트리마다 한 줄.
+    const now = Date.now()
+    const events = removed.flatMap((r) => diskRemoveEvent(r.worktreeRoot, r.result, now) ?? [])
+    if (events.length > 0) eventLog.add(events)
+    void scheduler.refreshNow()
+    return result
+  })
   ipcMain.handle(IPC.claudeHookStatus, async (event) =>
     fromMainWindow(event.sender) ? claude.status() : null
   )

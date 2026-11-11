@@ -92,14 +92,30 @@ export const text = {
         ...paths,
         '',
         '워크트리와 소스 코드는 그대로 두고 의존성 폴더만 지워요. 이 워크트리를 다시 쓰려면 npm install 등으로 다시 설치해야 해요.',
-        ...(allCwds
-          ? []
-          : [
-              '',
-              '이 PC 에서는 프로세스의 작업 폴더를 모두 확인할 수 없어, 이 폴더 안에서 열어 둔 터미널·도구가 있는지 다 알아보지 못했어요. 쓰는 것이 없는지 확인한 뒤 지워 주세요.'
-            ])
+        ...(allCwds ? [] : ['', text.disk.cwdsUnknown])
       ].join('\n'),
+    /** 수집 방식이 모든 프로세스의 작업 폴더를 읽지 못할 때 확인 창에 덧붙인다. */
+    cwdsUnknown:
+      '이 PC 에서는 프로세스의 작업 폴더를 모두 확인할 수 없어, 이 폴더 안에서 열어 둔 터미널·도구가 있는지 다 알아보지 못했어요. 쓰는 것이 없는지 확인한 뒤 지워 주세요.',
     confirm: '지우기',
+    /** 디스크 정리의 모두 정리: 사용 중이 아닌 워크트리를 확인 창 하나로 지운다. */
+    removeAll: {
+      title: '모두 정리',
+      message: (n: number, size: string): string =>
+        `워크트리 ${n}곳의 의존성 폴더를 지울까요? 약 ${size}`,
+      item: (name: string, folders: string, size: string): string =>
+        `• ${name} (${folders}) — ${size}`,
+      more: (n: number): string => `외 ${n}곳`,
+      stale: (n: number): string => `이 중 ${n}곳은 끝났다는 근거 없이 오래 안 쓴 워크트리예요.`,
+      note: '워크트리와 소스 코드는 그대로 두고 의존성 폴더만 지워요. 지우기 직전에 하나씩 다시 확인하고, 그 사이 쓰기 시작한 곳은 건너뛰어요.',
+      confirm: '모두 지우기',
+      removed: (n: number, size: string): string =>
+        `${n}곳을 정리했어요. 약 ${size} 를 확보했어요.`,
+      skipped: (n: number): string => `${n}곳은 그 사이 쓰기 시작했거나 바뀌어 건너뛰었어요.`,
+      busy: (n: number): string => `${n}곳은 이미 정리하는 중이라 건너뛰었어요.`,
+      failed: (n: number): string =>
+        `${n}곳은 일부 폴더를 지우지 못했어요(파일을 쓰는 프로그램이 있을 수 있어요).`
+    },
     removed: (names: string, size: string): string =>
       `${names} 를 지웠어요. 약 ${size} 를 확보했어요.`,
     inUse: '이 워크트리에서 개발 서버·에이전트 등이 실행 중이라 지우지 않았어요.',
@@ -951,6 +967,8 @@ export const text = {
       scanning: '찾는 중…',
       rescan: '다시 찾기',
       remove: '의존성 폴더 지우기',
+      /** 사용 중이 아닌 줄 전부를 지우는 버튼. 크기를 아직 모르면 이름만. */
+      removeAll: (size: string | null): string => (size ? `모두 정리 · ${size}` : '모두 정리'),
       evidence: { upstreamGone: '원격 삭제됨', merged: '머지됨', stale: '오래 안 씀' },
       /** 오래 안 쓴 워크트리의 근거 칸(G5d). */
       staleFor: (days: number): string => `오래 안 씀(${days}일)`,

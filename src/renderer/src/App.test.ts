@@ -6,11 +6,12 @@ import MemorySheet from './components/MemorySheet.vue'
 import { DEFAULT_SETTINGS, type Settings } from '../../shared/settings'
 import type { NavigateTarget, PitwallApi } from '../../shared/ipc'
 import type { PitEvent } from '../../shared/events'
-import type { ConfirmRequest, DashboardSnapshot } from '../../shared/types'
+import type { ConfirmRequest, DashboardSnapshot, KillResult } from '../../shared/types'
 import { selectionKey } from '../../shared/keys'
 import { TOP_HEIGHTS } from './layoutState'
 import { fakeResizeObserver, setBoxHeights } from './testing/resizeObserver'
 import {
+  GB,
   MB,
   agentRow,
   diskRow,
@@ -263,6 +264,90 @@ test('디스크 정리 결과 알림', async () => {
   expect(f.api.diskRemove).toHaveBeenCalledWith(diskRow().worktreeRoot)
   expect(notice(w)).toContain('1.2 GB 를 지웠어요.')
   w.unmount()
+})
+
+describe('디스크 정리: 모두 정리', () => {
+  const withDisk = (rows: ReturnType<typeof diskRow>[], scanning = false): Partial<PitwallApi> => ({
+    getLatest: async () => ({ ...snap(), disk: { rows, scannedAt: 1, scanning, error: null } })
+  })
+  const button = (w: VueWrapper): ReturnType<VueWrapper['find']> =>
+    w.find('[data-action="disk-remove-all"]')
+
+  test('사용 중이 아닌 줄의 크기 합을 보이고, 누르면 검색과 상관없이 전부 지우게 한 뒤 결과를 알린다', async () => {
+    const f = fake({
+      ...withDisk([
+        diskRow({ totalBytes: 1 * GB }),
+        diskRow({
+          worktreeRoot: 'C:\\work\\b',
+          evidence: 'stale',
+          staleDays: 21,
+          totalBytes: 2 * GB
+        }),
+        diskRow({ worktreeRoot: 'C:\\work\\c', inUse: true, totalBytes: 5 * GB })
+      ]),
+      diskRemoveAll: vi.fn(async () => ({
+        status: 'killed' as const,
+        message: '2곳을 정리했어요. 약 3.0 GB 를 확보했어요.'
+      }))
+    })
+    const w = await start(f)
+    await openTab(w, 'disk')
+    expect(button(w).text()).toBe('모두 정리 · 3.0 GB')
+    // 검색으로 좁혀도 버튼은 전부를 가리킨다.
+    await w.find('input[placeholder^="이름"]').setValue('old-feature')
+    expect(button(w).text()).toBe('모두 정리 · 3.0 GB')
+    await button(w).trigger('click')
+    await flushPromises()
+    expect(f.api.diskRemoveAll).toHaveBeenCalledTimes(1)
+    expect(notice(w)).toContain('2곳을 정리했어요.')
+    w.unmount()
+  })
+
+  test('정리하는 동안 버튼을 잠그고, 취소하면 알림이 없다', async () => {
+    let finish: (r: KillResult) => void = () => {}
+    const f = fake({
+      ...withDisk([diskRow()]),
+      diskRemoveAll: vi.fn(() => new Promise<KillResult>((resolve) => (finish = resolve)))
+    })
+    const w = await start(f)
+    await openTab(w, 'disk')
+    await button(w).trigger('click')
+    await flushPromises()
+    expect(button(w).attributes('disabled')).toBeDefined()
+    finish({ status: 'cancelled' })
+    await flushPromises()
+    expect(button(w).attributes('disabled')).toBeUndefined()
+    expect(notice(w)).toBe('')
+    w.unmount()
+  })
+
+  test('그 사이 지울 것이 없어졌으면(gone) 디스크 정리 문구로 알린다', async () => {
+    const f = fake({
+      ...withDisk([diskRow()]),
+      diskRemoveAll: vi.fn(async () => ({ status: 'gone' as const }))
+    })
+    const w = await start(f)
+    await openTab(w, 'disk')
+    await button(w).trigger('click')
+    await flushPromises()
+    expect(notice(w)).toContain('이미 정리됐거나 더는 끝난 워크트리가 아니에요.')
+    w.unmount()
+  })
+
+  test('지울 곳이 없거나(모두 사용 중) 찾는 중이면 누를 수 없고, 다른 탭에는 없다', async () => {
+    const allBusy = await start(fake(withDisk([diskRow({ inUse: true })])))
+    await openTab(allBusy, 'disk')
+    expect(button(allBusy).attributes('disabled')).toBeDefined()
+    expect(button(allBusy).text()).toBe('모두 정리')
+    allBusy.unmount()
+
+    const scanning = await start(fake(withDisk([diskRow()], true)))
+    await openTab(scanning, 'disk')
+    expect(button(scanning).attributes('disabled')).toBeDefined()
+    await openTab(scanning, 'ports')
+    expect(button(scanning).exists()).toBe(false)
+    scanning.unmount()
+  })
 })
 
 test('OS 알림에서 온 이동은 그 탭·그 항목 상세를 연다', async () => {

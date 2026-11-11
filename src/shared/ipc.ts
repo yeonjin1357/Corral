@@ -25,6 +25,7 @@ export const IPC = {
   cleanupWorkspace: 'pitwall:cleanup-workspace',
   diskScan: 'pitwall:disk-scan',
   diskRemove: 'pitwall:disk-remove',
+  diskRemoveAll: 'pitwall:disk-remove-all',
   refreshNow: 'pitwall:refresh-now',
   openPort: 'pitwall:open-port',
   quick: 'pitwall:quick',
@@ -97,6 +98,8 @@ export interface PitwallApi {
   diskScan(): Promise<DiskReport | null>
   /** 끝난 워크트리의 의존성 폴더를 지운다(메인에서 확인 창). */
   diskRemove(worktreeRoot: string): Promise<KillResult>
+  /** 모두 정리: 사용 중이 아닌 워크트리의 의존성 폴더를 확인 창 하나로 지운다(검색과 상관없이 전부). */
+  diskRemoveAll(): Promise<KillResult>
   /** 다음 주기를 기다리지 않고 지금 수집한다(끝날 때까지 기다린다). */
   refreshNow(): Promise<void>
   /** 목록에 있는 개발 서버 포트를 기본 브라우저로 연다. 열었으면 true. */

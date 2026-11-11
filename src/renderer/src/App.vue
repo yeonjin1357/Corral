@@ -6,7 +6,7 @@
 -->
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { RefreshCw, X } from '@lucide/vue'
+import { RefreshCw, Trash2, X } from '@lucide/vue'
 import type {
   ConfirmRequest,
   DashboardSnapshot,
@@ -488,14 +488,14 @@ async function act(kind: ActionKind, key: string, port?: number): Promise<void> 
   } else if (kind === 'kill' && leftover) {
     await runAction(key, async () => resultNotice(await window.pitwall.killLeftover(leftover.pid)))
   } else if (kind === 'remove' && disk) {
-    await runAction(key, async () => {
-      const result = await window.pitwall.diskRemove(disk.worktreeRoot)
-      if (result.status === 'killed')
-        return result.message ? { text: result.message, tone: 'success' } : null
-      if (result.status === 'gone') return { text: text.ui.disk.gone, tone: 'error' }
-      return resultNotice(result)
-    })
+    await runAction(key, async () => diskNotice(await window.pitwall.diskRemove(disk.worktreeRoot)))
   }
+}
+
+/** 디스크 정리 결과 알림: 지울 것이 없어졌으면 프로세스 문구 대신 디스크 정리 문구로. */
+function diskNotice(result: KillResult): Notice | null {
+  if (result.status === 'gone') return { text: text.ui.disk.gone, tone: 'error' }
+  return resultNotice(result)
 }
 
 function sheetAction(kind: ActionKind, port?: number): void {
@@ -595,6 +595,24 @@ async function diskScan(): Promise<void> {
     await window.pitwall.diskScan()
   } catch (e) {
     say('action', { text: failureText(e), tone: 'error' })
+  }
+}
+
+/** 모두 정리가 지울 줄: 검색과 상관없이 사용 중이 아닌 줄 전부. 크기는 마지막으로 찾은 때의 값. */
+const diskCleanable = computed(() => (snapshot.value?.disk?.rows ?? []).filter((r) => !r.inUse))
+const diskCleanableBytes = computed(() =>
+  diskCleanable.value.reduce((sum, r) => sum + (r.totalBytes ?? 0), 0)
+)
+const diskRemovingAll = ref(false)
+async function diskRemoveAll(): Promise<void> {
+  diskRemovingAll.value = true
+  say('action', null)
+  try {
+    say('action', diskNotice(await window.pitwall.diskRemoveAll()))
+  } catch (e) {
+    say('action', { text: failureText(e), tone: 'error' })
+  } finally {
+    diskRemovingAll.value = false
   }
 }
 
@@ -1117,6 +1135,20 @@ const takenAt = computed(() => (snapshot.value ? formatTimeOfDay(snapshot.value.
               :codex="snapshot.codexHook ?? null"
               @open="openSettings('claude')"
             />
+            <Button
+              v-if="tab === 'disk'"
+              variant="outline"
+              size="sm"
+              data-action="disk-remove-all"
+              :disabled="!diskCleanable.length || !!snapshot.disk?.scanning || diskRemovingAll"
+              @click="diskRemoveAll"
+            >
+              <Trash2 />{{
+                text.ui.disk.removeAll(
+                  diskCleanableBytes > 0 ? formatBytes(diskCleanableBytes) : null
+                )
+              }}
+            </Button>
             <Button
               v-if="tab === 'disk'"
               variant="outline"

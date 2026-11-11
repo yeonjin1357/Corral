@@ -32,6 +32,21 @@ import type { KillConfirm } from './kill'
 const MEASURE_CONCURRENCY = 32
 const DAY_MS = 24 * 60 * 60 * 1000
 const MEASURE_CACHE_MS = DAY_MS
+/** 모두 정리 확인 창에 이름을 늘어놓는 줄 수(나머지는 "외 n곳"). */
+const CONFIRM_LINES = 10
+
+/** 지우기 직전에 본 프로세스 샘플과, 모든 프로세스의 작업 폴더까지 읽었는지. */
+interface Sampled {
+  sample: RawSample
+  allCwds: boolean
+}
+
+/** 한 줄에서 지울 폴더와 마지막으로 잰 크기. */
+interface Planned {
+  targets: DiskFolder[]
+  known: Map<string, number>
+  total: number
+}
 
 /**
  * 폴더 안 파일 크기의 합. 링크(심볼릭 링크·Windows 정션)는 따라가지 않는다 — pnpm 처럼 바깥 저장소를 가리키는
@@ -306,6 +321,10 @@ export function createDiskManager(deps: DiskDeps): {
   scan(opts?: { manual?: boolean }): Promise<DiskReport>
   report(): DiskReport
   remove(worktreeRoot: string): Promise<KillResult>
+  removeAll(): Promise<{
+    result: KillResult
+    removed: { worktreeRoot: string; result: KillResult }[]
+  }>
 } {
   const removeDir =
     deps.removeDir ??
@@ -506,13 +525,29 @@ export function createDiskManager(deps: DiskDeps): {
     return scanning.then(() => report())
   }
 
+  /** 지우기 직전에 보는 최신 프로세스 샘플. 수집이 모든 작업 폴더를 읽지 못하면 따로 읽어 채운다. */
+  async function takeSample(): Promise<Sampled> {
+    const sample = await deps.resample()
+    let allCwds = hasAllCwds(sample)
+    if (!allCwds && deps.fullCwds) {
+      const extra = await deps.fullCwds().catch(() => null)
+      if (extra) {
+        sample.cwds = { ...sample.cwds, ...extra }
+        allCwds = true
+      }
+    }
+    return { sample, allCwds }
+  }
+
   /**
    * 지워도 되는지: 아직 메인이 아닌 연결된 워크트리이고 여전히 끝났고(오래 안 쓴 행은 여전히 오래 안 썼고),
    * 그 워크트리를 쓰는 것이 없다.
    * 확인 창 앞뒤로 두 번 부른다(창을 띄운 사이 npm install·개발 서버·에이전트를 시작했을 수 있다).
+   * sampled: 모두 정리의 확인 창 전처럼 여러 줄이 샘플 하나를 같이 쓸 때 넘긴다.
    */
   async function checkRemovable(
-    row: DiskRow
+    row: DiskRow,
+    sampled: () => Promise<Sampled> = takeSample
   ): Promise<{ problem: KillResult } | { allCwds: boolean }> {
     const list = await listWorktrees(row.commonDir)
     const index = list.findIndex((w) => samePath(w.path, row.worktreeRoot))
@@ -531,51 +566,29 @@ export function createDiskManager(deps: DiskDeps): {
     if ((deps.latest()?.agents ?? []).some((a) => !a.worktree))
       return { problem: { status: 'failed', message: text.disk.unknownAgent } }
 
-    const sample = await deps.resample()
-    let allCwds = hasAllCwds(sample)
-    if (!allCwds && deps.fullCwds) {
-      const extra = await deps.fullCwds().catch(() => null)
-      if (extra) {
-        sample.cwds = { ...sample.cwds, ...extra }
-        allCwds = true
-      }
-    }
+    const { sample, allCwds } = await sampled()
     const user = processUsing(sample, row.worktreeRoot)
     if (user)
       return { problem: { status: 'failed', message: text.disk.inUseBy(user.name, user.pid) } }
     return { allCwds }
   }
 
-  async function removeRow(row: DiskRow): Promise<KillResult> {
-    // 1) 지워도 되는지.
-    const before = await checkRemovable(row)
-    if ('problem' in before) return before.problem
-
-    // 2) 확인 창.
+  /** 지금 지울 폴더(링크·git 이 관리하는 폴더는 빼고)와 마지막으로 잰 크기의 합. */
+  async function plan(row: DiskRow): Promise<Planned> {
     const targets = (await dependencyFolders(row.worktreeRoot)).filter((f) => !f.skipped)
-    if (targets.length === 0) return { status: 'gone' }
     const known = new Map(row.folders.map((f) => [f.name, f.bytes ?? 0]))
     const total = targets.reduce((sum, f) => sum + (known.get(f.name) ?? 0), 0)
-    const names = targets.map((f) => f.name).join(', ')
-    const ok = await deps.confirm({
-      title: text.disk.confirmTitle,
-      message: text.disk.confirmMessage(basename(row.worktreeRoot), names, formatBytes(total)),
-      detail: text.disk.confirmDetail(
-        targets.map((f) => f.path),
-        before.allCwds
-      ),
-      buttons: [text.disk.confirm, text.kill.cancel],
-      defaultId: 1,
-      cancelId: 1,
-      tone: 'danger'
-    })
-    if (!ok) return { status: 'cancelled' }
+    return { targets, known, total }
+  }
 
-    // 3) 확인 창을 띄운 동안 시간이 지났으니 한 번 더 본다.
-    const after = await checkRemovable(row)
-    if ('problem' in after) return after.problem
-
-    // 4) 지우기: 이름 규칙·경로·링크 여부를 한 번 더 본 뒤에만.
+  /**
+   * 폴더 지우기: 이름 규칙·경로·링크 여부를 한 번 더 본 뒤에만. 지운 뒤 목록을 고친다(지울 것이 남지 않았으면
+   * 행을 빼고, 일부만 지워졌으면 크기를 다시 잰다).
+   */
+  async function removeFolders(
+    row: DiskRow,
+    { targets, known }: Planned
+  ): Promise<{ removed: string[]; failed: string[]; freed: number }> {
     const failed: string[] = []
     const removed: string[] = []
     let freed = 0
@@ -606,7 +619,6 @@ export function createDiskManager(deps: DiskDeps): {
       }
     }
 
-    // 5) 목록 갱신: 지울 것이 남지 않았으면 행을 뺀다.
     const remaining = (await dependencyFolders(row.worktreeRoot)).filter((f) => !f.skipped)
     if (remaining.length === 0) rows = rows.filter((r) => r !== row)
     else {
@@ -619,6 +631,39 @@ export function createDiskManager(deps: DiskDeps): {
       row.totalBytes = row.folders.reduce((sum, f) => sum + (f.bytes ?? 0), 0)
     }
     emit()
+    return { removed, failed, freed }
+  }
+
+  async function removeRow(row: DiskRow): Promise<KillResult> {
+    // 1) 지워도 되는지.
+    const before = await checkRemovable(row)
+    if ('problem' in before) return before.problem
+
+    // 2) 확인 창.
+    const planned = await plan(row)
+    const { targets, total } = planned
+    if (targets.length === 0) return { status: 'gone' }
+    const names = targets.map((f) => f.name).join(', ')
+    const ok = await deps.confirm({
+      title: text.disk.confirmTitle,
+      message: text.disk.confirmMessage(basename(row.worktreeRoot), names, formatBytes(total)),
+      detail: text.disk.confirmDetail(
+        targets.map((f) => f.path),
+        before.allCwds
+      ),
+      buttons: [text.disk.confirm, text.kill.cancel],
+      defaultId: 1,
+      cancelId: 1,
+      tone: 'danger'
+    })
+    if (!ok) return { status: 'cancelled' }
+
+    // 3) 확인 창을 띄운 동안 시간이 지났으니 한 번 더 본다.
+    const after = await checkRemovable(row)
+    if ('problem' in after) return after.problem
+
+    // 4) 지우기와 목록 갱신.
+    const { removed, failed, freed } = await removeFolders(row, planned)
     if (failed.length > 0)
       return { status: 'failed', message: text.disk.partial(failed.join(', ')) }
     return {
@@ -645,5 +690,137 @@ export function createDiskManager(deps: DiskDeps): {
     }
   }
 
-  return { scan, report, remove }
+  /**
+   * 모두 정리: 사용 중이 아닌 줄(끝난 워크트리와 오래 안 쓴 워크트리)을 확인 창 하나로 지운다.
+   * 확인 창 전에는 샘플 하나로 모든 줄을 보고, 확인 뒤에는 줄마다 지우기 직전에 새로 본다(지우는 데 시간이
+   * 걸려 그 사이 다른 워크트리에서 무언가를 시작할 수 있다). 바뀐 줄은 건너뛴다.
+   * removed: 무언가 지운 줄마다의 결과(기록 탭에 워크트리마다 남긴다).
+   */
+  async function removeAll(): Promise<{
+    result: KillResult
+    removed: { worktreeRoot: string; result: KillResult }[]
+  }> {
+    const removed: { worktreeRoot: string; result: KillResult }[] = []
+    const key = (r: DiskRow): string => r.worktreeRoot.toLowerCase()
+    const candidates = rows.filter((r) => !inUse(r))
+    const busyCount = candidates.filter((r) => busy.has(key(r))).length
+    const mine = candidates.filter((r) => !busy.has(key(r)))
+    if (mine.length === 0)
+      return {
+        result:
+          busyCount > 0 ? { status: 'failed', message: text.killResult.busy } : { status: 'gone' },
+        removed
+      }
+
+    for (const r of mine) busy.add(key(r))
+    try {
+      // 1) 지워도 되는지(샘플 하나를 같이 쓴다).
+      let shared: Promise<Sampled> | null = null
+      const once = (): Promise<Sampled> => (shared ??= takeSample())
+      const ready: { row: DiskRow; planned: Planned }[] = []
+      let firstProblem: KillResult | null = null
+      let allCwds = true
+      for (const row of mine) {
+        const check = await checkRemovable(row, once)
+        if ('problem' in check) {
+          firstProblem ??= check.problem
+          continue
+        }
+        const planned = await plan(row)
+        if (planned.targets.length === 0) continue
+        allCwds &&= check.allCwds
+        ready.push({ row, planned })
+      }
+      if (ready.length === 0) return { result: firstProblem ?? { status: 'gone' }, removed }
+
+      // 2) 확인 창 하나.
+      const t = text.disk.removeAll
+      const total = ready.reduce((sum, r) => sum + r.planned.total, 0)
+      const lines = ready
+        .slice(0, CONFIRM_LINES)
+        .map(({ row, planned }) =>
+          t.item(
+            basename(row.worktreeRoot),
+            planned.targets.map((f) => f.name).join(', '),
+            formatBytes(planned.total)
+          )
+        )
+      if (ready.length > CONFIRM_LINES) lines.push(t.more(ready.length - CONFIRM_LINES))
+      const stale = ready.filter((r) => r.row.evidence === 'stale').length
+      const ok = await deps.confirm({
+        title: t.title,
+        message: t.message(ready.length, formatBytes(total)),
+        detail: [
+          ...lines,
+          ...(stale > 0 ? ['', t.stale(stale)] : []),
+          '',
+          t.note,
+          ...(allCwds ? [] : ['', text.disk.cwdsUnknown])
+        ].join('\n'),
+        buttons: [t.confirm, text.kill.cancel],
+        defaultId: 1,
+        cancelId: 1,
+        tone: 'danger'
+      })
+      if (!ok) return { result: { status: 'cancelled' }, removed }
+
+      // 3) 줄마다 지우기 직전에 다시 보고 지운다.
+      let skipped = mine.length - ready.length
+      let failedRows = 0
+      let freedTotal = 0
+      for (const { row, planned } of ready) {
+        const after = await checkRemovable(row)
+        if ('problem' in after) {
+          skipped++
+          continue
+        }
+        const done = await removeFolders(row, planned)
+        if (done.failed.length > 0) failedRows++
+        if (done.removed.length === 0) {
+          // 그 사이 폴더가 이미 없어졌으면(다른 도구가 지움) 바뀐 줄로 센다.
+          if (done.failed.length === 0) skipped++
+          continue
+        }
+        freedTotal += done.freed
+        removed.push({
+          worktreeRoot: row.worktreeRoot,
+          result: {
+            status: 'killed',
+            freed: {
+              count: done.removed.length,
+              memoryBytes: done.freed,
+              commitBytes: null,
+              names: done.removed
+            }
+          }
+        })
+      }
+
+      const parts: string[] = []
+      if (removed.length > 0) parts.push(t.removed(removed.length, formatBytes(freedTotal)))
+      if (skipped > 0) parts.push(t.skipped(skipped))
+      if (busyCount > 0) parts.push(t.busy(busyCount))
+      if (failedRows > 0) parts.push(t.failed(failedRows))
+      const message = parts.join(' ')
+      if (removed.length > 0)
+        return {
+          result: {
+            status: 'killed',
+            message,
+            freed: { count: removed.length, memoryBytes: freedTotal, commitBytes: null }
+          },
+          removed
+        }
+      return { result: { status: 'failed', message }, removed }
+    } catch (e) {
+      return {
+        result: { status: 'failed', message: e instanceof Error ? e.message : String(e) },
+        removed
+      }
+    } finally {
+      for (const r of mine) busy.delete(key(r))
+    }
+  }
+
+  return { scan, report, remove, removeAll }
 }

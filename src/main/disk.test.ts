@@ -813,5 +813,196 @@ describe('createDiskManager (실제 git)', () => {
       expect(d.confirm).not.toHaveBeenCalled()
       expect(await exists(join(loose, 'node_modules'))).toBe(true)
     }, 60000)
+
+    describe('모두 정리', () => {
+      /** 개발 서버가 도는(사용 중) 워크트리. */
+      const serverIn = (root: string): DashboardSnapshot => ({
+        ...blankSnapshot(1),
+        servers: [{ worktree: { root, branch: null, isLinkedWorktree: true } } as ServerRow]
+      })
+
+      test('사용 중이 아닌 끝난·오래 안 쓴 워크트리를 확인 창 하나로 모두 지운다', async () => {
+        const old = await oldWorktree('old-work')
+        const busy = await oldWorktree('busy-work')
+        const d = deps({ now: Date.now, latest: () => serverIn(busy) })
+        const manager = createDiskManager(d)
+        const rows = (await manager.scan()).rows
+        expect(rows.map((r) => [r.worktreeRoot, r.inUse])).toEqual(
+          expect.arrayContaining([
+            [gone, false],
+            [old, false],
+            [busy, true]
+          ])
+        )
+
+        const { result, removed } = await manager.removeAll()
+
+        expect(d.confirm).toHaveBeenCalledTimes(1)
+        const box = d.confirm.mock.calls[0][0] as KillConfirm
+        expect(box.title).toBe('모두 정리')
+        expect(box.message).toBe('워크트리 2곳의 의존성 폴더를 지울까요? 약 3 KB')
+        expect(box.tone).toBe('danger')
+        expect(box.buttons[0]).toBe('모두 지우기')
+        expect(box.detail).toContain('• feat-gone (node_modules) — 3 KB')
+        expect(box.detail).toContain('• old-work (node_modules) — 1 KB')
+        expect(box.detail).not.toContain('busy-work')
+        expect(box.detail).toContain('이 중 1곳은 끝났다는 근거 없이 오래 안 쓴 워크트리예요.')
+
+        expect(result).toEqual({
+          status: 'killed',
+          message: '2곳을 정리했어요. 약 3 KB 를 확보했어요.',
+          freed: { count: 2, memoryBytes: 3500, commitBytes: null }
+        })
+        // 기록은 워크트리마다 남긴다.
+        expect(removed).toEqual(
+          expect.arrayContaining([
+            {
+              worktreeRoot: gone,
+              result: {
+                status: 'killed',
+                freed: { count: 1, memoryBytes: 3000, commitBytes: null, names: ['node_modules'] }
+              }
+            },
+            {
+              worktreeRoot: old,
+              result: {
+                status: 'killed',
+                freed: { count: 1, memoryBytes: 500, commitBytes: null, names: ['node_modules'] }
+              }
+            }
+          ])
+        )
+        expect(removed).toHaveLength(2)
+
+        expect(await exists(join(gone, 'node_modules'))).toBe(false)
+        expect(await exists(join(old, 'node_modules'))).toBe(false)
+        expect(await exists(join(busy, 'node_modules'))).toBe(true)
+        expect(await readFile(join(old, 'src', 'index.js'), 'utf8')).toBe('keep me')
+        expect(await exists(join(store, 'keep.bin'))).toBe(true)
+        expect(await exists(join(fresh, 'node_modules'))).toBe(true)
+        expect(await exists(join(fx.main, 'node_modules'))).toBe(true)
+        expect(manager.report().rows.map((r) => r.worktreeRoot)).toEqual([busy])
+      }, 60000)
+
+      test('지우기 직전에 워크트리마다 다시 샘플링해, 그 사이 쓰기 시작한 곳은 건너뛴다', async () => {
+        const old = await oldWorktree('old-work')
+        const quiet: RawSample = { processes: [], tcp: [], collectMode: 'helper-dll' }
+        const usingOld: RawSample = {
+          processes: [
+            {
+              pid: 77,
+              ppid: 1,
+              name: 'npm.exe',
+              commandLine: 'npm i',
+              memoryBytes: 1,
+              startedAt: 1
+            }
+          ],
+          tcp: [],
+          cwds: { 77: old },
+          collectMode: 'helper-dll'
+        }
+        // 확인 창 전에는 한 번만(모든 줄이 같이 쓴다), 확인 뒤에는 줄마다 새로 샘플링한다.
+        const samples = [quiet]
+        const resample = vi.fn(async () => samples.shift() ?? usingOld)
+        const manager = createDiskManager(deps({ now: Date.now, resample }))
+        await manager.scan()
+
+        const { result, removed } = await manager.removeAll()
+
+        expect(resample).toHaveBeenCalledTimes(3)
+        expect(result).toEqual({
+          status: 'killed',
+          message:
+            '1곳을 정리했어요. 약 3 KB 를 확보했어요. 1곳은 그 사이 쓰기 시작했거나 바뀌어 건너뛰었어요.',
+          freed: { count: 1, memoryBytes: 3000, commitBytes: null }
+        })
+        expect(removed.map((r) => r.worktreeRoot)).toEqual([gone])
+        expect(await exists(join(gone, 'node_modules'))).toBe(false)
+        expect(await exists(join(old, 'node_modules'))).toBe(true)
+      }, 60000)
+
+      test('확인 창 사이에 다시 쓰기 시작한 오래 안 쓴 워크트리는 건너뛴다', async () => {
+        const old = await oldWorktree('old-work')
+        const d = deps({
+          now: Date.now,
+          confirm: vi.fn(async () => {
+            fx.commit(old, 'back to work')
+            return true
+          })
+        })
+        const manager = createDiskManager(d)
+        await manager.scan()
+        const { result } = await manager.removeAll()
+        expect(result.status).toBe('killed')
+        expect(result.message).toContain('1곳은 그 사이 쓰기 시작했거나 바뀌어 건너뛰었어요.')
+        expect(await exists(join(gone, 'node_modules'))).toBe(false)
+        expect(await exists(join(old, 'node_modules'))).toBe(true)
+      }, 60000)
+
+      test('취소하면 아무것도 지우지 않는다', async () => {
+        const old = await oldWorktree('old-work')
+        const manager = createDiskManager(
+          deps({ now: Date.now, confirm: vi.fn(async () => false) })
+        )
+        await manager.scan()
+        expect(await manager.removeAll()).toEqual({ result: { status: 'cancelled' }, removed: [] })
+        expect(await exists(join(gone, 'node_modules'))).toBe(true)
+        expect(await exists(join(old, 'node_modules'))).toBe(true)
+        expect(manager.report().rows).toHaveLength(2)
+      }, 60000)
+
+      test('지울 곳이 없으면(모두 사용 중) 확인 창 없이 gone', async () => {
+        const d = deps({ latest: () => serverIn(gone) })
+        const manager = createDiskManager(d)
+        await manager.scan()
+        expect(await manager.removeAll()).toEqual({ result: { status: 'gone' }, removed: [] })
+        expect(d.confirm).not.toHaveBeenCalled()
+        expect(await exists(join(gone, 'node_modules'))).toBe(true)
+      }, 60000)
+
+      test('확인 창 전에 모두 지울 수 없게 되면 그 까닭을 알린다(작업 폴더를 모르는 에이전트)', async () => {
+        const agent = { pid: 5000, tool: 'claude', worktree: null } as unknown as AgentRow
+        const d = deps({ latest: () => ({ ...blankSnapshot(1), agents: [agent] }) })
+        const manager = createDiskManager(d)
+        await manager.scan()
+        expect((await manager.removeAll()).result).toEqual({
+          status: 'failed',
+          message:
+            '작업 폴더를 모르는 에이전트가 있어 지우지 않았어요. 그 에이전트가 이 워크트리를 쓰고 있을 수 있어요.'
+        })
+        expect(d.confirm).not.toHaveBeenCalled()
+      }, 60000)
+
+      test('폴더를 못 지운 곳은 따로 알린다', async () => {
+        const manager = createDiskManager(
+          deps({
+            removeDir: async () => {
+              throw Object.assign(new Error('busy'), { code: 'EBUSY' })
+            }
+          })
+        )
+        await manager.scan()
+        expect(await manager.removeAll()).toEqual({
+          result: {
+            status: 'failed',
+            message: '1곳은 일부 폴더를 지우지 못했어요(파일을 쓰는 프로그램이 있을 수 있어요).'
+          },
+          removed: []
+        })
+        expect(manager.report().rows).toHaveLength(1)
+      }, 60000)
+
+      test('작업 폴더를 모두 확인할 수 없는 수집 방식이면 확인 창에 그 사실을 알린다', async () => {
+        const confirm = vi.fn<(o: KillConfirm) => Promise<boolean>>(async () => false)
+        const manager = createDiskManager(
+          deps({ confirm, resample: async () => ({ processes: [], tcp: [], collectMode: 'safe' }) })
+        )
+        await manager.scan()
+        await manager.removeAll()
+        const box = confirm.mock.calls[0][0] as KillConfirm
+        expect(box.detail).toContain('프로세스의 작업 폴더를 모두 확인할 수 없어')
+      }, 60000)
+    })
   })
 })
