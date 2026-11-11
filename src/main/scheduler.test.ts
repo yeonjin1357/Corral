@@ -61,7 +61,21 @@ test('닫혀 있다가 창을 열면, 마지막 수집이 오래됐으면 바로
   s.stop()
 })
 
-test('수집이 주기보다 길면 겹쳐 실행하지 않고, 끝난 뒤부터 주기를 센다', async () => {
+test('수집에 시간이 걸려도 주기는 시작에서 다음 시작까지 센다(실시간 5초면 5초마다)', async () => {
+  const starts: number[] = []
+  const collect = vi.fn(() => {
+    starts.push(Date.now())
+    return new Promise<DashboardSnapshot>((r) => setTimeout(() => r(snap(Date.now())), 1000))
+  })
+  const s = createScheduler({ collect, intervals, onSnapshot: () => {} })
+  s.setWindowOpen(true)
+  s.start()
+  await vi.advanceTimersByTimeAsync(15000)
+  expect(starts).toEqual([0, 5000, 10000, 15000])
+  s.stop()
+})
+
+test('수집이 주기보다 길면 겹쳐 실행하지 않고, 끝난 뒤 1초는 쉬고 다음 수집을 시작한다', async () => {
   const collect = vi.fn(
     () => new Promise<DashboardSnapshot>((r) => setTimeout(() => r(snap(Date.now())), 12000))
   )
@@ -70,7 +84,8 @@ test('수집이 주기보다 길면 겹쳐 실행하지 않고, 끝난 뒤부터
   s.start()
   await vi.advanceTimersByTimeAsync(11999)
   expect(collect).toHaveBeenCalledTimes(1)
-  await vi.advanceTimersByTimeAsync(1 + 4999)
+  // 12초에 끝남 → 시작 기준이면 이미 5초가 지났지만 1초는 쉰다.
+  await vi.advanceTimersByTimeAsync(1 + 999)
   expect(collect).toHaveBeenCalledTimes(1)
   await vi.advanceTimersByTimeAsync(1)
   expect(collect).toHaveBeenCalledTimes(2)

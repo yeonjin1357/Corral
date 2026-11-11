@@ -27,7 +27,7 @@ import {
   X
 } from '@lucide/vue'
 import type { ActionKind, Column, GroupHead, GroupedRows, Row, Table, Tone } from '../rows'
-import { sortRows } from '../rows'
+import { TONE_COLOR, sortRows } from '../rows'
 import type { SortState } from '../sortState'
 import { formatBytes } from '../../../shared/format'
 import { text } from '../../../shared/text'
@@ -157,12 +157,7 @@ const commitHint = (group: GroupHead): string =>
 const statusTitle = (group: GroupHead): string =>
   [group.status.text, group.summary].filter(Boolean).join(' · ')
 
-const TONE: Record<Tone, string> = {
-  running: 'var(--status-running)',
-  idle: 'var(--status-idle)',
-  stopped: 'var(--status-stopped)',
-  warn: 'var(--peach)'
-}
+const TONE: Record<Tone, string> = TONE_COLOR
 const ICON: Record<ActionKind, unknown> = {
   open: ExternalLink,
   details: Info,

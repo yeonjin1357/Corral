@@ -4,6 +4,8 @@ import { describeCollectError } from '../shared/format'
 import { blankSnapshot } from '../shared/snapshot'
 
 export const DEFAULT_COLLECT_TIMEOUT_MS = 20000
+/** 수집이 주기보다 오래 걸렸을 때도 다음 수집 전에 이만큼은 쉰다(쉬지 않고 연달아 돌지 않게). */
+const MIN_GAP_MS = 1000
 
 export interface Scheduler {
   start(): void
@@ -27,7 +29,8 @@ function errorMessage(e: unknown): string {
 
 /**
  * 수집을 주기적으로 돌린다.
- * - 한 번에 하나만 돈다(수집이 주기보다 길어도 겹쳐 쌓이지 않음). 다음 주기는 수집이 끝난 시점부터 센다.
+ * - 주기는 수집을 시작한 때부터 다음 시작까지 센다(수집에 1초가 걸려도 "5초"는 5초마다).
+ * - 한 번에 하나만 돈다(수집이 주기보다 길어도 겹쳐 쌓이지 않음). 그때는 끝난 뒤 MIN_GAP_MS 는 쉬고 시작한다.
  * - 창이 열려 있으면 짧게, 닫혀 있으면 길게. 오래 닫혀 있다가 열리면 바로 한 번 수집한다.
  * - 실패하면 마지막 정상 스냅샷을 stale 로 다시 보낸다.
  */
@@ -46,7 +49,9 @@ export function createScheduler(o: {
   let timer: ReturnType<typeof setTimeout> | null = null
   let inFlight: Promise<void> | null = null
   let last: DashboardSnapshot | null = null
-  let lastRunAt = Number.NEGATIVE_INFINITY
+  /** 마지막 수집을 시작한 시각(주기의 기준)과 끝난 시각(쉬는 시간의 기준). */
+  let lastStartAt = Number.NEGATIVE_INFINITY
+  let lastEndAt = Number.NEGATIVE_INFINITY
   let intervals = { ...o.intervals }
 
   const interval = (): number => (open ? intervals.openMs : intervals.closedMs)
@@ -59,7 +64,8 @@ export function createScheduler(o: {
   function schedule(): void {
     clearTimer()
     if (!running) return
-    const delay = Math.max(0, lastRunAt + interval() - now())
+    const t = now()
+    const delay = Math.max(0, lastStartAt + interval() - t, lastEndAt + MIN_GAP_MS - t)
     timer = setTimeout(() => void refreshNow(), delay)
   }
 
@@ -71,6 +77,7 @@ export function createScheduler(o: {
   function refreshNow(): Promise<void> {
     if (inFlight) return inFlight
     clearTimer()
+    lastStartAt = now()
     // 수집이 멈춰도(응답 없는 네트워크 드라이브 등) 화면이 옛 데이터를 최신처럼 보여 주지 않게 지연을 먼저 알린다.
     // 새 수집은 이 수집이 끝날 때까지 시작하지 않는다(한 번에 하나).
     let deadline: ReturnType<typeof setTimeout> | null = setTimeout(() => {
@@ -88,7 +95,7 @@ export function createScheduler(o: {
         emitStale(describeCollectError(errorMessage(e)))
       } finally {
         if (deadline) clearTimeout(deadline)
-        lastRunAt = now()
+        lastEndAt = now()
         inFlight = null
         schedule()
       }
@@ -109,7 +116,7 @@ export function createScheduler(o: {
     setWindowOpen(value: boolean) {
       open = value
       if (!running || inFlight) return
-      if (value && now() - lastRunAt >= intervals.openMs) void refreshNow()
+      if (value && now() - lastStartAt >= intervals.openMs) void refreshNow()
       else schedule()
     },
     setIntervals(next) {

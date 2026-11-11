@@ -1,7 +1,7 @@
 <!--
   NeoHtop (MIT) toolbar/ToolBar.svelte · SearchBox.svelte.
   바꾼 점: "Processes 609" 제목과 목록/트리 전환 자리에 pitwall 의 보기 탭(작업 공간·개발 서버·에이전트·…)을 둔다.
-  오른쪽 칸은 탭마다 다른 버튼(디스크 다시 찾기·Claude 연동 켜기)을 받는다.
+  오른쪽 칸은 탭마다 다른 버튼(디스크 다시 찾기·연동 설정)을 받는다.
   개발 서버 탭에는 NeoHtop 의 "List / Tree" 전환을 "목록 / 묶음"(작업 공간)으로 둔다.
 -->
 <script setup lang="ts">

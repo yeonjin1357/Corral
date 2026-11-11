@@ -52,6 +52,13 @@ export type SnapshotTab = Exclude<TabKey, 'events'>
 
 /** 상태 점 색: running 초록 · idle 회색 · stopped 빨강 · warn 주황(NeoHtop status-* 와 peach). */
 export type Tone = 'running' | 'idle' | 'stopped' | 'warn'
+/** 상태 점의 색(표·연동 상태가 같이 쓴다). */
+export const TONE_COLOR: Record<Tone, string> = {
+  running: 'var(--status-running)',
+  idle: 'var(--status-idle)',
+  stopped: 'var(--status-stopped)',
+  warn: 'var(--peach)'
+}
 
 /**
  * 행 아이콘(NeoHtop ProcessIcon 처럼). 넣어 둔 로고(image) → OS 앱 아이콘(exePath)·브랜드 로고(brand) 중 prefer 쪽 → 기본 아이콘.
@@ -255,12 +262,16 @@ export function serverIcon(row: ServerRow, platform: Platform | null): RowIcon {
     title: brand?.title ?? row.processName
   }
 }
-export function agentIcon(row: AgentRow): RowIcon {
+/** Claude Code·Codex 로고(에이전트 행·연동 상태·설정 화면이 같이 쓴다). */
+export function toolIcon(tool: AgentTool): RowIcon {
   return {
-    image: TOOL_LOGO[row.tool],
+    image: TOOL_LOGO[tool],
     fallback: 'terminal',
-    title: text.ui.agent.toolNames[row.tool]
+    title: text.ui.agent.toolNames[tool]
   }
+}
+export function agentIcon(row: AgentRow): RowIcon {
+  return toolIcon(row.tool)
 }
 export function leftoverIcon(row: LeftoverRow, platform: Platform | null): RowIcon {
   const brand = leftoverBrand(row.label, row.commandLine)

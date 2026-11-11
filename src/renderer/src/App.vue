@@ -32,7 +32,6 @@ import {
   seedRam,
   selectionKey
 } from './history'
-import { hookControls } from './hook'
 import { awaySummary, awayText, eventsTable, trimEvents, type AwaySummary } from './events'
 import {
   TABS,
@@ -59,6 +58,7 @@ import ItemSheet, { type Selected } from './components/ItemSheet.vue'
 import MemorySheet from './components/MemorySheet.vue'
 import NoticeCard from './components/NoticeCard.vue'
 import ItemIcon from './components/ItemIcon.vue'
+import IntegrationButton from './components/IntegrationButton.vue'
 import SettingsView from './components/SettingsView.vue'
 import Button from './ui/Button.vue'
 
@@ -686,7 +686,6 @@ const emptyText = computed(() => {
   }
   return ''
 })
-const hookButton = computed(() => hookControls(snapshot.value?.hook ?? null).button)
 
 // ── 알림 카드 ──
 const recommendation = computed(() =>
@@ -926,16 +925,12 @@ const takenAt = computed(() =>
           :total="searchTotal"
         >
           <template #actions>
-            <Button
-              v-if="tab === 'agents' && hookButton"
-              variant="outline"
-              size="sm"
-              data-action="hook"
-              :disabled="hookBusy"
-              @click="hookAction(hookButton.action)"
-            >
-              {{ hookButton.label }}
-            </Button>
+            <IntegrationButton
+              v-if="tab === 'agents'"
+              :claude="snapshot.hook ?? null"
+              :codex="snapshot.codexHook ?? null"
+              @open="openSettings('claude')"
+            />
             <Button
               v-if="tab === 'disk'"
               variant="outline"

@@ -737,6 +737,37 @@ test('다른 포트 보기는 숨긴 서버 보기와 하나만 켜지고, 탭�
   w.unmount()
 })
 
+test('에이전트 탭: 연동은 켜고 끄는 버튼 대신 두 도구의 상태와 연동 설정으로 가는 버튼', async () => {
+  const w = await start(
+    fake({
+      getLatest: async () => ({
+        ...snap(),
+        hook: { state: 'on', problem: null, allHooksDisabled: false, settingsPath: '' },
+        codexHook: { state: 'off', problem: null, path: '' }
+      })
+    })
+  )
+  await openTab(w, 'agents')
+  const bar = w.find('.toolbar')
+  expect(bar.text()).not.toContain('Claude 연동 끄기')
+  const go = bar.find('[data-action="integration-settings"]')
+  expect(go.text()).toBe('연동 설정')
+  expect(
+    go.findAll('[data-integration-dot]').map((d) => d.attributes('data-integration-dot'))
+  ).toEqual(['on', 'off'])
+  // 다른 탭에는 없다.
+  await openTab(w, 'ports')
+  expect(w.find('[data-action="integration-settings"]').exists()).toBe(false)
+  await openTab(w, 'agents')
+  await w.find('[data-action="integration-settings"]').trigger('click')
+  await flushPromises()
+  expect(w.findAll('h1').map((h) => h.text())).toContain('에이전트 연동')
+  // 설정의 두 연동 카드 제목에 도구 로고.
+  for (const tool of ['claude', 'codex'])
+    expect(w.find(`[data-integration-title="${tool}"] img`).exists()).toBe(true)
+  w.unmount()
+})
+
 test('다른 포트 보기에서 검색하면 전체 수는 다른 포트 수', async () => {
   // 개발 서버 3개, 다른 포트 5개(postgres 하나, 디버깅 브라우저 넷).
   const chrome = [9222, 9223, 9224, 9225].map((port, i) =>

@@ -943,6 +943,26 @@ export const text = {
       },
       file: (path: string): string => `설정 파일: ${path}`
     },
+    /** 에이전트 탭 도구줄의 연동 상태·설정으로 가기(켜고 끄기는 설정 > 에이전트 연동에서). */
+    integration: {
+      settings: '연동 설정',
+      help: '에이전트 연동 설명',
+      helpTitle: '에이전트 연동',
+      helpBody: [
+        '연동을 켜지 않아도 Claude Code 의 세션 파일과 Codex 세션 기록으로 작업 중·쉬는 중·응답 대기를 알아요.',
+        '연동을 켜면 각 도구의 설정 파일에 pitwall 훅을 더해, 어떤 도구가 권한을 기다리는지와 하는 일까지 정확히 알아요. 켜고 끄는 것은 설정 > 에이전트 연동에서 해요(확인 창·백업).'
+      ],
+      states: {
+        on: '켜짐',
+        off: '꺼짐',
+        partial: '다시 켜야 해요',
+        error: '문제가 있어요',
+        allHooksDisabled: '훅이 모두 꺼져 있어요',
+        unknown: '확인 중'
+      },
+      /** 풍선말 한 줄: "Claude Code 연동: 켜짐". */
+      stateLine: (tool: string, state: string): string => `${tool} 연동: ${state}`
+    },
     home: {
       title: '한눈에 보기',
       ram: 'RAM',

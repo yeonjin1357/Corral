@@ -28,6 +28,8 @@ import {
 } from '../../../shared/settings'
 import { text } from '../../../shared/text'
 import { hookControls } from '../hook'
+import { toolIcon } from '../rows'
+import ItemIcon from './ItemIcon.vue'
 import ToggleGroup, { type ToggleOption } from '../ui/ToggleGroup.vue'
 import Card from '../ui/Card.vue'
 import CardHeader from '../ui/CardHeader.vue'
@@ -667,7 +669,11 @@ const NOTICES_URL = `${REPO_URL}/blob/main/THIRD_PARTY_NOTICES.md`
         <div v-else-if="page === 'claude'" class="space-y-5">
           <Card size="sm">
             <CardHeader
-              ><CardTitle>{{ text.ui.hook.title }}</CardTitle></CardHeader
+              ><CardTitle class="flex items-center gap-2" data-integration-title="claude"
+                ><ItemIcon :icon="toolIcon('claude')" :size="16" />{{
+                  text.ui.hook.title
+                }}</CardTitle
+              ></CardHeader
             >
             <CardContent>
               <p
@@ -716,7 +722,11 @@ const NOTICES_URL = `${REPO_URL}/blob/main/THIRD_PARTY_NOTICES.md`
           </Card>
           <Card size="sm">
             <CardHeader
-              ><CardTitle>{{ text.ui.codexHook.title }}</CardTitle></CardHeader
+              ><CardTitle class="flex items-center gap-2" data-integration-title="codex"
+                ><ItemIcon :icon="toolIcon('codex')" :size="16" />{{
+                  text.ui.codexHook.title
+                }}</CardTitle
+              ></CardHeader
             >
             <CardContent>
               <p

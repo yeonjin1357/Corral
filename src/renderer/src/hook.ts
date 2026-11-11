@@ -1,5 +1,44 @@
-import type { ClaudeHookStatus } from '../../shared/types'
+import type { AgentTool, ClaudeHookStatus, CodexHookStatus } from '../../shared/types'
 import { text } from '../../shared/text'
+import type { Tone } from './rows'
+
+/** 에이전트 탭 도구줄에 보이는 도구 하나의 연동 상태(짧은 글과 점 색). */
+export interface IntegrationItem {
+  tool: AgentTool
+  /** 모르면 null(확인 중). */
+  state: ClaudeHookStatus['state'] | null
+  label: string
+  tone: Tone
+}
+
+/**
+ * Claude·Codex 연동 상태를 짧은 글과 점 색으로. 켜짐 초록, 꺼짐 회색(꺼도 세션 파일·기록으로 상태는 안다),
+ * 다시 켜야 함 주황, 문제 빨강. Claude 가 켜져 있어도 설정에서 훅을 모두 꺼 두었으면(이벤트가 오지 않음) 주황.
+ */
+export function integrationStatus(
+  claude: Pick<ClaudeHookStatus, 'state' | 'allHooksDisabled'> | null,
+  codex: Pick<CodexHookStatus, 'state'> | null
+): IntegrationItem[] {
+  const S = text.ui.integration.states
+  const item = (
+    tool: AgentTool,
+    h: { state: ClaudeHookStatus['state']; allHooksDisabled?: boolean } | null
+  ): IntegrationItem => {
+    if (!h) return { tool, state: null, label: S.unknown, tone: 'idle' }
+    if (h.state === 'on' && h.allHooksDisabled)
+      return { tool, state: h.state, label: S.allHooksDisabled, tone: 'warn' }
+    const tone: Tone =
+      h.state === 'on'
+        ? 'running'
+        : h.state === 'partial'
+          ? 'warn'
+          : h.state === 'error'
+            ? 'stopped'
+            : 'idle'
+    return { tool, state: h.state, label: S[h.state], tone }
+  }
+  return [item('claude', claude), item('codex', codex)]
+}
 
 export interface HookControls {
   /** 지금 상태 설명. */
