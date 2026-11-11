@@ -4,11 +4,13 @@
   가로축은 "최근 windowMs" 고정이고, 기록이 gapMs 보다 끊긴 곳(앱이 꺼져 있었음)은 잇지 않는다.
 -->
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 import type { GroupPoint, ProcessGroup } from '../../../shared/types'
-import { formatBytes } from '../../../shared/format'
+import { formatBytes, formatTimeOfDay } from '../../../shared/format'
 import { text } from '../../../shared/text'
+import { splitAtGaps } from '../history'
 import { GROUP_COLOR, GROUP_ORDER } from '../memory'
+import { useElementWidth } from '../useElementWidth'
 
 const props = withDefaults(
   defineProps<{
@@ -24,17 +26,7 @@ const props = withDefaults(
 )
 
 const box = ref<HTMLElement | null>(null)
-const width = ref(0)
-let observer: ResizeObserver | null = null
-onMounted(() => {
-  if (!box.value) return
-  width.value = box.value.clientWidth
-  if (typeof ResizeObserver !== 'undefined') {
-    observer = new ResizeObserver(() => (width.value = box.value?.clientWidth ?? 0))
-    observer.observe(box.value)
-  }
-})
-onBeforeUnmount(() => observer?.disconnect())
+const width = useElementWidth(box)
 
 const height = 112
 const PAD = { left: 2, right: 3, top: 3, bottom: 2 }
@@ -58,17 +50,13 @@ const x = (t: number): number =>
 const y = (v: number): number =>
   PAD.top + (1 - Math.max(0, Math.min(1, v / ceiling.value))) * (height - PAD.top - PAD.bottom)
 
-/** 끊긴 곳(gapMs 초과)에서 나눈 이어진 구간들(두 점 이상인 것만 면이 된다). */
-const segments = computed(() => {
-  const out: GroupPoint[][] = []
-  for (const p of visible.value) {
-    const seg = out[out.length - 1]
-    const prev = seg?.[seg.length - 1]
-    if (!seg || (props.gapMs != null && prev && p.t - prev.t > props.gapMs)) out.push([p])
-    else seg.push(p)
-  }
-  return out.filter((seg) => seg.length >= 2)
-})
+/**
+ * 끊긴 곳(gapMs 초과)에서 나눈 이어진 구간들. 쌓은 면은 두 점 이상이어야 넓이가 생기므로 한 점짜리 구간은 뺀다
+ * (ResourceTrend 는 한 점짜리도 고른 점으로 보이지만, 여기는 묶음마다 점을 찍지 않는다).
+ */
+const segments = computed(() =>
+  splitAtGaps(visible.value, props.gapMs).filter((seg) => seg.length >= 2)
+)
 const pt = (p: GroupPoint, v: number): string => `${x(p.t).toFixed(1)},${y(v).toFixed(1)}`
 
 /** 묶음마다 면(윗선을 왼쪽→오른쪽, 아랫선(아래 묶음의 윗선)을 오른쪽→왼쪽)과 윗선. */
@@ -118,8 +106,7 @@ function point(event: PointerEvent): void {
   hovered.value = start.value + ratio * props.windowMs
 }
 
-const time = (t: number): string =>
-  new Date(t).toLocaleTimeString('ko-KR', { hour: 'numeric', minute: '2-digit', second: '2-digit' })
+const time = formatTimeOfDay
 /** 툴팁(화면 기준): ResourceTrend 와 같이 body 에 띄우고 창 가장자리에서는 안쪽으로 민다. 위쪽 묶음부터 적는다. */
 const TIP_HALF = 80
 const tip = computed(() => {

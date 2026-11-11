@@ -13,6 +13,7 @@ import {
   formatDuration,
   formatTokens,
   formatClock,
+  formatTimeOfDay,
   limitWindowLabel,
   formatContext,
   codexLimitView,
@@ -208,6 +209,11 @@ test('한도 창 이름: 10080분 주간 · 하루 단위 N일 · 시간 단위 
 
 test('시각(절대): 월·일·오전/오후 시:분', () => {
   expect(formatClock(new Date(2026, 10, 10, 15, 0).getTime())).toBe('11월 10일 오후 3:00')
+})
+
+test('하루 안의 시각(측정 시각·추이 그래프 툴팁): 오전/오후 시:분:초', () => {
+  expect(formatTimeOfDay(new Date(2026, 10, 10, 15, 4, 5).getTime())).toBe('오후 3:04:05')
+  expect(formatTimeOfDay(new Date(2026, 10, 10, 9, 0, 0).getTime())).toBe('오전 9:00:00')
 })
 
 test('토큰 수: 반올림 경계 999,500 은 1.0M, 소수 입력은 내림·반올림이 같은 규칙', () => {

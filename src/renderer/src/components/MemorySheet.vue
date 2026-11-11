@@ -8,7 +8,7 @@
 import { computed } from 'vue'
 import { ChevronRight, RefreshCw } from '@lucide/vue'
 import type { DashboardSnapshot, GroupPoint, ProcessGroup } from '../../../shared/types'
-import { formatBytes } from '../../../shared/format'
+import { formatBytes, formatTimeOfDay } from '../../../shared/format'
 import { text } from '../../../shared/text'
 import type { Point } from '../history'
 import { GROUP_COLOR, memoryComposition } from '../memory'
@@ -48,13 +48,7 @@ const hasMemory = computed(() => m.value.totalBytes > 0)
 /** 지도 위 한 줄의 남은 메모리(전체 − 사용, 메모리 카드의 쌓은 막대와 같은 값). 전체를 모르면 지도가 없다. */
 const composition = computed(() => memoryComposition(m.value, props.snapshot.groups))
 const percent = computed(() => Math.floor(m.value.usedPercent))
-const reading = computed(() =>
-  new Date(props.snapshot.takenAt).toLocaleTimeString('ko-KR', {
-    hour: 'numeric',
-    minute: '2-digit',
-    second: '2-digit'
-  })
-)
+const reading = computed(() => formatTimeOfDay(props.snapshot.takenAt))
 
 /** 묶음과, 누르면 갈 탭(시스템·공유 메모리는 행이 없어 없음). 색은 메모리 카드와 같은 GROUP_COLOR. */
 const ORDER: { key: ProcessGroup; tab: TabKey | null }[] = [

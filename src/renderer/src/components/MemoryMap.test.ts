@@ -76,3 +76,20 @@ test('칸을 누르면 그 줄의 키로 select', async () => {
   expect(w.find(`[data-map-tile="${selectionKey.server(web)}"]`).text()).toContain('shop-web')
   w.unmount()
 })
+
+test('누를 수 있는 아주 작은 칸도 사방 2px 이상(초점 표시가 보이게)', async () => {
+  const speck = heavyJob({ pid: 21, memoryBytes: 64 * 1024 })
+  const w = await map({
+    ...s,
+    heavyJobs: [speck],
+    groups: s.groups.map((g) => (g.group === 'heavy' ? { ...g, memoryBytes: 64 * 1024 } : g))
+  })
+  const tile = w.find(`button[data-map-tile="${selectionKey.heavy(speck)}"]`)
+  const style = (tile.element as HTMLElement).style
+  expect(parseFloat(style.width)).toBeGreaterThanOrEqual(2)
+  expect(parseFloat(style.height)).toBeGreaterThanOrEqual(2)
+  // 칸이 지도 밖으로 나가지 않는다.
+  expect(parseFloat(style.left)).toBeGreaterThanOrEqual(0)
+  expect(parseFloat(style.top)).toBeGreaterThanOrEqual(0)
+  w.unmount()
+})

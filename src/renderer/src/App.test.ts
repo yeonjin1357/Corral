@@ -658,8 +658,12 @@ test('묶음 기록을 받지 못해도(예전 메인·실패) 화면은 그대�
   expect(document.body.querySelector('[data-memory-map]')).not.toBeNull()
   expect(w.findComponent(MemorySheet).props('groupHistory')).toHaveLength(1)
   w.unmount()
+  // 거절(메인 오류): 기록은 스냅샷으로 그대로 쌓인다.
   const failed = await start(fake({ historyGroups: async () => Promise.reject(new Error('x')) }))
-  expect(failed.find('[aria-label="메모리 자세히 보기"]').exists()).toBe(true)
+  await failed.find('[aria-label="메모리 자세히 보기"]').trigger('click')
+  await flushPromises()
+  expect(document.body.querySelector('[data-memory-map]')).not.toBeNull()
+  expect(failed.findComponent(MemorySheet).props('groupHistory')).toHaveLength(1)
   failed.unmount()
 })
 

@@ -4,8 +4,10 @@
   가로축은 "최근 windowMs" 고정이라 기록이 쌓일수록 오른쪽부터 채워진다.
 -->
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import type { Point } from '../history'
+import { computed, ref } from 'vue'
+import { splitAtGaps, type Point } from '../history'
+import { useElementWidth } from '../useElementWidth'
+import { formatTimeOfDay } from '../../../shared/format'
 import { text } from '../../../shared/text'
 
 const props = withDefaults(
@@ -30,17 +32,7 @@ const props = withDefaults(
 )
 
 const box = ref<HTMLElement | null>(null)
-const width = ref(0)
-let observer: ResizeObserver | null = null
-onMounted(() => {
-  if (!box.value) return
-  width.value = box.value.clientWidth
-  if (typeof ResizeObserver !== 'undefined') {
-    observer = new ResizeObserver(() => (width.value = box.value?.clientWidth ?? 0))
-    observer.observe(box.value)
-  }
-})
-onBeforeUnmount(() => observer?.disconnect())
+const width = useElementWidth(box)
 
 const height = computed(() => (props.expanded ? 112 : 48))
 const PAD = { left: 2, right: 3, top: 3, bottom: 2 }
@@ -61,17 +53,8 @@ const y = (v: number): number =>
   PAD.top +
   (1 - Math.max(0, Math.min(1, v / ceiling.value))) * (height.value - PAD.top - PAD.bottom)
 
-/** 끊긴 곳(gapMs 초과)에서 나눈 이어진 구간들. */
-const segments = computed(() => {
-  const out: Point[][] = []
-  for (const p of visible.value) {
-    const seg = out[out.length - 1]
-    const prev = seg?.[seg.length - 1]
-    if (!seg || (props.gapMs != null && prev && p.t - prev.t > props.gapMs)) out.push([p])
-    else seg.push(p)
-  }
-  return out
-})
+/** 끊긴 곳(gapMs 초과)에서 나눈 이어진 구간들(한 점짜리 구간은 선 없이 고른 점으로만 보인다). */
+const segments = computed(() => splitAtGaps(visible.value, props.gapMs))
 const pathOf = (seg: Point[]): string =>
   seg.map((p, i) => `${i ? 'L' : 'M'}${x(p.t).toFixed(1)},${y(p.value).toFixed(1)}`).join('')
 const line = computed(() => segments.value.map(pathOf).join(''))
@@ -125,8 +108,7 @@ const tip = computed(() => {
   }
 })
 
-const time = (t: number): string =>
-  new Date(t).toLocaleTimeString('ko-KR', { hour: 'numeric', minute: '2-digit', second: '2-digit' })
+const time = formatTimeOfDay
 const windowText = computed(() => text.ui.trend.window(props.windowMs))
 const caption = computed(() => {
   if (visible.value.length < 2) return text.ui.trend.collecting

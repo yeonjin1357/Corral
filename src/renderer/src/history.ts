@@ -1,6 +1,6 @@
 import type { AgentState, DashboardSnapshot, GroupPoint, TrendPoint } from '../../shared/types'
 import { agentKey, selectionKey } from '../../shared/keys'
-import { groupPoint } from '../../shared/snapshot'
+import { fitGroups, groupPoint } from '../../shared/memoryGroups'
 
 /**
  * 하트비트 한 칸. 서버: 연결이 있었으면 up, 열려 있기만 했으면 idle.
@@ -54,6 +54,24 @@ function thin<P extends { t: number }>(points: P[]): P[] {
     out.push(p)
   }
   for (let i = fineFrom; i < points.length; i++) if (points[i].t >= cutoff) out.push(points[i])
+  return out
+}
+
+/**
+ * 이웃한 기록이 gapMs 보다 벌어진 곳(앱이 꺼져 있었음)에서 나눈 이어진 구간들(추이 그래프가 그 사이를 잇지 않게).
+ * gapMs 가 없거나(null·undefined) 0 이하면 나누지 않는다. 시간 순이어야 한다.
+ */
+export function splitAtGaps<P extends { t: number }>(
+  points: P[],
+  gapMs: number | null | undefined
+): P[][] {
+  const out: P[][] = []
+  for (const p of points) {
+    const seg = out[out.length - 1]
+    const prev = seg?.[seg.length - 1]
+    if (!seg || (gapMs != null && gapMs > 0 && prev && p.t - prev.t > gapMs)) out.push([p])
+    else seg.push(p)
+  }
   return out
 }
 
@@ -134,7 +152,8 @@ export function appendSnapshot(history: History, s: DashboardSnapshot): History 
   return {
     lastTakenAt: s.takenAt,
     ram: thin([...history.ram, { t: s.takenAt, value: s.memory.usedPercent }]),
-    groups: thin([...history.groups, groupPoint(s.takenAt, s.groups)]),
+    // 메인 기록과 같이 사용량에 맞춰 줄인 값(메모리 카드·지도와 같은 값).
+    groups: thin([...history.groups, groupPoint(s.takenAt, fitGroups(s.memory, s.groups))]),
     servers,
     agents
   }

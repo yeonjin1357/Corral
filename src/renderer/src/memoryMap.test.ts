@@ -64,7 +64,7 @@ test('2단계 합이 묶음보다 크면 줄여 맞추고 작으면 그 밖 칸'
   // 에이전트 줄 합(300 MB) < 묶음 500 MB: 남는 200 MB 는 그 밖 칸.
   const agents = group(map, 'agent')
   expect(agents.tiles.map((t) => [t.label, t.bytes, t.key])).toEqual([
-    ['wt-a', 300 * MB, selectionKey.agent(agent)],
+    ['wt-a · Claude Code', 300 * MB, selectionKey.agent(agent)],
     ['그 밖', 200 * MB, null]
   ])
   // 시스템·공유는 한 칸. 모든 묶음에서 칸 합 = 묶음.
@@ -111,7 +111,7 @@ test('누를 수 있는 칸만 선택 키를 가진다', () => {
     // 개발 서버: 이름 · 작업 공간(작업 공간을 모르면 이름만).
     ['web · shop', selectionKey.server(web)],
     ['api', selectionKey.server(api)],
-    ['wt-a', selectionKey.agent(agent)],
+    ['wt-a · Claude Code', selectionKey.agent(agent)],
     ['vue-tsc', selectionKey.heavy(job)]
   ])
   // 숨긴 서버·다른 앱·그 밖·시스템은 누를 수 없다.
@@ -134,4 +134,30 @@ test('0 인 묶음은 지도에 없다', () => {
   expect(map.map((g) => g.group)).toEqual(['devServer', 'otherApps', 'system'])
   // 전체 RAM 을 모르면(아직 수집 전) 지도가 없다.
   expect(memoryMapGroups({ ...base, memory: { ...base.memory, totalBytes: 0 } })).toEqual([])
+})
+
+test('같은 폴더의 에이전트·서버도 칸 이름으로 구분된다', () => {
+  const wt = { root: 'C:\\work\\shop', branch: 'main', isLinkedWorktree: false }
+  const claude = agentRow({ pid: 10, worktree: wt, tool: 'claude' })
+  const codex = agentRow({ pid: 11, worktree: wt, tool: 'codex' })
+  const claude2 = agentRow({ pid: 12, worktree: wt, tool: 'claude' })
+  const front = serverRow({ pid: 1, ports: [5173], worktree: wt })
+  const back = serverRow({ pid: 2, ports: [8081, 8082], worktree: wt })
+  const map = memoryMapGroups({
+    ...base,
+    servers: [front, back],
+    hiddenServers: [],
+    agents: [claude, codex, claude2]
+  })
+  // 에이전트: 폴더 · 도구, 그래도 같으면 PID 까지.
+  expect(group(map, 'agent').tiles.map((t) => t.label)).toEqual([
+    'shop · Claude Code · PID 10',
+    'shop · Codex',
+    'shop · Claude Code · PID 12'
+  ])
+  // 개발 서버: 이름이 같으면 표의 포트 칸처럼 포트를 붙인다.
+  expect(group(map, 'devServer').tiles.map((t) => t.label)).toEqual([
+    'shop · :5173',
+    'shop · :8081 · :8082'
+  ])
 })

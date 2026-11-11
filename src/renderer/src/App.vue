@@ -15,7 +15,13 @@ import {
   hiddenLabel,
   hiddenMatches
 } from '../../shared/settings'
-import { describeKillResult, formatBytes, formatFreed, pressureText } from '../../shared/format'
+import {
+  describeKillResult,
+  formatBytes,
+  formatFreed,
+  formatTimeOfDay,
+  pressureText
+} from '../../shared/format'
 import { cleanupRecommendation } from '../../shared/recommend'
 import type { QuickKind } from '../../shared/ipc'
 import type { PitEvent } from '../../shared/events'
@@ -829,15 +835,7 @@ const recommendChips = computed(() => {
   })
 })
 
-const takenAt = computed(() =>
-  snapshot.value
-    ? new Date(snapshot.value.takenAt).toLocaleTimeString('ko-KR', {
-        hour: 'numeric',
-        minute: '2-digit',
-        second: '2-digit'
-      })
-    : ''
-)
+const takenAt = computed(() => (snapshot.value ? formatTimeOfDay(snapshot.value.takenAt) : ''))
 </script>
 
 <template>

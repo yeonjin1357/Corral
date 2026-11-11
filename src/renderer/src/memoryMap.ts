@@ -3,8 +3,9 @@
  * 2단계 합이 묶음과 다르면(에이전트 줄은 자손의 무거운 작업까지 세는 등) 같은 비율로 줄이거나 "그 밖" 칸으로 채워
  * 지도가 늘 묶음 값과 맞다(같은 메모리를 두 번 세지 않는다).
  */
-import type { DashboardSnapshot, ProcessGroup } from '../../shared/types'
+import type { DashboardSnapshot, ProcessGroup, ServerRow } from '../../shared/types'
 import { selectionKey } from '../../shared/keys'
+import { portList } from '../../shared/format'
 import { text } from '../../shared/text'
 import { memoryComposition } from './memory'
 import { appName, appRowId, folderOf } from './rows'
@@ -29,8 +30,22 @@ const APP_TILES = 12
 
 const t = text.ui.memorySheet
 
+/**
+ * 칸 이름: 같은 이름이 둘 이상이면 그 줄들에만 구분할 꼬리를 붙인다(같은 폴더의 서버·에이전트가 풍선말까지 같지 않게).
+ */
+function distinct<R>(
+  rows: R[],
+  name: (row: R) => string,
+  tail: (row: R, name: string) => string
+): string[] {
+  const names = rows.map(name)
+  const count = new Map<string, number>()
+  for (const n of names) count.set(n, (count.get(n) ?? 0) + 1)
+  return rows.map((row, i) => (count.get(names[i])! > 1 ? tail(row, names[i]) : names[i]))
+}
+
 /** 개발 서버 칸 이름: 표의 이름(폴더) · 작업 공간. 작업 공간을 모르거나 이름과 같으면 이름만. */
-function serverLabel(row: DashboardSnapshot['servers'][number]): string {
+function serverLabel(row: ServerRow): string {
   const name = folderOf(row.worktree)
   const ws = row.workspace?.name
   return ws && ws !== name ? `${name} · ${ws}` : name
@@ -39,25 +54,29 @@ function serverLabel(row: DashboardSnapshot['servers'][number]): string {
 /** 그 묶음의 줄(맞추기 전). */
 function rowsOf(group: ProcessGroup, s: DashboardSnapshot): MapTile[] {
   switch (group) {
-    case 'devServer':
-      return [
-        ...s.servers.map((row) => {
-          const key = selectionKey.server(row)
-          return { id: key, label: serverLabel(row), bytes: row.memoryBytes, key }
-        }),
-        // 숨긴 서버도 개발 서버 메모리지만 표에 줄이 없어 누를 수 없다.
-        ...s.hiddenServers.map((row) => ({
-          id: `hidden:${selectionKey.server(row)}`,
-          label: serverLabel(row),
-          bytes: row.memoryBytes,
-          key: null
-        }))
-      ]
-    case 'agent':
-      return s.agents.map((row) => {
-        const key = selectionKey.agent(row)
-        return { id: key, label: folderOf(row.worktree), bytes: row.memoryBytes, key }
+    case 'devServer': {
+      // 숨긴 서버도 개발 서버 메모리지만 표에 줄이 없어 누를 수 없다. 이름이 같으면 표의 포트 칸처럼 포트를 붙인다.
+      const rows = [...s.servers, ...s.hiddenServers]
+      const labels = distinct(rows, serverLabel, (row, name) => `${name} · ${portList(row.ports)}`)
+      return rows.map((row, i) => {
+        const key = selectionKey.server(row)
+        return i < s.servers.length
+          ? { id: key, label: labels[i], bytes: row.memoryBytes, key }
+          : { id: `hidden:${key}`, label: labels[i], bytes: row.memoryBytes, key: null }
       })
+    }
+    case 'agent': {
+      // 폴더 · 도구(같은 폴더의 Claude·Codex), 그래도 같으면 PID 까지.
+      const labels = distinct(
+        s.agents,
+        (row) => `${folderOf(row.worktree)} · ${text.ui.agent.toolNames[row.tool]}`,
+        (row, name) => t.mapWithPid(name, row.pid)
+      )
+      return s.agents.map((row, i) => {
+        const key = selectionKey.agent(row)
+        return { id: key, label: labels[i], bytes: row.memoryBytes, key }
+      })
+    }
     case 'heavy':
       return s.heavyJobs.map((row) => {
         const key = selectionKey.heavy(row)

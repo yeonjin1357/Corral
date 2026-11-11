@@ -3,6 +3,7 @@
  * 메모리 카드의 쌓은 막대·범례, 간단히 카드, 메모리 지도가 같은 값·순서·색을 쓴다.
  */
 import type { GroupUsage, MemorySummary, ProcessGroup } from '../../shared/types'
+import { fitGroups, usedWithin } from '../../shared/memoryGroups'
 
 /** 묶음 순서(쌓은 막대·지도·묶음 추이가 이 순서로 놓는다). */
 export const GROUP_ORDER: ProcessGroup[] = ['devServer', 'agent', 'heavy', 'otherApps', 'system']
@@ -43,22 +44,18 @@ export const tipPercent = (share: number): number =>
 /**
  * 전체 RAM 의 묶음별 몫과 남은 메모리. 전체를 모르면(0) null.
  * 묶음 합이 사용량을 넘으면(측정 시점 차이) 모든 묶음을 같은 비율로 줄여 사용량에 맞춘다 —
- * 막대가 100% 를 넘지 않고 남은 메모리 칸은 늘 정확하다.
+ * 막대가 100% 를 넘지 않고 남은 메모리 칸은 늘 정확하다. 믿을 수 없는 값(NaN 등)은 0 이고, 사용량은 전체까지.
+ * 규칙은 메인의 묶음 기록과 같은 fitGroups(묶음 추이가 같은 값).
  */
 export function memoryComposition(
   memory: Pick<MemorySummary, 'totalBytes' | 'usedBytes'>,
   groups: GroupUsage[]
 ): MemoryComposition | null {
-  const total = memory.totalBytes
+  const { total, used } = usedWithin(memory)
   if (!(total > 0)) return null
-  const used = Math.max(0, Math.min(total, memory.usedBytes))
-  const raw = GROUP_ORDER.map((group) =>
-    Math.max(0, groups.find((g) => g.group === group)?.memoryBytes ?? 0)
-  )
-  const sum = raw.reduce((a, b) => a + b, 0)
-  const scale = sum > used ? used / sum : 1
-  const parts = GROUP_ORDER.map((group, i) => {
-    const bytes = raw[i] * scale
+  const fitted = fitGroups(memory, groups)
+  const parts = GROUP_ORDER.map((group) => {
+    const bytes = fitted.find((g) => g.group === group)?.memoryBytes ?? 0
     return { group, bytes, share: clamp01(bytes / total) }
   })
   const freeBytes = total - used

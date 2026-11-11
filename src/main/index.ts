@@ -30,6 +30,7 @@ import {
 } from '../shared/settings'
 import { IPC, type NavigateTarget } from '../shared/ipc'
 import { text } from '../shared/text'
+import { fitGroups } from '../shared/memoryGroups'
 import { mkdirSync, readdirSync, rmSync } from 'fs'
 import { access, stat } from 'fs/promises'
 import { sample, toPlatform } from './collect/sample'
@@ -241,7 +242,8 @@ const scheduler = createScheduler({
   onSnapshot: (snapshot) => {
     if (!snapshot.stale && snapshot.memory.totalBytes > 0) {
       ramHistory.record(snapshot.takenAt, snapshot.memory.usedPercent)
-      groupHistory.record(snapshot.takenAt, snapshot.groups)
+      // 메모리 카드·지도와 같이 사용량에 맞춰 줄인 값으로 남긴다(추이 맨 위가 사용량을 넘지 않게).
+      groupHistory.record(snapshot.takenAt, fitGroups(snapshot.memory, snapshot.groups))
     }
     recordSnapshot(snapshot)
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.snapshot, snapshot)

@@ -690,6 +690,8 @@ export const text = {
       mapOthers: (n: number): string => `기타 ${n}개`,
       /** 묶음 안 줄들의 합이 묶음보다 작을 때 남는 몫. */
       mapRest: '그 밖',
+      /** 폴더·도구까지 같은 에이전트 칸을 PID 로 구분한다. */
+      mapWithPid: (label: string, pid: number): string => `${label} · PID ${pid}`,
       trendGroupsTitle: '묶음별 추이',
       /** 지도 위 한 줄(남은 메모리는 지도에 넣지 않는다). */
       freeLine: (free: string): string => `남은 메모리 ${free}`

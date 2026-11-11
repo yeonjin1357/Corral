@@ -5,7 +5,8 @@ import {
   emptyHistory,
   seedGroups,
   seedRam,
-  selectionKey
+  selectionKey,
+  splitAtGaps
 } from './history'
 import { GB, MB, agentRow, leftoverRow, serverRow, snapshot } from './testing/fixtures'
 import type { GroupPoint } from '../../shared/types'
@@ -164,4 +165,40 @@ test('스냅샷마다 묶음 점을 더하고 메인 기록으로 처음 채운�
   // 앱이 기억한 2시간 기록(30초 간격 240점)은 자르지 않는다.
   const seeds = Array.from({ length: 240 }, (_, i) => at(i * 30_000))
   expect(seedGroups(emptyHistory(), seeds).groups).toHaveLength(240)
+})
+
+test('묶음 점은 메모리 카드·지도와 같이 사용량에 맞춰 줄인 값(그래프 맨 위가 사용량을 넘지 않게)', () => {
+  const s = snapshot({
+    takenAt: 1,
+    memory: { ...snapshot().memory, totalBytes: 32 * GB, usedBytes: 10 * GB },
+    groups: [
+      { group: 'devServer', memoryBytes: 4 * GB, commitBytes: null, processCount: 1 },
+      { group: 'otherApps', memoryBytes: 16 * GB, commitBytes: null, processCount: 1 }
+    ]
+  })
+  // 묶음 합 20 GB > 사용 10 GB → 모두 절반.
+  expect(appendSnapshot(emptyHistory(), s).groups).toEqual([
+    { t: 1, devServer: 2 * GB, agent: 0, heavy: 0, otherApps: 8 * GB, system: 0 }
+  ])
+})
+
+describe('끊긴 곳에서 나누기(추이 그래프가 같이 쓴다)', () => {
+  const at = (...ts: number[]): { t: number }[] => ts.map((t) => ({ t }))
+
+  test('끊김이 없으면 한 구간', () => {
+    expect(splitAtGaps(at(0, 10, 20), 60)).toEqual([at(0, 10, 20)])
+  })
+
+  test('gapMs 보다 벌어진 곳에서 나눈다(같은 간격은 잇는다)', () => {
+    expect(splitAtGaps(at(0, 10, 100, 160, 300), 60)).toEqual([at(0, 10), at(100, 160), at(300)])
+  })
+
+  test('gapMs 가 없거나(null·undefined) 0 이하면 나누지 않는다', () => {
+    for (const gap of [null, undefined, 0, -1])
+      expect(splitAtGaps(at(0, 1_000_000), gap)).toEqual([at(0, 1_000_000)])
+  })
+
+  test('기록이 없으면 구간도 없다', () => {
+    expect(splitAtGaps([], 60)).toEqual([])
+  })
 })

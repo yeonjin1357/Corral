@@ -199,6 +199,15 @@ export function formatClock(ms: number): string {
   })
 }
 
+/** 하루 안의 시각을 "오후 3:04:05"처럼(측정 시각, 추이 그래프 툴팁). */
+export function formatTimeOfDay(ms: number): string {
+  return new Date(ms).toLocaleTimeString('ko-KR', {
+    hour: 'numeric',
+    minute: '2-digit',
+    second: '2-digit'
+  })
+}
+
 /** 한도 창 하나(보이는 것). */
 export interface ShownLimit {
   label: string

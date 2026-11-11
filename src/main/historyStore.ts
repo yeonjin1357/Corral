@@ -1,7 +1,7 @@
 import { readFile, rename, rm, writeFile } from 'fs/promises'
 import type { AgentState, GroupPoint, GroupUsage, TrendPoint } from '../shared/types'
 import type { PitEvent } from '../shared/events'
-import { groupPoint } from '../shared/snapshot'
+import { groupPoint } from '../shared/memoryGroups'
 import type { ServerHistoryData } from './serverHistory'
 
 const MIN = 60_000
