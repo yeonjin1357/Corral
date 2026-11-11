@@ -28,6 +28,7 @@ import {
   hiddenLabel
 } from '../../../shared/settings'
 import { text } from '../../../shared/text'
+import { formatDuration } from '../../../shared/format'
 import { hookControls } from '../hook'
 import { toolIcon } from '../rows'
 import ItemIcon from './ItemIcon.vue'
@@ -159,10 +160,12 @@ async function submit(): Promise<void> {
 
 const REFRESH: RefreshSpeed[] = ['fast', 'normal', 'saver']
 const THEMES: ThemeChoice[] = ['light', 'dark', 'auto']
-const refreshHelp = computed(() => {
-  const i = REFRESH_INTERVALS[draft.value.refresh]
-  return S.refreshHelp(i.openMs / 1000, i.closedMs / 1000)
-})
+/** 갱신 주기의 두 간격(창 열림·닫힘)을 "2초"·"2분"처럼. */
+const refreshTimes = (speed: RefreshSpeed): [string, string] => {
+  const i = REFRESH_INTERVALS[speed]
+  return [formatDuration(i.openMs), formatDuration(i.closedMs)]
+}
+const refreshHelp = computed(() => S.refreshHelp(...refreshTimes(draft.value.refresh)))
 
 function resetHeavy(): void {
   heavyText.value = DEFAULT_SETTINGS.heavyPatterns.join('\n')
@@ -276,9 +279,9 @@ const status = computed(() => {
                     {{ refreshHelp }}
                   </p>
                 </div>
-                <NativeSelect id="refresh" v-model="draft.refresh" class="w-28 shrink-0">
+                <NativeSelect id="refresh" v-model="draft.refresh" class="w-48 shrink-0">
                   <option v-for="speed in REFRESH" :key="speed" :value="speed">
-                    {{ S.refreshChoices[speed] }}
+                    {{ S.refreshChoice(S.refreshChoices[speed], ...refreshTimes(speed)) }}
                   </option>
                 </NativeSelect>
               </div>

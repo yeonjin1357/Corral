@@ -755,8 +755,11 @@ export const text = {
       saveFailed: (detail: string): string => `저장하지 못했어요: ${detail}`,
       refresh: '갱신 주기',
       refreshChoices: { fast: '빠르게', normal: '보통', saver: '절약' },
-      refreshHelp: (openSec: number, closedSec: number): string =>
-        `창이 열려 있으면 ${openSec}초, 닫혀 있으면 ${closedSec}초마다 확인해요. 빠를수록 Corral 이 CPU 를 조금 더 써요.`,
+      /** 옵션 줄: "빠르게 · 2초 / 10초"(창을 열어 두었을 때 / 닫아 두었을 때). */
+      refreshChoice: (label: string, open: string, closed: string): string =>
+        `${label} · ${open} / ${closed}`,
+      refreshHelp: (open: string, closed: string): string =>
+        `창을 열어 두면 ${open}, 닫아 두면 ${closed}마다 확인해요. 창을 닫아 둔 동안에는 알림이 최대 ${closed} 늦을 수 있고, 빠를수록 Corral 이 CPU 를 조금 더 써요.`,
       theme: '화면 테마',
       themeChoices: { light: '밝게', dark: '어둡게', auto: '자동(OS 따라)' },
       launchAtLogin: '로그인할 때 트레이로 시작',

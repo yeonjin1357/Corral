@@ -38,6 +38,22 @@ test('일반 쪽의 새 버전 확인 설명에 GitHub 이 나오지 않는다',
   expect(w.text()).not.toContain('GitHub')
 })
 
+test('갱신 주기: 옵션마다 창을 열었을 때·닫았을 때 간격을 적고, 설명에 알림이 늦을 수 있는 만큼을 적는다', async () => {
+  const w = view('general')
+  const select = w.find('select#refresh')
+  expect(select.findAll('option').map((o) => o.text())).toEqual([
+    '빠르게 · 2초 / 10초',
+    '보통 · 5초 / 30초',
+    '절약 · 15초 / 2분'
+  ])
+  const help = (): string => w.find('label[for="refresh"]').element.parentElement!.textContent!
+  expect(help()).toContain('창을 열어 두면 5초, 닫아 두면 30초마다 확인해요.')
+  expect(help()).toContain('알림이 최대 30초 늦을 수 있고')
+  await select.setValue('saver')
+  expect(help()).toContain('창을 열어 두면 15초, 닫아 두면 2분마다 확인해요.')
+  expect(help()).toContain('알림이 최대 2분 늦을 수 있고')
+})
+
 test('드롭다운 목록은 테마의 팝오버 색으로 그린다(반투명 바탕이 흰색 위에 깔려 글자가 안 보이지 않게)', () => {
   const select = view('general').find('select#refresh')
   expect(select.classes()).toContain('[&_option]:bg-popover')
