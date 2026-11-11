@@ -1,3 +1,5 @@
+// 반드시 맨 처음: 아래 모듈들이 설정 폴더를 읽기 전에 예전 폴더(<appData>/pitwall)로 고정한다.
+import './pinUserData'
 import {
   screen,
   app,
@@ -575,7 +577,7 @@ const updater = createUpdater({
   fetchJson: async (url) => {
     // 사용자 정보는 보내지 않는다(일반 이름의 User-Agent 만).
     const response = await net.fetch(url, {
-      headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'pitwall' }
+      headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Corral' }
     })
     if (!response.ok) throw new Error(`GitHub ${response.status}`)
     return response.json()

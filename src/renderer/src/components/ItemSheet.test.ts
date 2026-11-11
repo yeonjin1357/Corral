@@ -314,7 +314,7 @@ describe('상세 패널: 서버 판단과 에이전트(G2)', () => {
 
 describe('상세 패널: 하는 일(G3b)', () => {
   const NOTE =
-    '에이전트 연동이 알려 준 내용이에요. pitwall 은 이것을 메모리에만 두고 파일로 남기지 않아요. 설정 > 에이전트 연동에서 끌 수 있어요.'
+    '에이전트 연동이 알려 준 내용이에요. Corral 은 이것을 메모리에만 두고 파일로 남기지 않아요. 설정 > 에이전트 연동에서 끌 수 있어요.'
   const HOOK_ON: ClaudeHookStatus = {
     state: 'on',
     problem: null,

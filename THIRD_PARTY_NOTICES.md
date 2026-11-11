@@ -1,6 +1,6 @@
 # Third-party notices
 
-pitwall 은 아래 오픈소스 프로젝트의 일부(스타일·컴포넌트·글꼴)를 가져와 변형해 사용합니다.
+Corral 은 아래 오픈소스 프로젝트의 일부(스타일·컴포넌트·글꼴)를 가져와 변형해 사용합니다.
 
 ## NeoHtop
 
@@ -9,7 +9,7 @@ pitwall 은 아래 오픈소스 프로젝트의 일부(스타일·컴포넌트·
 - 가져온 것: 화면 디자인 전체 — `src/app.css`(색·표·카드 줄 규칙), 테마 "GitHub Light"·"Catppuccin" 의 색 값(`theme-tokens.js` 로 계산한 값),
   `TitleBar`·`stats/*Panel`·`ResourceTrend`·`ResourceDetails`·`toolbar/*`·`process/*`(트리 보기의 family 줄 포함)·`modals/ProcessDetailsModal`·`SettingsWindow`·`MenuBarOverview`(트레이 요약 창) 의 마크업과 클래스,
   `src-tauri/src/companion.rs` 의 요약 창 위치 계산 규칙,
-  `ui/*`(shadcn-svelte 부품)의 클래스. Svelte 코드를 Vue 로 옮기면서 pitwall 의 데이터에 맞게 바꿨다.
+  `ui/*`(shadcn-svelte 부품)의 클래스. Svelte 코드를 Vue 로 옮기면서 Corral 의 데이터에 맞게 바꿨다.
 - 라이선스: MIT
 
 ```

@@ -267,7 +267,7 @@ test('기다리게 하기 켜기·끄기는 따로 된 확인 창으로 묻고, 
     expect.objectContaining({
       title: '에이전트 기다리게 하기 켜기',
       message: 'Claude Code 설정 파일에 질문 훅을 더할까요?',
-      detail: `${settingsPath()} 의 pitwall 훅을 다시 써서, Claude 가 Bash·PowerShell 명령을 실행하기 전에 pitwall 에 묻는 훅을 하나 더해요. 무거운 작업이 겹치고 메모리가 부족할 때만 그 명령을 잠깐 미루게 해요. 다른 설정과 훅은 그대로 두고, 바꾸기 전에 백업을 남겨요. 이미 실행 중인 Claude 세션은 다시 시작해야 반영될 수 있어요.`,
+      detail: `${settingsPath()} 의 Corral 훅을 다시 써서, Claude 가 Bash·PowerShell 명령을 실행하기 전에 Corral 에 묻는 훅을 하나 더해요. 무거운 작업이 겹치고 메모리가 부족할 때만 그 명령을 잠깐 미루게 해요. 다른 설정과 훅은 그대로 두고, 바꾸기 전에 백업을 남겨요. 이미 실행 중인 Claude 세션은 다시 시작해야 반영될 수 있어요.`,
       buttons: ['켜기', '취소']
     })
   )
@@ -278,7 +278,7 @@ test('기다리게 하기 켜기·끄기는 따로 된 확인 창으로 묻고, 
     expect.objectContaining({
       title: '에이전트 기다리게 하기 끄기',
       message: 'Claude Code 설정 파일에서 질문 훅을 뺄까요?',
-      detail: `기능은 이미 껐어요. ${settingsPath()} 에서 Bash·PowerShell 명령 전에 pitwall 에 묻는 훅도 빼요. 남겨 두면 명령마다 pitwall 에 한 번 묻기만 하고 아무것도 미루지 않아요. 다른 설정과 훅은 그대로 두고, 바꾸기 전에 백업을 남겨요.`,
+      detail: `기능은 이미 껐어요. ${settingsPath()} 에서 Bash·PowerShell 명령 전에 Corral 에 묻는 훅도 빼요. 남겨 두면 명령마다 Corral 에 한 번 묻기만 하고 아무것도 미루지 않아요. 다른 설정과 훅은 그대로 두고, 바꾸기 전에 백업을 남겨요.`,
       buttons: ['빼기', '취소']
     })
   )
@@ -298,14 +298,14 @@ test('연동 켜기 확인 창은 기다리게 하기가 켜져 있으면 질문
   const { deps, confirm } = setup({ guard: () => guard })
   const integration = createClaudeIntegration(deps)
   const detail = (): string => (confirm.mock.calls.at(-1)![0] as { detail: string }).detail
-  const plain = `${settingsPath()} 에 세션 시작·프롬프트·권한 요청·알림·도구 사용·응답 끝·오류·세션 끝 이벤트를 pitwall 로 보내는 훅을 더해요. 다른 설정과 훅은 그대로 두고, 바꾸기 전에 백업을 남겨요. 이미 실행 중인 Claude 세션은 다시 시작해야 반영될 수 있어요.`
+  const plain = `${settingsPath()} 에 세션 시작·프롬프트·권한 요청·알림·도구 사용·응답 끝·오류·세션 끝 이벤트를 Corral 로 보내는 훅을 더해요. 다른 설정과 훅은 그대로 두고, 바꾸기 전에 백업을 남겨요. 이미 실행 중인 Claude 세션은 다시 시작해야 반영될 수 있어요.`
   await integration.enable()
   expect(detail()).toBe(plain)
   guard = true
   await integration.enable()
   expect(detail()).toBe(
     plain +
-      ' "겹치면 에이전트가 기다리게 하기"가 켜져 있어, Bash·PowerShell 명령 전에 pitwall 에 묻는 훅도 하나 더해요.'
+      ' "겹치면 에이전트가 기다리게 하기"가 켜져 있어, Bash·PowerShell 명령 전에 Corral 에 묻는 훅도 하나 더해요.'
   )
   await integration.stop()
 })

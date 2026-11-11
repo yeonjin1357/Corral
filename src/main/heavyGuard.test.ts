@@ -102,7 +102,7 @@ function ask(
 const noScripts = (): null => null
 
 const deferText = (running: string, percent: number): string =>
-  `pitwall: 지금 다른 무거운 작업(${running})이 돌고 있고 메모리 사용률이 ${percent}% 예요. 이 명령은 지금 실행하지 말고 1분쯤 뒤에 같은 명령을 다시 실행해 주세요. 그동안 다른 일을 먼저 해도 돼요. 검사를 건너뛰지는 마세요.`
+  `Corral: 지금 다른 무거운 작업(${running})이 돌고 있고 메모리 사용률이 ${percent}% 예요. 이 명령은 지금 실행하지 말고 1분쯤 뒤에 같은 명령을 다시 실행해 주세요. 그동안 다른 일을 먼저 해도 돼요. 검사를 건너뛰지는 마세요.`
 
 describe('셸 명령 나누기', () => {
   test('따옴표 밖의 &&·||·;·|·줄바꿈으로 나누고, 빈 조각은 버린다', () => {
@@ -298,7 +298,7 @@ describe('무거운 작업 겹침 판단', () => {
     expect(at(NOW + 2 * MIN)).toEqual({
       kind: 'note',
       pattern: 'vue-tsc',
-      note: 'pitwall 참고: 다른 무거운 작업(vite build)과 겹쳐 실행됐고 메모리 사용률이 85% 예요.'
+      note: 'Corral 참고: 다른 무거운 작업(vite build)과 겹쳐 실행됐고 메모리 사용률이 85% 예요.'
     })
     expect(at(NOW + 3 * MIN).kind).toBe('note')
     // 다른 세션·다른 패턴은 따로 센다.

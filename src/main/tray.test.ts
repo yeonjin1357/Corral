@@ -247,8 +247,8 @@ describe('buildTrayMenu', () => {
 })
 
 test('툴팁', () => {
-  expect(trayTooltip(snap())).toBe('pitwall — RAM 82%')
-  expect(trayTooltip(null)).toBe('pitwall')
+  expect(trayTooltip(snap())).toBe('Corral — RAM 82%')
+  expect(trayTooltip(null)).toBe('Corral')
   // 커밋이 더 높으면 그 압박을 말한다.
   const m = snap().memory
   expect(
@@ -262,15 +262,15 @@ test('툴팁', () => {
         }
       })
     )
-  ).toBe('pitwall — 커밋 91%')
+  ).toBe('Corral — 커밋 91%')
 })
 
 test('풍선말에 응답 대기 수', () => {
   expect(
     trayTooltip(snap({ agents: [agentRow('waiting'), agentRow('working'), agentRow('waiting')] }))
-  ).toBe('pitwall — RAM 82% · 응답 대기 2')
+  ).toBe('Corral — RAM 82% · 응답 대기 2')
   // 조용한 에이전트는 점으로만 보이고 풍선말에는 세지 않는다.
-  expect(trayTooltip(snap({ agents: [agentRow('working', 1)] }))).toBe('pitwall — RAM 82%')
+  expect(trayTooltip(snap({ agents: [agentRow('working', 1)] }))).toBe('Corral — RAM 82%')
 })
 
 describe('아이콘', () => {
@@ -397,9 +397,8 @@ describe('createTrayController', () => {
     controller.notifyHiddenOnce()
     expect(tray.displayBalloon).toHaveBeenCalledTimes(1)
     expect(tray.displayBalloon).toHaveBeenCalledWith({
-      title: 'pitwall',
-      content:
-        'pitwall 은 트레이에서 계속 실행돼요. 끄려면 트레이 아이콘 메뉴에서 종료를 누르세요.',
+      title: 'Corral',
+      content: 'Corral 은 트레이에서 계속 실행돼요. 끄려면 트레이 아이콘 메뉴에서 종료를 누르세요.',
       noSound: true
     })
     const mac = setup('darwin')

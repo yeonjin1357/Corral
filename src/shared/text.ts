@@ -3,7 +3,7 @@ import type { MemoryLevel, WaitReason } from './types'
 
 /** 화면·트레이·확인 창에 나오는 문구는 모두 여기 모은다(나중에 다국어로 넓힐 때 이 파일만 바꾸면 되도록). */
 export const text = {
-  appName: 'pitwall',
+  appName: 'Corral',
   unresolvable: '판별 불가',
   detached: '(detached)',
   kill: {
@@ -35,9 +35,9 @@ export const text = {
    */
   guard: {
     defer: (running: string, percent: number): string =>
-      `pitwall: 지금 다른 무거운 작업(${running})이 돌고 있고 메모리 사용률이 ${percent}% 예요. 이 명령은 지금 실행하지 말고 1분쯤 뒤에 같은 명령을 다시 실행해 주세요. 그동안 다른 일을 먼저 해도 돼요. 검사를 건너뛰지는 마세요.`,
+      `Corral: 지금 다른 무거운 작업(${running})이 돌고 있고 메모리 사용률이 ${percent}% 예요. 이 명령은 지금 실행하지 말고 1분쯤 뒤에 같은 명령을 다시 실행해 주세요. 그동안 다른 일을 먼저 해도 돼요. 검사를 건너뛰지는 마세요.`,
     note: (running: string, percent: number): string =>
-      `pitwall 참고: 다른 무거운 작업(${running})과 겹쳐 실행됐고 메모리 사용률이 ${percent}% 예요.`,
+      `Corral 참고: 다른 무거운 작업(${running})과 겹쳐 실행됐고 메모리 사용률이 ${percent}% 예요.`,
     /** 패턴 이름 몇 개와 나머지 개수: "vite build, tsc, webpack 외 2개". */
     running: (labels: string[], rest: number): string =>
       rest > 0 ? `${labels.join(', ')} 외 ${rest}개` : labels.join(', ')
@@ -142,31 +142,31 @@ export const text = {
   },
   claudeHook: {
     enableTitle: 'Claude 연동 켜기',
-    enableMessage: 'Claude Code 설정 파일에 pitwall 훅을 더할까요?',
+    enableMessage: 'Claude Code 설정 파일에 Corral 훅을 더할까요?',
     enableDetail: (path: string): string =>
       `${path} 에 세션 시작·프롬프트·권한 요청·알림·도구 사용·응답 끝·오류·세션 끝 이벤트를 ` +
-      'pitwall 로 보내는 훅을 더해요. 다른 설정과 훅은 그대로 두고, 바꾸기 전에 백업을 남겨요. ' +
+      'Corral 로 보내는 훅을 더해요. 다른 설정과 훅은 그대로 두고, 바꾸기 전에 백업을 남겨요. ' +
       '이미 실행 중인 Claude 세션은 다시 시작해야 반영될 수 있어요.',
     /** 무거운 작업 기다리게 하기(G7)가 켜져 있을 때 enableDetail 뒤에 붙인다. */
     enableGuardNote:
-      ' "겹치면 에이전트가 기다리게 하기"가 켜져 있어, Bash·PowerShell 명령 전에 pitwall 에 묻는 훅도 하나 더해요.',
+      ' "겹치면 에이전트가 기다리게 하기"가 켜져 있어, Bash·PowerShell 명령 전에 Corral 에 묻는 훅도 하나 더해요.',
     enableConfirm: '켜기',
     /** 설정에서 무거운 작업 기다리게 하기(G7)를 켤 때: 질문 훅을 더한다. */
     guardOnTitle: '에이전트 기다리게 하기 켜기',
     guardOnMessage: 'Claude Code 설정 파일에 질문 훅을 더할까요?',
     guardOnDetail: (path: string): string =>
-      `${path} 의 pitwall 훅을 다시 써서, Claude 가 Bash·PowerShell 명령을 실행하기 전에 pitwall 에 묻는 훅을 하나 더해요. 무거운 작업이 겹치고 메모리가 부족할 때만 그 명령을 잠깐 미루게 해요. 다른 설정과 훅은 그대로 두고, 바꾸기 전에 백업을 남겨요. 이미 실행 중인 Claude 세션은 다시 시작해야 반영될 수 있어요.`,
+      `${path} 의 Corral 훅을 다시 써서, Claude 가 Bash·PowerShell 명령을 실행하기 전에 Corral 에 묻는 훅을 하나 더해요. 무거운 작업이 겹치고 메모리가 부족할 때만 그 명령을 잠깐 미루게 해요. 다른 설정과 훅은 그대로 두고, 바꾸기 전에 백업을 남겨요. 이미 실행 중인 Claude 세션은 다시 시작해야 반영될 수 있어요.`,
     guardOnConfirm: '켜기',
     /** 설정에서 끈 뒤(기능은 이미 꺼짐): 질문 훅도 뺄지. */
     guardOffTitle: '에이전트 기다리게 하기 끄기',
     guardOffMessage: 'Claude Code 설정 파일에서 질문 훅을 뺄까요?',
     guardOffDetail: (path: string): string =>
-      `기능은 이미 껐어요. ${path} 에서 Bash·PowerShell 명령 전에 pitwall 에 묻는 훅도 빼요. 남겨 두면 명령마다 pitwall 에 한 번 묻기만 하고 아무것도 미루지 않아요. 다른 설정과 훅은 그대로 두고, 바꾸기 전에 백업을 남겨요.`,
+      `기능은 이미 껐어요. ${path} 에서 Bash·PowerShell 명령 전에 Corral 에 묻는 훅도 빼요. 남겨 두면 명령마다 Corral 에 한 번 묻기만 하고 아무것도 미루지 않아요. 다른 설정과 훅은 그대로 두고, 바꾸기 전에 백업을 남겨요.`,
     guardOffConfirm: '빼기',
     disableTitle: 'Claude 연동 끄기',
-    disableMessage: 'Claude Code 설정 파일에서 pitwall 훅을 뺄까요?',
+    disableMessage: 'Claude Code 설정 파일에서 Corral 훅을 뺄까요?',
     disableDetail: (path: string): string =>
-      `${path} 에서 pitwall 이 넣은 훅만 빼요. 다른 설정과 훅은 그대로 두고, 바꾸기 전에 백업을 남겨요.`,
+      `${path} 에서 Corral 이 넣은 훅만 빼요. 다른 설정과 훅은 그대로 두고, 바꾸기 전에 백업을 남겨요.`,
     disableConfirm: '끄기',
     enabled: (backupPath: string | null): string =>
       backupPath
@@ -189,21 +189,21 @@ export const text = {
   },
   codexHook: {
     enableTitle: 'Codex 연동 켜기',
-    enableMessage: 'Codex 훅 설정 파일에 pitwall 훅을 더할까요?',
+    enableMessage: 'Codex 훅 설정 파일에 Corral 훅을 더할까요?',
     enableDetail: (path: string): string =>
-      `${path} 에 세션 시작·프롬프트·도구 사용·권한 요청·응답 끝·멈춤·세션 끝 이벤트를 pitwall 로 보내는 훅을 ` +
+      `${path} 에 세션 시작·프롬프트·도구 사용·권한 요청·응답 끝·멈춤·세션 끝 이벤트를 Corral 로 보내는 훅을 ` +
       '더해요. 다른 훅은 그대로 두고, 바꾸기 전에 백업을 남겨요. 켠 뒤 Codex 에서 /hooks 를 열어 한 번 승인해야 ' +
       '상태가 와요. 이미 실행 중인 Codex 는 다시 시작해야 반영될 수 있어요.',
     enableConfirm: '켜기',
     disableTitle: 'Codex 연동 끄기',
-    disableMessage: 'Codex 훅 설정 파일에서 pitwall 훅을 뺄까요?',
+    disableMessage: 'Codex 훅 설정 파일에서 Corral 훅을 뺄까요?',
     disableDetail: (path: string): string =>
-      `${path} 에서 pitwall 이 넣은 훅만 빼요. 다른 훅은 그대로 두고, 바꾸기 전에 백업을 남겨요.`,
+      `${path} 에서 Corral 이 넣은 훅만 빼요. 다른 훅은 그대로 두고, 바꾸기 전에 백업을 남겨요.`,
     disableConfirm: '끄기',
     enabled: (backupPath: string | null): string =>
       (backupPath
         ? `Codex 연동을 켰어요. 원래 설정은 ${backupPath} 에 백업했어요. `
-        : 'Codex 연동을 켰어요. ') + 'Codex 에서 /hooks 를 열어 pitwall 훅을 한 번 승인해 주세요.',
+        : 'Codex 연동을 켰어요. ') + 'Codex 에서 /hooks 를 열어 Corral 훅을 한 번 승인해 주세요.',
     alreadyOn:
       'Codex 연동이 이미 켜져 있어요. 상태가 안 오면 Codex 의 /hooks 에서 승인했는지 확인해 주세요.',
     disabled: (backupPath: string | null): string =>
@@ -275,9 +275,9 @@ export const text = {
     quit: '종료',
     /** pressure: pressureText 결과("RAM 82%" 또는 "커밋 91%"), waiting: 응답을 기다리는 에이전트 수. */
     tooltip: (pressure: string, waiting: number): string =>
-      waiting > 0 ? `pitwall — ${pressure} · 응답 대기 ${waiting}` : `pitwall — ${pressure}`,
+      waiting > 0 ? `Corral — ${pressure} · 응답 대기 ${waiting}` : `Corral — ${pressure}`,
     stillRunning:
-      'pitwall 은 트레이에서 계속 실행돼요. 끄려면 트레이 아이콘 메뉴에서 종료를 누르세요.'
+      'Corral 은 트레이에서 계속 실행돼요. 끄려면 트레이 아이콘 메뉴에서 종료를 누르세요.'
   },
   ui: {
     loading: '불러오는 중…',
@@ -297,9 +297,9 @@ export const text = {
         dark: { label: '어둡게', sub: 'Catppuccin' },
         auto: { label: 'OS 따라', sub: '밝게·어둡게 자동' }
       },
-      menu: 'pitwall 메뉴',
+      menu: 'Corral 메뉴',
       settings: '설정…',
-      about: 'pitwall 정보',
+      about: 'Corral 정보',
       checkUpdate: '새 버전 확인…',
       back: '대시보드로',
       dismiss: '닫기'
@@ -514,9 +514,9 @@ export const text = {
       live: '실시간 요약',
       stale: '업데이트가 늦어지고 있어요',
       reading: '확인하는 중…',
-      open: 'pitwall 열기',
+      open: 'Corral 열기',
       settings: '설정',
-      quit: 'pitwall 종료',
+      quit: 'Corral 종료',
       ram: 'RAM',
       ramDetail: (used: string, total: string): string => `${used} / ${total}`,
       servers: '개발 서버',
@@ -615,7 +615,7 @@ export const text = {
       clientsNow: (n: number): string =>
         n > 0 ? '브라우저 등이 연결돼 있어요' : '지금 연결이 없어요',
       memoryTitle: '메모리',
-      memoryDesc: 'pitwall 이 묶어서 본 메모리 사용',
+      memoryDesc: 'Corral 이 묶어서 본 메모리 사용',
       reading: (time: string): string => `${time} 측정`,
       facts: {
         total: '전체 메모리',
@@ -655,7 +655,7 @@ export const text = {
       dirty: '저장하지 않은 변경 사항이 있어요.',
       clean: '바꾼 뒤 저장을 누르면 바로 적용돼요.',
       pageDesc: {
-        general: 'pitwall 이 얼마나 자주 확인하고 어떻게 보일지 정해요.',
+        general: 'Corral 이 얼마나 자주 확인하고 어떻게 보일지 정해요.',
         thresholds: '경고 색과 정리 후보를 정하는 기준이에요.',
         heavy: '겹쳐 돌면 알려 줄 무거운 명령이에요.',
         notifications: '어떤 때 OS 알림을 보낼지 골라요.',
@@ -676,21 +676,21 @@ export const text = {
         stale: '오래 안 쓴 워크트리',
         repos: '더 살펴볼 저장소',
         hook: '연동 상태',
-        app: 'pitwall',
+        app: 'Corral',
         links: '링크'
       },
       saveFailed: (detail: string): string => `저장하지 못했어요: ${detail}`,
       refresh: '갱신 주기',
       refreshChoices: { fast: '빠르게', normal: '보통', saver: '절약' },
       refreshHelp: (openSec: number, closedSec: number): string =>
-        `창이 열려 있으면 ${openSec}초, 닫혀 있으면 ${closedSec}초마다 확인해요. 빠를수록 pitwall 이 CPU 를 조금 더 써요.`,
+        `창이 열려 있으면 ${openSec}초, 닫혀 있으면 ${closedSec}초마다 확인해요. 빠를수록 Corral 이 CPU 를 조금 더 써요.`,
       theme: '화면 테마',
       themeChoices: { light: '밝게', dark: '어둡게', auto: '자동(OS 따라)' },
       launchAtLogin: '로그인할 때 트레이로 시작',
       launchAtLoginHelp: '설치한 앱에서만 적용돼요(개발 실행에서는 등록하지 않아요).',
       updateCheck: '새 버전 확인',
       updateCheckHelp:
-        'GitHub 에서 새 버전이 있는지 확인해요. pitwall 이 하는 유일한 인터넷 접속이에요.',
+        'GitHub 에서 새 버전이 있는지 확인해요. Corral 이 하는 유일한 인터넷 접속이에요.',
       ramWarn: 'RAM 경고 기준',
       ramWarnHelp:
         'RAM 사용률이나 커밋 사용률이 이 이상이면 주황색이 되고, 무거운 작업이 겹칠 때 알려요.',
@@ -710,7 +710,7 @@ export const text = {
       resetDefaults: '기본값으로',
       heavyGuard: '겹치면 에이전트가 기다리게 하기(Claude Code)',
       heavyGuardHelp:
-        '켜면 Claude 가 Bash·PowerShell 명령을 실행하기 전에 pitwall 에 물어봐요. 무거운 작업이 이미 돌고 있고 메모리가 경고 기준을 넘었을 때만, 같은 명령을 두 번까지 1분 뒤로 미루게 해요. Claude 설정 파일에 훅을 하나 더 넣어요(확인 창·백업). pitwall 이 꺼져 있으면 아무 일도 없어요.',
+        '켜면 Claude 가 Bash·PowerShell 명령을 실행하기 전에 Corral 에 물어봐요. 무거운 작업이 이미 돌고 있고 메모리가 경고 기준을 넘었을 때만, 같은 명령을 두 번까지 1분 뒤로 미루게 해요. Claude 설정 파일에 훅을 하나 더 넣어요(확인 창·백업). Corral 이 꺼져 있으면 아무 일도 없어요.',
       /** 켜려고 저장했는데 메인이 켜지 않았을 때(질문 훅 설치를 취소·실패) "저장했어요" 대신. */
       heavyGuardNotChanged:
         '에이전트 기다리게 하기는 켜지 않았어요(훅 설치를 취소했거나 실패했어요).',
@@ -742,7 +742,7 @@ export const text = {
       notifyAgentGoneHelp: '작업 중이거나 응답을 기다리던 에이전트가 꺼지면 알려요.',
       notifyClickFocus: '알림을 누르면 그 에이전트의 창으로',
       notifyClickFocusHelp:
-        '에이전트 알림을 누르면 그 에이전트가 떠 있는 터미널·에디터 창을 앞으로 가져와요. 창을 찾지 못하면 pitwall 을 열어요. 탭까지 고르지는 못해요.',
+        '에이전트 알림을 누르면 그 에이전트가 떠 있는 터미널·에디터 창을 앞으로 가져와요. 창을 찾지 못하면 Corral 을 열어요. 탭까지 고르지는 못해요.',
       waitingReminder: '응답 대기 다시 알림',
       waitingReminderHelp:
         '응답 대기가 이 시간 넘게 이어지면 다시 알려요. 0 이면 다시 알리지 않아요.',
@@ -762,7 +762,7 @@ export const text = {
       removeRepo: '빼기',
       noRepos: '더한 저장소가 없어요.',
       settingsFile: (path: string): string => `설정 파일: ${path}`,
-      version: (v: string): string => `pitwall ${v}`,
+      version: (v: string): string => `Corral ${v}`,
       repo: 'GitHub 저장소',
       license: '라이선스: MIT',
       notices: '가져온 오픈소스와 라이선스',
@@ -872,7 +872,7 @@ export const text = {
         waiting: '권한을 기다리는 도구'
       },
       activityNote:
-        '에이전트 연동이 알려 준 내용이에요. pitwall 은 이것을 메모리에만 두고 파일로 남기지 않아요. 설정 > 에이전트 연동에서 끌 수 있어요.'
+        '에이전트 연동이 알려 준 내용이에요. Corral 은 이것을 메모리에만 두고 파일로 남기지 않아요. 설정 > 에이전트 연동에서 끌 수 있어요.'
     },
     disk: {
       empty: '정리할 끝난 워크트리가 없어요.',
@@ -935,7 +935,7 @@ export const text = {
       reenable: 'Codex 연동 다시 켜기',
       disable: 'Codex 연동 끄기',
       states: {
-        on: '켜짐 — Codex 훅으로 작업 중·응답 대기를 알아요. 상태가 안 오면 Codex 에서 /hooks 를 열어 pitwall 훅을 승인해 주세요.',
+        on: '켜짐 — Codex 훅으로 작업 중·응답 대기를 알아요. 상태가 안 오면 Codex 에서 /hooks 를 열어 Corral 훅을 승인해 주세요.',
         off: '꺼짐 — 지금은 Codex 세션 기록(없으면 CPU 사용량)으로 짐작해요. 켜면 응답 대기까지 알 수 있어요.',
         partial: '예전 설정이 남아 있어요. 다시 켜 주세요.',
         server: '훅을 받을 포트를 열지 못했어요. 다시 켜면 새 포트로 바꿔요.',
@@ -950,7 +950,7 @@ export const text = {
       helpTitle: '에이전트 연동',
       helpBody: [
         '연동을 켜지 않아도 Claude Code 의 세션 파일과 Codex 세션 기록으로 작업 중·쉬는 중·응답 대기를 알아요.',
-        '연동을 켜면 각 도구의 설정 파일에 pitwall 훅을 더해, 어떤 도구가 권한을 기다리는지와 하는 일까지 정확히 알아요. 켜고 끄는 것은 설정 > 에이전트 연동에서 해요(확인 창·백업).'
+        '연동을 켜면 각 도구의 설정 파일에 Corral 훅을 더해, 어떤 도구가 권한을 기다리는지와 하는 일까지 정확히 알아요. 켜고 끄는 것은 설정 > 에이전트 연동에서 해요(확인 창·백업).'
       ],
       states: {
         on: '켜짐',
@@ -1009,7 +1009,7 @@ export const text = {
       otherApps: '다른 앱',
       system: '시스템·공유 메모리',
       systemNote:
-        '시스템·공유 메모리: 커널·드라이버, 여러 앱이 같이 쓰는 메모리, pitwall 이 읽을 수 없는 프로세스(보안 프로그램·관리자 권한 등)를 합친 값이에요.',
+        '시스템·공유 메모리: 커널·드라이버, 여러 앱이 같이 쓰는 메모리, Corral 이 읽을 수 없는 프로세스(보안 프로그램·관리자 권한 등)를 합친 값이에요.',
       processes: (n: number): string => `${n}개`,
       /** 런타임을 띄운 앱까지 적은 다른 앱 이름(G5b, "node (Cursor)")과 그 title("node.exe — Cursor.exe"). */
       withOwner: (name: string, owner: string): string => `${name} (${owner})`,

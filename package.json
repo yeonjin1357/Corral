@@ -1,6 +1,6 @@
 {
-  "name": "pitwall",
-  "productName": "pitwall",
+  "name": "corral",
+  "productName": "Corral",
   "version": "0.1.0",
   "description": "Tray app to watch and tidy up local AI coding agents, dev-server ports, RAM and disk",
   "main": "./out/main/index.js",
