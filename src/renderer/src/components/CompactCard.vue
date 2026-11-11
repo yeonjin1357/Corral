@@ -19,6 +19,8 @@ defineProps<{
   /** 큰 값과 그 뒤에 작게 붙는 단위(개·%). */
   value: string
   unit?: string | null
+  /** 누를 것이 없을 때(예: 응답 대기 카드에 기다리는 에이전트가 없음). */
+  disabled?: boolean
 }>()
 const emit = defineEmits<{ action: [] }>()
 </script>
@@ -28,8 +30,9 @@ const emit = defineEmits<{ action: [] }>()
     <button
       type="button"
       data-compact-body
-      class="flex h-full w-full min-w-0 flex-col justify-center gap-1.5 px-4 text-left outline-none hover:bg-muted/40 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:ring-inset"
-      :title="actionLabel"
+      class="flex h-full w-full min-w-0 flex-col justify-center gap-1.5 px-4 text-left outline-none enabled:hover:bg-muted/40 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:ring-inset"
+      :title="disabled ? undefined : actionLabel"
+      :disabled="disabled"
       @click="emit('action')"
     >
       <span class="flex w-full min-w-0 items-center gap-2">

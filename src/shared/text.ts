@@ -396,6 +396,31 @@ export const text = {
       handle: '끌어서 위아래 크기 조절 · 더블클릭: 자세히 ↔ 접기',
       editCards: '카드 편집'
     },
+    /** 카드 고르기(G3): 카드 이름(편집 막대의 칩·새 카드 제목), 편집 단추, 새 카드의 빈 상태. */
+    cardsEdit: {
+      title: {
+        memory: '메모리',
+        servers: '개발 서버',
+        agents: '에이전트',
+        heavy: '무거운 작업',
+        leftovers: '남은 프로세스',
+        disk: '디스크 정리',
+        waiting: '응답 대기',
+        tokens: '토큰·한도',
+        events: '최근 기록'
+      },
+      hide: '숨기기',
+      show: '보이기',
+      remove: '빼기',
+      left: '앞으로',
+      right: '뒤로',
+      addable: '더할 수 있는 카드',
+      reset: '기본값으로',
+      done: '완료',
+      waitingNone: '기다리는 에이전트가 없어요',
+      tokensNone: '아직 읽은 토큰이 없어요',
+      eventsNone: '아직 기록이 없어요'
+    },
     /** 표 위 탭(NeoHtop ToolBar). */
     tabs: {
       label: '보기',

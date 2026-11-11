@@ -902,6 +902,91 @@ test('손잡이를 끄는 동안 카드 영역이 그 높이를 따르고 놓으
   w.unmount()
 })
 
+// ── 카드 고르기(G3) ──
+/** 카드 줄의 칸 이름(data-card) 순서. */
+const cardIds = (w: VueWrapper): string[] =>
+  w.findAll('.resource-grid [data-card]').map((c) => c.attributes('data-card')!)
+
+test('카드 배치를 바꾸면 다시 켜도 기억한다', async () => {
+  const w = await start(fake())
+  expect(cardIds(w)).toEqual(['memory', 'servers', 'agents', 'heavy', 'leftovers', 'disk'])
+  await w.find('[data-action="cards-edit"]').trigger('click')
+  // 새 카드를 더하고, 메모리를 숨기고, 디스크 정리를 앞으로.
+  await w.find('[data-add-card="waiting"]').trigger('click')
+  await w.find('[data-card="memory"] [data-card-action="hide"]').trigger('click')
+  await w.find('[data-card="disk"] [data-card-action="left"]').trigger('click')
+  // 편집 중에는 숨긴 카드도 보인다. 더한 카드는 더할 목록에서 빠진다.
+  expect(cardIds(w)).toEqual([
+    'memory',
+    'servers',
+    'agents',
+    'heavy',
+    'disk',
+    'leftovers',
+    'waiting'
+  ])
+  expect(w.find('[data-add-card="waiting"]').exists()).toBe(false)
+  // 편집을 끝내면 숨긴 카드는 없고, 배치는 저장돼 있다.
+  await w.find('[data-action="cards-edit"]').trigger('click')
+  expect(w.find('[data-card-action]').exists()).toBe(false)
+  expect(cardIds(w)).toEqual(['servers', 'agents', 'heavy', 'disk', 'leftovers', 'waiting'])
+  expect(JSON.parse(localStorage.getItem('pitwall.cards')!)).toEqual({
+    order: ['memory', 'servers', 'agents', 'heavy', 'disk', 'leftovers', 'waiting'],
+    hidden: ['memory']
+  })
+  w.unmount()
+  // 다시 켠다(저장소는 그대로).
+  window.pitwall = fake().api
+  const again = mount(App, { attachTo: document.body })
+  await flushPromises()
+  expect(cardIds(again)).toEqual(['servers', 'agents', 'heavy', 'disk', 'leftovers', 'waiting'])
+  // 기본값으로 돌리면 기본 여섯 장, 그것도 기억한다.
+  await again.find('[data-action="cards-edit"]').trigger('click')
+  await again.find('[data-action="cards-reset"]').trigger('click')
+  await again.find('[data-action="cards-edit"]').trigger('click')
+  expect(cardIds(again)).toEqual(['memory', 'servers', 'agents', 'heavy', 'leftovers', 'disk'])
+  expect(JSON.parse(localStorage.getItem('pitwall.cards')!)).toEqual({
+    order: ['memory', 'servers', 'agents', 'heavy', 'leftovers', 'disk'],
+    hidden: []
+  })
+  again.unmount()
+})
+
+test('접기에서 카드 편집을 누르면 자세히로 바뀐다', async () => {
+  const waiting = agentRow({ pid: 6000, state: 'waiting', stateSince: 1 })
+  const w = await start(fake({ getLatest: async () => ({ ...snap(), agents: [agent, waiting] }) }))
+  await w.find('[data-mode="collapsed"]').trigger('click')
+  expect(w.find('.resource-grid').exists()).toBe(false)
+  await w.find('[data-action="cards-edit"]').trigger('click')
+  // 자세히로 돌아와 카드가 편집 모양으로 보이고, 편집 막대가 단계 버튼 자리에.
+  expect(w.find('main').attributes('data-top-mode')).toBe('full')
+  expect(w.findAll('.resource-grid [data-card] [inert]')).toHaveLength(6)
+  expect(w.find('[data-mode]').exists()).toBe(false)
+  expect(localStorage.getItem('pitwall.topMode')).toBe('full')
+  await w.find('[data-add-card="waiting"]').trigger('click')
+  // 간단히에서도 편집할 수 있다.
+  await w.find('[data-action="cards-edit"]').trigger('click')
+  await w.find('[data-mode="compact"]').trigger('click')
+  await w.find('[data-action="cards-edit"]').trigger('click')
+  expect(w.find('main').attributes('data-top-mode')).toBe('compact')
+  expect(w.find('[data-card="waiting"] [data-card-action="remove"]').exists()).toBe(true)
+  // 손잡이를 더블클릭해 접으면 편집도 끝난다.
+  await w.find('[role="separator"]').trigger('dblclick')
+  expect(w.find('.resource-grid').exists()).toBe(false)
+  expect(w.findAll('[data-mode]')).toHaveLength(3)
+  expect(w.find('[data-action="cards-edit"]').attributes('aria-pressed')).toBe('false')
+  // 자세히로 돌아와 응답 대기 카드의 줄을 누르면 그 에이전트의 상세 패널.
+  await w.find('[data-mode="full"]').trigger('click')
+  await w.find('[data-card="waiting"] [data-waiting] button').trigger('click')
+  await flushPromises()
+  expect(pressedTab(w)).toBe('agents')
+  expect(document.body.textContent).toContain('Claude Code · PID 6000')
+  expect(w.find(`tr[data-key="${selectionKey.agent(waiting)}"]`).attributes('data-selected')).toBe(
+    'true'
+  )
+  w.unmount()
+})
+
 // ── 자리 비운 사이(G3g) ──
 function setVisibility(state: 'hidden' | 'visible'): void {
   Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state })

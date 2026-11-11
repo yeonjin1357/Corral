@@ -4,10 +4,15 @@
   넓은 첫 칸(NeoHtop CPU 칸 자리)은 메모리로, 코어별 막대 대신 전체 RAM 을 묶음별(개발 서버·에이전트·…)로 쌓은 막대와 범례를 둔다.
   아래 칸 구분선 + 세 숫자(NeoHtop System 카드의 Load average)는 개발 서버 판단·에이전트 상태 개수에 쓴다.
   간단히 단계(compact, G2)에서는 카드마다 CompactCard 한 장(제목·큰 값·설명 한 줄)으로 그린다.
+  카드 줄은 배치(layout, G3)의 순서대로 그린다. 새 카드(응답 대기·토큰·한도·최근 기록)는 cards/ 의 작은 컴포넌트다.
+  편집 모드(editing)에서는 숨긴 카드도 흐리게 보이고, 카드마다 오른쪽 위에 앞으로·뒤로·숨기기/보이기·빼기 단추,
+  끌어서 놓으면 놓은 카드 자리로 옮긴다. 편집 중에는 카드 안을 누를 수 없다(inert).
 -->
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import {
+  ChevronLeft,
+  ChevronRight,
   Globe,
   Hammer,
   HardDrive,
@@ -17,9 +22,20 @@ import {
   Unplug
 } from '@lucide/vue'
 import type { DashboardSnapshot, ProcessGroup } from '../../../shared/types'
+import type { PitEvent } from '../../../shared/events'
 import { formatBytes, codexLimitView, pressureText } from '../../../shared/format'
 import { text } from '../../../shared/text'
 import type { Point } from '../history'
+import {
+  DEFAULT_CARDS,
+  EXTRA_CARDS,
+  moveCard,
+  removeCard,
+  setCardHidden,
+  visibleCards,
+  type CardId,
+  type CardLayout
+} from '../layoutState'
 import { GROUP_COLOR, memoryComposition, tipPercent, type CompositionPart } from '../memory'
 import Card from '../ui/Card.vue'
 import CardContent from '../ui/CardContent.vue'
@@ -31,10 +47,13 @@ import StatItem from './StatItem.vue'
 import ResourceTrend from './ResourceTrend.vue'
 import ItemIcon from './ItemIcon.vue'
 import CompactCard from './CompactCard.vue'
+import WaitingCard from './cards/WaitingCard.vue'
+import TokensCard from './cards/TokensCard.vue'
+import EventsCard from './cards/EventsCard.vue'
 import { agentIcon, heavyIcon, leftoverIcon, serverIcon, type RowIcon } from '../rows'
 import { selectionKey } from '../../../shared/keys'
 
-export type TabKey = 'ports' | 'agents' | 'leftovers' | 'heavy' | 'disk' | 'apps'
+export type TabKey = 'ports' | 'agents' | 'leftovers' | 'heavy' | 'disk' | 'apps' | 'events'
 
 const props = defineProps<{
   snapshot: DashboardSnapshot
@@ -45,13 +64,98 @@ const props = defineProps<{
   gapMs?: number | null
   /** 간단히 단계: 카드마다 제목·큰 값·설명 한 줄(추이 그래프·아래 칸 없음). */
   compact?: boolean
+  /** 카드 편집 중(G3): 숨긴 카드도 흐리게 보이고 카드마다 편집 단추. */
+  editing?: boolean
+  /** 최근 기록 카드의 기록(오래된 것부터). */
+  events?: PitEvent[]
 }>()
+/** 카드 배치(G3). 주지 않으면 기본 여섯 장. */
+const layout = defineModel<CardLayout>('layout', {
+  default: () => ({ order: [...DEFAULT_CARDS], hidden: [] })
+})
 const emit = defineEmits<{
   memory: []
   tab: [key: TabKey]
   diskScan: []
   select: [key: string]
 }>()
+
+// ── 카드 배치(G3) ──
+const T = text.ui.cardsEdit
+/** 카드 줄에 그리는 카드: 편집 중이면 order 전체(숨긴 것은 흐리게), 아니면 보이는 것만. */
+const shownCards = computed(() => (props.editing ? layout.value.order : visibleCards(layout.value)))
+const isHidden = (id: CardId): boolean => layout.value.hidden.includes(id)
+/** 하나 남은 보이는 카드는 숨기거나 뺄 수 없다(조작 함수도 그대로 돌려준다 — 단추도 막아 둔다). */
+const lastVisible = computed(() => visibleCards(layout.value).length <= 1)
+/**
+ * 열 너비: 메모리 1.5 몫·나머지 1 몫(지금 비율), 한 장은 200px 아래로 줄지 않는다. 몇 장이든 한 줄이라(카드 영역
+ * 높이 TOP_HEIGHTS 가 한 줄을 가정) 다 들어가지 않으면 카드 줄만 가로로 스크롤한다(app.css `.resource-grid`).
+ */
+const CARD_MIN_PX = 200
+const columns = computed(() =>
+  shownCards.value.map((id) => `minmax(${CARD_MIN_PX}px, ${id === 'memory' ? 1.5 : 1}fr)`).join(' ')
+)
+
+const grid = ref<HTMLElement | null>(null)
+/**
+ * 앞으로·뒤로. 칸이 자리를 옮기며 누른 단추가 초점을 잃을 수 있어, 다시 그린 뒤 같은 단추(끝에 닿아 막혔으면
+ * 반대쪽 단추)로 초점을 돌려준다 — 키보드로 이어서 옮길 수 있게.
+ */
+async function moveBy(id: CardId, step: -1 | 1): Promise<void> {
+  layout.value = moveCard(layout.value, id, layout.value.order.indexOf(id) + step)
+  await nextTick()
+  const button = (action: string): HTMLButtonElement | null | undefined =>
+    grid.value?.querySelector<HTMLButtonElement>(
+      `[data-card="${id}"] [data-card-action="${action}"]`
+    )
+  const same = button(step < 0 ? 'left' : 'right')
+  ;(same && !same.disabled ? same : button(step < 0 ? 'right' : 'left'))?.focus()
+}
+function toggleHidden(id: CardId): void {
+  layout.value = setCardHidden(layout.value, id, !isHidden(id))
+}
+function remove(id: CardId): void {
+  layout.value = removeCard(layout.value, id)
+}
+
+/** 끄는 카드와 지금 그 위에 있는 카드(놓을 자리 표시). */
+const dragging = ref<CardId | null>(null)
+const dropTarget = ref<CardId | null>(null)
+function onDragStart(e: DragEvent, id: CardId): void {
+  if (!props.editing) return
+  dragging.value = id
+  if (e.dataTransfer) {
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', id)
+  }
+}
+function onDragOver(e: DragEvent, id: CardId): void {
+  if (!dragging.value) return
+  // 기본 동작을 막아야 이 카드에 놓을 수 있다.
+  e.preventDefault()
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+  dropTarget.value = id
+}
+function onDragLeave(e: DragEvent, id: CardId): void {
+  // 카드 안의 편집 단추로 옮겨 갈 때는 그대로 둔다.
+  const inside = (e.currentTarget as Node).contains(e.relatedTarget as Node | null)
+  if (dropTarget.value === id && !inside) dropTarget.value = null
+}
+/** 놓은 카드의 자리(order 의 위치)로 옮긴다. */
+function onDrop(e: DragEvent, id: CardId): void {
+  const from = dragging.value
+  if (!from) return
+  e.preventDefault()
+  onDragEnd()
+  if (from !== id) layout.value = moveCard(layout.value, from, layout.value.order.indexOf(id))
+}
+function onDragEnd(): void {
+  dragging.value = null
+  dropTarget.value = null
+}
+/** 카드 오른쪽 위 편집 단추(작게, 아이콘 단추는 정사각형). */
+const CONTROL =
+  'flex h-5 shrink-0 items-center justify-center rounded-[5px] text-[10px] leading-none text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-40'
 
 const s = computed(() => props.snapshot)
 const hasMemory = computed(() => s.value.memory.totalBytes > 0)
@@ -282,511 +386,652 @@ const diskSub = computed(() => {
 </script>
 
 <template>
-  <section class="resource-grid shrink-0" aria-label="자원 요약">
-    <!-- 메모리(넓은 칸) -->
-    <CompactCard
-      v-if="compact"
-      :icon="MemoryStick"
-      :title="text.ui.cards.memory"
-      color="var(--chart-3)"
-      :action-label="text.ui.cards.memoryDetails"
-      :value="hasMemory ? String(ramPercent) : text.ui.none"
-      :unit="hasMemory ? '%' : null"
-      @action="emit('memory')"
+  <section
+    ref="grid"
+    class="resource-grid shrink-0"
+    aria-label="자원 요약"
+    :style="{ gridTemplateColumns: columns }"
+  >
+    <!-- 칸마다 카드 한 장. 편집 중에는 칸 전체를 끌 수 있고, 카드 안은 누를 수 없다(inert). -->
+    <div
+      v-for="(id, index) in shownCards"
+      :key="id"
+      :data-card="id"
+      :data-hidden="(editing && isHidden(id)) || undefined"
+      class="relative min-w-0 rounded-xl"
+      :class="
+        editing
+          ? [
+              'cursor-grab outline-1 outline-offset-2 outline-dashed',
+              dropTarget === id && dragging !== id ? 'outline-primary' : 'outline-border'
+            ]
+          : null
+      "
+      :draggable="!!editing"
+      @dragstart="onDragStart($event, id)"
+      @dragover="onDragOver($event, id)"
+      @dragleave="onDragLeave($event, id)"
+      @drop="onDrop($event, id)"
+      @dragend="onDragEnd"
     >
-      <template #badge>
-        <Badge
-          v-for="b in memoryBadges"
-          :key="b.key"
-          :variant="b.variant"
-          class="text-[10px] font-normal"
-          >{{ b.label }}</Badge
-        >
-      </template>
-      <!-- 설명 줄 대신 얇은 쌓은 막대(자세히와 같은 조각·풍선말). -->
-      <span
-        v-if="composition"
-        data-memory-bar
-        class="flex h-1 w-full gap-px overflow-hidden rounded-full bg-muted"
-        :title="freeTip"
-        aria-hidden="true"
-      >
-        <span
-          v-for="p in memoryParts"
-          :key="p.group"
-          :data-memory-part="p.group"
-          class="h-full"
-          :style="{ width: `${p.share * 100}%`, backgroundColor: p.color }"
-          :title="p.tip"
-        ></span>
-      </span>
-      <span v-else class="truncate">{{ text.ui.loading }}</span>
-    </CompactCard>
-    <Card v-else size="sm" class="h-60 gap-3">
-      <PanelHeader
-        :icon="MemoryStick"
-        :title="text.ui.cards.memory"
-        color="var(--chart-3)"
-        :action-label="text.ui.cards.memoryDetails"
-        @action="emit('memory')"
-      >
-        <template #badge>
-          <Badge
-            v-for="b in memoryBadges"
-            :key="b.key"
-            :variant="b.variant"
-            class="text-[10px] font-normal"
-            >{{ b.label }}</Badge
+      <div :inert="editing || undefined" :class="{ 'opacity-40': editing && isHidden(id) }">
+        <!-- 메모리(넓은 칸) -->
+        <template v-if="id === 'memory'">
+          <CompactCard
+            v-if="compact"
+            :icon="MemoryStick"
+            :title="text.ui.cards.memory"
+            color="var(--chart-3)"
+            :action-label="text.ui.cards.memoryDetails"
+            :value="hasMemory ? String(ramPercent) : text.ui.none"
+            :unit="hasMemory ? '%' : null"
+            @action="emit('memory')"
           >
-        </template>
-      </PanelHeader>
-      <!-- 다른 카드(gap-2)보다 조금 좁혀(gap-1.5) 범례 세 줄도 카드 높이 안에 들어가게 한다(legendDense 참고). -->
-      <CardContent class="min-h-0 flex-1 gap-1.5">
-        <div>
-          <!-- 카드 높이가 정해져 있어 커밋 줄은 큰 숫자와 같은 줄 오른쪽에 둔다. -->
-          <div class="flex items-baseline justify-between gap-2">
-            <div class="text-3xl leading-8 font-semibold tracking-tight tabular-nums">
-              {{ hasMemory ? ramPercent : text.ui.none
-              }}<span v-if="hasMemory" class="ml-0.5 text-lg font-normal text-muted-foreground"
-                >%</span
+            <template #badge>
+              <Badge
+                v-for="b in memoryBadges"
+                :key="b.key"
+                :variant="b.variant"
+                class="text-[10px] font-normal"
+                >{{ b.label }}</Badge
               >
-            </div>
+            </template>
+            <!-- 설명 줄 대신 얇은 쌓은 막대(자세히와 같은 조각·풍선말). -->
             <span
-              v-if="hasMemory && commit && commitLine"
-              data-commit-line
-              class="min-w-0 truncate text-[11px] leading-4 tabular-nums text-muted-foreground"
-              :style="commit.level !== 'normal' ? { color: COMMIT_COLOR[commit.level] } : undefined"
-              :title="text.ui.sheet.commitNote"
-              >{{ commitLine }}</span
-            >
-          </div>
-          <p class="text-xs leading-4 text-muted-foreground">
-            {{
-              hasMemory
-                ? text.ui.cards.memoryOf(
-                    formatBytes(s.memory.usedBytes),
-                    formatBytes(s.memory.totalBytes),
-                    formatBytes(s.memory.availableBytes)
-                  )
-                : text.ui.loading
-            }}
-          </p>
-        </div>
-        <div
-          v-if="composition"
-          class="shrink-0"
-          :class="legendDense ? 'space-y-0.5' : 'space-y-1.5'"
-        >
-          <!-- 범례가 같은 값을 글로 보이므로 막대는 읽어 주지 않는다. 빈 칸(남은 메모리)은 막대 바탕. -->
-          <div
-            data-memory-bar
-            class="flex h-2.5 w-full gap-px overflow-hidden rounded-full bg-muted"
-            :title="freeTip"
-            aria-hidden="true"
-          >
-            <div
-              v-for="p in memoryParts"
-              :key="p.group"
-              :data-memory-part="p.group"
-              class="h-full"
-              :style="{ width: `${p.share * 100}%`, backgroundColor: p.color }"
-              :title="p.tip"
-            ></div>
-          </div>
-          <ul class="grid grid-cols-2 gap-x-4" :class="legendDense ? 'gap-y-0' : 'gap-y-1'">
-            <li
-              v-for="item in memoryLegend"
-              :key="item.group"
-              :data-memory-legend="item.group"
-              class="flex min-w-0 items-center gap-1.5 text-[11px] leading-3"
-              :title="item.tip"
+              v-if="composition"
+              data-memory-bar
+              class="flex h-1 w-full gap-px overflow-hidden rounded-full bg-muted"
+              :title="freeTip"
+              aria-hidden="true"
             >
               <span
-                class="size-1.5 shrink-0 rounded-full"
-                :style="{ backgroundColor: item.color }"
-                aria-hidden="true"
-              ></span
-              ><span class="min-w-0 truncate text-muted-foreground">{{ item.label }}</span
-              ><span class="ml-auto shrink-0 tabular-nums">{{ item.percent }}</span>
-            </li>
-          </ul>
-        </div>
-        <ResourceTrend
-          :points="ramHistory"
-          :window-ms="windowMs"
-          :gap-ms="gapMs"
-          :max="100"
-          color="var(--chart-3)"
-          :label="text.ui.cards.memory"
-          :format="(v) => `${Math.floor(v)}%`"
-          range="0–100%"
-        />
-      </CardContent>
-    </Card>
-
-    <!-- 개발 서버 -->
-    <CompactCard
-      v-if="compact"
-      :icon="Globe"
-      :title="text.ui.cards.ports"
-      color="var(--chart-1)"
-      :action-label="text.ui.cards.showList"
-      :value="String(s.servers.length)"
-      :unit="text.ui.cards.count"
-      @action="emit('tab', 'ports')"
-    >
-      <span class="min-w-0 truncate">{{ text.ui.cards.portsSub(portCount, workspaceCount) }}</span>
-    </CompactCard>
-    <Card v-else size="sm" class="h-60 gap-3">
-      <PanelHeader
-        :icon="Globe"
-        :title="text.ui.cards.ports"
-        color="var(--chart-1)"
-        :action-label="text.ui.cards.showList"
-        @action="emit('tab', 'ports')"
-      />
-      <CardContent class="min-h-0 flex-1 gap-2">
-        <div>
-          <div class="text-3xl leading-8 font-semibold tracking-tight tabular-nums">
-            {{ s.servers.length
-            }}<span class="ml-0.5 text-lg font-normal text-muted-foreground">{{
-              text.ui.cards.count
-            }}</span>
-          </div>
-          <p class="text-xs leading-4 text-muted-foreground">
-            {{ text.ui.cards.portsSub(portCount, workspaceCount) }}
-          </p>
-        </div>
-        <div v-if="portLogos.length" class="flex h-4 items-center gap-2.5 whitespace-nowrap">
-          <span
-            v-for="g in portLogos"
-            :key="g.key"
-            class="flex items-center gap-1 text-[11px] tabular-nums text-muted-foreground"
-            :title="`${g.key} ${g.count}${text.ui.cards.count}`"
-          >
-            <ItemIcon :icon="g.icon" :size="14" />{{ g.count }}
-          </span>
-        </div>
-        <StatItem :label="text.ui.cards.memorySum" :value="formatBytes(portMemory)" />
-        <div class="mt-auto border-t border-border/60 pt-3">
-          <p class="mb-2 text-[11px] text-muted-foreground">{{ text.ui.cards.portJudge }}</p>
-          <dl class="flex justify-between gap-2">
-            <div>
-              <dt class="whitespace-nowrap text-[10px] text-muted-foreground">
-                {{ text.ui.cards.candidate }}
-              </dt>
-              <dd
-                class="mt-0.5 text-sm font-medium tabular-nums"
-                :class="{ 'text-destructive': portCounts.candidate > 0 }"
+                v-for="p in memoryParts"
+                :key="p.group"
+                :data-memory-part="p.group"
+                class="h-full"
+                :style="{ width: `${p.share * 100}%`, backgroundColor: p.color }"
+                :title="p.tip"
+              ></span>
+            </span>
+            <span v-else class="truncate">{{ text.ui.loading }}</span>
+          </CompactCard>
+          <Card v-else size="sm" class="h-60 gap-3">
+            <PanelHeader
+              :icon="MemoryStick"
+              :title="text.ui.cards.memory"
+              color="var(--chart-3)"
+              :action-label="text.ui.cards.memoryDetails"
+              @action="emit('memory')"
+            >
+              <template #badge>
+                <Badge
+                  v-for="b in memoryBadges"
+                  :key="b.key"
+                  :variant="b.variant"
+                  class="text-[10px] font-normal"
+                  >{{ b.label }}</Badge
+                >
+              </template>
+            </PanelHeader>
+            <!-- 다른 카드(gap-2)보다 조금 좁혀(gap-1.5) 범례 세 줄도 카드 높이 안에 들어가게 한다(legendDense 참고). -->
+            <CardContent class="min-h-0 flex-1 gap-1.5">
+              <div>
+                <!-- 카드 높이가 정해져 있어 커밋 줄은 큰 숫자와 같은 줄 오른쪽에 둔다. -->
+                <div class="flex items-baseline justify-between gap-2">
+                  <div class="text-3xl leading-8 font-semibold tracking-tight tabular-nums">
+                    {{ hasMemory ? ramPercent : text.ui.none
+                    }}<span
+                      v-if="hasMemory"
+                      class="ml-0.5 text-lg font-normal text-muted-foreground"
+                      >%</span
+                    >
+                  </div>
+                  <span
+                    v-if="hasMemory && commit && commitLine"
+                    data-commit-line
+                    class="min-w-0 truncate text-[11px] leading-4 tabular-nums text-muted-foreground"
+                    :style="
+                      commit.level !== 'normal' ? { color: COMMIT_COLOR[commit.level] } : undefined
+                    "
+                    :title="text.ui.sheet.commitNote"
+                    >{{ commitLine }}</span
+                  >
+                </div>
+                <p class="text-xs leading-4 text-muted-foreground">
+                  {{
+                    hasMemory
+                      ? text.ui.cards.memoryOf(
+                          formatBytes(s.memory.usedBytes),
+                          formatBytes(s.memory.totalBytes),
+                          formatBytes(s.memory.availableBytes)
+                        )
+                      : text.ui.loading
+                  }}
+                </p>
+              </div>
+              <div
+                v-if="composition"
+                class="shrink-0"
+                :class="legendDense ? 'space-y-0.5' : 'space-y-1.5'"
               >
-                {{ portCounts.candidate }}
-              </dd>
-            </div>
-            <div>
-              <dt class="whitespace-nowrap text-[10px] text-muted-foreground">
-                {{ text.ui.cards.check }}
-              </dt>
-              <dd class="mt-0.5 text-sm font-medium tabular-nums">{{ portCounts.check }}</dd>
-            </div>
-            <div>
-              <dt class="whitespace-nowrap text-[10px] text-muted-foreground">
-                {{ text.ui.cards.inUse }}
-              </dt>
-              <dd class="mt-0.5 text-sm font-medium tabular-nums">{{ portCounts.inUse }}</dd>
-            </div>
-          </dl>
-        </div>
-      </CardContent>
-    </Card>
+                <!-- 범례가 같은 값을 글로 보이므로 막대는 읽어 주지 않는다. 빈 칸(남은 메모리)은 막대 바탕. -->
+                <div
+                  data-memory-bar
+                  class="flex h-2.5 w-full gap-px overflow-hidden rounded-full bg-muted"
+                  :title="freeTip"
+                  aria-hidden="true"
+                >
+                  <div
+                    v-for="p in memoryParts"
+                    :key="p.group"
+                    :data-memory-part="p.group"
+                    class="h-full"
+                    :style="{ width: `${p.share * 100}%`, backgroundColor: p.color }"
+                    :title="p.tip"
+                  ></div>
+                </div>
+                <ul class="grid grid-cols-2 gap-x-4" :class="legendDense ? 'gap-y-0' : 'gap-y-1'">
+                  <li
+                    v-for="item in memoryLegend"
+                    :key="item.group"
+                    :data-memory-legend="item.group"
+                    class="flex min-w-0 items-center gap-1.5 text-[11px] leading-3"
+                    :title="item.tip"
+                  >
+                    <span
+                      class="size-1.5 shrink-0 rounded-full"
+                      :style="{ backgroundColor: item.color }"
+                      aria-hidden="true"
+                    ></span
+                    ><span class="min-w-0 truncate text-muted-foreground">{{ item.label }}</span
+                    ><span class="ml-auto shrink-0 tabular-nums">{{ item.percent }}</span>
+                  </li>
+                </ul>
+              </div>
+              <ResourceTrend
+                :points="ramHistory"
+                :window-ms="windowMs"
+                :gap-ms="gapMs"
+                :max="100"
+                color="var(--chart-3)"
+                :label="text.ui.cards.memory"
+                :format="(v) => `${Math.floor(v)}%`"
+                range="0–100%"
+              />
+            </CardContent>
+          </Card>
+        </template>
 
-    <!-- 에이전트 -->
-    <CompactCard
-      v-if="compact"
-      :icon="SquareTerminal"
-      :title="text.ui.cards.agents"
-      color="var(--chart-2)"
-      :action-label="text.ui.cards.showList"
-      :value="String(s.agents.length)"
-      :unit="text.ui.cards.count"
-      @action="emit('tab', 'agents')"
-    >
-      <!-- 좁은 카드에 들어가게 사람이 볼 일(응답 대기)과 정리할 거리(오래 쉼)만. -->
-      <span
-        class="min-w-0 truncate tabular-nums"
-        :style="agentCounts.waiting > 0 ? { color: 'var(--peach)' } : undefined"
-        >{{ text.ui.agent.states.waiting }} {{ agentCounts.waiting }}</span
-      >
-      <span v-if="agentCounts.parked > 0" class="shrink-0 tabular-nums">{{
-        text.ui.cards.agentParked(agentCounts.parked)
-      }}</span>
-    </CompactCard>
-    <Card v-else size="sm" class="h-60 gap-3">
-      <PanelHeader
-        :icon="SquareTerminal"
-        :title="text.ui.cards.agents"
-        color="var(--chart-2)"
-        :action-label="text.ui.cards.showList"
-        @action="emit('tab', 'agents')"
-      />
-      <CardContent class="min-h-0 flex-1 gap-2">
-        <div>
-          <div class="text-3xl leading-8 font-semibold tracking-tight tabular-nums">
-            {{ s.agents.length
-            }}<span class="ml-0.5 text-lg font-normal text-muted-foreground">{{
-              text.ui.cards.count
+        <!-- 개발 서버 -->
+        <template v-else-if="id === 'servers'">
+          <CompactCard
+            v-if="compact"
+            :icon="Globe"
+            :title="text.ui.cards.ports"
+            color="var(--chart-1)"
+            :action-label="text.ui.cards.showList"
+            :value="String(s.servers.length)"
+            :unit="text.ui.cards.count"
+            @action="emit('tab', 'ports')"
+          >
+            <span class="min-w-0 truncate">{{
+              text.ui.cards.portsSub(portCount, workspaceCount)
             }}</span>
-          </div>
-          <p
-            v-if="codexLimit"
-            data-codex-limits
-            class="truncate text-xs leading-4 text-muted-foreground"
-            :title="codexLimit.tip"
+          </CompactCard>
+          <Card v-else size="sm" class="h-60 gap-3">
+            <PanelHeader
+              :icon="Globe"
+              :title="text.ui.cards.ports"
+              color="var(--chart-1)"
+              :action-label="text.ui.cards.showList"
+              @action="emit('tab', 'ports')"
+            />
+            <CardContent class="min-h-0 flex-1 gap-2">
+              <div>
+                <div class="text-3xl leading-8 font-semibold tracking-tight tabular-nums">
+                  {{ s.servers.length
+                  }}<span class="ml-0.5 text-lg font-normal text-muted-foreground">{{
+                    text.ui.cards.count
+                  }}</span>
+                </div>
+                <p class="text-xs leading-4 text-muted-foreground">
+                  {{ text.ui.cards.portsSub(portCount, workspaceCount) }}
+                </p>
+              </div>
+              <div v-if="portLogos.length" class="flex h-4 items-center gap-2.5 whitespace-nowrap">
+                <span
+                  v-for="g in portLogos"
+                  :key="g.key"
+                  class="flex items-center gap-1 text-[11px] tabular-nums text-muted-foreground"
+                  :title="`${g.key} ${g.count}${text.ui.cards.count}`"
+                >
+                  <ItemIcon :icon="g.icon" :size="14" />{{ g.count }}
+                </span>
+              </div>
+              <StatItem :label="text.ui.cards.memorySum" :value="formatBytes(portMemory)" />
+              <div class="mt-auto border-t border-border/60 pt-3">
+                <p class="mb-2 text-[11px] text-muted-foreground">{{ text.ui.cards.portJudge }}</p>
+                <dl class="flex justify-between gap-2">
+                  <div>
+                    <dt class="whitespace-nowrap text-[10px] text-muted-foreground">
+                      {{ text.ui.cards.candidate }}
+                    </dt>
+                    <dd
+                      class="mt-0.5 text-sm font-medium tabular-nums"
+                      :class="{ 'text-destructive': portCounts.candidate > 0 }"
+                    >
+                      {{ portCounts.candidate }}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt class="whitespace-nowrap text-[10px] text-muted-foreground">
+                      {{ text.ui.cards.check }}
+                    </dt>
+                    <dd class="mt-0.5 text-sm font-medium tabular-nums">{{ portCounts.check }}</dd>
+                  </div>
+                  <div>
+                    <dt class="whitespace-nowrap text-[10px] text-muted-foreground">
+                      {{ text.ui.cards.inUse }}
+                    </dt>
+                    <dd class="mt-0.5 text-sm font-medium tabular-nums">{{ portCounts.inUse }}</dd>
+                  </div>
+                </dl>
+              </div>
+            </CardContent>
+          </Card>
+        </template>
+
+        <!-- 에이전트 -->
+        <template v-else-if="id === 'agents'">
+          <CompactCard
+            v-if="compact"
+            :icon="SquareTerminal"
+            :title="text.ui.cards.agents"
+            color="var(--chart-2)"
+            :action-label="text.ui.cards.showList"
+            :value="String(s.agents.length)"
+            :unit="text.ui.cards.count"
+            @action="emit('tab', 'agents')"
           >
-            {{ codexLimit.caption }}
-          </p>
-          <p v-else class="text-xs leading-4 text-muted-foreground">
-            {{ text.ui.cards.agentsSub }}
-          </p>
-        </div>
-        <div v-if="agentLogos.length" class="flex h-4 items-center gap-2.5 whitespace-nowrap">
-          <span
-            v-for="g in agentLogos"
-            :key="g.key"
-            class="flex items-center gap-1 text-[11px] tabular-nums text-muted-foreground"
-            :title="`${g.key} ${g.count}${text.ui.cards.count}`"
-          >
-            <ItemIcon :icon="g.icon" :size="14" />{{ g.count }}
-          </span>
-        </div>
-        <StatItem :label="text.ui.cards.memorySum" :value="formatBytes(agentMemory)" />
-        <div class="mt-auto border-t border-border/60 pt-3">
-          <!-- 카드 높이(h-60)가 이미 꽉 차, 오래 쉬는 세션 수는 셋째 칸 아래 새 줄 대신 이 줄 오른쪽(셋째 칸 위)에 둔다. -->
-          <div
-            class="mb-2 flex items-baseline justify-between gap-2 text-[11px] text-muted-foreground"
-          >
-            <p class="min-w-0 truncate" :title="text.ui.cards.stateSource">
-              {{ text.ui.cards.agentStates }} ·
-              {{ stateSourceLabel }}
-            </p>
-            <span v-if="agentCounts.parked > 0" data-parked class="shrink-0 tabular-nums">{{
+            <!-- 좁은 카드에 들어가게 사람이 볼 일(응답 대기)과 정리할 거리(오래 쉼)만. -->
+            <span
+              class="min-w-0 truncate tabular-nums"
+              :style="agentCounts.waiting > 0 ? { color: 'var(--peach)' } : undefined"
+              >{{ text.ui.agent.states.waiting }} {{ agentCounts.waiting }}</span
+            >
+            <span v-if="agentCounts.parked > 0" class="shrink-0 tabular-nums">{{
               text.ui.cards.agentParked(agentCounts.parked)
             }}</span>
-          </div>
-          <dl class="flex justify-between gap-2">
-            <div>
-              <dt class="whitespace-nowrap text-[10px] text-muted-foreground">
-                {{ text.ui.agent.states.working }}
-              </dt>
-              <dd class="mt-0.5 text-sm font-medium tabular-nums">{{ agentCounts.working }}</dd>
-            </div>
-            <div>
-              <dt class="whitespace-nowrap text-[10px] text-muted-foreground">
-                {{ text.ui.agent.states.waiting }}
-              </dt>
-              <dd
-                class="mt-0.5 text-sm font-medium tabular-nums"
-                :style="agentCounts.waiting > 0 ? { color: 'var(--peach)' } : undefined"
-              >
-                {{ agentCounts.waiting }}
-              </dd>
-            </div>
-            <div>
-              <dt class="whitespace-nowrap text-[10px] text-muted-foreground">
-                {{ agentCounts.restLabel }}
-              </dt>
-              <dd class="mt-0.5 text-sm font-medium tabular-nums">{{ agentCounts.rest }}</dd>
-            </div>
-          </dl>
-        </div>
-      </CardContent>
-    </Card>
-
-    <!-- 무거운 작업 -->
-    <CompactCard
-      v-if="compact"
-      :icon="Hammer"
-      :title="text.ui.cards.heavy"
-      :hint="text.ui.cards.heavyHelp"
-      :color="s.heavyOverlap ? 'var(--destructive)' : null"
-      :action-label="text.ui.cards.showList"
-      :value="String(s.heavyJobs.length)"
-      :unit="text.ui.cards.count"
-      @action="emit('tab', 'heavy')"
-    >
-      <template #badge>
-        <Badge v-if="s.heavyOverlap" variant="destructive" class="text-[10px] font-normal">{{
-          text.ui.cards.overlap
-        }}</Badge>
-      </template>
-      <span class="min-w-0 truncate">{{ text.ui.cards.heavyRunning }}</span>
-      <span class="shrink-0 tabular-nums" :title="text.ui.cards.memorySum">{{
-        formatBytes(heavyMemory)
-      }}</span>
-    </CompactCard>
-    <Card v-else size="sm" class="h-60 gap-3">
-      <PanelHeader
-        :icon="Hammer"
-        :title="text.ui.cards.heavy"
-        :hint="text.ui.cards.heavyHelp"
-        :color="s.heavyOverlap ? 'var(--destructive)' : null"
-        :action-label="text.ui.cards.showList"
-        @action="emit('tab', 'heavy')"
-      >
-        <template #badge>
-          <Badge v-if="s.heavyOverlap" variant="destructive" class="text-[10px] font-normal">{{
-            text.ui.cards.overlap
-          }}</Badge>
+          </CompactCard>
+          <Card v-else size="sm" class="h-60 gap-3">
+            <PanelHeader
+              :icon="SquareTerminal"
+              :title="text.ui.cards.agents"
+              color="var(--chart-2)"
+              :action-label="text.ui.cards.showList"
+              @action="emit('tab', 'agents')"
+            />
+            <CardContent class="min-h-0 flex-1 gap-2">
+              <div>
+                <div class="text-3xl leading-8 font-semibold tracking-tight tabular-nums">
+                  {{ s.agents.length
+                  }}<span class="ml-0.5 text-lg font-normal text-muted-foreground">{{
+                    text.ui.cards.count
+                  }}</span>
+                </div>
+                <p
+                  v-if="codexLimit"
+                  data-codex-limits
+                  class="truncate text-xs leading-4 text-muted-foreground"
+                  :title="codexLimit.tip"
+                >
+                  {{ codexLimit.caption }}
+                </p>
+                <p v-else class="text-xs leading-4 text-muted-foreground">
+                  {{ text.ui.cards.agentsSub }}
+                </p>
+              </div>
+              <div v-if="agentLogos.length" class="flex h-4 items-center gap-2.5 whitespace-nowrap">
+                <span
+                  v-for="g in agentLogos"
+                  :key="g.key"
+                  class="flex items-center gap-1 text-[11px] tabular-nums text-muted-foreground"
+                  :title="`${g.key} ${g.count}${text.ui.cards.count}`"
+                >
+                  <ItemIcon :icon="g.icon" :size="14" />{{ g.count }}
+                </span>
+              </div>
+              <StatItem :label="text.ui.cards.memorySum" :value="formatBytes(agentMemory)" />
+              <div class="mt-auto border-t border-border/60 pt-3">
+                <!-- 카드 높이(h-60)가 이미 꽉 차, 오래 쉬는 세션 수는 셋째 칸 아래 새 줄 대신 이 줄 오른쪽(셋째 칸 위)에 둔다. -->
+                <div
+                  class="mb-2 flex items-baseline justify-between gap-2 text-[11px] text-muted-foreground"
+                >
+                  <p class="min-w-0 truncate" :title="text.ui.cards.stateSource">
+                    {{ text.ui.cards.agentStates }} ·
+                    {{ stateSourceLabel }}
+                  </p>
+                  <span v-if="agentCounts.parked > 0" data-parked class="shrink-0 tabular-nums">{{
+                    text.ui.cards.agentParked(agentCounts.parked)
+                  }}</span>
+                </div>
+                <dl class="flex justify-between gap-2">
+                  <div>
+                    <dt class="whitespace-nowrap text-[10px] text-muted-foreground">
+                      {{ text.ui.agent.states.working }}
+                    </dt>
+                    <dd class="mt-0.5 text-sm font-medium tabular-nums">
+                      {{ agentCounts.working }}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt class="whitespace-nowrap text-[10px] text-muted-foreground">
+                      {{ text.ui.agent.states.waiting }}
+                    </dt>
+                    <dd
+                      class="mt-0.5 text-sm font-medium tabular-nums"
+                      :style="agentCounts.waiting > 0 ? { color: 'var(--peach)' } : undefined"
+                    >
+                      {{ agentCounts.waiting }}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt class="whitespace-nowrap text-[10px] text-muted-foreground">
+                      {{ agentCounts.restLabel }}
+                    </dt>
+                    <dd class="mt-0.5 text-sm font-medium tabular-nums">{{ agentCounts.rest }}</dd>
+                  </div>
+                </dl>
+              </div>
+            </CardContent>
+          </Card>
         </template>
-      </PanelHeader>
-      <CardContent class="min-h-0 flex-1 gap-2">
-        <div>
-          <div class="text-3xl leading-8 font-semibold tracking-tight tabular-nums">
-            {{ s.heavyJobs.length
-            }}<span class="ml-0.5 text-lg font-normal text-muted-foreground">{{
-              text.ui.cards.count
-            }}</span>
-          </div>
-          <p class="text-xs leading-4 text-muted-foreground">{{ text.ui.cards.heavyRunning }}</p>
-        </div>
-        <StatItem :label="text.ui.cards.memorySum" :value="formatBytes(heavyMemory)" />
-        <ul v-if="heavyItems.length" class="mt-auto space-y-1.5 border-t border-border/60 pt-2.5">
-          <li v-for="item in heavyItems" :key="item.key">
-            <button
-              type="button"
-              class="flex w-full min-w-0 items-center gap-2 rounded-sm text-left text-xs outline-none hover:text-primary focus-visible:ring-3 focus-visible:ring-ring/50"
-              :title="item.title"
-              @click="emit('select', item.key)"
-            >
-              <ItemIcon :icon="item.icon" :size="14" />
-              <span class="min-w-0 truncate">{{ item.label }}</span>
-              <span class="ml-auto shrink-0 tabular-nums text-muted-foreground">{{
-                formatBytes(item.bytes)
-              }}</span>
-            </button>
-          </li>
-        </ul>
-        <p
-          v-if="s.heavyOverlap"
-          class="text-[11px] leading-4 text-destructive"
-          :class="{ 'mt-auto': !heavyItems.length }"
-        >
-          {{ text.ui.cards.overlapNote(pressure) }}
-        </p>
-      </CardContent>
-    </Card>
 
-    <!-- 남은 프로세스 -->
-    <CompactCard
-      v-if="compact"
-      :icon="Unplug"
-      :title="text.ui.cards.leftovers"
-      :hint="text.ui.cards.leftoversHelp"
-      :color="freeLeftovers.length ? 'var(--peach)' : null"
-      :action-label="text.ui.cards.showList"
-      :value="String(freeLeftovers.length)"
-      :unit="text.ui.cards.count"
-      @action="emit('tab', 'leftovers')"
-    >
-      <span class="min-w-0 truncate">{{ text.ui.cards.leftoversSub }}</span>
-      <span class="shrink-0 tabular-nums" :title="text.ui.cards.memorySum">{{
-        formatBytes(leftoverMemory)
-      }}</span>
-    </CompactCard>
-    <Card v-else size="sm" class="h-60 gap-3">
-      <PanelHeader
-        :icon="Unplug"
-        :title="text.ui.cards.leftovers"
-        :hint="text.ui.cards.leftoversHelp"
-        :color="freeLeftovers.length ? 'var(--peach)' : null"
-        :action-label="text.ui.cards.showList"
-        @action="emit('tab', 'leftovers')"
-      />
-      <CardContent class="min-h-0 flex-1 gap-2">
-        <div>
-          <div class="text-3xl leading-8 font-semibold tracking-tight tabular-nums">
-            {{ freeLeftovers.length
-            }}<span class="ml-0.5 text-lg font-normal text-muted-foreground">{{
-              text.ui.cards.count
+        <!-- 무거운 작업 -->
+        <template v-else-if="id === 'heavy'">
+          <CompactCard
+            v-if="compact"
+            :icon="Hammer"
+            :title="text.ui.cards.heavy"
+            :hint="text.ui.cards.heavyHelp"
+            :color="s.heavyOverlap ? 'var(--destructive)' : null"
+            :action-label="text.ui.cards.showList"
+            :value="String(s.heavyJobs.length)"
+            :unit="text.ui.cards.count"
+            @action="emit('tab', 'heavy')"
+          >
+            <template #badge>
+              <Badge v-if="s.heavyOverlap" variant="destructive" class="text-[10px] font-normal">{{
+                text.ui.cards.overlap
+              }}</Badge>
+            </template>
+            <span class="min-w-0 truncate">{{ text.ui.cards.heavyRunning }}</span>
+            <span class="shrink-0 tabular-nums" :title="text.ui.cards.memorySum">{{
+              formatBytes(heavyMemory)
             }}</span>
-          </div>
-          <p class="text-xs leading-4 text-muted-foreground">{{ text.ui.cards.leftoversSub }}</p>
-        </div>
-        <StatItem :label="text.ui.cards.memorySum" :value="formatBytes(leftoverMemory)" />
-        <ul
-          v-if="leftoverItems.length"
-          class="mt-auto space-y-1.5 border-t border-border/60 pt-2.5"
-        >
-          <li v-for="item in leftoverItems" :key="item.key">
-            <button
-              type="button"
-              class="flex w-full min-w-0 items-center gap-2 rounded-sm text-left text-xs outline-none hover:text-primary focus-visible:ring-3 focus-visible:ring-ring/50"
-              :title="item.title"
-              @click="emit('select', item.key)"
+          </CompactCard>
+          <Card v-else size="sm" class="h-60 gap-3">
+            <PanelHeader
+              :icon="Hammer"
+              :title="text.ui.cards.heavy"
+              :hint="text.ui.cards.heavyHelp"
+              :color="s.heavyOverlap ? 'var(--destructive)' : null"
+              :action-label="text.ui.cards.showList"
+              @action="emit('tab', 'heavy')"
             >
-              <ItemIcon :icon="item.icon" :size="14" />
-              <span class="min-w-0 truncate">{{ item.label }}</span>
-              <span class="ml-auto shrink-0 tabular-nums text-muted-foreground">{{
-                formatBytes(item.bytes)
-              }}</span>
-            </button>
-          </li>
-        </ul>
-        <p
-          v-if="agentLeftovers > 0"
-          class="text-[11px] leading-4 text-muted-foreground"
-          :class="{ 'mt-auto': !leftoverItems.length }"
-        >
-          {{ text.ui.cards.leftoversAgent(agentLeftovers) }}
-        </p>
-      </CardContent>
-    </Card>
+              <template #badge>
+                <Badge
+                  v-if="s.heavyOverlap"
+                  variant="destructive"
+                  class="text-[10px] font-normal"
+                  >{{ text.ui.cards.overlap }}</Badge
+                >
+              </template>
+            </PanelHeader>
+            <CardContent class="min-h-0 flex-1 gap-2">
+              <div>
+                <div class="text-3xl leading-8 font-semibold tracking-tight tabular-nums">
+                  {{ s.heavyJobs.length
+                  }}<span class="ml-0.5 text-lg font-normal text-muted-foreground">{{
+                    text.ui.cards.count
+                  }}</span>
+                </div>
+                <p class="text-xs leading-4 text-muted-foreground">
+                  {{ text.ui.cards.heavyRunning }}
+                </p>
+              </div>
+              <StatItem :label="text.ui.cards.memorySum" :value="formatBytes(heavyMemory)" />
+              <ul
+                v-if="heavyItems.length"
+                class="mt-auto space-y-1.5 border-t border-border/60 pt-2.5"
+              >
+                <li v-for="item in heavyItems" :key="item.key">
+                  <button
+                    type="button"
+                    class="flex w-full min-w-0 items-center gap-2 rounded-sm text-left text-xs outline-none hover:text-primary focus-visible:ring-3 focus-visible:ring-ring/50"
+                    :title="item.title"
+                    @click="emit('select', item.key)"
+                  >
+                    <ItemIcon :icon="item.icon" :size="14" />
+                    <span class="min-w-0 truncate">{{ item.label }}</span>
+                    <span class="ml-auto shrink-0 tabular-nums text-muted-foreground">{{
+                      formatBytes(item.bytes)
+                    }}</span>
+                  </button>
+                </li>
+              </ul>
+              <p
+                v-if="s.heavyOverlap"
+                class="text-[11px] leading-4 text-destructive"
+                :class="{ 'mt-auto': !heavyItems.length }"
+              >
+                {{ text.ui.cards.overlapNote(pressure) }}
+              </p>
+            </CardContent>
+          </Card>
+        </template>
 
-    <!-- 디스크 정리 -->
-    <CompactCard
-      v-if="compact"
-      :icon="HardDrive"
-      :title="text.ui.cards.disk"
-      color="var(--chart-4)"
-      :action-label="text.ui.cards.showList"
-      :value="diskReady ? formatBytes(diskBytes) : text.ui.none"
-      @action="emit('tab', 'disk')"
-    >
-      <span class="min-w-0 truncate" :title="diskSub">{{ diskSub }}</span>
-    </CompactCard>
-    <Card v-else size="sm" class="h-60 gap-3">
-      <PanelHeader
-        :icon="HardDrive"
-        :title="text.ui.cards.disk"
-        color="var(--chart-4)"
-        :action-label="text.ui.cards.showList"
-        @action="emit('tab', 'disk')"
-      />
-      <CardContent class="min-h-0 flex-1 gap-2">
-        <div>
-          <div class="text-2xl leading-8 font-semibold tracking-tight tabular-nums">
-            {{ diskReady ? formatBytes(diskBytes) : text.ui.none }}
-          </div>
-          <p class="text-xs leading-4 text-muted-foreground">{{ diskSub }}</p>
-        </div>
-        <StatItem :label="text.ui.cards.diskInUse" :value="`${diskInUse}${text.ui.cards.count}`" />
-        <div class="mt-auto flex items-center justify-between gap-2 border-t border-border/60 pt-2">
-          <span
-            class="min-w-0 truncate text-[11px] leading-4"
-            :class="disk?.error ? 'text-destructive' : 'text-muted-foreground'"
-            :title="diskNote"
-            >{{ diskNote }}</span
+        <!-- 남은 프로세스 -->
+        <template v-else-if="id === 'leftovers'">
+          <CompactCard
+            v-if="compact"
+            :icon="Unplug"
+            :title="text.ui.cards.leftovers"
+            :hint="text.ui.cards.leftoversHelp"
+            :color="freeLeftovers.length ? 'var(--peach)' : null"
+            :action-label="text.ui.cards.showList"
+            :value="String(freeLeftovers.length)"
+            :unit="text.ui.cards.count"
+            @action="emit('tab', 'leftovers')"
           >
-          <Button
-            variant="ghost"
-            size="xs"
-            class="shrink-0 text-muted-foreground"
-            :disabled="!!disk?.scanning"
-            @click="emit('diskScan')"
+            <span class="min-w-0 truncate">{{ text.ui.cards.leftoversSub }}</span>
+            <span class="shrink-0 tabular-nums" :title="text.ui.cards.memorySum">{{
+              formatBytes(leftoverMemory)
+            }}</span>
+          </CompactCard>
+          <Card v-else size="sm" class="h-60 gap-3">
+            <PanelHeader
+              :icon="Unplug"
+              :title="text.ui.cards.leftovers"
+              :hint="text.ui.cards.leftoversHelp"
+              :color="freeLeftovers.length ? 'var(--peach)' : null"
+              :action-label="text.ui.cards.showList"
+              @action="emit('tab', 'leftovers')"
+            />
+            <CardContent class="min-h-0 flex-1 gap-2">
+              <div>
+                <div class="text-3xl leading-8 font-semibold tracking-tight tabular-nums">
+                  {{ freeLeftovers.length
+                  }}<span class="ml-0.5 text-lg font-normal text-muted-foreground">{{
+                    text.ui.cards.count
+                  }}</span>
+                </div>
+                <p class="text-xs leading-4 text-muted-foreground">
+                  {{ text.ui.cards.leftoversSub }}
+                </p>
+              </div>
+              <StatItem :label="text.ui.cards.memorySum" :value="formatBytes(leftoverMemory)" />
+              <ul
+                v-if="leftoverItems.length"
+                class="mt-auto space-y-1.5 border-t border-border/60 pt-2.5"
+              >
+                <li v-for="item in leftoverItems" :key="item.key">
+                  <button
+                    type="button"
+                    class="flex w-full min-w-0 items-center gap-2 rounded-sm text-left text-xs outline-none hover:text-primary focus-visible:ring-3 focus-visible:ring-ring/50"
+                    :title="item.title"
+                    @click="emit('select', item.key)"
+                  >
+                    <ItemIcon :icon="item.icon" :size="14" />
+                    <span class="min-w-0 truncate">{{ item.label }}</span>
+                    <span class="ml-auto shrink-0 tabular-nums text-muted-foreground">{{
+                      formatBytes(item.bytes)
+                    }}</span>
+                  </button>
+                </li>
+              </ul>
+              <p
+                v-if="agentLeftovers > 0"
+                class="text-[11px] leading-4 text-muted-foreground"
+                :class="{ 'mt-auto': !leftoverItems.length }"
+              >
+                {{ text.ui.cards.leftoversAgent(agentLeftovers) }}
+              </p>
+            </CardContent>
+          </Card>
+        </template>
+
+        <!-- 디스크 정리 -->
+        <template v-else-if="id === 'disk'">
+          <CompactCard
+            v-if="compact"
+            :icon="HardDrive"
+            :title="text.ui.cards.disk"
+            color="var(--chart-4)"
+            :action-label="text.ui.cards.showList"
+            :value="diskReady ? formatBytes(diskBytes) : text.ui.none"
+            @action="emit('tab', 'disk')"
           >
-            <RefreshCw :class="{ 'animate-spin': disk?.scanning }" />{{ text.ui.cards.rescan }}
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
+            <span class="min-w-0 truncate" :title="diskSub">{{ diskSub }}</span>
+          </CompactCard>
+          <Card v-else size="sm" class="h-60 gap-3">
+            <PanelHeader
+              :icon="HardDrive"
+              :title="text.ui.cards.disk"
+              color="var(--chart-4)"
+              :action-label="text.ui.cards.showList"
+              @action="emit('tab', 'disk')"
+            />
+            <CardContent class="min-h-0 flex-1 gap-2">
+              <div>
+                <div class="text-2xl leading-8 font-semibold tracking-tight tabular-nums">
+                  {{ diskReady ? formatBytes(diskBytes) : text.ui.none }}
+                </div>
+                <p class="text-xs leading-4 text-muted-foreground">{{ diskSub }}</p>
+              </div>
+              <StatItem
+                :label="text.ui.cards.diskInUse"
+                :value="`${diskInUse}${text.ui.cards.count}`"
+              />
+              <div
+                class="mt-auto flex items-center justify-between gap-2 border-t border-border/60 pt-2"
+              >
+                <span
+                  class="min-w-0 truncate text-[11px] leading-4"
+                  :class="disk?.error ? 'text-destructive' : 'text-muted-foreground'"
+                  :title="diskNote"
+                  >{{ diskNote }}</span
+                >
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  class="shrink-0 text-muted-foreground"
+                  :disabled="!!disk?.scanning"
+                  @click="emit('diskScan')"
+                >
+                  <RefreshCw :class="{ 'animate-spin': disk?.scanning }" />{{
+                    text.ui.cards.rescan
+                  }}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </template>
+
+        <!-- 새 카드(G3) -->
+        <WaitingCard
+          v-else-if="id === 'waiting'"
+          :agents="s.agents"
+          :now="s.takenAt"
+          :compact="compact"
+          @select="(key) => emit('select', key)"
+        />
+        <TokensCard
+          v-else-if="id === 'tokens'"
+          :agents="s.agents"
+          :limits="s.codexLimits"
+          :now="s.takenAt"
+          :compact="compact"
+          @tab="(key) => emit('tab', key)"
+        />
+        <EventsCard
+          v-else-if="id === 'events'"
+          :events="events ?? []"
+          :now="s.takenAt"
+          :compact="compact"
+          @tab="(key) => emit('tab', key)"
+        />
+      </div>
+
+      <!-- 편집 단추: 카드(간단히 카드는 카드 전체가 단추) 밖, 칸 오른쪽 위. -->
+      <div
+        v-if="editing"
+        role="group"
+        :aria-label="T.title[id]"
+        class="absolute top-2 right-2 flex items-center gap-0.5 rounded-md bg-card p-0.5 shadow-xs ring-1 ring-border"
+      >
+        <button
+          type="button"
+          data-card-action="left"
+          :class="[CONTROL, 'w-5']"
+          :aria-label="T.left"
+          :title="T.left"
+          :disabled="index === 0"
+          @click="moveBy(id, -1)"
+        >
+          <ChevronLeft class="size-3" aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          data-card-action="right"
+          :class="[CONTROL, 'w-5']"
+          :aria-label="T.right"
+          :title="T.right"
+          :disabled="index === shownCards.length - 1"
+          @click="moveBy(id, 1)"
+        >
+          <ChevronRight class="size-3" aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          :data-card-action="isHidden(id) ? 'show' : 'hide'"
+          :class="[CONTROL, 'px-1.5']"
+          :disabled="!isHidden(id) && lastVisible"
+          @click="toggleHidden(id)"
+        >
+          {{ isHidden(id) ? T.show : T.hide }}
+        </button>
+        <button
+          v-if="EXTRA_CARDS.includes(id)"
+          type="button"
+          data-card-action="remove"
+          :class="[CONTROL, 'px-1.5']"
+          :disabled="!isHidden(id) && lastVisible"
+          @click="remove(id)"
+        >
+          {{ T.remove }}
+        </button>
+      </div>
+    </div>
   </section>
 </template>

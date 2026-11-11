@@ -260,19 +260,19 @@
 }
 
 /*
-  NeoHtop app.css: 맨 위 카드 줄. pitwall 은 카드가 6개(메모리 칸이 넓다).
+  NeoHtop app.css: 맨 위 카드 줄. 카드는 고른 배치(G3)대로 몇 장이든 한 줄에 놓인다.
+  열은 StatsBar 가 보이는 카드로 만든다(메모리 1.5 몫·나머지 1 몫, 한 장 최소 200px). 다 들어가지 않으면
+  (좁은 창·카드가 많을 때) 카드 줄만 옆으로 스크롤한다 — NeoHtop 처럼 여러 줄로 접으면 표 자리가 없어진다.
   아래 여백은 바로 밑 손잡이 줄(TopSplitter)이 맡아 4px 만 둔다. 위·아래 여백(16px·4px)은 창 너비와 상관없이
   그대로다 — layoutState.ts 의 TOP_HEIGHTS(끄는 높이·붙는 단계)가 이 값으로 카드 영역 높이를 센다.
 */
 .resource-grid {
   display: grid;
-  grid-template-columns:
-    minmax(0, 1.5fr) repeat(3, minmax(0, 1fr)) minmax(0, 1.05fr)
-    minmax(0, 1.2fr);
   gap: 12px;
   padding: 16px 16px 4px;
+  overflow-x: auto;
 }
-.resource-grid > [data-slot='card'] {
+.resource-grid > [data-card] {
   min-width: 0;
 }
 .resource-grid [data-slot='card-header'],
@@ -345,7 +345,11 @@
   background-size: var(--memory-share, 0%) calc(100% - 8px);
 }
 
-@media (max-width: 1200px) {
+/*
+  기본 창(1280px) 언저리부터 카드 사이·바깥 여백을 좁힌다: 기본 여섯 장이 한 장 200px 이상으로 스크롤 없이 들어가게
+  (좁힌 여백 200 × 6 + 8 × 5 + 12 × 2 = 1264px, 원래 여백은 200 × 6 + 12 × 5 + 16 × 2 = 1292px 라 그보다 넓은 1300px 까지).
+*/
+@media (max-width: 1300px) {
   .resource-grid {
     gap: 8px;
     padding-inline: 12px;
@@ -354,19 +358,6 @@
   .resource-grid [data-slot='card-content'],
   .resource-grid [data-compact-body] {
     padding-inline: 12px;
-  }
-}
-/*
-  좁은 창: NeoHtop 은 900px 아래에서 2칸으로 접고 높이를 넘으면 스크롤한다.
-  pitwall 은 카드가 6개라 접으면 표 자리가 없어지므로, 카드를 한 줄에 두고 옆으로 스크롤한다(자세히·간단히 모두).
-  한글 제목·숫자가 잘리지 않게 카드 한 칸이 200px 아래로 줄어들 폭(1180px)부터 그렇게 한다.
-*/
-@media (max-width: 1180px) {
-  .resource-grid {
-    grid-template-columns: 280px;
-    grid-auto-flow: column;
-    grid-auto-columns: 200px;
-    overflow-x: auto;
   }
 }
 /*

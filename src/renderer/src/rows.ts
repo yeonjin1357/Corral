@@ -128,7 +128,8 @@ const c = text.ui.columns
 const st = text.ui.rowStatus
 const ACTIONS = text.ui.actions
 
-const folderOf = (w: WorktreeInfo | null): string =>
+/** 표의 이름·프로젝트 칸(과 응답 대기·토큰 카드)의 폴더 이름. 워크트리를 모르면 "작업 폴더 모름". */
+export const folderOf = (w: WorktreeInfo | null): string =>
   w ? worktreeFolder(w) : text.ui.tags.noWorktree
 const branchOf = (w: WorktreeInfo | null): Cell => ({
   text: w ? (w.branch ?? text.detached) : text.ui.none,

@@ -1,9 +1,10 @@
 // @vitest-environment happy-dom
-import { mount, type DOMWrapper, type VueWrapper } from '@vue/test-utils'
+import { flushPromises, mount, type DOMWrapper, type VueWrapper } from '@vue/test-utils'
 import StatsBar from './StatsBar.vue'
 import ResourceTrend from './ResourceTrend.vue'
 import type { DashboardSnapshot, DiskRow, ProcessGroup } from '../../../shared/types'
 import { GB, MB, agentRow, diskRow, heavyJob, serverRow, snapshot } from '../testing/fixtures'
+import { DEFAULT_CARDS, type CardLayout } from '../layoutState'
 
 function bar(s: DashboardSnapshot): VueWrapper {
   return mount(StatsBar, { props: { snapshot: s, ramHistory: [], windowMs: 600_000 } })
@@ -454,5 +455,203 @@ describe('Codex 한도(G6): 에이전트 카드의 설명 줄', () => {
   test('읽은 때가 스냅샷보다 뒤여도 "0초 전 기준"', () => {
     const el = caption(limits(win(10, 300, null), null, NOW + 60_000))
     expect(el.attributes('title')!.endsWith('0초 전 기준')).toBe(true)
+  })
+})
+
+// ── 카드 고르기(G3) ──
+describe('카드 배치', () => {
+  /** 카드 줄의 칸마다 제목(편집 모드가 아니면 보이는 카드만). */
+  const titles = (w: VueWrapper): string[] =>
+    w.findAll('[data-card]').map((c) => c.find('[data-slot=card-title]').text().trim())
+  const cell = (w: VueWrapper, id: string): DOMWrapper<Element> => w.find(`[data-card="${id}"]`)
+  const control = (w: VueWrapper, id: string, action: string): DOMWrapper<Element> =>
+    cell(w, id).find(`[data-card-action="${action}"]`)
+
+  /** v-model:layout 처럼 바뀐 배치를 다시 props 로 넣는다. */
+  function editable(layout: CardLayout, editing: boolean): VueWrapper {
+    const w: VueWrapper = mount(StatsBar, {
+      props: {
+        snapshot: snapshot(),
+        ramHistory: [],
+        windowMs: 600_000,
+        layout,
+        editing,
+        events: [],
+        'onUpdate:layout': (next: CardLayout) => void w.setProps({ layout: next })
+      }
+    })
+    return w
+  }
+  const layouts = (w: VueWrapper): CardLayout[] =>
+    (w.emitted('update:layout') ?? []).map((e) => e[0] as CardLayout)
+
+  test('배치 순서대로 보이고 숨긴 카드는 없다', () => {
+    const w = editable(
+      {
+        order: ['disk', 'waiting', 'memory', 'servers', 'agents', 'heavy', 'leftovers', 'events'],
+        hidden: ['servers', 'heavy']
+      },
+      false
+    )
+    expect(titles(w)).toEqual([
+      '디스크 정리',
+      '응답 대기',
+      '메모리',
+      '에이전트',
+      '남은 프로세스',
+      '최근 기록'
+    ])
+    // 열은 보이는 카드로 만든다: 메모리는 1.5 몫, 나머지는 1 몫, 한 장은 200px 아래로 줄지 않는다.
+    expect(w.find('.resource-grid').attributes('style')).toContain(
+      [
+        'minmax(200px, 1fr)',
+        'minmax(200px, 1fr)',
+        'minmax(200px, 1.5fr)',
+        'minmax(200px, 1fr)',
+        'minmax(200px, 1fr)',
+        'minmax(200px, 1fr)'
+      ].join(' ')
+    )
+    // 편집 중이 아니면 편집 단추가 없고 카드를 누를 수 있으며 끌 수 없다.
+    expect(w.find('[data-card-action]').exists()).toBe(false)
+    expect(w.find('[inert]').exists()).toBe(false)
+    expect(cell(w, 'disk').attributes('draggable')).toBe('false')
+    // 배치를 주지 않으면 기본 여섯 장.
+    expect(titles(bar(snapshot()))).toEqual([
+      '메모리',
+      '개발 서버',
+      '에이전트',
+      '무거운 작업',
+      '남은 프로세스',
+      '디스크 정리'
+    ])
+  })
+
+  test('편집 모드: 숨긴 카드는 흐리게, 보이기·숨기기·빼기·앞으로·뒤로', async () => {
+    const w = editable({ order: [...DEFAULT_CARDS, 'waiting'], hidden: ['heavy'] }, true)
+    // 숨긴 카드도 보이되 흐리게.
+    expect(titles(w)).toEqual([
+      '메모리',
+      '개발 서버',
+      '에이전트',
+      '무거운 작업',
+      '남은 프로세스',
+      '디스크 정리',
+      '응답 대기'
+    ])
+    expect(cell(w, 'heavy').attributes('data-hidden')).toBeDefined()
+    expect(cell(w, 'heavy').find('[inert]').classes()).toContain('opacity-40')
+    expect(cell(w, 'memory').attributes('data-hidden')).toBeUndefined()
+    expect(cell(w, 'memory').find('[inert]').classes()).not.toContain('opacity-40')
+    // 편집 중에는 카드 안을 누를 수 없다(누르면 다른 곳으로 가는 대신 끌어서 옮긴다).
+    for (const c of w.findAll('[data-card]')) {
+      expect(c.find('[inert]').find('[data-slot=card]').exists()).toBe(true)
+      expect(c.attributes('draggable')).toBe('true')
+    }
+    // 단추: 맨 앞은 앞으로 못 가고 맨 뒤는 뒤로 못 간다. 빼기는 새 카드에만.
+    expect(control(w, 'memory', 'left').attributes('disabled')).toBeDefined()
+    expect(control(w, 'memory', 'left').attributes('aria-label')).toBe('앞으로')
+    expect(control(w, 'memory', 'right').attributes('aria-label')).toBe('뒤로')
+    expect(control(w, 'waiting', 'right').attributes('disabled')).toBeDefined()
+    expect(control(w, 'memory', 'hide').text()).toBe('숨기기')
+    expect(control(w, 'heavy', 'show').text()).toBe('보이기')
+    expect(control(w, 'memory', 'remove').exists()).toBe(false)
+    expect(control(w, 'waiting', 'remove').text()).toBe('빼기')
+
+    await control(w, 'heavy', 'show').trigger('click')
+    expect(layouts(w).at(-1)).toEqual({ order: [...DEFAULT_CARDS, 'waiting'], hidden: [] })
+    await control(w, 'memory', 'hide').trigger('click')
+    expect(layouts(w).at(-1)!.hidden).toEqual(['memory'])
+    await control(w, 'servers', 'left').trigger('click')
+    expect(layouts(w).at(-1)!.order.slice(0, 2)).toEqual(['servers', 'memory'])
+    await control(w, 'disk', 'right').trigger('click')
+    expect(layouts(w).at(-1)!.order.slice(-2)).toEqual(['waiting', 'disk'])
+    await control(w, 'waiting', 'remove').trigger('click')
+    expect(layouts(w).at(-1)).toEqual({
+      order: ['servers', 'memory', 'agents', 'heavy', 'leftovers', 'disk'],
+      hidden: ['memory']
+    })
+
+    // 끌어서 놓으면 놓은 카드 자리로.
+    await cell(w, 'leftovers').trigger('dragstart')
+    await cell(w, 'servers').trigger('dragover')
+    await cell(w, 'servers').trigger('drop')
+    await cell(w, 'leftovers').trigger('dragend')
+    expect(layouts(w).at(-1)!.order).toEqual([
+      'leftovers',
+      'servers',
+      'memory',
+      'agents',
+      'heavy',
+      'disk'
+    ])
+    // 제자리에 놓으면 그대로.
+    const before = layouts(w).length
+    await cell(w, 'agents').trigger('dragstart')
+    await cell(w, 'agents').trigger('drop')
+    expect(layouts(w)).toHaveLength(before)
+
+    // 앞으로·뒤로를 눌러도 초점은 옮긴 카드의 단추에 남는다(키보드로 이어서 옮기게). 끝에 닿으면 반대쪽 단추로.
+    const keys: VueWrapper = mount(StatsBar, {
+      attachTo: document.body,
+      props: {
+        snapshot: snapshot(),
+        ramHistory: [],
+        windowMs: 600_000,
+        editing: true,
+        layout: { order: DEFAULT_CARDS, hidden: [] },
+        'onUpdate:layout': (next: CardLayout) => void keys.setProps({ layout: next })
+      }
+    })
+    /** 초점이 있는 단추: "카드:단추". */
+    const focused = (): string => {
+      const el = document.activeElement
+      return `${el?.closest('[data-card]')?.getAttribute('data-card')}:${el?.getAttribute('data-card-action')}`
+    }
+    const press = async (id: string, action: string): Promise<void> => {
+      await keys.find(`[data-card="${id}"] [data-card-action="${action}"]`).trigger('click')
+      await flushPromises()
+    }
+    await press('heavy', 'right')
+    expect(focused()).toBe('heavy:right')
+    await press('heavy', 'right')
+    expect(keys.findAll('[data-card]').at(-1)!.attributes('data-card')).toBe('heavy')
+    expect(focused()).toBe('heavy:left')
+    keys.unmount()
+
+    // 하나 남은 보이는 카드는 숨길 수 없다.
+    const last = editable({ order: DEFAULT_CARDS, hidden: DEFAULT_CARDS.slice(1) }, true)
+    expect(control(last, 'memory', 'hide').attributes('disabled')).toBeDefined()
+    expect(control(last, 'servers', 'show').attributes('disabled')).toBeUndefined()
+  })
+
+  test('간단히·편집 모드: 새 카드도 같은 줄에, 편집 단추는 카드 단추 밖에', () => {
+    const w: VueWrapper = mount(StatsBar, {
+      props: {
+        snapshot: snapshot(),
+        ramHistory: [],
+        windowMs: 600_000,
+        compact: true,
+        editing: true,
+        layout: { order: ['tokens', ...DEFAULT_CARDS, 'events'], hidden: [] },
+        events: []
+      }
+    })
+    expect(titles(w)).toEqual([
+      '토큰·한도',
+      '메모리',
+      '개발 서버',
+      '에이전트',
+      '무거운 작업',
+      '남은 프로세스',
+      '디스크 정리',
+      '최근 기록'
+    ])
+    // 간단히 카드는 카드 전체가 단추라, 편집 단추는 그 밖에 둔다.
+    for (const c of w.findAll('[data-card]')) {
+      expect(c.find('[data-compact-body]').exists()).toBe(true)
+      expect(c.find('[data-compact-body] [data-card-action]').exists()).toBe(false)
+      expect(c.find('[data-card-action="hide"]').exists()).toBe(true)
+    }
   })
 })

@@ -52,7 +52,20 @@ import {
   type TabKey
 } from './rows'
 import { readServerView, writeServerView, type ServerView } from './viewState'
-import { TOP_HEIGHTS, readTopMode, snapTopMode, writeTopMode, type TopMode } from './layoutState'
+import {
+  DEFAULT_CARDS,
+  EXTRA_CARDS,
+  TOP_HEIGHTS,
+  addCard,
+  readCardLayout,
+  readTopMode,
+  snapTopMode,
+  writeCardLayout,
+  writeTopMode,
+  type CardId,
+  type CardLayout,
+  type TopMode
+} from './layoutState'
 import logo from '../../../resources/icon.png'
 import TitleBar from './components/TitleBar.vue'
 import StatsBar from './components/StatsBar.vue'
@@ -636,6 +649,30 @@ const compactCards = computed(() =>
     ? snapTopMode(topDrag.value, TOP_HEIGHTS) !== 'full'
     : topMode.value === 'compact'
 )
+/** 카드 배치(G3): 순서·숨김·더한 새 카드. 다시 켜도 기억한다. */
+const cardLayout = ref<CardLayout>(readCardLayout(storage))
+watch(cardLayout, (l) => writeCardLayout(storage, l))
+/** 카드 편집 중. 편집 막대(더할 카드·기본값으로·완료)는 손잡이 줄에 있다. */
+const editingCards = ref(false)
+/** 편집 막대의 칩: 카드 줄에 아직 없는 새 카드. */
+const addableCards = computed(() =>
+  EXTRA_CARDS.filter((id) => !cardLayout.value.order.includes(id))
+)
+/** 카드 편집 시작·끝. 접혀 있으면 카드가 보이게 자세히로. */
+function toggleCardEdit(): void {
+  editingCards.value = !editingCards.value
+  if (editingCards.value && topMode.value === 'collapsed') topMode.value = 'full'
+}
+// 편집 중에 접으면(손잡이 더블클릭·끌기) 편집할 카드가 없으니 편집도 끝낸다.
+watch(topMode, (m) => {
+  if (m === 'collapsed') editingCards.value = false
+})
+function addCardToRow(id: CardId): void {
+  cardLayout.value = addCard(cardLayout.value, id)
+}
+function resetCards(): void {
+  cardLayout.value = { order: [...DEFAULT_CARDS], hidden: [] }
+}
 /** 접은 작업 공간 묶음. 갱신해도 유지한다(앱을 다시 켜면 모두 펼침). */
 const collapsedGroups = ref<string[]>([])
 const grouping = computed<((rows: Row[]) => GroupedRows[]) | null>(() => {
@@ -872,18 +909,30 @@ const takenAt = computed(() =>
           :style="topDrag != null ? { height: `${topDrag}px` } : undefined"
         >
           <StatsBar
+            v-model:layout="cardLayout"
             :snapshot="snapshot"
             :ram-history="history.ram"
             :window-ms="windowMs"
             :gap-ms="gapMs"
             :compact="compactCards"
+            :editing="editingCards"
+            :events="events"
             @memory="memoryOpen = true"
             @tab="(key) => ((tab = key), (query = ''))"
             @disk-scan="diskScan"
             @select="select"
           />
         </div>
-        <TopSplitter v-model:mode="topMode" :heights="TOP_HEIGHTS" @drag="(h) => (topDrag = h)" />
+        <TopSplitter
+          v-model:mode="topMode"
+          :heights="TOP_HEIGHTS"
+          :editing="editingCards"
+          :addable="addableCards"
+          @drag="(h) => (topDrag = h)"
+          @edit="toggleCardEdit"
+          @add="addCardToRow"
+          @reset="resetCards"
+        />
 
         <NoticeCard
           v-if="away"

@@ -134,3 +134,40 @@ test('카드 편집 버튼은 edit 를 보낸다', async () => {
     'true'
   )
 })
+
+test('더할 수 있는 카드 칩·기본값으로·완료', async () => {
+  const w = mount(TopSplitter, {
+    props: { mode: 'full', heights: HEIGHTS, editing: true, addable: ['waiting', 'events'] }
+  })
+  // 편집 중에는 단계 버튼 자리에 편집 막대가 온다(카드 영역 높이는 그대로).
+  expect(w.find('[data-mode]').exists()).toBe(false)
+  const bar = w.find('[role="group"]')
+  expect(bar.attributes('aria-label')).toBe('더할 수 있는 카드')
+  expect(bar.text()).toContain('더할 수 있는 카드')
+  const chips = w.findAll('[data-add-card]')
+  expect(chips.map((c) => [c.attributes('data-add-card'), c.text()])).toEqual([
+    ['waiting', '응답 대기'],
+    ['events', '최근 기록']
+  ])
+  await chips[1].trigger('click')
+  expect(w.emitted('add')).toEqual([['events']])
+  const reset = w.find('[data-action="cards-reset"]')
+  expect(reset.text()).toBe('기본값으로')
+  await reset.trigger('click')
+  expect(w.emitted('reset')).toHaveLength(1)
+  // 카드 편집 버튼은 완료가 되고, 누르면 편집을 끝낸다(edit 를 보낸다).
+  const done = w.find('[data-action="cards-edit"]')
+  expect(done.text()).toBe('완료')
+  await done.trigger('click')
+  expect(w.emitted('edit')).toHaveLength(1)
+  // 더할 카드가 없으면 칩과 이름 없이 기본값으로만.
+  await w.setProps({ addable: [] })
+  expect(w.find('[data-add-card]').exists()).toBe(false)
+  expect(w.text()).not.toContain('더할 수 있는 카드')
+  expect(w.find('[data-action="cards-reset"]').exists()).toBe(true)
+  // 편집이 끝나면 단계 버튼이 돌아온다.
+  await w.setProps({ editing: false })
+  expect(w.findAll('[data-mode]')).toHaveLength(3)
+  expect(w.find('[data-action="cards-reset"]').exists()).toBe(false)
+  expect(w.find('[data-action="cards-edit"]').text()).toBe('카드 편집')
+})

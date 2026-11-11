@@ -78,8 +78,8 @@ export function eventText(e: PitEvent): { kind: string; detail: string } {
   return DESCRIBE[e.kind](e)
 }
 
-/** `오전 9:10`, 오늘이 아니면 `11월 9일 오전 9:10`. 오늘은 스냅샷 시각 기준. */
-function timeText(t: number, now: number): string {
+/** `오전 9:10`, 오늘이 아니면 `11월 9일 오전 9:10`. 오늘은 스냅샷 시각 기준(기록 탭·최근 기록 카드). */
+export function timeText(t: number, now: number): string {
   const when = new Date(t)
   const today = new Date(now)
   const clock = when.toLocaleTimeString('ko-KR', { hour: 'numeric', minute: '2-digit' })
