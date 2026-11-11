@@ -187,7 +187,9 @@ test('확인 창 문구', () => {
     detail: 'node.exe (PID 4100) 와 하위 프로세스 1개가 종료돼요.',
     buttons: ['내리기', '취소'],
     defaultId: 1,
-    cancelId: 1
+    cancelId: 1,
+    // 되돌릴 수 없는 일이라 확인 버튼을 빨간 계열로 그린다.
+    tone: 'danger'
   })
   expect(buildKillConfirm({ ...row, descendantPids: [] }).detail).toBe(
     'node.exe (PID 4100) 가 종료돼요.'
@@ -228,6 +230,9 @@ test('한꺼번에 끄기·작업 공간 정리 확인 창의 확보 예상: 커
   expect(buildManyConfirm([item(3000, 800, null)]).message).toBe(
     '1개를 끌까요? 약 800 MB 를 확보해요.'
   )
+  // 한꺼번에 끄기·작업 공간 정리도 되돌릴 수 없는 일이다.
+  expect(buildManyConfirm(known).tone).toBe('danger')
+  expect(buildWorkspaceConfirm('work', known, []).tone).toBe('danger')
 })
 
 describe('killServer', () => {
@@ -476,7 +481,8 @@ describe('남은 프로세스 끄기', () => {
       detail: 'node.exe (PID 4100) 와 하위 프로세스 1개가 종료돼요.',
       buttons: ['끄기', '취소'],
       defaultId: 1,
-      cancelId: 1
+      cancelId: 1,
+      tone: 'danger'
     })
     const inWorktree = buildLeftoverConfirm({
       ...leftover,

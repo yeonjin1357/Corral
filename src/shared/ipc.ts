@@ -1,6 +1,7 @@
 import type {
   ClaudeHookStatus,
   CodexHookStatus,
+  ConfirmRequest,
   DashboardSnapshot,
   DiskReport,
   GroupPoint,
@@ -46,7 +47,15 @@ export const IPC = {
   updateInstall: 'pitwall:update-install',
   updateChanged: 'pitwall:update-changed',
   eventsGet: 'pitwall:events-get',
-  eventsAdded: 'pitwall:events-added'
+  eventsAdded: 'pitwall:events-added',
+  /** 메인 → 화면: 이 내용으로 물어봐 줘(ConfirmRequest). */
+  confirmRequest: 'pitwall:confirm-request',
+  /** 화면 → 메인: 그 요청을 그렸다(id). */
+  confirmShown: 'pitwall:confirm-shown',
+  /** 화면 → 메인: 누른 버튼 번호(id, index). */
+  confirmReply: 'pitwall:confirm-reply',
+  /** 화면 → 메인: 아직 답이 없는 요청(→ ConfirmRequest[]). */
+  confirmPending: 'pitwall:confirm-pending'
 } as const
 
 /** 바로 가기(G3f): 경로 복사·폴더 열기·터미널 열기. */
@@ -135,6 +144,20 @@ export interface PitwallApi {
   }
   /** 알림·트레이에서 특정 화면으로 가라고 할 때 호출된다. 반환 함수로 구독을 끊는다. */
   onNavigate(callback: (target: NavigateTarget) => void): () => void
+  /**
+   * 확인 창: 메인이 묻고(끄기·지우기·연동 바꾸기) 화면은 그려서 누른 버튼 번호만 돌려준다.
+   * 그렸다고 알리지(shown) 않으면 메인이 OS 확인 창으로 대신 묻는다. 메인 창에서만 쓴다.
+   */
+  confirm: {
+    /** 메인이 물어볼 때 호출된다. 반환 함수로 구독을 끊는다. */
+    onRequest(callback: (request: ConfirmRequest) => void): () => void
+    /** 아직 답이 없는 요청(처음 그려질 때·다시 로드됐을 때 받아 간다). */
+    pending(): Promise<ConfirmRequest[]>
+    /** 그 요청을 화면에 그렸다. */
+    shown(id: number): void
+    /** 누른 버튼 번호(Esc 는 cancelId). */
+    reply(id: number, index: number): void
+  }
   /** 사용자 설정. 저장하면 메인이 범위를 고쳐 저장·반영한 값을 돌려준다. */
   settings: {
     get(): Promise<Settings>

@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import { IPC, type NavigateTarget, type PitwallApi } from '../shared/ipc'
-import type { DashboardSnapshot, UpdateStatus } from '../shared/types'
+import type { ConfirmRequest, DashboardSnapshot, UpdateStatus } from '../shared/types'
 import type { Settings } from '../shared/settings'
 import type { PitEvent } from '../shared/events'
 
@@ -50,6 +50,18 @@ const api: PitwallApi = {
     return () => {
       ipcRenderer.removeListener(IPC.navigate, handler)
     }
+  },
+  confirm: {
+    onRequest(callback) {
+      const handler = (_event: IpcRendererEvent, request: ConfirmRequest): void => callback(request)
+      ipcRenderer.on(IPC.confirmRequest, handler)
+      return () => {
+        ipcRenderer.removeListener(IPC.confirmRequest, handler)
+      }
+    },
+    pending: () => ipcRenderer.invoke(IPC.confirmPending),
+    shown: (id) => ipcRenderer.send(IPC.confirmShown, id),
+    reply: (id, index) => ipcRenderer.send(IPC.confirmReply, id, index)
   },
   killServer: (pid) => ipcRenderer.invoke(IPC.killServer, pid),
   killLeftover: (pid) => ipcRenderer.invoke(IPC.killLeftover, pid),

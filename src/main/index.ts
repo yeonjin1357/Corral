@@ -21,7 +21,7 @@ import { join } from 'path'
 import { cpus, homedir } from 'os'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
-import type { DashboardSnapshot, KillResult } from '../shared/types'
+import type { ConfirmOptions, DashboardSnapshot, KillResult } from '../shared/types'
 import {
   DEFAULT_SETTINGS,
   normalizeSettings,
@@ -56,7 +56,8 @@ import { createGuardAnswerer, settleHeavyGuard } from './heavyGuard'
 import { applyHookEvent, clearActivity } from './sessions'
 import type { Sessions } from './sessions'
 import { createScheduler } from './scheduler'
-import { createKiller, type KillConfirm } from './kill'
+import { createKiller } from './kill'
+import { confirmIpcHandlers, createConfirmBroker } from './confirmBroker'
 import { createDiskManager, createRepoMemory, pathExists, snapshotWorktrees } from './disk'
 import { createNotifier, type Notice } from './notifier'
 import { loginItemOptions, shouldStartHidden } from './startup'
@@ -466,14 +467,44 @@ function createTray(): void {
   if (latest) trayController.update(latest)
 }
 
-/** 끄기·설정 바꾸기 전에 띄우는 네이티브 확인 창. 첫 번째 버튼이면 true. */
-async function confirmDialog(options: KillConfirm): Promise<boolean> {
-  const box = { type: 'warning' as const, noLink: true, ...options }
-  const result =
-    mainWindow && !mainWindow.isDestroyed()
-      ? await dialog.showMessageBox(mainWindow, box)
-      : await dialog.showMessageBox(box)
-  return result.response === 0
+/** 지금 메인 창이 있고 다 떠서 보내면 바로 받을 수 있는지. */
+function mainWindowReady(): boolean {
+  return !!mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isLoading()
+}
+
+/**
+ * 확인 창: 메인이 묻고, 메인 창 화면이 앱 디자인으로 그려 누른 버튼 번호만 돌려준다.
+ * 화면이 10초 안에 그렸다고 알리지 않으면 OS 기본 확인 창으로 대신 묻는다(판단은 confirmBroker).
+ */
+const confirms = createConfirmBroker({
+  send: (request) => {
+    if (mainWindow && !mainWindow.isDestroyed())
+      mainWindow.webContents.send(IPC.confirmRequest, request)
+  },
+  ready: mainWindowReady,
+  showWindow,
+  native: async (options) => {
+    const box = {
+      type: options.kind ?? ('warning' as const),
+      noLink: true,
+      title: options.title,
+      message: options.message,
+      ...(options.detail ? { detail: options.detail } : {}),
+      buttons: options.buttons,
+      defaultId: options.defaultId,
+      cancelId: options.cancelId
+    }
+    const result =
+      mainWindow && !mainWindow.isDestroyed()
+        ? await dialog.showMessageBox(mainWindow, box)
+        : await dialog.showMessageBox(box)
+    return result.response
+  }
+})
+
+/** 끄기·설정 바꾸기 전에 묻는 확인 창. 첫 번째 버튼이면 true. */
+async function confirmDialog(options: ConfirmOptions): Promise<boolean> {
+  return (await confirms.ask(options)) === 0
 }
 
 /** 디스크 정리: 시작 1분 뒤, 30분마다, 화면에서 요청할 때, 관련 설정을 바꿀 때 다시 찾는다. */
@@ -649,14 +680,19 @@ async function persistSettings(next: Settings): Promise<Settings> {
 }
 
 /**
- * 설정 저장 중에 Claude 설정 파일을 바꾸지 못한 이유를 OS 창으로 알린다(설정 화면의 저장 결과에는 설정만 돌아가고,
- * 연동 카드의 알림 줄은 렌더러가 연동 켜기를 눌렀을 때만 쓴다). 기다리지 않는다.
+ * 설정 저장 중에 Claude 설정 파일을 바꾸지 못한 이유를 확인 창(오류, 버튼 하나)으로 알린다(설정 화면의 저장 결과에는
+ * 설정만 돌아가고, 연동 카드의 알림 줄은 렌더러가 연동 켜기를 눌렀을 때만 쓴다). 기다리지 않는다.
  */
 function showHookFailure(title: string, message: string): void {
-  const box = { type: 'error' as const, noLink: true, title, message }
-  void (mainWindow && !mainWindow.isDestroyed()
-    ? dialog.showMessageBox(mainWindow, box)
-    : dialog.showMessageBox(box))
+  void confirms.ask({
+    kind: 'error',
+    title,
+    message,
+    detail: '',
+    buttons: [text.confirm.ok],
+    defaultId: 0,
+    cancelId: 0
+  })
 }
 
 async function saveSettings(next: unknown): Promise<Settings> {
@@ -826,6 +862,13 @@ function registerIpc(): void {
     if (!fromMainWindow(event.sender) || typeof key !== 'string') return false
     return focuser.focusAgent(key)
   })
+  // 확인 창: 메인 창 화면의 알림·답만 받는다(어느 요청에 어떤 답을 받을지는 confirms 가 정한다).
+  const confirmIpc = confirmIpcHandlers(confirms, fromMainWindow)
+  ipcMain.handle(IPC.confirmPending, (event) => confirmIpc.pending(event.sender))
+  ipcMain.on(IPC.confirmShown, (event, id: unknown) => confirmIpc.shown(event.sender, id))
+  ipcMain.on(IPC.confirmReply, (event, id: unknown, index: unknown) =>
+    confirmIpc.reply(event.sender, id, index)
+  )
 }
 
 function createWindow(): void {
@@ -871,7 +914,12 @@ function createWindow(): void {
   mainWindow.on('closed', () => {
     scheduler.setWindowOpen(false)
     mainWindow = null
+    // 창이 없어지면 답이 없는 확인은 모두 취소로 끝낸다.
+    confirms.cancelAll()
   })
+  // 확인 창: 다 뜨면(다시 로드돼도) 기다리던 요청을 보내고, 렌더러가 죽으면 모두 취소로 끝낸다.
+  mainWindow.webContents.on('did-finish-load', () => confirms.flush())
+  mainWindow.webContents.on('render-process-gone', () => confirms.cancelAll())
 
   // 앱 화면 밖으로 이동하거나 새 창을 여는 것을 막고, 외부 링크는 기본 브라우저로 연다.
   mainWindow.webContents.on('will-navigate', (event) => event.preventDefault())

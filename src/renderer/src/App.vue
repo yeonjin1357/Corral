@@ -1,12 +1,18 @@
 <!--
   화면 뼈대는 NeoHtop (MIT) routes/+page.svelte 를 따른다:
   제목줄 → 자원 카드 줄 → 도구줄(탭·검색) → 표 → 바닥 줄, 항목을 누르면 오른쪽에서 상세 패널이 나온다.
-  끄기·지우기는 모두 메인 프로세스의 OS 확인 창을 거친다(화면에서 바로 끄지 않는다).
+  끄기·지우기는 모두 메인 프로세스가 묻는 확인 창을 거친다(화면에서 바로 끄지 않는다). 확인 창은 메인이 보낸 요청을
+  맨 바깥의 ConfirmDialog 가 그리고 누른 버튼 번호만 돌려준다(그리지 못하면 메인이 OS 창으로 묻는다).
 -->
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RefreshCw, X } from '@lucide/vue'
-import type { DashboardSnapshot, KillResult, UpdateStatus } from '../../shared/types'
+import type {
+  ConfirmRequest,
+  DashboardSnapshot,
+  KillResult,
+  UpdateStatus
+} from '../../shared/types'
 import {
   DEFAULT_SETTINGS,
   REFRESH_INTERVALS,
@@ -86,6 +92,7 @@ import NoticeCard from './components/NoticeCard.vue'
 import ItemIcon from './components/ItemIcon.vue'
 import IntegrationButton from './components/IntegrationButton.vue'
 import SettingsView from './components/SettingsView.vue'
+import ConfirmDialog from './components/ConfirmDialog.vue'
 import Button from './ui/Button.vue'
 
 const snapshot = ref<DashboardSnapshot | null>(null)
@@ -145,7 +152,46 @@ let unsubscribeSettings: () => void = () => {}
 let unsubscribeNavigate: () => void = () => {}
 let unsubscribeUpdate: () => void = () => {}
 let unsubscribeEvents: () => void = () => {}
+let unsubscribeConfirm: () => void = () => {}
 let stopTheme: () => void = () => {}
+
+// ── 확인 창: 메인이 묻고(끄기·지우기·연동 바꾸기) 화면은 그려서 누른 버튼 번호만 돌려준다 ──
+/** 지금 그리는 요청(한 번에 하나 — 메인이 차례로 보낸다). */
+const confirmRequest = ref<ConfirmRequest | null>(null)
+/** 그렸다고 알린 요청 id(같은 요청이 다시 오면 그렸다고 다시 알린다). */
+let confirmDrawn: number | null = null
+/** 답한 요청 가운데 가장 큰 id(늦게 다시 온 요청을 또 띄우지 않는다). */
+let confirmAnswered = 0
+
+/**
+ * 메인이 보낸 요청(이벤트·pending). 같은 요청은 한 번만 띄우고, 더 새 요청(id 가 큼)이 오면 그것으로 바꾼다
+ * (메인은 앞의 요청이 끝나야 다음을 보내므로, 새 요청이 왔다면 앞의 것은 메인에서 이미 끝났다).
+ */
+function receiveConfirm(request: ConfirmRequest): void {
+  const current = confirmRequest.value
+  if (request.id <= confirmAnswered || (current && request.id < current.id)) return
+  if (current?.id === request.id) {
+    if (confirmDrawn === request.id) window.pitwall.confirm.shown(request.id)
+    return
+  }
+  confirmRequest.value = request
+}
+
+function confirmShown(): void {
+  const request = confirmRequest.value
+  if (!request) return
+  confirmDrawn = request.id
+  window.pitwall.confirm.shown(request.id)
+}
+
+function answerConfirm(index: number): void {
+  const request = confirmRequest.value
+  if (!request) return
+  confirmAnswered = Math.max(confirmAnswered, request.id)
+  confirmRequest.value = null
+  confirmDrawn = null
+  window.pitwall.confirm.reply(request.id, index)
+}
 
 function shortcut(event: KeyboardEvent): void {
   if ((event.ctrlKey || event.metaKey) && event.key === ',') {
@@ -192,6 +238,12 @@ function showEvents(): void {
 }
 
 onMounted(async () => {
+  // 확인 요청을 먼저 받는다: 구독한 뒤 그 사이(창이 뜨는 동안) 보낸 요청도 pending 으로 받아 간다.
+  unsubscribeConfirm = window.pitwall.confirm.onRequest(receiveConfirm)
+  void window.pitwall.confirm
+    .pending()
+    .then((requests) => requests.forEach(receiveConfirm))
+    .catch(() => {})
   stopTheme = watchColorScheme((q) => window.matchMedia(q), document.documentElement)
   window.addEventListener('keydown', shortcut)
   unsubscribe = window.pitwall.onSnapshot(receive)
@@ -246,6 +298,7 @@ onUnmounted(() => {
   unsubscribeNavigate()
   unsubscribeUpdate()
   unsubscribeEvents()
+  unsubscribeConfirm()
   document.removeEventListener('visibilitychange', onVisibility)
   stopTheme()
   window.removeEventListener('keydown', shortcut)
@@ -1161,6 +1214,14 @@ const takenAt = computed(() => (snapshot.value ? formatTimeOfDay(snapshot.value.
       @refresh="refresh"
       @go="goToTab"
       @select="selectFromMap"
+    />
+    <!-- 확인 창은 맨 바깥(대시보드·설정·상세 패널 어디서든 위에 보인다). -->
+    <ConfirmDialog
+      v-if="confirmRequest"
+      :key="confirmRequest.id"
+      :request="confirmRequest"
+      @shown="confirmShown"
+      @answer="answerConfirm"
     />
   </div>
 </template>

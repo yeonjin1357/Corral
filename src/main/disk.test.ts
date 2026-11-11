@@ -347,6 +347,8 @@ describe('createDiskManager (실제 git)', () => {
     const box = d.confirm.mock.calls[0][0] as KillConfirm
     expect(box.title).toBe('의존성 폴더 지우기')
     expect(box.message).toBe('feat-gone 의 node_modules 를 지울까요? 약 3 KB')
+    // 폴더 지우기는 되돌릴 수 없어 확인 버튼을 빨간 계열로.
+    expect(box.tone).toBe('danger')
     expect(box.detail).toContain(join(gone, 'node_modules'))
     expect(await exists(join(gone, 'node_modules'))).toBe(false)
     expect(await readFile(join(gone, 'src', 'index.js'), 'utf8')).toBe('keep me')

@@ -6,7 +6,7 @@ import MemorySheet from './components/MemorySheet.vue'
 import { DEFAULT_SETTINGS, type Settings } from '../../shared/settings'
 import type { NavigateTarget, PitwallApi } from '../../shared/ipc'
 import type { PitEvent } from '../../shared/events'
-import type { DashboardSnapshot } from '../../shared/types'
+import type { ConfirmRequest, DashboardSnapshot } from '../../shared/types'
 import { selectionKey } from '../../shared/keys'
 import { TOP_HEIGHTS } from './layoutState'
 import { fakeResizeObserver, setBoxHeights } from './testing/resizeObserver'
@@ -63,14 +63,28 @@ interface Fake {
   api: PitwallApi
   navigate: (t: NavigateTarget) => void
   saved: Settings[]
+  /** 메인이 확인 요청을 보낸다(pitwall:confirm-request). */
+  requestConfirm: (r: ConfirmRequest) => void
 }
 
 function fake(over: Partial<PitwallApi> = {}): Fake {
   let navigate: (t: NavigateTarget) => void = () => {}
+  let requestConfirm: (r: ConfirmRequest) => void = () => {}
   const saved: Settings[] = []
   let current: Settings = structuredClone(DEFAULT_SETTINGS)
   const off = (): (() => void) => () => {}
   const api = {
+    confirm: {
+      onRequest: (cb: (r: ConfirmRequest) => void) => {
+        requestConfirm = cb
+        return () => {
+          requestConfirm = () => {}
+        }
+      },
+      pending: vi.fn(async () => [] as ConfirmRequest[]),
+      shown: vi.fn(),
+      reply: vi.fn()
+    },
     onSnapshot: off,
     getLatest: async () => snap(),
     historyRam: async () => [],
@@ -114,7 +128,7 @@ function fake(over: Partial<PitwallApi> = {}): Fake {
     },
     ...over
   } as unknown as PitwallApi
-  return { api, navigate: (t) => navigate(t), saved }
+  return { api, navigate: (t) => navigate(t), saved, requestConfirm: (r) => requestConfirm(r) }
 }
 
 async function start(f: Fake): Promise<VueWrapper> {
@@ -1237,6 +1251,106 @@ describe('자리 비운 사이', () => {
     push([done(1, T0)])
     await flushPromises()
     expect(tab.text()).toContain('1')
+    w.unmount()
+  })
+})
+
+// ── 확인 창: 메인이 묻고 화면은 그리기만 한다 ──
+describe('앱 안 확인 창', () => {
+  const KILL: ConfirmRequest = {
+    id: 3,
+    title: '개발 서버 내리기',
+    message: ':8081 (ws · feat/api) 을(를) 내릴까요?',
+    detail: 'node.exe (PID 2) 가 종료돼요.',
+    buttons: ['내리기', '취소'],
+    defaultId: 1,
+    cancelId: 1,
+    tone: 'danger'
+  }
+  const dialog = (): HTMLElement | null => document.querySelector('[role="alertdialog"]')
+  const confirmButton = (index: number): HTMLButtonElement =>
+    document.querySelector<HTMLButtonElement>(`[data-confirm-button="${index}"]`)!
+  const pressEscape = (): void => {
+    ;(document.activeElement ?? document.body).dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+    )
+  }
+
+  test('요청 이벤트가 오면 확인 창이 보이고, 그린 뒤 shown, 누른 버튼 번호로 reply', async () => {
+    const f = fake()
+    const w = await start(f)
+    expect(dialog()).toBeNull()
+    f.requestConfirm(KILL)
+    await flushPromises()
+    expect(dialog()!.textContent).toContain(KILL.message)
+    expect(f.api.confirm.shown).toHaveBeenCalledWith(KILL.id)
+    confirmButton(0).click()
+    await flushPromises()
+    expect(f.api.confirm.reply).toHaveBeenCalledWith(KILL.id, 0)
+    expect(dialog()).toBeNull()
+    w.unmount()
+  })
+
+  test('설정 화면에서도 보인다', async () => {
+    const f = fake()
+    const w = await start(f)
+    f.navigate({ page: 'settings' })
+    await flushPromises()
+    f.requestConfirm({ ...KILL, id: 4, tone: 'normal' })
+    await flushPromises()
+    expect(dialog()).not.toBeNull()
+    pressEscape()
+    await flushPromises()
+    expect(f.api.confirm.reply).toHaveBeenCalledWith(4, 1)
+    expect(dialog()).toBeNull()
+    w.unmount()
+  })
+
+  test('처음 그려질 때 pending() 의 요청을 보인다', async () => {
+    const f = fake()
+    f.api.confirm.pending = vi.fn(async () => [KILL])
+    const w = await start(f)
+    expect(f.api.confirm.pending).toHaveBeenCalledTimes(1)
+    expect(dialog()!.textContent).toContain(KILL.message)
+    expect(f.api.confirm.shown).toHaveBeenCalledWith(KILL.id)
+    w.unmount()
+  })
+
+  test('같은 요청이 다시 와도 하나만 띄우고, 답한 요청이 늦게 다시 오면 띄우지 않는다', async () => {
+    const f = fake()
+    f.api.confirm.pending = vi.fn(async () => [KILL])
+    const w = await start(f)
+    // 창이 다 뜬 뒤 메인이 다시 보낸 같은 요청: 그대로 두고 그렸다고만 다시 알린다.
+    f.requestConfirm(KILL)
+    await flushPromises()
+    expect(document.querySelectorAll('[role="alertdialog"]')).toHaveLength(1)
+    expect(f.api.confirm.shown).toHaveBeenCalledTimes(2)
+    pressEscape()
+    await flushPromises()
+    expect(f.api.confirm.reply).toHaveBeenCalledWith(KILL.id, KILL.cancelId)
+    f.requestConfirm(KILL)
+    await flushPromises()
+    expect(dialog()).toBeNull()
+    // 다음 요청은 보인다.
+    f.requestConfirm({ ...KILL, id: KILL.id + 1 })
+    await flushPromises()
+    expect(dialog()).not.toBeNull()
+    w.unmount()
+  })
+
+  test('Esc 는 확인 창만 취소하고 열린 상세 패널은 그대로 둔다', async () => {
+    const f = fake()
+    const w = await start(f)
+    await w.find(`tr[data-key="${selectionKey.server(api)}"] td button`).trigger('click')
+    await flushPromises()
+    expect(document.body.textContent).toContain('node.exe · PID 2')
+    f.requestConfirm(KILL)
+    await flushPromises()
+    pressEscape()
+    await flushPromises()
+    expect(f.api.confirm.reply).toHaveBeenCalledWith(KILL.id, 1)
+    expect(dialog()).toBeNull()
+    expect(document.querySelector('[data-slot="sheet-content"]')).not.toBeNull()
     w.unmount()
   })
 })

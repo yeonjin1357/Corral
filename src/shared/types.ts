@@ -456,6 +456,26 @@ export type KillResult = {
   freed?: { count: number; memoryBytes: number; commitBytes: number | null; names?: string[] }
 }
 
+/**
+ * 확인 창(끄기·지우기·연동 바꾸기 전에 묻는다). 메인이 묻고, 화면(메인 창)은 그려서 누른 버튼 번호만 돌려준다.
+ * 첫 번째 버튼(0)이 "예"(실행), cancelId 가 취소(Esc·창이 없어짐), defaultId 가 처음 초점.
+ */
+export interface ConfirmOptions {
+  title: string
+  message: string
+  detail: string
+  buttons: string[]
+  defaultId: number
+  cancelId: number
+  /** danger: 되돌릴 수 없는 일(서버·프로세스 끄기, 폴더 지우기) — 확인 버튼을 빨간 계열로. 없으면 normal. */
+  tone?: 'danger' | 'normal'
+  /** error: 실패를 알리는 창(빨간 아이콘). 없으면 warning. */
+  kind?: 'warning' | 'error'
+}
+
+/** 화면에 보내는 확인 요청. id 는 메인이 정하고, 화면은 이 id 로만 답한다. */
+export type ConfirmRequest = ConfirmOptions & { id: number }
+
 export interface DashboardSnapshot {
   takenAt: number
   memory: MemorySummary

@@ -566,7 +566,8 @@ export function createDiskManager(deps: DiskDeps): {
       ),
       buttons: [text.disk.confirm, text.kill.cancel],
       defaultId: 1,
-      cancelId: 1
+      cancelId: 1,
+      tone: 'danger'
     })
     if (!ok) return { status: 'cancelled' }
 

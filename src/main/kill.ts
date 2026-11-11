@@ -1,6 +1,7 @@
 import { agentsInWorkspace } from '../shared/workspace'
 import type {
   AgentRow,
+  ConfirmOptions,
   DashboardSnapshot,
   KillResult,
   LeftoverRow,
@@ -37,14 +38,8 @@ const MAX_ROOT_LENGTH = 4096
 
 export type { KillResult }
 
-export interface KillConfirm {
-  title: string
-  message: string
-  detail: string
-  buttons: string[]
-  defaultId: number
-  cancelId: number
-}
+/** 확인 창 내용(shared/types 의 ConfirmOptions). 끄기 확인은 되돌릴 수 없어 tone: 'danger'. */
+export type KillConfirm = ConfirmOptions
 
 /** 끌 대상(포트 행·남은 프로세스 행)에서 "같은 프로세스인지" 확인하는 데 쓰는 값. */
 export type KillTarget = Pick<ServerRow, 'pid' | 'processName' | 'commandLine' | 'startedAt'>
@@ -113,7 +108,8 @@ export function buildKillConfirm(row: ServerRow): KillConfirm {
     ].join('\n'),
     buttons: [text.kill.confirm, text.kill.cancel],
     defaultId: 1,
-    cancelId: 1
+    cancelId: 1,
+    tone: 'danger'
   }
 }
 
@@ -128,7 +124,8 @@ export function buildLeftoverConfirm(row: LeftoverRow): KillConfirm {
     ].join('\n'),
     buttons: [text.leftoverKill.confirm, text.kill.cancel],
     defaultId: 1,
-    cancelId: 1
+    cancelId: 1,
+    tone: 'danger'
   }
 }
 
@@ -175,7 +172,7 @@ function freedOf(items: RecommendItem[]): string {
 
 /**
  * 서버 내리기와 남은 프로세스 끄기. 둘 다 같은 절차를 거친다:
- * 최신 샘플로 같은 프로세스인지·하위에 에이전트가 없는지 확인 → 네이티브 확인 창 → 한 번 더 확인 → 루트와 자손 종료.
+ * 최신 샘플로 같은 프로세스인지·하위에 에이전트가 없는지 확인 → 확인 창 → 한 번 더 확인 → 루트와 자손 종료.
  * 같은 pid 를 동시에 처리하지 않는다(서버와 남은 프로세스 사이에서도).
  */
 /** 정리 추천을 한꺼번에 끌 때의 확인 창: 항목 목록(최대 10줄)과 합계. */
@@ -190,7 +187,8 @@ export function buildManyConfirm(items: RecommendItem[]): KillConfirm {
     detail: [...lines, '', text.killMany.note].join('\n'),
     buttons: [text.killMany.confirm, text.kill.cancel],
     defaultId: 1,
-    cancelId: 1
+    cancelId: 1,
+    tone: 'danger'
   }
 }
 

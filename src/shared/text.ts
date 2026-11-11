@@ -34,6 +34,10 @@ export const text = {
     confirm: '내리기',
     cancel: '취소'
   },
+  /** 확인 창(메인이 묻고 화면이 그린다). ok: 실패를 알리기만 하는 창의 버튼 하나. */
+  confirm: {
+    ok: '확인'
+  },
   /** 끄면 확보할 메모리(formatFreed). 커밋을 알면 RAM·커밋 둘 다, 모르면 RAM 만. */
   freed: {
     withCommit: (ram: string, commit: string): string => `RAM 약 ${ram} · 커밋 약 ${commit}`,

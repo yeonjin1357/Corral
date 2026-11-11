@@ -26,7 +26,7 @@ export interface ClaudeIntegrationDeps {
   systemRoot?: string
   sessions: Sessions
   now: () => number
-  /** 메인 프로세스의 네이티브 확인 창. 첫 번째 버튼이면 true. */
+  /** 메인 프로세스가 여는 확인 창(앱 화면에 그리고, 그리지 못하면 OS 창). 첫 번째 버튼이면 true. */
   confirm: (o: KillConfirm) => Promise<boolean>
   /** 훅 이벤트로 세션 상태가 바뀌었을 때(화면을 바로 갱신하려고). hub 를 주면 쓰지 않는다. */
   onEvent?: () => void
