@@ -117,6 +117,7 @@ describe('조용한 에이전트(G3c)', () => {
     workspace: null,
     startedAt: 100,
     memoryBytes: 1,
+    ownMemoryBytes: 1,
     commitBytes: null,
     descendantCount: 0,
     processes: [],

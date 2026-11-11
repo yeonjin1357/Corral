@@ -149,6 +149,30 @@ test('이전 샘플의 CPU 를 기억해 두 번째 수집부터 작업 중/쉬�
   expect(second.agents[0]).toMatchObject({ pid: 5000, state: 'working', cpuPercent: 20 })
 })
 
+test('에이전트가 띄운 무거운 작업은 자기 메모리(ownMemoryBytes)에서 빠지고, 에이전트 묶음은 그 합과 같다', async () => {
+  const { deps } = setup()
+  const sized = (p: ProcessInfo, mb: number): ProcessInfo => ({ ...p, memoryBytes: mb * MB })
+  const tsc = 'node C:\\work\\shop-web\\node_modules\\typescript\\bin\\tsc --noEmit'
+  const withTsc: RawSample = {
+    ...sampleAt(0),
+    processes: [
+      ...sampleAt(0).processes,
+      // Claude(10 MB)가 띄운 tsc(2000 MB)와 그 자식(100 MB), 셸(20 MB).
+      sized(proc(5100, 5000, 'node.exe', 0, tsc), 2000),
+      sized(proc(5101, 5100, 'node.exe', 0), 100),
+      sized(proc(5200, 5000, 'bash.exe', 0), 20)
+    ]
+  }
+  const s = await createCollector({ ...deps, sample: async () => withTsc }).collect()
+  expect(s.heavyJobs.map((j) => j.pid)).toEqual([5100])
+  const claude = s.agents.find((a) => a.pid === 5000)!
+  // 표의 메모리는 그대로 무거운 작업까지, 자기 메모리는 무거운 작업을 뺀 것.
+  expect(claude.memoryBytes).toBe((10 + 2000 + 100 + 20) * MB)
+  expect(claude.ownMemoryBytes).toBe((10 + 20) * MB)
+  const agentGroup = s.groups.find((g) => g.group === 'agent')!
+  expect(agentGroup.memoryBytes).toBe(s.agents.reduce((n, a) => n + a.ownMemoryBytes, 0))
+})
+
 test('에이전트 작업 폴더는 명령줄보다 먼저 보도록 넘긴다', async () => {
   const resolveProcessWorktrees = vi.fn<CollectorDeps['resolveProcessWorktrees']>(
     async () => new Map()

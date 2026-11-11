@@ -47,6 +47,7 @@ function run(
     previousCpu?: CpuMemo
     now?: number
     devServerPids?: number[]
+    heavyPids?: number[]
     worktrees?: [number, WorktreeInfo][]
     hookFor?: (agent: {
       key: string
@@ -61,6 +62,7 @@ function run(
     sample,
     worktrees: new Map(opts.worktrees ?? []),
     devServerPids: new Set(opts.devServerPids ?? []),
+    heavyPids: new Set(opts.heavyPids ?? []),
     previousCpu: opts.previousCpu ?? new Map(),
     now: opts.now ?? 10_000,
     hookFor: opts.hookFor,
@@ -122,6 +124,32 @@ describe('에이전트 행', () => {
       ['node.exe', 1, 20],
       ['bash.exe', 1, 10]
     ])
+  })
+
+  test('자기 메모리(ownMemoryBytes)는 무거운 작업·개발 서버를 뺀 것, 표의 메모리는 무거운 작업까지', () => {
+    const { agents } = run(
+      [
+        proc(5000, 1, 'claude.exe', { mb: 500 }),
+        // 에이전트가 띄운 tsc(무거운 작업)와 그 자식.
+        proc(5100, 5000, 'node.exe', { mb: 2000 }),
+        proc(5101, 5100, 'node.exe', { mb: 100 }),
+        proc(5200, 5000, 'bash.exe', { mb: 10 }),
+        proc(5300, 5000, 'node.exe', { mb: 900 }),
+        proc(6000, 1, 'codex.exe', { mb: 300 }),
+        // 개발 서버 아래에 뜬 에이전트: 메모리 구성처럼 자기 자신도 개발 서버 몫이다.
+        proc(7000, 1, 'claude.exe', { mb: 50 }),
+        proc(7001, 7000, 'node.exe', { mb: 5 })
+      ],
+      { heavyPids: [5100, 5101], devServerPids: [5300, 7000, 7001] }
+    )
+    const own = (pid: number): [number, number] => {
+      const a = agents.find((x) => x.pid === pid)!
+      return [a.memoryBytes / MB, a.ownMemoryBytes / MB]
+    }
+    // 표의 메모리(memoryBytes)는 그대로 무거운 작업까지 센다.
+    expect(own(5000)).toEqual([2610, 510])
+    expect(own(6000)).toEqual([300, 300])
+    expect(own(7000)).toEqual([50, 0])
   })
 
   test('members: 에이전트 키 → 자기와 센 자손 pid(개발 서버와 그 아래는 빼고)', () => {
@@ -529,6 +557,7 @@ describe('상태 시작 시각(F3)', () => {
     workspace: null,
     startedAt: 100,
     memoryBytes: 1,
+    ownMemoryBytes: 1,
     commitBytes: null,
     descendantCount: 0,
     processes: [],

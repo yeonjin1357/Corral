@@ -89,28 +89,40 @@ test('카드 줄에 가로 스크롤바가 있으면 자세히·간단히 높이
 
 // ── 카드 고르기(G3) ──
 test('카드 열 너비: 카드마다 비중과 최소 너비, 순서는 배치대로', () => {
-  // 기본 여섯 장: 지금까지의 비율(메모리 1.5, 남은 프로세스 1.05, 디스크 정리 1.2), 메모리는 240px·나머지는 160px 아래로 줄지 않는다.
+  // 기본 여섯 장: 지금까지의 비율(메모리 1.5, 남은 프로세스 1.05, 디스크 정리 1.2), 메모리는 240px·나머지는 150px 아래로 줄지 않는다.
   expect(cardColumns(DEFAULT_CARDS)).toBe(
     [
       'minmax(240px, 1.5fr)',
-      'minmax(160px, 1fr)',
-      'minmax(160px, 1fr)',
-      'minmax(160px, 1fr)',
-      'minmax(160px, 1.05fr)',
-      'minmax(160px, 1.2fr)'
+      'minmax(150px, 1fr)',
+      'minmax(150px, 1fr)',
+      'minmax(150px, 1fr)',
+      'minmax(150px, 1.05fr)',
+      'minmax(150px, 1.2fr)'
     ].join(' ')
   )
   // 새 카드는 1 몫, 순서는 받은 대로.
   expect(cardColumns(['events', 'disk', 'waiting', 'memory', 'tokens'])).toBe(
     [
-      'minmax(160px, 1fr)',
-      'minmax(160px, 1.2fr)',
-      'minmax(160px, 1fr)',
+      'minmax(150px, 1fr)',
+      'minmax(150px, 1.2fr)',
+      'minmax(150px, 1fr)',
       'minmax(240px, 1.5fr)',
-      'minmax(160px, 1fr)'
+      'minmax(150px, 1fr)'
     ].join(' ')
   )
   expect(cardColumns([])).toBe('')
+})
+
+test('1280px 창에서 일곱 장(기본 여섯 + 새 카드 하나)이 스크롤 없이 한 줄에 들어간다', () => {
+  // 카드 줄 너비 = 1280 − 좌우 여백 16×2 − 카드 사이 틈 12×6 = 1176px(app.css `.resource-grid`).
+  const row = 1280 - 2 * 16 - 6 * 12
+  expect(row).toBe(1176)
+  for (const extra of EXTRA_CARDS) {
+    const columns = cardColumns([...DEFAULT_CARDS, extra])
+    const mins = [...columns.matchAll(/minmax\((\d+)px/g)].map((m) => Number(m[1]))
+    expect(mins).toHaveLength(7)
+    expect(mins.reduce((n, px) => n + px, 0)).toBeLessThanOrEqual(row)
+  }
 })
 
 const DEFAULT_LAYOUT: CardLayout = { order: DEFAULT_CARDS, hidden: [] }

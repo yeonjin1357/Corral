@@ -60,6 +60,7 @@ function agent(pid: number, state: AgentRow['state'], root = 'C:\\work\\shop-web
     workspace: null,
     startedAt: pid,
     memoryBytes: 1,
+    ownMemoryBytes: 1,
     commitBytes: null,
     descendantCount: 0,
     processes: [],

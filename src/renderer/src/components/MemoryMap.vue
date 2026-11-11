@@ -35,11 +35,13 @@ const BYTES_MIN_H = 44
 
 const groupLabel = (group: ProcessGroup): string =>
   group === 'system' ? text.ui.groups.systemShort : text.ui.groups[group]
-const tip = (label: string, bytes: number): string => {
+/** 풍선말(누를 수 있는 칸은 이름도): 이름 크기 · 전체 RAM 의 %. 무거운 작업을 뺀 에이전트 칸은 크기 뒤에 그렇게 적는다. */
+const tip = (label: string, bytes: number, excludesHeavy = false): string => {
   const total = props.snapshot.memory.totalBytes
+  const size = formatBytes(bytes)
   return text.ui.cards.memoryPart(
     label,
-    formatBytes(bytes),
+    excludesHeavy ? text.ui.memorySheet.agentOwn(size) : size,
     tipPercent(total > 0 ? bytes / total : 0)
   )
 }
@@ -108,7 +110,7 @@ const layout = computed<PlacedGroup[]>(() => {
       ...tile,
       rect: tile.key ? atLeast(inset(r)) : inset(r),
       color,
-      tip: tip(tile.label, tile.bytes),
+      tip: tip(tile.label, tile.bytes, tile.excludesHeavy),
       showLabel: r.w >= TEXT_MIN_W && r.h >= TEXT_MIN_H,
       showBytes: r.w >= TEXT_MIN_W && r.h >= BYTES_MIN_H
     }))

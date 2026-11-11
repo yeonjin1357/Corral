@@ -80,6 +80,10 @@ test('켜기: 확인 창 → hooks.json 에 더함 → /hooks 승인 안내 → 
   expect((confirm.mock.calls[0][0] as KillConfirm).detail).toContain(hooksPath())
   expect(result.status).toBe('done')
   expect(result.status === 'done' && result.message).toContain('/hooks')
+  // /hooks 의 항목에는 내부 이름이 든 주소(…/pitwall-hook/codex…)가 보여 어느 훅인지 함께 알린다.
+  expect(result.status === 'done' && result.message).toContain(
+    '(주소에 pitwall-hook 이 들어 있는 훅)'
+  )
   expect(await codex.status()).toMatchObject({ state: 'on', problem: null })
 
   const { hook } = await loadConfig(userData)

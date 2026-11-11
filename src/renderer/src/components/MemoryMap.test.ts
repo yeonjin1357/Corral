@@ -77,6 +77,20 @@ test('칸을 누르면 그 줄의 키로 select', async () => {
   w.unmount()
 })
 
+test('에이전트 칸이 표의 메모리와 다르면(무거운 작업을 뺌) 풍선말·이름에 그렇게 적는다', async () => {
+  const heavyParent = agentRow({ pid: 10, memoryBytes: 4 * GB, ownMemoryBytes: GB })
+  const plain = agentRow({ pid: 11, tool: 'codex', memoryBytes: GB })
+  const w = await map({ ...s, agents: [heavyParent, plain] })
+  const tile = w.find(`button[data-map-tile="${selectionKey.agent(heavyParent)}"]`)
+  expect(tile.attributes('title')).toContain('1.0 GB (무거운 작업 제외) · 전체 RAM 의')
+  expect(tile.attributes('aria-label')).toBe(tile.attributes('title'))
+  // 표의 값과 같은 칸은 그대로.
+  const other = w.find(`button[data-map-tile="${selectionKey.agent(plain)}"]`)
+  expect(other.attributes('title')).toContain('1.0 GB · 전체 RAM 의')
+  expect(other.attributes('title')).not.toContain('무거운 작업 제외')
+  w.unmount()
+})
+
 test('누를 수 있는 아주 작은 칸도 사방 2px 이상(초점 표시가 보이게)', async () => {
   const speck = heavyJob({ pid: 21, memoryBytes: 64 * 1024 })
   const w = await map({

@@ -243,6 +243,7 @@ describe('작업 공간 한 번에 정리(F2)', () => {
     workspace: WS,
     startedAt: 1,
     memoryBytes: 600 * MB,
+    ownMemoryBytes: 600 * MB,
     commitBytes: null,
     descendantCount: 2,
     processes: [],

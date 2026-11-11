@@ -219,7 +219,8 @@ export const text = {
     enabled: (backupPath: string | null): string =>
       (backupPath
         ? `Codex 연동을 켰어요. 원래 설정은 ${backupPath} 에 백업했어요. `
-        : 'Codex 연동을 켰어요. ') + 'Codex 에서 /hooks 를 열어 Corral 훅을 한 번 승인해 주세요.',
+        : 'Codex 연동을 켰어요. ') +
+      'Codex 에서 /hooks 를 열어 Corral 훅(주소에 pitwall-hook 이 들어 있는 훅)을 한 번 승인해 주세요.',
     alreadyOn:
       'Codex 연동이 이미 켜져 있어요. 상태가 안 오면 Codex 의 /hooks 에서 승인했는지 확인해 주세요.',
     disabled: (backupPath: string | null): string =>
@@ -698,6 +699,8 @@ export const text = {
       mapRest: '그 밖',
       /** 폴더·도구까지 같은 에이전트 칸을 PID 로 구분한다. */
       mapWithPid: (label: string, pid: number): string => `${label} · PID ${pid}`,
+      /** 에이전트 칸의 크기: 표의 메모리(띄운 무거운 작업까지)와 달리 무거운 작업을 뺀 자기 몫일 때. */
+      agentOwn: (bytes: string): string => `${bytes} (무거운 작업 제외)`,
       trendGroupsTitle: '묶음별 추이',
       /** 지도 위 한 줄(남은 메모리는 지도에 넣지 않는다). */
       freeLine: (free: string): string => `남은 메모리 ${free}`
@@ -1003,7 +1006,7 @@ export const text = {
       reenable: 'Codex 연동 다시 켜기',
       disable: 'Codex 연동 끄기',
       states: {
-        on: '켜짐 — Codex 훅으로 작업 중·응답 대기를 알아요. 상태가 안 오면 Codex 에서 /hooks 를 열어 Corral 훅을 승인해 주세요.',
+        on: '켜짐 — Codex 훅으로 작업 중·응답 대기를 알아요. 상태가 안 오면 Codex 에서 /hooks 를 열어 Corral 훅(주소에 pitwall-hook 이 들어 있는 훅)을 승인해 주세요.',
         off: '꺼짐 — 지금은 Codex 세션 기록(없으면 CPU 사용량)으로 짐작해요. 켜면 응답 대기까지 알 수 있어요.',
         partial: '예전 설정이 남아 있어요. 다시 켜 주세요.',
         server: '훅을 받을 포트를 열지 못했어요. 다시 켜면 새 포트로 바꿔요.',

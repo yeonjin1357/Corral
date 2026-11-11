@@ -199,6 +199,11 @@ export function buildAgents(input: {
   worktrees: Map<number, WorktreeInfo>
   /** 개발 서버 포트 행의 프로세스와 자손. 에이전트가 띄운 개발 서버는 에이전트 몫으로 세지 않는다. */
   devServerPids: Set<number>
+  /**
+   * 무거운 작업(그 작업과 자손) pid. 표의 메모리(memoryBytes)에는 넣고 자기 몫(ownMemoryBytes)에서는 뺀다 —
+   * 메모리 구성(snapshot.ts)의 에이전트 묶음과 같은 규칙.
+   */
+  heavyPids: Set<number>
   previousCpu: CpuMemo
   now: number
   /**
@@ -218,12 +223,18 @@ export function buildAgents(input: {
   /** agentKey → 자기와 센 자손(개발 서버가 아닌 것) pid. 메모리·커밋에 센 프로세스와 같다. */
   members: Map<string, number[]>
 } {
-  const { sample, worktrees, devServerPids, previousCpu, now } = input
+  const { sample, worktrees, devServerPids, heavyPids, previousCpu, now } = input
   const tree = buildTree(sample.processes)
   const hostOf = hostFinder(sample.processes, tree, input.selfPid)
   const cpu: CpuMemo = new Map()
   const agents: AgentRow[] = []
   const memberPids = new Map<string, number[]>()
+  /**
+   * 자기 몫(ownMemoryBytes)에 이미 센 pid. 최상위 에이전트의 트리는 겹치지 않지만(한 프로세스가 두 에이전트 아래에
+   * 있으면 한쪽이 다른 쪽의 조상이라 최상위가 아니다), 겹치더라도 먼저 센 에이전트에만 넣어 한 번만 센다 —
+   * 에이전트 묶음도 pid 집합이라 한 번씩 센다.
+   */
+  const counted = new Set<number>()
 
   for (const pid of topLevelAgentPids(sample.processes, tree)) {
     const self = tree.byPid.get(pid)
@@ -242,6 +253,13 @@ export function buildAgents(input: {
     const hook = input.hookFor?.({ key, worktreeRoot: worktree?.root ?? null, tool }) ?? null
     const pids = members.map((m) => m.pid)
     memberPids.set(key, pids)
+    // 자기 몫: 메모리 구성의 에이전트 묶음처럼 개발 서버(자기 자신 포함)·무거운 작업을 뺀다.
+    let ownMemoryBytes = 0
+    for (const m of members) {
+      if (devServerPids.has(m.pid) || heavyPids.has(m.pid) || counted.has(m.pid)) continue
+      counted.add(m.pid)
+      ownMemoryBytes += m.memoryBytes
+    }
 
     agents.push({
       pid,
@@ -250,6 +268,7 @@ export function buildAgents(input: {
       workspace: null,
       startedAt: self.startedAt,
       memoryBytes: members.reduce((sum, m) => sum + m.memoryBytes, 0),
+      ownMemoryBytes,
       commitBytes: commitSum(members),
       descendantCount: descendants.length,
       processes: summarizeProcesses(members),

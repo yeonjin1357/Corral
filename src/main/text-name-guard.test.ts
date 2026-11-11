@@ -14,6 +14,30 @@ function textSourceWithoutComments(): string {
     .replace(/(^|[^:])\/\/.*$/gm, '$1')
 }
 
+/**
+ * 예외는 훅 주소의 낱말 `pitwall-hook` 하나: Codex 의 /hooks 에는 훅이 주소(`…/pitwall-hook/codex…`)로 보여,
+ * 어느 훅을 승인할지 알리려면 그 낱말을 그대로 적어야 한다. 그 낱말만(대소문자까지 같고, 앞뒤에 글자·`-` 가 붙지
+ * 않은 것) 빼고 본다.
+ */
+const withoutHookAddress = (source: string): string =>
+  source.replace(/(?<![\w-])pitwall-hook(?![\w-])/g, '')
+
 test('화면 문구에 예전 제품 이름이 남지 않는다', () => {
-  expect(textSourceWithoutComments()).not.toMatch(/pitwall/i)
+  expect(withoutHookAddress(textSourceWithoutComments())).not.toMatch(/pitwall/i)
+})
+
+test('예외는 훅 주소의 낱말 pitwall-hook 하나뿐', () => {
+  expect(withoutHookAddress('Corral 훅(주소에 pitwall-hook 이 들어 있는 훅)')).not.toMatch(
+    /pitwall/i
+  )
+  for (const other of [
+    'pitwall',
+    'Pitwall 훅',
+    'Pitwall-hook',
+    'pitwall-hooks',
+    'pitwall-hook-v2',
+    'my-pitwall-hook',
+    'pitwall.exe'
+  ])
+    expect(withoutHookAddress(other)).toMatch(/pitwall/i)
 })

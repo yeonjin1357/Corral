@@ -1,10 +1,11 @@
 // @vitest-environment happy-dom
 import { mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach } from 'vitest'
+import { nextTick } from 'vue'
 import MemorySheet from './MemorySheet.vue'
 import MemoryMap from './MemoryMap.vue'
 import StackedTrend from './StackedTrend.vue'
-import type { DashboardSnapshot, GroupPoint } from '../../../shared/types'
+import type { DashboardSnapshot, GroupPoint, GroupUsage, ProcessGroup } from '../../../shared/types'
 import { GB, MB, agentRow, heavyJob, serverRow, snapshot } from '../testing/fixtures'
 
 let wrapper: VueWrapper | null = null
@@ -172,6 +173,46 @@ test('맨 위에 남은 메모리 한 줄과 메모리 지도, RAM 추이 아래
   // 지도에서 고른 줄은 그대로 올린다(App 이 메모리 상세를 닫고 그 줄의 상세를 연다).
   w.findComponent(MemoryMap).vm.$emit('select', 'server:1:200')
   expect(w.emitted('select')).toEqual([['server:1:200']])
+})
+
+test('묶음 합이 사용량을 넘으면 묶음 목록도 메모리 지도와 같은 값(같은 비율로 줄인 값)', async () => {
+  // happy-dom 은 배치를 하지 않아 너비가 0 이다. 지도를 그리도록 너비를 준다.
+  const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth')
+  Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
+    configurable: true,
+    get: () => 600
+  })
+  try {
+    // 묶음 합 52.6 GB = 사용량(26.3 GB)의 두 배 → 모두 절반으로.
+    const g = (group: ProcessGroup, gb: number): GroupUsage => ({
+      group,
+      memoryBytes: gb * GB,
+      commitBytes: null,
+      processCount: 1
+    })
+    sheet({
+      ...s,
+      groups: [
+        g('devServer', 8),
+        g('agent', 10),
+        g('heavy', 6),
+        g('otherApps', 20),
+        g('system', 8.6)
+      ]
+    })
+    await nextTick()
+    expect(groupText('agent')).toContain('5.0 GB')
+    expect(groupText('otherApps')).toContain('10.0 GB')
+    // 지도의 묶음 머리 띠와 목록이 같은 숫자를 적는다.
+    const headers = [...document.body.querySelectorAll('[data-map-group]')]
+    expect(headers.map((h) => h.getAttribute('data-map-group'))).toContain('agent')
+    for (const h of headers) {
+      const bytes = h.lastElementChild!.textContent!.trim()
+      expect(groupText(h.getAttribute('data-map-group')!)).toContain(bytes)
+    }
+  } finally {
+    if (original) Object.defineProperty(HTMLElement.prototype, 'clientWidth', original)
+  }
 })
 
 test('커밋·한도·남은 메모리·커널 몫을 보인다, 모르면 숨긴다', () => {

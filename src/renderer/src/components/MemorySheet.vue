@@ -10,6 +10,7 @@ import { ChevronRight, RefreshCw } from '@lucide/vue'
 import type { DashboardSnapshot, GroupPoint, ProcessGroup } from '../../../shared/types'
 import { formatBytes, formatTimeOfDay } from '../../../shared/format'
 import { text } from '../../../shared/text'
+import { fitGroups } from '../../../shared/memoryGroups'
 import type { Point } from '../history'
 import { GROUP_COLOR, memoryComposition } from '../memory'
 import { appName, appRowId, appTitle, type TabKey } from '../rows'
@@ -87,9 +88,16 @@ const facts = computed<[string, string][]>(() => [
     : [])
 ])
 const topApps = computed(() => props.snapshot.apps.slice(0, 5))
+/**
+ * 묶음 값: 메모리 지도·메모리 카드와 같은 값(묶음 합이 사용량을 넘으면 같은 비율로 줄인 값). 전체를 모르면
+ * (지도도 없다) 받은 값 그대로.
+ */
+const fitted = computed(() =>
+  hasMemory.value ? fitGroups(m.value, props.snapshot.groups) : props.snapshot.groups
+)
 const groups = computed(() =>
   ORDER.map((g) => {
-    const usage = props.snapshot.groups.find((x) => x.group === g.key)
+    const usage = fitted.value.find((x) => x.group === g.key)
     const bytes = usage?.memoryBytes ?? 0
     return {
       ...g,

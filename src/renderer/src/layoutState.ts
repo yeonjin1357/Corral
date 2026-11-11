@@ -130,19 +130,19 @@ export function visibleCards(l: CardLayout): CardId[] {
 
 /**
  * 카드마다 열 너비의 비중(fr)과 최소 너비(px). 비중은 여섯 장일 때의 예전 비율 그대로(메모리 1.5·남은 프로세스 1.05·
- * 디스크 정리 1.2), 새 카드는 1. 최소 너비는 메모리 240px(범례·커밋 줄), 나머지 160px(1180~1280px 창에서 카드가
- * 161~176px 로 잘 보였다).
+ * 디스크 정리 1.2), 새 카드는 1. 최소 너비는 메모리 240px(범례·커밋 줄), 나머지 150px — 1280px 창의 카드 줄
+ * (1280 − 여백 32 − 틈 6×12 = 1176px)에 일곱 장(240 + 6×150 = 1140px)이 스크롤 없이 들어간다.
  */
 const CARD_WIDTH: Record<CardId, { weight: number; minPx: number }> = {
   memory: { weight: 1.5, minPx: 240 },
-  servers: { weight: 1, minPx: 160 },
-  agents: { weight: 1, minPx: 160 },
-  heavy: { weight: 1, minPx: 160 },
-  leftovers: { weight: 1.05, minPx: 160 },
-  disk: { weight: 1.2, minPx: 160 },
-  waiting: { weight: 1, minPx: 160 },
-  tokens: { weight: 1, minPx: 160 },
-  events: { weight: 1, minPx: 160 }
+  servers: { weight: 1, minPx: 150 },
+  agents: { weight: 1, minPx: 150 },
+  heavy: { weight: 1, minPx: 150 },
+  leftovers: { weight: 1.05, minPx: 150 },
+  disk: { weight: 1.2, minPx: 150 },
+  waiting: { weight: 1, minPx: 150 },
+  tokens: { weight: 1, minPx: 150 },
+  events: { weight: 1, minPx: 150 }
 }
 
 /**

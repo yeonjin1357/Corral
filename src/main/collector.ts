@@ -579,6 +579,7 @@ export function createCollector(deps: CollectorDeps): {
     })
 
     const devServerPids = new Set(snapshot.servers.flatMap((p) => [p.pid, ...p.descendantPids]))
+    const heavyPids = new Set(snapshot.heavyJobs.flatMap((j) => [j.pid, ...j.descendantPids]))
     const byPid = new Map(raw.processes.map((p) => [p.pid, p]))
     const agentProcs = agentPids.flatMap((pid) => {
       const p = byPid.get(pid)
@@ -637,6 +638,7 @@ export function createCollector(deps: CollectorDeps): {
       sample: raw,
       worktrees,
       devServerPids,
+      heavyPids,
       previousCpu,
       now: sampledAt,
       hookFor: hookFor(roots),

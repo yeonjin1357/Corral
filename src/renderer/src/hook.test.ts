@@ -27,6 +27,8 @@ test('Codex 연동도 같은 규칙으로 상태 문구와 버튼(켜기·끄기
   })
   expect(hookControls(status('error', 'settings'), codex).text).toBe(codex.states.settings)
   expect(codex.states.on).toContain('/hooks')
+  // /hooks 의 항목에는 내부 이름이 든 주소(…/pitwall-hook/codex…)가 보여 어느 훅인지 함께 알린다.
+  expect(codex.states.on).toContain('(주소에 pitwall-hook 이 들어 있는 훅)')
   // Claude 는 기본 문구 그대로.
   const claude: ClaudeHookStatus = {
     state: 'off',

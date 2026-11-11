@@ -372,8 +372,13 @@ export interface AgentRow {
   worktree: WorktreeInfo | null
   workspace: WorkspaceInfo | null
   startedAt: number | null
-  /** 자기 + 자손 중 개발 서버가 아닌 것. */
+  /** 자기 + 자손 중 개발 서버가 아닌 것(에이전트가 띄운 무거운 작업까지). 에이전트 표가 보이는 값. */
   memoryBytes: number
+  /**
+   * 그 가운데 무거운 작업(그 작업과 자손)도 뺀 자기 몫. 메모리 구성의 에이전트 묶음과 같은 규칙이라 모든 에이전트의
+   * 합이 에이전트 묶음과 같다(메모리 지도의 에이전트 칸).
+   */
+  ownMemoryBytes: number
   /** 같은 프로세스의 커밋 합. 하나도 모르면 null(일부만 알면 아는 것의 합). */
   commitBytes: number | null
   descendantCount: number

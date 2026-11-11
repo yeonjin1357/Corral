@@ -72,6 +72,31 @@ test('2단계 합이 묶음보다 크면 줄여 맞추고 작으면 그 밖 칸'
   for (const g of map) expect(sum(g)).toBeCloseTo(g.bytes, 0)
 })
 
+test('에이전트 칸은 무거운 작업을 뺀 자기 메모리(A 0.5 GB + 띄운 tsc 2 GB, B 0.5 GB)', () => {
+  const a = agentRow({ pid: 10, memoryBytes: 2.5 * GB, ownMemoryBytes: 0.5 * GB })
+  const b = agentRow({ pid: 11, tool: 'codex', memoryBytes: 0.5 * GB })
+  const tsc = heavyJob({ pid: 12, memoryBytes: 2 * GB })
+  const map = memoryMapGroups({
+    ...base,
+    agents: [a, b],
+    heavyJobs: [tsc],
+    groups: groups({
+      devServer: 2200 * MB,
+      agent: GB,
+      heavy: 2 * GB,
+      otherApps: 7 * GB,
+      system: GB
+    })
+  })
+  // 표의 메모리(2.5 GB·0.5 GB)로 묶음 1 GB 를 나누면 833 MB·167 MB 가 된다. 자기 메모리로 0.5 GB 씩.
+  // 표의 값과 다른 칸만 풍선말에 "무거운 작업 제외"를 붙인다.
+  expect(group(map, 'agent').tiles.map((t) => [t.key, t.bytes, t.excludesHeavy])).toEqual([
+    [selectionKey.agent(a), 0.5 * GB, true],
+    [selectionKey.agent(b), 0.5 * GB, false]
+  ])
+  expect(group(map, 'heavy').tiles.map((t) => t.bytes)).toEqual([2 * GB])
+})
+
 test('다른 앱은 큰 순 12개 + 기타 n개', () => {
   const apps = Array.from({ length: 15 }, (_, i) => app(`app${i}.exe`, (i + 1) * 100 * MB))
   const total = apps.reduce((n, a) => n + a.memoryBytes, 0)

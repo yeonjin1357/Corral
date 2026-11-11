@@ -47,6 +47,7 @@ function agent(over: Partial<AgentRow> = {}): AgentRow {
     workspace: null,
     startedAt: 100,
     memoryBytes: 1,
+    ownMemoryBytes: 1,
     commitBytes: null,
     descendantCount: 0,
     processes: [],

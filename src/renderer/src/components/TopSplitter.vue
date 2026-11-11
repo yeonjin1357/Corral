@@ -6,7 +6,7 @@
   막대를 카드 줄 아래가 아니라 이 줄에 두어 편집 중에도 카드 영역 높이(TOP_HEIGHTS)가 그대로다.
 -->
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 import { Plus } from '@lucide/vue'
 import { text } from '../../../shared/text'
 import { TOP_MODES, snapTopMode, type CardId, type TopMode } from '../layoutState'
@@ -39,20 +39,22 @@ const maxHeight = computed(() => Math.max(...TOP_MODES.map((m) => props.heights[
 
 /** 이만큼은 움직여야 끌기로 본다(누르거나 더블클릭하며 조금 흔들린 것은 끌기가 아니다). */
 const DRAG_START_PX = 3
-let start: { y: number; height: number } | null = null
+/** 끌기를 시작한 포인터와 그때의 위치·높이. 끌지 않을 때는 null. */
+let start: { pointerId: number; y: number; height: number } | null = null
 /** 끄는 동안의 높이(px). 아직 끌지 않았으면 null. */
 const dragHeight = ref<number | null>(null)
 
 function onPointerDown(e: PointerEvent): void {
   // 끄는 중에 다른 포인터(둘째 손가락·펜)가 눌려도 시작점을 바꾸지 않는다.
   if (start || e.button !== 0) return
-  start = { y: e.clientY, height: props.heights[mode.value] }
+  start = { pointerId: e.pointerId, y: e.clientY, height: props.heights[mode.value] }
   // 손잡이 밖으로 나가도 놓을 때까지 이 줄이 포인터를 받는다.
   ;(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId)
 }
 
 function onPointerMove(e: PointerEvent): void {
-  if (!start) return
+  // 다른 포인터(둘째 손가락·펜)의 움직임은 끌기와 상관없다.
+  if (!start || e.pointerId !== start.pointerId) return
   const dy = e.clientY - start.y
   if (dragHeight.value == null && Math.abs(dy) < DRAG_START_PX) return
   const height = Math.min(maxHeight.value, Math.max(0, start.height + dy))
@@ -61,9 +63,9 @@ function onPointerMove(e: PointerEvent): void {
   emit('drag', height)
 }
 
-/** 놓으면(snap) 가장 가까운 단계에 붙고, 취소되면 단계는 그대로 둔다. */
+/** 놓으면(snap) 가장 가까운 단계에 붙고, 취소되면 단계는 그대로 둔다. 다른 포인터의 놓기·취소는 무시한다. */
 function finish(e: PointerEvent, snap: boolean): void {
-  if (!start) return
+  if (!start || e.pointerId !== start.pointerId) return
   start = null
   const el = e.currentTarget as HTMLElement
   if (el.hasPointerCapture?.(e.pointerId)) el.releasePointerCapture(e.pointerId)
@@ -73,6 +75,12 @@ function finish(e: PointerEvent, snap: boolean): void {
   emit('drag', null)
   if (snap) choose(snapTopMode(height, props.heights))
 }
+
+// 끄는 중에 손잡이가 사라지면(단축키로 설정에 감 등) 놓기가 오지 않는다. 높이 알림을 끝내 카드 영역이 그 높이로
+// 잘린 채 남지 않게 한다(단계는 그대로).
+onBeforeUnmount(() => {
+  if (dragHeight.value != null) emit('drag', null)
+})
 
 function onDoubleClick(): void {
   choose(mode.value === 'collapsed' ? 'full' : 'collapsed')

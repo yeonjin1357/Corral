@@ -1,7 +1,8 @@
 /**
  * 메모리 지도(G6)의 칸: 1단계는 메모리 구성(G4)의 묶음(0 인 것은 뺀다), 2단계는 그 묶음의 줄.
- * 2단계 합이 묶음과 다르면(에이전트 줄은 자손의 무거운 작업까지 세는 등) 같은 비율로 줄이거나 "그 밖" 칸으로 채워
- * 지도가 늘 묶음 값과 맞다(같은 메모리를 두 번 세지 않는다).
+ * 에이전트 칸은 표의 메모리(자손의 무거운 작업까지)가 아니라 무거운 작업을 뺀 자기 몫(ownMemoryBytes)이라
+ * 에이전트 묶음과 같은 규칙이다. 그래도 2단계 합이 묶음과 다르면(측정 시점 차이로 묶음을 사용량에 맞춰 줄였을 때 등)
+ * 같은 비율로 줄이거나 "그 밖" 칸으로 채워 지도가 늘 묶음 값과 맞다(같은 메모리를 두 번 세지 않는다).
  */
 import type { DashboardSnapshot, ProcessGroup, ServerRow } from '../../shared/types'
 import { selectionKey } from '../../shared/keys'
@@ -17,6 +18,8 @@ export interface MapTile {
   bytes: number
   /** 누르면 열 줄의 선택 키. 줄이 없거나 찾을 수 없는 칸(숨긴 서버·다른 앱·기타·그 밖·시스템)은 null. */
   key: string | null
+  /** 에이전트 칸의 값이 표의 메모리와 다르면(자손의 무거운 작업을 뺌) true — 풍선말에 그렇게 적는다. */
+  excludesHeavy?: boolean
 }
 
 export interface MapGroup {
@@ -72,9 +75,16 @@ function rowsOf(group: ProcessGroup, s: DashboardSnapshot): MapTile[] {
         (row) => `${folderOf(row.worktree)} · ${text.ui.agent.toolNames[row.tool]}`,
         (row, name) => t.mapWithPid(name, row.pid)
       )
+      // 무거운 작업은 무거운 작업 묶음에 있으므로 에이전트 칸은 그것을 뺀 자기 몫.
       return s.agents.map((row, i) => {
         const key = selectionKey.agent(row)
-        return { id: key, label: labels[i], bytes: row.memoryBytes, key }
+        return {
+          id: key,
+          label: labels[i],
+          bytes: row.ownMemoryBytes,
+          key,
+          excludesHeavy: row.ownMemoryBytes !== row.memoryBytes
+        }
       })
     }
     case 'heavy':
@@ -109,7 +119,7 @@ function rowsOf(group: ProcessGroup, s: DashboardSnapshot): MapTile[] {
   }
 }
 
-/** 칸 합을 묶음 값에 맞춘다: 크면 같은 비율로 줄이고, 작으면 남는 몫을 "그 밖" 칸으로. */
+/** 칸 합을 묶음 값에 맞춘다(그래도 다를 때만): 크면 같은 비율로 줄이고, 작으면 남는 몫을 "그 밖" 칸으로. */
 function fit(group: ProcessGroup, tiles: MapTile[], bytes: number): MapTile[] {
   const positive = tiles.filter((tile) => tile.bytes > 0)
   const sum = positive.reduce((n, tile) => n + tile.bytes, 0)

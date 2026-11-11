@@ -46,6 +46,7 @@ function agent(
     workspace: null,
     startedAt: 1,
     memoryBytes: 1,
+    ownMemoryBytes: 1,
     commitBytes: null,
     descendantCount: 0,
     processes: [],

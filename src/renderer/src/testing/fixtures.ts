@@ -41,13 +41,16 @@ export function serverRow(over: Partial<ServerRow> = {}): ServerRow {
 }
 
 export function agentRow(over: Partial<AgentRow> = {}): AgentRow {
+  const memoryBytes = over.memoryBytes ?? 600 * MB
   return {
     pid: 5000,
     tool: 'claude',
     worktree: { root: 'C:\\work\\wt-a', branch: 'feat/a', isLinkedWorktree: true },
     workspace: null,
     startedAt: 100,
-    memoryBytes: 600 * MB,
+    memoryBytes,
+    // 무거운 작업을 띄우지 않은 에이전트: 자기 몫 = 표의 메모리(다르게 하려면 ownMemoryBytes 를 준다).
+    ownMemoryBytes: memoryBytes,
     commitBytes: null,
     descendantCount: 3,
     processes: [],

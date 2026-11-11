@@ -56,6 +56,7 @@ function agent(over: Partial<AgentRow> = {}): AgentRow {
     workspace: WS_SHOP,
     startedAt: 100,
     memoryBytes: 0,
+    ownMemoryBytes: 0,
     commitBytes: null,
     descendantCount: 0,
     processes: [],

@@ -951,6 +951,30 @@ test('손잡이를 끄는 동안 카드 영역이 그 높이를 따르고 놓으
   w.unmount()
 })
 
+test('끄는 중에 단축키로 설정에 갔다 돌아와도 카드 영역이 그 높이로 잘려 있지 않다', async () => {
+  const f = fake()
+  const w = await start(f)
+  const handle = w.find('[role="separator"]')
+  await handle.trigger('pointerdown', { clientY: 500, button: 0, pointerId: 1 })
+  await handle.trigger('pointermove', { clientY: 380, pointerId: 1 })
+  expect(w.find('.resource-grid').element.parentElement!.style.height).toBe(
+    `${TOP_HEIGHTS.full - 120}px`
+  )
+  // 손을 떼기 전에 Ctrl+, 로 설정에 간다(손잡이가 사라진다).
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: ',', ctrlKey: true }))
+  await flushPromises()
+  expect(w.find('[role="separator"]').exists()).toBe(false)
+  f.navigate({ page: 'dashboard', key: null })
+  await flushPromises()
+  // 돌아오면 고른 단계(자세히)의 제 높이 그대로.
+  const area = w.find('.resource-grid').element.parentElement!
+  expect(area.style.height).toBe('')
+  expect(area.classList.contains('overflow-hidden')).toBe(false)
+  expect(w.find('.resource-grid [data-compact-value]').exists()).toBe(false)
+  expect(w.find('[data-mode="full"]').attributes('aria-pressed')).toBe('true')
+  w.unmount()
+})
+
 test('카드 줄에 가로 스크롤바가 생기면 끄는 높이·붙는 높이에 그만큼 더한다', async () => {
   const resize = fakeResizeObserver()
   try {

@@ -113,6 +113,54 @@ test('끄는 중에 다른 포인터를 눌러도 끌기는 처음 포인터 그
   expect(modes(w)).toEqual(['compact'])
 })
 
+test('끄는 중에는 다른 포인터의 움직임·놓기·취소·잡기 잃음을 무시한다', async () => {
+  const w = splitter('full')
+  const drags = (): (number | null)[] => (w.emitted('drag') ?? []).map((e) => e[0] as number)
+  await handle(w).trigger('pointerdown', { clientY: 400, button: 0, pointerId: 1 })
+  await handle(w).trigger('pointermove', { clientY: 330, pointerId: 1 })
+  // 둘째 포인터(펜·다른 손가락)는 높이를 바꾸지도, 끌기를 끝내지도 않는다.
+  await handle(w).trigger('pointermove', { clientY: 100, pointerId: 2 })
+  await handle(w).trigger('pointerup', { clientY: 100, pointerId: 2 })
+  await handle(w).trigger('pointercancel', { pointerId: 2 })
+  await handle(w).trigger('lostpointercapture', { pointerId: 2 })
+  expect(drags()).toEqual([190])
+  expect(modes(w)).toEqual([])
+  // 처음 포인터로 이어 끌고 놓으면 그대로 붙는다.
+  await handle(w).trigger('pointermove', { clientY: 280, pointerId: 1 })
+  await handle(w).trigger('pointerup', { clientY: 280, pointerId: 1 })
+  expect(drags()).toEqual([190, 140, null])
+  expect(modes(w)).toEqual(['compact'])
+})
+
+test('끄는 중에 손잡이가 사라지면(다른 화면으로 감) 높이 알림을 끝낸다(단계는 그대로)', async () => {
+  // unmount 는 기록된 emitted 를 지우므로 부모처럼 듣는 함수로 받는다.
+  const listen = (): { w: VueWrapper; drags: (number | null)[]; modes: TopMode[] } => {
+    const drags: (number | null)[] = []
+    const modes: TopMode[] = []
+    const w = mount(TopSplitter, {
+      props: {
+        mode: 'full',
+        heights: HEIGHTS,
+        onDrag: (h: number | null) => drags.push(h),
+        'onUpdate:mode': (m: TopMode) => modes.push(m)
+      }
+    })
+    return { w, drags, modes }
+  }
+  const dragging = listen()
+  await handle(dragging.w).trigger('pointerdown', { clientY: 400, button: 0, pointerId: 1 })
+  await handle(dragging.w).trigger('pointermove', { clientY: 300, pointerId: 1 })
+  expect(dragging.drags).toEqual([160])
+  dragging.w.unmount()
+  expect(dragging.drags).toEqual([160, null])
+  expect(dragging.modes).toEqual([])
+  // 끌지 않았으면(누르기만 했음) 사라져도 알리지 않는다.
+  const pressed = listen()
+  await handle(pressed.w).trigger('pointerdown', { clientY: 400, button: 0, pointerId: 1 })
+  pressed.w.unmount()
+  expect(pressed.drags).toEqual([])
+})
+
 test('포인터 잡기를 잃으면(lostpointercapture) 끌기를 끝내고 가까운 단계에 붙는다', async () => {
   const w = splitter('full')
   const drags = (): (number | null)[] => (w.emitted('drag') ?? []).map((e) => e[0] as number)

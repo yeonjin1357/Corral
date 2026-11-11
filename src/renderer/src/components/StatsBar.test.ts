@@ -526,12 +526,12 @@ describe('카드 배치', () => {
     // 열은 보이는 카드로 만든다(cardColumns: 카드마다 비중과 최소 너비).
     expect(w.find('.resource-grid').attributes('style')).toContain(
       [
-        'minmax(160px, 1.2fr)',
-        'minmax(160px, 1fr)',
+        'minmax(150px, 1.2fr)',
+        'minmax(150px, 1fr)',
         'minmax(240px, 1.5fr)',
-        'minmax(160px, 1fr)',
-        'minmax(160px, 1.05fr)',
-        'minmax(160px, 1fr)'
+        'minmax(150px, 1fr)',
+        'minmax(150px, 1.05fr)',
+        'minmax(150px, 1fr)'
       ].join(' ')
     )
     // 편집 중이 아니면 편집 단추가 없고 카드를 누를 수 있으며 끌 수 없다.
