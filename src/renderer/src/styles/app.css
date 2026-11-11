@@ -325,6 +325,20 @@
 .process-table-region [data-slot='table-row'][data-selected='true'] .actions-cell {
   background: color-mix(in srgb, var(--primary) 6%, var(--card));
 }
+/*
+  표의 메모리 막대(G5, 스프레드시트의 데이터 막대처럼): 그 표 안에서의 비중(--memory-share)만큼 칸 왼쪽부터 옅게.
+  칸 배경이라 글자 뒤에 있고 칸 크기는 그대로다. 반투명이라 줄의 마우스 올림·선택·묶음 머리 배경이 비쳐
+  어느 배경에서도 글자가 읽힌다. 색은 모든 탭이 개발 서버 묶음 색.
+*/
+.process-table-region .memory-bar {
+  background-image: linear-gradient(
+    color-mix(in srgb, var(--chart-1) 22%, transparent),
+    color-mix(in srgb, var(--chart-1) 22%, transparent)
+  );
+  background-repeat: no-repeat;
+  background-position: left center;
+  background-size: var(--memory-share, 0%) calc(100% - 8px);
+}
 
 @media (max-width: 1200px) {
   .resource-grid {

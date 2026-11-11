@@ -482,6 +482,18 @@ export const text = {
       processes: '프로세스 수',
       actions: '동작'
     },
+    /** 표의 메모리 막대(G5): 메모리 칸 풍선말과 메모리 머리글 풍선말(막대의 기준). */
+    table: {
+      /** ofRam: 전체 RAM 대비 %. 전체 RAM 을 아직 모르면 null(그 부분을 뺀다). */
+      memoryShareRows: (bytes: string, ofTable: number, ofRam: number | null): string =>
+        ofRam == null
+          ? `${bytes} · 이 표 합의 ${ofTable}%`
+          : `${bytes} · 이 표 합의 ${ofTable}% · 전체 RAM 의 ${ofRam}%`,
+      memoryShareUsed: (bytes: string, ofUsed: number): string =>
+        `${bytes} · 사용 중 RAM 의 ${ofUsed}%`,
+      memoryHintRows: '막대: 이 표의 메모리 합 대비',
+      memoryHintUsed: '막대: 사용 중인 RAM 대비'
+    },
     rowStatus: {
       inUse: '사용 중',
       idle: '연결 없음',

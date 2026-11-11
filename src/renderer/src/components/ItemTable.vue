@@ -157,6 +157,13 @@ const commitHint = (group: GroupHead): string =>
 const statusTitle = (group: GroupHead): string =>
   [group.status.text, group.summary].filter(Boolean).join(' · ')
 
+/**
+ * 메모리 막대(G5)의 길이. 막대는 칸 배경(app.css 의 .memory-bar)이라 글자 뒤에 있고 칸 너비를 바꾸지 않는다.
+ * 비중이 없는 칸(다른 포트 보기 등)은 막대가 없다.
+ */
+const barStyle = (share: number | undefined): Record<string, string> | undefined =>
+  share == null ? undefined : { '--memory-share': `${Math.round(share * 1000) / 10}%` }
+
 const TONE: Record<Tone, string> = TONE_COLOR
 const ICON: Record<ActionKind, unknown> = {
   open: ExternalLink,
@@ -199,6 +206,7 @@ const G = text.ui.group
                     'h-8 max-w-full px-1 text-xs',
                     sort.id === col.id ? 'text-primary' : 'text-muted-foreground'
                   ]"
+                  :title="col.hint"
                   @click="toggleSort(col)"
                 >
                   <span>{{ col.label }}</span>
@@ -237,8 +245,13 @@ const G = text.ui.group
                   :colspan="span > 1 ? span : undefined"
                   :class="[
                     TABLE.cell,
-                    { 'text-right': col.align === 'right', 'pl-4': first || col.id === 'name' }
+                    {
+                      'text-right': col.align === 'right',
+                      'pl-4': first || col.id === 'name',
+                      'memory-bar': col.id === 'memory' && block.group.memoryShare != null
+                    }
                   ]"
+                  :style="col.id === 'memory' ? barStyle(block.group.memoryShare) : undefined"
                 >
                   <div v-if="col.id === 'name'" class="flex min-w-0 items-center gap-1.5">
                     <Button
@@ -396,9 +409,11 @@ const G = text.ui.group
                     {
                       'text-right': col.align === 'right',
                       'font-mono text-xs': row.cells[col.id]?.mono,
-                      'pl-4': ci === 0 || col.id === 'name'
+                      'pl-4': ci === 0 || col.id === 'name',
+                      'memory-bar': row.cells[col.id]?.share != null
                     }
                   ]"
+                  :style="barStyle(row.cells[col.id]?.share)"
                 >
                   <div
                     v-if="col.id === 'name'"

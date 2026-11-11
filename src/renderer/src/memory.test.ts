@@ -1,4 +1,4 @@
-import { GROUP_ORDER, memoryComposition } from './memory'
+import { GROUP_ORDER, memoryComposition, tipPercent } from './memory'
 import type { GroupUsage } from '../../shared/types'
 
 /** 묶음 순서(GROUP_ORDER)대로 바이트를 받아 GroupUsage 목록을 만든다. */
@@ -44,6 +44,12 @@ test('묶음 합이 사용량을 넘으면 같은 비율로 줄여 사용량에 
 
 test('전체를 모르면(0) null', () => {
   expect(memoryComposition({ totalBytes: 0, usedBytes: 0 }, usage(10, 5, 0, 30, 15))).toBeNull()
+})
+
+test('풍선말의 %: 반올림하되 0 보다 크고 1% 아래는 소수 한 자리', () => {
+  expect([0, 0.125, 0.0937, 1].map(tipPercent)).toEqual([0, 13, 9, 100])
+  // "0%" 로 보이지 않게.
+  expect([0.004, 0.0030518].map(tipPercent)).toEqual([0.4, 0.3])
 })
 
 test('없는 묶음은 0', () => {

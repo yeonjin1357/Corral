@@ -32,6 +32,7 @@ import {
 import { exePathOf } from '../../shared/exePath'
 import { text } from '../../shared/text'
 import { appBrand, devServerBrand, heavyBrand, leftoverBrand, type Brand } from './brand'
+import { clamp01, tipPercent } from './memory'
 import claudeCodeLogo from './assets/brands/claude-code.svg'
 import codexLogo from './assets/brands/codex.svg'
 
@@ -85,6 +86,8 @@ export interface Cell {
   dot?: Tone
   /** 글자 옆 작은 표시(메모리 증가 등). */
   badge?: string
+  /** 메모리 칸의 막대(G5): 그 표의 기준 대비 비중 0~1. withMemoryShares 가 채운다. */
+  share?: number
 }
 
 export type ActionKind = 'open' | 'details' | 'kill' | 'remove' | 'unhide'
@@ -99,6 +102,8 @@ export interface Column {
   label: string
   width: number
   align?: 'right'
+  /** 머리글 풍선말(메모리 칸에 막대의 기준). */
+  hint?: string
 }
 
 export interface Row {
@@ -711,6 +716,77 @@ export function otherPortsTable(s: DashboardSnapshot): Table {
   })
 }
 
+// ── 메모리 막대(G5) ──
+
+/**
+ * 메모리 막대의 기준. rows: 그 표 줄들의 메모리 합(개발 서버·숨긴 서버·에이전트·남은 프로세스·무거운 작업·다른 앱),
+ * used: 사용 중인 RAM(작업 공간 탭 — 줄끼리 더하면 같은 프로세스를 두 번 셀 수 있다),
+ * none: 막대 없음(다른 포트 보기 — 한 프로세스가 여러 줄에 나온다).
+ */
+export type MemoryShareBase = { kind: 'rows' } | { kind: 'used'; bytes: number } | { kind: 'none' }
+
+const memoryOf = (row: Row): number => {
+  const bytes = row.cells.memory?.sort
+  return typeof bytes === 'number' && bytes > 0 ? bytes : 0
+}
+
+/**
+ * 막대의 분모. 메모리 칸이 없는 표(디스크 정리·기록)·막대 없는 기준·0 이하면 null.
+ * 검색으로 거르기 전 표로 구하고, 묶음 머리(groupServers·groupWorkspaces)도 이 값으로 나눈다.
+ */
+export function memoryShareDenominator(table: Table, base: MemoryShareBase): number | null {
+  if (base.kind === 'none' || !table.columns.some((col) => col.id === 'memory')) return null
+  const total =
+    base.kind === 'used' ? base.bytes : table.rows.reduce((sum, row) => sum + memoryOf(row), 0)
+  return total > 0 ? total : null
+}
+
+/**
+ * 메모리 칸에 그 표 안에서의 비중(0~1 로 자름)과 풍선말(표 합 대비·전체 RAM 대비, 작업 공간 탭은 사용 중 RAM 대비)을,
+ * 메모리 머리글에 기준을 채운다. 분모가 없으면 표를 그대로 돌려준다. 검색으로 거르기 전 표에 쓴다(검색해도 막대가 그대로).
+ */
+export function withMemoryShares(
+  table: Table,
+  base: MemoryShareBase,
+  totalRamBytes: number
+): Table {
+  const total = memoryShareDenominator(table, base)
+  if (total == null) return table
+  const T = text.ui.table
+  const used = base.kind === 'used'
+  const title = (label: string, bytes: number, share: number): string =>
+    used
+      ? T.memoryShareUsed(label, tipPercent(share))
+      : T.memoryShareRows(
+          label,
+          tipPercent(share),
+          totalRamBytes > 0 ? tipPercent(clamp01(bytes / totalRamBytes)) : null
+        )
+  return {
+    ...table,
+    columns: table.columns.map((col) =>
+      col.id === 'memory' ? { ...col, hint: used ? T.memoryHintUsed : T.memoryHintRows } : col
+    ),
+    rows: table.rows.map((row) => {
+      const cell = row.cells.memory
+      // 모르는 값(—)은 막대가 없다.
+      if (!cell || typeof cell.sort !== 'number' || cell.sort < 0) return row
+      const share = clamp01(cell.sort / total)
+      return {
+        ...row,
+        cells: {
+          ...row.cells,
+          memory: { ...cell, share, title: title(cell.text, cell.sort, share) }
+        }
+      }
+    })
+  }
+}
+
+/** 묶음 머리의 막대: 표와 같은 분모로(없으면 막대 없음). */
+const headShare = (bytes: number, total: number | null): Pick<GroupHead, 'memoryShare'> =>
+  total != null && total > 0 ? { memoryShare: clamp01(bytes / total) } : {}
+
 /** 검색어로 거르기. `:3000` 처럼 앞에 콜론을 붙여도 포트를 찾는다. */
 export function filterRows(rows: Row[], query: string): Row[] {
   const q = query.trim().toLowerCase()
@@ -749,6 +825,8 @@ export interface GroupHead {
   count: number
   /** 메모리 합(개발 서버 탭은 서버마다 한 번, 작업 공간 탭은 프로세스마다 한 번). */
   memoryBytes: number
+  /** 메모리 막대(G5): 표와 같은 분모 대비 0~1. 분모가 없으면 없다. */
+  memoryShare?: number
   /** 커밋 합. 하나도 모르면 null. */
   commitBytes: number | null
   /** 머리에 보일 에이전트 로고와 설명(도구 · 상태 · 경과 시간). */
@@ -788,7 +866,9 @@ export function groupServers(
   agents: AgentRow[],
   now: number = Date.now(),
   /** 작업 공간의 남은 프로세스(정리 버튼이 같이 끈다). 그 워크트리를 감싸는 에이전트도 머리에 보인다. */
-  leftovers: Pick<LeftoverRow, 'workspace' | 'worktree'>[] = []
+  leftovers: Pick<LeftoverRow, 'workspace' | 'worktree'>[] = [],
+  /** 메모리 막대의 분모(검색 전 표의 memoryShareDenominator). 없으면 머리에 막대가 없다. */
+  memoryTotal: number | null = null
 ): GroupedRows[] {
   const byKey = new Map(servers.map((r) => [selectionKey.server(r), r]))
   const buckets = new Map<string, { rows: Row[]; servers: ServerRow[] }>()
@@ -821,6 +901,7 @@ export function groupServers(
       ws.root,
       members.flatMap((r) => (r.worktree ? [r.worktree.root] : []))
     )
+    const memoryBytes = all.reduce((sum, r) => sum + r.memoryBytes, 0)
     return {
       group: {
         key: id,
@@ -828,7 +909,8 @@ export function groupServers(
         name: ws.name,
         outer: ws.outer,
         count: all.length,
-        memoryBytes: all.reduce((sum, r) => sum + r.memoryBytes, 0),
+        memoryBytes,
+        ...headShare(memoryBytes, memoryTotal),
         commitBytes: commitSum(all),
         agentBadges: inside.map((a) => agentBadge(a, now)),
         status: groupStatus(all),
@@ -844,8 +926,14 @@ export function groupServers(
  * 작업 폴더 모름은 맨 끝)이고 정렬은 묶음 안 줄의 순서만 바꾼다. 구성원이 하나여도 머리를 두고, 보일 줄이 없는 작업 공간
  * (검색에 맞는 구성원이 없음)은 뺀다. 머리의 수치는 걸러진 줄이 아니라 작업 공간 전체다.
  * 작업 공간끼리는 더하지 않는다(드물게 한 프로세스가 두 작업 공간에 든다).
+ * memoryTotal: 메모리 막대의 분모(검색 전 표의 memoryShareDenominator, 사용 중 RAM). 없으면 머리에 막대가 없다.
  */
-export function groupWorkspaces(rows: Row[], s: DashboardSnapshot, now: number): GroupedRows[] {
+export function groupWorkspaces(
+  rows: Row[],
+  s: DashboardSnapshot,
+  now: number,
+  memoryTotal: number | null = null
+): GroupedRows[] {
   const agents = new Map(s.agents.map((a) => [selectionKey.agent(a), a]))
   const servers = new Map(s.servers.map((r) => [selectionKey.server(r), r]))
   const heavy = new Set(s.heavyJobs.map((j) => selectionKey.heavy(j)))
@@ -860,7 +948,7 @@ export function groupWorkspaces(rows: Row[], s: DashboardSnapshot, now: number):
       heavy: ws.heavyKeys.filter((k) => heavy.has(k)).length,
       leftovers: ws.leftoverKeys.filter((k) => leftovers.has(k)).length
     }
-    return [{ group: workspaceHead(ws, members, now), rows: mine }]
+    return [{ group: workspaceHead(ws, members, now, memoryTotal), rows: mine }]
   })
 }
 
@@ -868,7 +956,8 @@ export function groupWorkspaces(rows: Row[], s: DashboardSnapshot, now: number):
 function workspaceHead(
   ws: WorkspaceRow,
   m: { agents: AgentRow[]; servers: ServerRow[]; heavy: number; leftovers: number },
-  now: number
+  now: number,
+  memoryTotal: number | null
 ): GroupHead {
   const K = text.ui.workspaces.kinds
   const counts: [string, number][] = [
@@ -889,6 +978,7 @@ function workspaceHead(
     outer: ws.outer,
     count: m.agents.length + m.servers.length + m.heavy + m.leftovers,
     memoryBytes: ws.memoryBytes,
+    ...headShare(ws.memoryBytes, memoryTotal),
     commitBytes: ws.commitBytes,
     agentBadges: m.agents.map((a) => agentBadge(a, now)),
     status: workspaceStatus(m.agents, m.servers),

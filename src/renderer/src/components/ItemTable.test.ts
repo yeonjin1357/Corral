@@ -1,7 +1,13 @@
 // @vitest-environment happy-dom
 import { mount } from '@vue/test-utils'
 import ItemTable from './ItemTable.vue'
-import { groupServers, groupWorkspaces, tableFor } from '../rows'
+import {
+  groupServers,
+  groupWorkspaces,
+  memoryShareDenominator,
+  tableFor,
+  withMemoryShares
+} from '../rows'
 import { MB, heavyJob, serverRow, snapshot, workspaceRow } from '../testing/fixtures'
 import type { DashboardSnapshot } from '../../../shared/types'
 import { selectionKey } from '../../../shared/keys'
@@ -206,6 +212,65 @@ describe('작업 공간 탭 묶음', () => {
       ['cleanup', 'C:\\work\\shop']
     ])
     expect(w.find('tr[data-group="ws:?"]').findAll('[data-action]')).toHaveLength(0)
+  })
+})
+
+describe('메모리 막대(G5)', () => {
+  const WS = { root: 'C:\\work\\ws', name: 'ws', branch: 'main', outer: true }
+  const s = snapshot({
+    servers: [
+      serverRow({ pid: 1, ports: [5173], workspace: WS, memoryBytes: 100 * MB }),
+      serverRow({ pid: 2, ports: [8081], workspace: WS, memoryBytes: 200 * MB }),
+      serverRow({ pid: 3, ports: [3000], memoryBytes: 100 * MB })
+    ]
+  })
+  const plain = tableFor('ports', s)
+  const table = withMemoryShares(plain, { kind: 'rows' }, s.memory.totalBytes)
+  function barProps(t = table, group?: TableProps['group']): TableProps {
+    return { ...props(s, { id: 'port', dir: 'asc' }), table: t, rows: t.rows, group }
+  }
+
+  test('메모리 칸에 비중만큼 배경 막대를 그린다(글자는 그대로)', () => {
+    const w = mount(ItemTable, { props: barProps() })
+    // 메모리 칸만, 줄마다 하나(포트 순: 3000·5173·8081).
+    expect(w.findAll('td.memory-bar').map((td) => td.text())).toEqual([
+      '100 MB',
+      '100 MB',
+      '200 MB'
+    ])
+    const cell = w.find('tr[data-key="server:2:200"] td.memory-bar')
+    expect(cell.attributes('style')).toContain('--memory-share: 50%')
+    expect(cell.find('[title]').attributes('title')).toBe(
+      '200 MB · 이 표 합의 50% · 전체 RAM 의 0.6%'
+    )
+    // 칸 너비는 그대로.
+    const memoryHead = w.findAll('th').find((th) => th.text().includes('메모리'))!
+    expect(memoryHead.attributes('style')).toContain('width: 96px')
+    // 묶음 머리 줄도 같은 분모로(작업 공간 300 MB ÷ 표 합 400 MB).
+    const total = memoryShareDenominator(table, { kind: 'rows' })
+    const grouped = mount(ItemTable, {
+      props: barProps(table, (rows) => groupServers(rows, s.servers, [], 0, [], total))
+    })
+    const head = grouped.find('tr[data-group] td.memory-bar')
+    expect(head.attributes('style')).toContain('--memory-share: 75%')
+    expect(head.text()).toBe('300 MB')
+    // 비중이 없는 표(다른 포트 보기 등)는 막대가 없다.
+    expect(
+      mount(ItemTable, { props: barProps(plain) })
+        .find('.memory-bar')
+        .exists()
+    ).toBe(false)
+  })
+
+  test('메모리 머리글에 기준 풍선말', () => {
+    const w = mount(ItemTable, { props: barProps() })
+    const head = (label: string): ReturnType<typeof w.find> =>
+      w
+        .findAll('th')
+        .find((th) => th.text().includes(label))!
+        .find('button')
+    expect(head('메모리').attributes('title')).toBe('막대: 이 표의 메모리 합 대비')
+    expect(head('포트').attributes('title')).toBeUndefined()
   })
 })
 

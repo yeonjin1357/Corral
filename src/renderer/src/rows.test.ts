@@ -3,11 +3,13 @@ import {
   groupServers,
   groupWorkspaces,
   hiddenServerTable,
+  memoryShareDenominator,
   otherPortsTable,
   sortRows,
   tableFor,
   TABS,
   type SnapshotTab,
+  withMemoryShares,
   workspaceSummary,
   workspaceTable
 } from './rows'
@@ -1194,6 +1196,133 @@ describe('커밋 칸', () => {
     expect(
       groupServers(tableFor('ports', none).rows, none.servers, [])[0].group?.commitBytes
     ).toBeNull()
+  })
+})
+
+describe('메모리 막대(G5)', () => {
+  const RAM = 32 * GB
+
+  test('메모리 비중은 표 줄 합 대비이고 0~1 로 자른다', () => {
+    const s = snapshot({
+      servers: [
+        serverRow({ pid: 1, ports: [1], memoryBytes: 300 * MB }),
+        serverRow({ pid: 2, ports: [2], memoryBytes: 900 * MB })
+      ]
+    })
+    const plain = tableFor('ports', s)
+    const t = withMemoryShares(plain, { kind: 'rows' }, RAM)
+    expect(t.rows.map((r) => r.cells.memory.share)).toEqual([0.25, 0.75])
+    // 숫자·정렬은 그대로, 머리글에 기준.
+    expect(t.rows[1].cells.memory).toMatchObject({ text: '900 MB', sort: 900 * MB, mono: true })
+    expect(t.columns.find((col) => col.id === 'memory')?.hint).toBe('막대: 이 표의 메모리 합 대비')
+    expect(t.columns.filter((col) => col.hint).map((col) => col.id)).toEqual(['memory'])
+    // 받은 표는 바꾸지 않는다.
+    expect(plain.rows[0].cells.memory.share).toBeUndefined()
+    // 기준보다 큰 줄은 1 로 자른다.
+    const over = withMemoryShares(plain, { kind: 'used', bytes: 600 * MB }, RAM)
+    expect(over.rows.map((r) => r.cells.memory.share)).toEqual([0.5, 1])
+    // 분모가 0 이하이면 그대로.
+    const zero = tableFor('ports', snapshot({ servers: [serverRow({ memoryBytes: 0 })] }))
+    expect(withMemoryShares(zero, { kind: 'rows' }, RAM)).toBe(zero)
+    expect(withMemoryShares(plain, { kind: 'used', bytes: 0 }, RAM)).toBe(plain)
+    // 메모리 칸이 없는 표(디스크 정리)도 그대로.
+    const disk = tableFor(
+      'disk',
+      snapshot({ disk: { rows: [diskRow()], scannedAt: 1, scanning: false, error: null } })
+    )
+    expect(withMemoryShares(disk, { kind: 'rows' }, RAM)).toBe(disk)
+    expect(memoryShareDenominator(disk, { kind: 'used', bytes: GB })).toBeNull()
+  })
+
+  test('작업 공간 표는 사용 중 RAM 대비', () => {
+    const SHOP = { root: 'C:\\work\\shop', name: 'shop', branch: 'main', outer: false }
+    const server = serverRow({ pid: 1, ports: [5173], memoryBytes: 4 * GB, workspace: SHOP })
+    const build = heavyJob({ pid: 2, memoryBytes: 2 * GB, workspace: SHOP })
+    const s = snapshot({
+      memory: { ...snapshot().memory, usedBytes: 16 * GB },
+      servers: [server],
+      heavyJobs: [build],
+      workspaces: [
+        workspaceRow({
+          key: 'ws:c:\\work\\shop',
+          root: 'C:\\work\\shop',
+          name: 'shop',
+          // 줄 합(6 GB)이 아니라 메인이 pid 마다 한 번 센 값.
+          memoryBytes: 8 * GB,
+          serverKeys: [selectionKey.server(server)],
+          heavyKeys: [selectionKey.heavy(build)]
+        })
+      ]
+    })
+    const base = { kind: 'used', bytes: s.memory.usedBytes } as const
+    const t = withMemoryShares(workspaceTable(s), base, s.memory.totalBytes)
+    const memory = new Map(t.rows.map((r) => [r.key, r.cells.memory]))
+    expect(memory.get(selectionKey.server(server))).toMatchObject({
+      text: '4.0 GB',
+      share: 0.25,
+      title: '4.0 GB · 사용 중 RAM 의 25%'
+    })
+    expect(memory.get(selectionKey.heavy(build))).toMatchObject({
+      share: 0.125,
+      title: '2.0 GB · 사용 중 RAM 의 13%'
+    })
+    expect(t.columns.find((col) => col.id === 'memory')?.hint).toBe('막대: 사용 중인 RAM 대비')
+    // 머리(작업 공간 합)도 같은 분모.
+    const total = memoryShareDenominator(t, base)
+    expect(total).toBe(16 * GB)
+    expect(groupWorkspaces(t.rows, s, s.takenAt, total)[0].group?.memoryShare).toBe(0.5)
+  })
+
+  test('다른 포트 보기는 막대 없음', () => {
+    const t = otherPortsTable(snapshot({ otherPorts: [otherPort({ memoryBytes: 300 * MB })] }))
+    expect(withMemoryShares(t, { kind: 'none' }, RAM)).toBe(t)
+    expect(memoryShareDenominator(t, { kind: 'none' })).toBeNull()
+    expect(t.rows[0].cells.memory.share).toBeUndefined()
+    expect(t.columns.find((col) => col.id === 'memory')?.hint).toBeUndefined()
+  })
+
+  test('풍선말에 표 합 대비와 전체 RAM 대비 %', () => {
+    const s = snapshot({
+      servers: [
+        serverRow({ pid: 1, ports: [1], memoryBytes: 3 * GB }),
+        serverRow({ pid: 2, ports: [2], memoryBytes: 1 * GB }),
+        serverRow({ pid: 3, ports: [3], memoryBytes: 100 * MB })
+      ]
+    })
+    const titles = (ram: number): (string | undefined)[] =>
+      withMemoryShares(tableFor('ports', s), { kind: 'rows' }, ram).rows.map(
+        (r) => r.cells.memory.title
+      )
+    // 표 합 4196 MB. 반올림하되 1% 아래는 소수 한 자리(메모리 카드 풍선말과 같은 규칙).
+    expect(titles(RAM)).toEqual([
+      '3.0 GB · 이 표 합의 73% · 전체 RAM 의 9%',
+      '1.0 GB · 이 표 합의 24% · 전체 RAM 의 3%',
+      '100 MB · 이 표 합의 2% · 전체 RAM 의 0.3%'
+    ])
+    // 전체 RAM 을 아직 모르면(0) 전체 RAM 대비는 뺀다.
+    expect(titles(0)[0]).toBe('3.0 GB · 이 표 합의 73%')
+  })
+
+  test('개발 서버 묶음 머리 줄의 비중은 같은 분모', () => {
+    const WS = { root: 'C:\\work\\ws', name: 'ws', branch: 'main', outer: true }
+    const s = snapshot({
+      servers: [
+        serverRow({ pid: 1, ports: [5173], workspace: WS, memoryBytes: 300 * MB }),
+        serverRow({ pid: 2, ports: [8081], workspace: WS, memoryBytes: 900 * MB }),
+        serverRow({ pid: 3, ports: [3000], memoryBytes: 400 * MB })
+      ]
+    })
+    const t = withMemoryShares(tableFor('ports', s), { kind: 'rows' }, s.memory.totalBytes)
+    const total = memoryShareDenominator(t, { kind: 'rows' })
+    expect(total).toBe(1600 * MB)
+    // 검색으로 일부만 보여도 머리는 작업 공간 전체 ÷ 검색 전 표 합, 줄도 검색 전 비중 그대로.
+    const filtered = filterRows(t.rows, ':8081')
+    const head = groupServers(filtered, s.servers, [], 0, [], total).find((g) => g.group)?.group
+    expect(head?.memoryShare).toBe(0.75)
+    expect(filtered.map((r) => r.cells.memory.share)).toEqual([900 / 1600])
+    // 기준이 없으면 머리에도 막대가 없다.
+    const plain = groupServers(t.rows, s.servers, []).find((g) => g.group)?.group
+    expect(plain?.memoryShare).toBeUndefined()
   })
 })
 

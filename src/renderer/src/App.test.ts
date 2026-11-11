@@ -516,6 +516,30 @@ test('검색·탭·정렬', async () => {
   w.unmount()
 })
 
+test('검색해도 메모리 막대 길이는 그대로', async () => {
+  const w = await start(fake())
+  const search = (q: string): Promise<void> => w.find('input[placeholder^="이름"]').setValue(q)
+  const bar = (tr: string): string | undefined => w.find(`${tr} td.memory-bar`).attributes('style')
+  const apiRow = `tr[data-key="${selectionKey.server(api)}"]`
+  // 작업 공간 탭: 사용 중 RAM 대비.
+  const wsHead = bar('tr[data-group="ws:c:\\\\work\\\\ws"]')
+  const wsApi = bar(apiRow)
+  expect(wsHead).toContain('--memory-share: 4.5%')
+  expect(wsApi).toContain('--memory-share: 3.3%')
+  await search(':8081')
+  expect(bar('tr[data-group="ws:c:\\\\work\\\\ws"]')).toBe(wsHead)
+  expect(bar(apiRow)).toBe(wsApi)
+  await search('')
+  // 개발 서버 탭(묶음 보기): 표 줄 합(300 + 900 + 100 MB) 대비, 머리는 작업 공간(1200 MB).
+  await openTab(w, 'ports')
+  expect(bar('tr[data-group]')).toContain('--memory-share: 92.3%')
+  expect(bar(apiRow)).toContain('--memory-share: 69.2%')
+  await search(':8081')
+  expect(bar('tr[data-group]')).toContain('--memory-share: 92.3%')
+  expect(bar(apiRow)).toContain('--memory-share: 69.2%')
+  w.unmount()
+})
+
 test('묶음 정리 버튼은 작업 공간 정리를 부르고 결과를 알린다', async () => {
   const f = fake()
   const w = await start(f)

@@ -40,11 +40,14 @@ import {
   groupWorkspaces,
   hiddenServerTable,
   leftoverIcon,
+  memoryShareDenominator,
   otherPortsTable,
   serverIcon,
   tableFor,
+  withMemoryShares,
   type ActionKind,
   type GroupedRows,
+  type MemoryShareBase,
   type Row,
   type TabKey
 } from './rows'
@@ -562,13 +565,34 @@ watch(tab, () => {
   showHidden.value = false
   showOther.value = false
 })
+/**
+ * 메모리 막대의 기준(G5): 작업 공간 탭은 사용 중인 RAM(구성원끼리 더하면 같은 프로세스를 두 번 셀 수 있다),
+ * 다른 포트 보기는 없음(한 프로세스가 여러 줄에 나온다), 나머지(숨긴 서버 보기 포함)는 그 표 줄들의 합.
+ */
+const memoryBase = computed<MemoryShareBase>(() => {
+  if (otherView.value) return { kind: 'none' }
+  if (tab.value === 'workspaces')
+    return { kind: 'used', bytes: snapshot.value?.memory.usedBytes ?? 0 }
+  return { kind: 'rows' }
+})
+/** 지금 보는 표. 메모리 막대는 검색으로 거르기 전 표에 채운다(검색해도 막대 길이가 그대로). */
 const table = computed(() => {
   const s = snapshot.value
   if (!s) return null
-  if (tab.value === 'events') return eventsTable(events.value, s)
-  if (otherView.value) return otherPortsTable(s)
-  return tab.value === 'ports' && showHidden.value ? hiddenServerTable(s) : tableFor(tab.value, s)
+  const view =
+    tab.value === 'events'
+      ? eventsTable(events.value, s)
+      : otherView.value
+        ? otherPortsTable(s)
+        : tab.value === 'ports' && showHidden.value
+          ? hiddenServerTable(s)
+          : tableFor(tab.value, s)
+  return withMemoryShares(view, memoryBase.value, s.memory.totalBytes)
 })
+/** 묶음 머리 막대의 분모: 표와 같은 기준·같은 검색 전 표(막대는 숫자·정렬 값을 바꾸지 않아 같은 값이다). */
+const memoryTotal = computed(() =>
+  table.value ? memoryShareDenominator(table.value, memoryBase.value) : null
+)
 const rows = computed(() => (table.value ? filterRows(table.value.rows, query.value) : []))
 /** 검색어가 포트 번호면 그 번호(앞의 `:` 는 떼고), 아니면 null. */
 const queryPort = computed(() => {
@@ -601,12 +625,14 @@ const collapsedGroups = ref<string[]>([])
 const grouping = computed<((rows: Row[]) => GroupedRows[]) | null>(() => {
   const s = snapshot.value
   if (!s) return null
+  // 머리 막대는 걸러진 줄이 아니라 검색 전 표와 같은 분모로.
+  const total = memoryTotal.value
   // 작업 공간 탭은 늘 묶음(작업 공간 하나에 머리 하나).
-  if (tab.value === 'workspaces') return (rows) => groupWorkspaces(rows, s, s.takenAt)
+  if (tab.value === 'workspaces') return (rows) => groupWorkspaces(rows, s, s.takenAt, total)
   // 숨긴 서버·다른 포트는 묶음 보기여도 평평한 표.
   if (tab.value !== 'ports' || showHidden.value || showOther.value || serverView.value !== 'group')
     return null
-  return (rows) => groupServers(rows, s.servers, s.agents, s.takenAt, s.leftovers)
+  return (rows) => groupServers(rows, s.servers, s.agents, s.takenAt, s.leftovers, total)
 })
 /**
  * 검색에 맞는 수(도구줄의 "n개 중 m개"·바닥 줄). 작업 공간 탭은 탭 숫자처럼 작업 공간으로 센다

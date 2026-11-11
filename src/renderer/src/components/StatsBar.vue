@@ -19,7 +19,7 @@ import type { DashboardSnapshot, ProcessGroup } from '../../../shared/types'
 import { formatBytes, codexLimitView, pressureText } from '../../../shared/format'
 import { text } from '../../../shared/text'
 import type { Point } from '../history'
-import { GROUP_COLOR, memoryComposition, type CompositionPart } from '../memory'
+import { GROUP_COLOR, memoryComposition, tipPercent, type CompositionPart } from '../memory'
 import Card from '../ui/Card.vue'
 import CardContent from '../ui/CardContent.vue'
 import Badge from '../ui/Badge.vue'
@@ -78,9 +78,6 @@ const composition = computed(() => memoryComposition(s.value.memory, s.value.gro
 /** 범례의 %: 반올림, 0 보다 크고 1 보다 작으면 "<1%". */
 const legendPercent = (share: number): string =>
   share > 0 && share < 0.01 ? '<1%' : `${Math.round(share * 100)}%`
-/** 풍선말의 %: 반올림하되 1% 아래는 소수 한 자리(범례가 "<1%" 인 묶음이 "0%" 로 보이지 않게). */
-const tipPercent = (share: number): number =>
-  share > 0 && share < 0.01 ? Math.round(share * 1000) / 10 : Math.round(share * 100)
 const partTip = (part: CompositionPart): string =>
   text.ui.cards.memoryPart(
     text.ui.groups[part.group],
