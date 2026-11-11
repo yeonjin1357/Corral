@@ -881,7 +881,9 @@ function createWindow(): void {
     title: text.appName,
     autoHideMenuBar: true,
     ...windowChrome(process.platform, nativeTheme.shouldUseDarkColors),
-    ...(process.platform === 'linux' ? { icon } : {}),
+    // Windows 도 창 아이콘을 준다: 개발 실행(npm run dev)은 electron.exe 로 떠서, 주지 않으면 작업 표시줄에
+    // Electron 기본 아이콘이 보인다(설치본은 실행 파일 아이콘과 같은 그림). macOS 는 이 값을 쓰지 않는다.
+    ...(process.platform !== 'darwin' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: true,
