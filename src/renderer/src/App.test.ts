@@ -1244,13 +1244,13 @@ describe('자리 비운 사이', () => {
       }
     })
     const w = await start(f)
-    const tab = w
-      .findAll('[data-slot="toggle-group-item"]')
-      .find((b) => b.text().startsWith('기록'))!
-    expect(tab.text()).toContain('0')
+    // 기록 탭에는 숫자가 없어(ToolBar) 탭을 열고 아래 줄의 개수로 본다.
+    await w.find('[data-slot="toggle-group-item"][data-value="events"]').trigger('click')
+    expect(w.find('footer').text()).toContain('기록 0개')
     push([done(1, T0)])
     await flushPromises()
-    expect(tab.text()).toContain('1')
+    expect(w.find('footer').text()).toContain('기록 1개')
+    expect(w.findAll('tbody tr').length).toBe(1)
     w.unmount()
   })
 })

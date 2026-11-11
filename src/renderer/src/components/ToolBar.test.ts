@@ -39,16 +39,30 @@ test('작업 공간이 탭의 맨 앞에 있고 숫자는 작업 공간 수다',
   expect(w.find('[aria-label="개발 서버 보기"]').exists()).toBe(false)
 })
 
-test('기록이 탭의 맨 끝에 있고 숫자는 기록 수다', () => {
+test('기록이 탭의 맨 끝에 있고, 다른 앱·기록 탭에는 숫자를 달지 않는다', () => {
   const w = mount(ToolBar, {
-    props: { tab: 'ports', query: '', counts: { ...counts, events: 7 }, matching: 1, view: 'group' }
+    props: {
+      tab: 'ports',
+      query: '',
+      counts: { ...counts, apps: 155, events: 276 },
+      matching: 1,
+      view: 'group'
+    }
   })
   const items = w
     .findAll('[data-slot="toggle-group-item"]')
     .filter((b) => b.attributes('aria-pressed') != null && !['목록', '묶음'].includes(b.text()))
   const last = items[items.length - 1]
-  expect(last.text()).toContain('기록')
-  expect(last.text()).toContain('7')
+  expect(last.text()).toBe('기록')
+  const apps = w.find('[data-slot="toggle-group-item"][data-value="apps"]')
+  expect(apps.text()).toBe('다른 앱')
+})
+
+test('다른 앱·기록 탭도 검색 결과 줄의 전체 수는 탭의 수', () => {
+  const w = mount(ToolBar, {
+    props: { tab: 'events', query: '서버', counts: { ...counts, events: 276 }, matching: 4 }
+  })
+  expect(w.text()).toContain('276개 중 4개')
 })
 
 test('검색 결과 줄의 전체 수는 지금 보이는 표의 수', async () => {

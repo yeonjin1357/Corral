@@ -45,11 +45,13 @@ const ORDER: TabKey[] = [
   'apps',
   'events'
 ]
+/** 숫자를 달지 않는 탭: 수가 늘 크고(앱 수백 개·기록 수백 줄) 손댈 일의 양을 뜻하지 않아 눈에 거슬리기만 한다. */
+const UNCOUNTED: ReadonlySet<TabKey> = new Set(['apps', 'events'])
 const options = computed<ToggleOption[]>(() =>
   ORDER.map((key) => ({
     value: key,
     label: text.ui.tabs[key],
-    count: props.counts[key]
+    count: UNCOUNTED.has(key) ? null : props.counts[key]
   }))
 )
 const tabValue = computed({
