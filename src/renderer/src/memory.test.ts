@@ -1,0 +1,61 @@
+import { GROUP_ORDER, memoryComposition } from './memory'
+import type { GroupUsage } from '../../shared/types'
+
+/** 묶음 순서(GROUP_ORDER)대로 바이트를 받아 GroupUsage 목록을 만든다. */
+function usage(...bytes: number[]): GroupUsage[] {
+  return GROUP_ORDER.map((group, i) => ({
+    group,
+    memoryBytes: bytes[i],
+    commitBytes: null,
+    processCount: 1
+  }))
+}
+
+test('묶음은 정해진 순서로, 전체 RAM 대비 비율과 남은 메모리', () => {
+  const c = memoryComposition(
+    { totalBytes: 100, usedBytes: 60 },
+    usage(10, 5, 0, 30, 15).reverse()
+  )!
+  expect(c.parts.map((p) => p.group)).toEqual([
+    'devServer',
+    'agent',
+    'heavy',
+    'otherApps',
+    'system'
+  ])
+  expect(c.parts.map((p) => p.bytes)).toEqual([10, 5, 0, 30, 15])
+  expect(c.parts.map((p) => p.share)).toEqual([0.1, 0.05, 0, 0.3, 0.15])
+  expect(c.freeBytes).toBe(40)
+  expect(c.freeShare).toBe(0.4)
+})
+
+test('묶음 합이 사용량을 넘으면 같은 비율로 줄여 사용량에 맞춘다', () => {
+  // 측정 시점이 달라 묶음 합(80)이 사용량(60)보다 크다 → 모두 ×0.75.
+  const c = memoryComposition({ totalBytes: 100, usedBytes: 60 }, usage(20, 10, 0, 40, 10))!
+  const expected = [15, 7.5, 0, 30, 7.5]
+  c.parts.forEach((p, i) => {
+    expect(p.bytes).toBeCloseTo(expected[i])
+    expect(p.share).toBeCloseTo(expected[i] / 100)
+  })
+  expect(c.parts.reduce((sum, p) => sum + p.bytes, 0)).toBeCloseTo(60)
+  expect(c.freeBytes).toBe(40)
+  expect(c.freeShare).toBe(0.4)
+})
+
+test('전체를 모르면(0) null', () => {
+  expect(memoryComposition({ totalBytes: 0, usedBytes: 0 }, usage(10, 5, 0, 30, 15))).toBeNull()
+})
+
+test('없는 묶음은 0', () => {
+  const c = memoryComposition({ totalBytes: 100, usedBytes: 50 }, [
+    { group: 'agent', memoryBytes: 20, commitBytes: null, processCount: 3 }
+  ])!
+  expect(c.parts.map((p) => [p.group, p.bytes, p.share])).toEqual([
+    ['devServer', 0, 0],
+    ['agent', 20, 0.2],
+    ['heavy', 0, 0],
+    ['otherApps', 0, 0],
+    ['system', 0, 0]
+  ])
+  expect(c.freeBytes).toBe(50)
+})

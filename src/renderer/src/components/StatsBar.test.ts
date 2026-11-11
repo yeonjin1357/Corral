@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { mount, type DOMWrapper, type VueWrapper } from '@vue/test-utils'
 import StatsBar from './StatsBar.vue'
-import type { DashboardSnapshot, DiskRow } from '../../../shared/types'
+import type { DashboardSnapshot, DiskRow, ProcessGroup } from '../../../shared/types'
 import { GB, MB, agentRow, diskRow, heavyJob, serverRow, snapshot } from '../testing/fixtures'
 
 function bar(s: DashboardSnapshot): VueWrapper {
@@ -210,6 +210,112 @@ describe('메모리 카드: 남은 메모리와 커밋', () => {
       }
     })
     expect(bar(commit).text()).toContain('커밋 94% 에서 겹쳐 도는 중')
+  })
+})
+
+describe('메모리 카드: 전체 RAM 을 묶음별로 쌓은 막대(G4)', () => {
+  /** 전체 100 GB 중 60 GB 사용. 묶음은 GROUP_ORDER 순서(개발 서버·에이전트·무거운 작업·다른 앱·시스템)의 GB. */
+  const withGroups = (heavyGb: number, totalBytes = 100 * GB): DashboardSnapshot => {
+    const base = snapshot()
+    const gb: [ProcessGroup, number][] = [
+      ['devServer', 12],
+      ['agent', 0.4],
+      ['heavy', heavyGb],
+      ['otherApps', 29.6 - heavyGb],
+      ['system', 18]
+    ]
+    return snapshot({
+      memory: {
+        ...base.memory,
+        totalBytes,
+        usedBytes: totalBytes ? 60 * GB : 0,
+        availableBytes: totalBytes ? 40 * GB : 0
+      },
+      groups: gb.map(([group, n]) => ({
+        group,
+        memoryBytes: Math.round(n * GB),
+        commitBytes: null,
+        processCount: 1
+      }))
+    })
+  }
+  const memoryCard = (w: VueWrapper): DOMWrapper<Element> => w.findAll('[data-slot=card]')[0]
+  const parts = (w: VueWrapper): DOMWrapper<Element>[] =>
+    memoryCard(w).findAll('[data-memory-part]')
+  /** 범례 항목마다 [이름, %]. */
+  const legend = (w: VueWrapper): string[][] =>
+    memoryCard(w)
+      .findAll('[data-memory-legend]')
+      .map((li) =>
+        li
+          .findAll('span')
+          .map((s) => s.text())
+          .filter(Boolean)
+      )
+
+  test('메모리 카드: 전체 RAM 을 묶음별로 쌓은 막대와 묶음별 %', () => {
+    const w = bar(withGroups(0))
+    // 0 인 묶음(무거운 작업)은 조각이 없다. 나머지(남은 메모리)는 막대 바탕 그대로.
+    expect(parts(w).map((p) => p.attributes('data-memory-part'))).toEqual([
+      'devServer',
+      'agent',
+      'otherApps',
+      'system'
+    ])
+    const widths = parts(w).map((p) => parseFloat((p.element as HTMLElement).style.width))
+    ;[12, 0.4, 29.6, 18].forEach((share, i) => expect(widths[i]).toBeCloseTo(share))
+    expect(parts(w).map((p) => (p.element as HTMLElement).style.backgroundColor)).toEqual([
+      'var(--chart-1)',
+      'var(--chart-2)',
+      'var(--chart-4)',
+      'var(--status-idle)'
+    ])
+    expect(parts(w).map((p) => p.attributes('title'))).toEqual([
+      '개발 서버 12.0 GB · 전체 RAM 의 12%',
+      '에이전트 410 MB · 전체 RAM 의 0.4%',
+      '다른 앱 29.6 GB · 전체 RAM 의 30%',
+      '시스템·공유 메모리 18.0 GB · 전체 RAM 의 18%'
+    ])
+    expect(memoryCard(w).find('[data-memory-bar]').attributes('title')).toBe(
+      '남은 메모리 40.0 GB · 전체 RAM 의 40%'
+    )
+    // 범례: 2×2, 반올림한 %, 0 보다 크고 1 보다 작으면 <1%.
+    expect(legend(w)).toEqual([
+      ['개발 서버', '12%'],
+      ['에이전트', '<1%'],
+      ['다른 앱', '30%'],
+      ['시스템·공유', '18%']
+    ])
+    expect(memoryCard(w).find('[data-memory-legend=devServer]').attributes('title')).toBe(
+      '개발 서버 12.0 GB · 전체 RAM 의 12%'
+    )
+  })
+
+  test('무거운 작업은 0 보다 클 때만 범례에', () => {
+    expect(legend(bar(withGroups(0))).map(([name]) => name)).not.toContain('무거운 작업')
+    const w = bar(withGroups(2))
+    // 막대는 묶음 순서 그대로, 범례는 2×2 자리를 지키고 다섯째로 더한다.
+    expect(parts(w).map((p) => p.attributes('data-memory-part'))).toEqual([
+      'devServer',
+      'agent',
+      'heavy',
+      'otherApps',
+      'system'
+    ])
+    expect(legend(w)).toEqual([
+      ['개발 서버', '12%'],
+      ['에이전트', '<1%'],
+      ['다른 앱', '28%'],
+      ['시스템·공유', '18%'],
+      ['무거운 작업', '2%']
+    ])
+  })
+
+  test('메모리를 아직 모르면 쌓은 막대가 없다', () => {
+    const w = bar(withGroups(0, 0))
+    expect(memoryCard(w).find('[data-memory-bar]').exists()).toBe(false)
+    expect(parts(w)).toHaveLength(0)
+    expect(legend(w)).toHaveLength(0)
   })
 })
 

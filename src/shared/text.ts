@@ -325,6 +325,11 @@ export const text = {
       /** 경고·위험의 원인이 RAM 이 아니라 커밋일 때 배지 옆에 붙는다. */
       commitCause: '커밋',
       levels: { warn: '경고', danger: '위험' },
+      /** 쌓은 막대 조각·범례의 풍선말(G4): "개발 서버 8.7 GB · 전체 RAM 의 14%". */
+      memoryPart: (name: string, bytes: string, percent: number): string =>
+        `${name} ${bytes} · 전체 RAM 의 ${percent}%`,
+      /** 쌓은 막대의 빈 칸(남은 메모리) 풍선말 이름. */
+      memoryFree: '남은 메모리',
       memoryDetails: '메모리 자세히 보기',
       showList: '목록에서 보기',
       count: '개',
@@ -1008,6 +1013,8 @@ export const text = {
       heavy: '무거운 작업',
       otherApps: '다른 앱',
       system: '시스템·공유 메모리',
+      /** 좁은 자리(메모리 카드 범례)의 시스템·공유 메모리 이름. */
+      systemShort: '시스템·공유',
       systemNote:
         '시스템·공유 메모리: 커널·드라이버, 여러 앱이 같이 쓰는 메모리, Corral 이 읽을 수 없는 프로세스(보안 프로그램·관리자 권한 등)를 합친 값이에요.',
       processes: (n: number): string => `${n}개`,

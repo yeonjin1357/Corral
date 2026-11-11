@@ -10,6 +10,7 @@ import type { DashboardSnapshot, ProcessGroup } from '../../../shared/types'
 import { formatBytes } from '../../../shared/format'
 import { text } from '../../../shared/text'
 import type { Point } from '../history'
+import { GROUP_COLOR } from '../memory'
 import { appName, appRowId, appTitle, type TabKey } from '../rows'
 import Sheet from '../ui/Sheet.vue'
 import Card from '../ui/Card.vue'
@@ -46,13 +47,13 @@ const reading = computed(() =>
   })
 )
 
-/** 묶음 색과, 누르면 갈 탭(시스템·공유 메모리는 행이 없어 없음). */
-const ORDER: { key: ProcessGroup; color: string; tab: TabKey | null }[] = [
-  { key: 'devServer', color: 'var(--chart-1)', tab: 'ports' },
-  { key: 'agent', color: 'var(--chart-2)', tab: 'agents' },
-  { key: 'heavy', color: 'var(--chart-3)', tab: 'heavy' },
-  { key: 'otherApps', color: 'var(--chart-4)', tab: 'apps' },
-  { key: 'system', color: 'var(--status-idle)', tab: null }
+/** 묶음과, 누르면 갈 탭(시스템·공유 메모리는 행이 없어 없음). 색은 메모리 카드와 같은 GROUP_COLOR. */
+const ORDER: { key: ProcessGroup; tab: TabKey | null }[] = [
+  { key: 'devServer', tab: 'ports' },
+  { key: 'agent', tab: 'agents' },
+  { key: 'heavy', tab: 'heavy' },
+  { key: 'otherApps', tab: 'apps' },
+  { key: 'system', tab: null }
 ]
 /** 탭 숫자와 같은 단위의 행 수. 숨긴 서버도 메모리를 쓰므로 개발 서버 수에 넣고 따로 적는다. */
 function rowCount(key: ProcessGroup): { n: number; hidden: number } {
@@ -89,6 +90,7 @@ const groups = computed(() =>
     const bytes = usage?.memoryBytes ?? 0
     return {
       ...g,
+      color: GROUP_COLOR[g.key],
       label: t.groups[g.key],
       bytes,
       rows: rowCount(g.key),

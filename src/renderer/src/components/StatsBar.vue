@@ -1,7 +1,7 @@
 <!--
   NeoHtop (MIT) stats/StatsBar.svelte 와 CpuPanel·MemoryPanel·StoragePanel·SystemPanel 의 카드 모양을 가져옴.
   바꾼 점: CPU·GPU·저장소·시스템·네트워크 대신 pitwall 의 메모리·개발 서버·에이전트·무거운 작업·남은 프로세스·디스크 정리.
-  넓은 첫 칸(NeoHtop CPU 칸 자리)은 메모리로, 코어별 막대 대신 묶음별(개발 서버·에이전트·…) 막대를 둔다.
+  넓은 첫 칸(NeoHtop CPU 칸 자리)은 메모리로, 코어별 막대 대신 전체 RAM 을 묶음별(개발 서버·에이전트·…)로 쌓은 막대와 범례를 둔다.
   아래 칸 구분선 + 세 숫자(NeoHtop System 카드의 Load average)는 개발 서버 판단·에이전트 상태 개수에 쓴다.
 -->
 <script setup lang="ts">
@@ -19,11 +19,11 @@ import type { DashboardSnapshot, ProcessGroup } from '../../../shared/types'
 import { formatBytes, codexLimitView, pressureText } from '../../../shared/format'
 import { text } from '../../../shared/text'
 import type { Point } from '../history'
+import { GROUP_COLOR, memoryComposition, type CompositionPart } from '../memory'
 import Card from '../ui/Card.vue'
 import CardContent from '../ui/CardContent.vue'
 import Badge from '../ui/Badge.vue'
 import Button from '../ui/Button.vue'
-import Progress from '../ui/Progress.vue'
 import PanelHeader from './PanelHeader.vue'
 import StatItem from './StatItem.vue'
 import ResourceTrend from './ResourceTrend.vue'
@@ -73,19 +73,55 @@ const commitLine = computed(() => {
   )
 })
 
-const GROUPS: { key: ProcessGroup; label: string; color: string }[] = [
-  { key: 'devServer', label: text.ui.groups.devServer, color: 'var(--chart-1)' },
-  { key: 'agent', label: text.ui.groups.agent, color: 'var(--chart-2)' },
-  { key: 'heavy', label: text.ui.groups.heavy, color: 'var(--chart-3)' },
-  { key: 'otherApps', label: text.ui.groups.otherApps, color: 'var(--chart-4)' }
-]
-const groupRows = computed(() =>
-  GROUPS.map((g) => {
-    const bytes = s.value.groups.find((x) => x.group === g.key)?.memoryBytes ?? 0
-    const share = hasMemory.value ? (bytes / s.value.memory.totalBytes) * 100 : 0
-    return { ...g, bytes, share }
-  })
+/** 전체 RAM 을 묶음별로 나눈 쌓은 막대(G4). 전체를 모르면 null(막대를 그리지 않는다). */
+const composition = computed(() => memoryComposition(s.value.memory, s.value.groups))
+/** 범례의 %: 반올림, 0 보다 크고 1 보다 작으면 "<1%". */
+const legendPercent = (share: number): string =>
+  share > 0 && share < 0.01 ? '<1%' : `${Math.round(share * 100)}%`
+/** 풍선말의 %: 반올림하되 1% 아래는 소수 한 자리(범례가 "<1%" 인 묶음이 "0%" 로 보이지 않게). */
+const tipPercent = (share: number): number =>
+  share > 0 && share < 0.01 ? Math.round(share * 1000) / 10 : Math.round(share * 100)
+const partTip = (part: CompositionPart): string =>
+  text.ui.cards.memoryPart(
+    text.ui.groups[part.group],
+    formatBytes(part.bytes),
+    tipPercent(part.share)
+  )
+/** 막대 조각: 묶음 순서대로, 0 인 묶음은 조각이 없다. 남은 메모리는 막대 바탕 그대로. */
+const memoryParts = computed(() =>
+  (composition.value?.parts ?? [])
+    .filter((p) => p.bytes > 0)
+    .map((p) => ({ ...p, color: GROUP_COLOR[p.group], tip: partTip(p) }))
 )
+const freeTip = computed(() => {
+  const c = composition.value
+  return c
+    ? text.ui.cards.memoryPart(
+        text.ui.cards.memoryFree,
+        formatBytes(c.freeBytes),
+        tipPercent(c.freeShare)
+      )
+    : undefined
+})
+/** 범례: 네 묶음 2×2 자리는 늘 그대로, 무거운 작업은 0 보다 클 때만 다섯째로. */
+const memoryLegend = computed(() => {
+  const parts = composition.value?.parts ?? []
+  return [
+    ...parts.filter((p) => p.group !== 'heavy'),
+    ...parts.filter((p) => p.group === 'heavy' && p.bytes > 0)
+  ].map((p) => ({
+    ...p,
+    label: p.group === 'system' ? text.ui.groups.systemShort : text.ui.groups[p.group],
+    color: GROUP_COLOR[p.group],
+    percent: legendPercent(p.share),
+    tip: partTip(p)
+  }))
+})
+/**
+ * 범례가 세 줄(무거운 작업 포함)이면 카드 높이(h-60)를 넘지 않게 막대·범례 사이와 범례 줄 사이를 좁힌다.
+ * 두 줄: 막대 10 + 6 + 범례 12·4·12 = 44px, 세 줄: 막대 10 + 2 + 범례 12×3 = 48px(남는 높이가 48px).
+ */
+const legendDense = computed(() => memoryLegend.value.length > 4)
 
 const portCounts = computed(() => ({
   candidate: s.value.servers.filter((p) => p.judgement === 'candidate').length,
@@ -254,7 +290,8 @@ const diskSub = computed(() => {
           >
         </template>
       </PanelHeader>
-      <CardContent class="min-h-0 flex-1 gap-2">
+      <!-- 다른 카드(gap-2)보다 조금 좁혀(gap-1.5) 범례 세 줄도 카드 높이 안에 들어가게 한다(legendDense 참고). -->
+      <CardContent class="min-h-0 flex-1 gap-1.5">
         <div>
           <!-- 카드 높이가 정해져 있어 커밋 줄은 큰 숫자와 같은 줄 오른쪽에 둔다. -->
           <div class="flex items-baseline justify-between gap-2">
@@ -285,14 +322,44 @@ const diskSub = computed(() => {
             }}
           </p>
         </div>
-        <div class="grid shrink-0 grid-cols-2 gap-x-4 gap-y-1.5">
-          <div v-for="g in groupRows" :key="g.key" class="min-w-0 space-y-1">
-            <div class="flex justify-between gap-2 text-[11px] leading-3">
-              <span class="truncate text-muted-foreground">{{ g.label }}</span
-              ><span class="shrink-0 tabular-nums">{{ formatBytes(g.bytes) }}</span>
-            </div>
-            <Progress :value="g.share" class="h-1" :style="{ '--primary': g.color }" />
+        <div
+          v-if="composition"
+          class="shrink-0"
+          :class="legendDense ? 'space-y-0.5' : 'space-y-1.5'"
+        >
+          <!-- 범례가 같은 값을 글로 보이므로 막대는 읽어 주지 않는다. 빈 칸(남은 메모리)은 막대 바탕. -->
+          <div
+            data-memory-bar
+            class="flex h-2.5 w-full gap-px overflow-hidden rounded-full bg-muted"
+            :title="freeTip"
+            aria-hidden="true"
+          >
+            <div
+              v-for="p in memoryParts"
+              :key="p.group"
+              :data-memory-part="p.group"
+              class="h-full"
+              :style="{ width: `${p.share * 100}%`, backgroundColor: p.color }"
+              :title="p.tip"
+            ></div>
           </div>
+          <ul class="grid grid-cols-2 gap-x-4" :class="legendDense ? 'gap-y-0' : 'gap-y-1'">
+            <li
+              v-for="item in memoryLegend"
+              :key="item.group"
+              :data-memory-legend="item.group"
+              class="flex min-w-0 items-center gap-1.5 text-[11px] leading-3"
+              :title="item.tip"
+            >
+              <span
+                class="size-1.5 shrink-0 rounded-full"
+                :style="{ backgroundColor: item.color }"
+                aria-hidden="true"
+              ></span
+              ><span class="min-w-0 truncate text-muted-foreground">{{ item.label }}</span
+              ><span class="ml-auto shrink-0 tabular-nums">{{ item.percent }}</span>
+            </li>
+          </ul>
         </div>
         <ResourceTrend
           :points="ramHistory"
