@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { mount, type DOMWrapper, type VueWrapper } from '@vue/test-utils'
 import StatsBar from './StatsBar.vue'
+import ResourceTrend from './ResourceTrend.vue'
 import type { DashboardSnapshot, DiskRow, ProcessGroup } from '../../../shared/types'
 import { GB, MB, agentRow, diskRow, heavyJob, serverRow, snapshot } from '../testing/fixtures'
 
@@ -317,6 +318,77 @@ describe('메모리 카드: 전체 RAM 을 묶음별로 쌓은 막대(G4)', () =
     expect(parts(w)).toHaveLength(0)
     expect(legend(w)).toHaveLength(0)
   })
+})
+
+test('간단히: 카드마다 제목·큰 값·한 줄', async () => {
+  const s = snapshot({
+    servers: [
+      serverRow({
+        ports: [6176, 8081],
+        pid: 6100,
+        workspace: { root: 'C:/work/ws', name: 'ws', branch: null, outer: true }
+      }),
+      serverRow({ ports: [3000], pid: 4100 })
+    ],
+    agents: [
+      agentRow({ pid: 1 }),
+      agentRow({ pid: 2, state: 'waiting' }),
+      agentRow({ pid: 3, state: 'idle', lastActiveAt: 0, parked: true })
+    ],
+    disk: {
+      rows: [
+        diskRow({ totalBytes: 1 * GB }),
+        diskRow({ worktreeRoot: 'C:\\work\\b', inUse: true })
+      ],
+      scannedAt: 1,
+      scanning: false,
+      error: null
+    }
+  })
+  const w = mount(StatsBar, {
+    props: { snapshot: s, ramHistory: [], windowMs: 600_000, compact: true }
+  })
+  const cards = w.findAll('[data-slot=card]')
+  /** 카드마다 [제목, 큰 값, 설명 줄의 왼쪽·오른쪽 글]. */
+  const read = cards.map((c) => [
+    c.find('[data-slot=card-title]').text(),
+    c.find('[data-compact-value]').text(),
+    c
+      .findAll('[data-compact-sub] > span')
+      .map((x) => x.text().replace(/\s+/g, ' '))
+      .filter(Boolean)
+  ])
+  expect(read).toEqual([
+    // 메모리는 설명 줄 대신 얇은 쌓은 막대.
+    ['메모리', '82%', []],
+    ['개발 서버', '2개', ['포트 3개 · 작업 공간 1곳']],
+    ['에이전트', '3개', ['응답 대기 1', '오래 쉼 1']],
+    ['무거운 작업', '0개', ['실행 중', '0 MB']],
+    ['남은 프로세스', '0개', ['남은 개발 도구', '0 MB']],
+    ['디스크 정리', '1.0 GB', ['끝난 워크트리 1곳에서 확보 가능']]
+  ])
+  // 카드는 낮은 한 줄(72px): 추이 그래프·아래 칸·항목 목록이 없다.
+  for (const c of cards) expect(c.classes()).toContain('h-18')
+  expect(w.findComponent(ResourceTrend).exists()).toBe(false)
+  expect(w.find('dl').exists()).toBe(false)
+  expect(w.find('[data-memory-legend]').exists()).toBe(false)
+  // 메모리 카드의 얇은 쌓은 막대: 자세히와 같은 묶음 조각.
+  const memory = cards[0]
+  expect(memory.find('[data-memory-bar]').classes()).toContain('h-1')
+  expect(memory.findAll('[data-memory-part]').map((p) => p.attributes('data-memory-part'))).toEqual(
+    ['devServer', 'agent', 'otherApps', 'system']
+  )
+  // 경고 배지는 그대로.
+  expect(
+    memory
+      .findAll('[data-slot=badge]')
+      .map((b) => b.text())
+      .filter(Boolean)
+  ).toEqual(['경고'])
+  // 카드를 누르면 자세히의 ↗ 와 같은 곳으로.
+  for (const c of cards) await c.find('button').trigger('click')
+  expect(w.emitted('memory')).toHaveLength(1)
+  expect(w.emitted('tab')).toEqual([['ports'], ['agents'], ['heavy'], ['leftovers'], ['disk']])
 })
 
 describe('Codex 한도(G6): 에이전트 카드의 설명 줄', () => {

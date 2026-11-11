@@ -3,6 +3,7 @@
   바꾼 점: CPU·GPU·저장소·시스템·네트워크 대신 pitwall 의 메모리·개발 서버·에이전트·무거운 작업·남은 프로세스·디스크 정리.
   넓은 첫 칸(NeoHtop CPU 칸 자리)은 메모리로, 코어별 막대 대신 전체 RAM 을 묶음별(개발 서버·에이전트·…)로 쌓은 막대와 범례를 둔다.
   아래 칸 구분선 + 세 숫자(NeoHtop System 카드의 Load average)는 개발 서버 판단·에이전트 상태 개수에 쓴다.
+  간단히 단계(compact, G2)에서는 카드마다 CompactCard 한 장(제목·큰 값·설명 한 줄)으로 그린다.
 -->
 <script setup lang="ts">
 import { computed } from 'vue'
@@ -24,10 +25,12 @@ import Card from '../ui/Card.vue'
 import CardContent from '../ui/CardContent.vue'
 import Badge from '../ui/Badge.vue'
 import Button from '../ui/Button.vue'
+import type { BadgeVariant } from '../ui/variants'
 import PanelHeader from './PanelHeader.vue'
 import StatItem from './StatItem.vue'
 import ResourceTrend from './ResourceTrend.vue'
 import ItemIcon from './ItemIcon.vue'
+import CompactCard from './CompactCard.vue'
 import { agentIcon, heavyIcon, leftoverIcon, serverIcon, type RowIcon } from '../rows'
 import { selectionKey } from '../../../shared/keys'
 
@@ -40,6 +43,8 @@ const props = defineProps<{
   windowMs: number
   /** 기록이 이보다 끊기면 그래프를 잇지 않는다(앱이 꺼져 있었음). */
   gapMs?: number | null
+  /** 간단히 단계: 카드마다 제목·큰 값·설명 한 줄(추이 그래프·아래 칸 없음). */
+  compact?: boolean
 }>()
 const emit = defineEmits<{
   memory: []
@@ -57,6 +62,21 @@ const level = computed(() => s.value.memory.level)
 const pressure = computed(() => pressureText(s.value.memory))
 /** level 은 RAM·커밋 중 높은 쪽이라, ramLevel 과 다르면 원인은 커밋이다. */
 const commitCaused = computed(() => level.value !== s.value.memory.ramLevel)
+/** 메모리 카드 머리의 배지: 경고·위험, 원인이 커밋이면 그 옆에 "커밋"(자세히·간단히 같음). */
+const memoryBadges = computed(() => {
+  const l = level.value
+  if (!hasMemory.value || l === 'normal') return []
+  const badges: { key: string; label: string; variant: BadgeVariant }[] = [
+    {
+      key: 'level',
+      label: text.ui.cards.levels[l],
+      variant: l === 'danger' ? 'destructive' : 'secondary'
+    }
+  ]
+  if (commitCaused.value)
+    badges.push({ key: 'commit', label: text.ui.cards.commitCause, variant: 'outline' })
+  return badges
+})
 const commit = computed(() => s.value.memory.commit)
 const COMMIT_COLOR = { warn: 'var(--peach)', danger: 'var(--destructive)' } as const
 /** "104.8 / 127.7 GB (82%)": 두 값의 단위가 같으면 앞 값의 단위는 뺀다. */
@@ -264,7 +284,45 @@ const diskSub = computed(() => {
 <template>
   <section class="resource-grid shrink-0" aria-label="자원 요약">
     <!-- 메모리(넓은 칸) -->
-    <Card size="sm" class="h-60 gap-3">
+    <CompactCard
+      v-if="compact"
+      :icon="MemoryStick"
+      :title="text.ui.cards.memory"
+      color="var(--chart-3)"
+      :action-label="text.ui.cards.memoryDetails"
+      :value="hasMemory ? String(ramPercent) : text.ui.none"
+      :unit="hasMemory ? '%' : null"
+      @action="emit('memory')"
+    >
+      <template #badge>
+        <Badge
+          v-for="b in memoryBadges"
+          :key="b.key"
+          :variant="b.variant"
+          class="text-[10px] font-normal"
+          >{{ b.label }}</Badge
+        >
+      </template>
+      <!-- 설명 줄 대신 얇은 쌓은 막대(자세히와 같은 조각·풍선말). -->
+      <span
+        v-if="composition"
+        data-memory-bar
+        class="flex h-1 w-full gap-px overflow-hidden rounded-full bg-muted"
+        :title="freeTip"
+        aria-hidden="true"
+      >
+        <span
+          v-for="p in memoryParts"
+          :key="p.group"
+          :data-memory-part="p.group"
+          class="h-full"
+          :style="{ width: `${p.share * 100}%`, backgroundColor: p.color }"
+          :title="p.tip"
+        ></span>
+      </span>
+      <span v-else class="truncate">{{ text.ui.loading }}</span>
+    </CompactCard>
+    <Card v-else size="sm" class="h-60 gap-3">
       <PanelHeader
         :icon="MemoryStick"
         :title="text.ui.cards.memory"
@@ -274,16 +332,11 @@ const diskSub = computed(() => {
       >
         <template #badge>
           <Badge
-            v-if="hasMemory && level !== 'normal'"
-            :variant="level === 'danger' ? 'destructive' : 'secondary'"
+            v-for="b in memoryBadges"
+            :key="b.key"
+            :variant="b.variant"
             class="text-[10px] font-normal"
-            >{{ text.ui.cards.levels[level] }}</Badge
-          >
-          <Badge
-            v-if="hasMemory && level !== 'normal' && commitCaused"
-            variant="outline"
-            class="text-[10px] font-normal"
-            >{{ text.ui.cards.commitCause }}</Badge
+            >{{ b.label }}</Badge
           >
         </template>
       </PanelHeader>
@@ -372,7 +425,19 @@ const diskSub = computed(() => {
     </Card>
 
     <!-- 개발 서버 -->
-    <Card size="sm" class="h-60 gap-3">
+    <CompactCard
+      v-if="compact"
+      :icon="Globe"
+      :title="text.ui.cards.ports"
+      color="var(--chart-1)"
+      :action-label="text.ui.cards.showList"
+      :value="String(s.servers.length)"
+      :unit="text.ui.cards.count"
+      @action="emit('tab', 'ports')"
+    >
+      <span class="min-w-0 truncate">{{ text.ui.cards.portsSub(portCount, workspaceCount) }}</span>
+    </CompactCard>
+    <Card v-else size="sm" class="h-60 gap-3">
       <PanelHeader
         :icon="Globe"
         :title="text.ui.cards.ports"
@@ -435,7 +500,27 @@ const diskSub = computed(() => {
     </Card>
 
     <!-- 에이전트 -->
-    <Card size="sm" class="h-60 gap-3">
+    <CompactCard
+      v-if="compact"
+      :icon="SquareTerminal"
+      :title="text.ui.cards.agents"
+      color="var(--chart-2)"
+      :action-label="text.ui.cards.showList"
+      :value="String(s.agents.length)"
+      :unit="text.ui.cards.count"
+      @action="emit('tab', 'agents')"
+    >
+      <!-- 좁은 카드에 들어가게 사람이 볼 일(응답 대기)과 정리할 거리(오래 쉼)만. -->
+      <span
+        class="min-w-0 truncate tabular-nums"
+        :style="agentCounts.waiting > 0 ? { color: 'var(--peach)' } : undefined"
+        >{{ text.ui.agent.states.waiting }} {{ agentCounts.waiting }}</span
+      >
+      <span v-if="agentCounts.parked > 0" class="shrink-0 tabular-nums">{{
+        text.ui.cards.agentParked(agentCounts.parked)
+      }}</span>
+    </CompactCard>
+    <Card v-else size="sm" class="h-60 gap-3">
       <PanelHeader
         :icon="SquareTerminal"
         :title="text.ui.cards.agents"
@@ -517,7 +602,28 @@ const diskSub = computed(() => {
     </Card>
 
     <!-- 무거운 작업 -->
-    <Card size="sm" class="h-60 gap-3">
+    <CompactCard
+      v-if="compact"
+      :icon="Hammer"
+      :title="text.ui.cards.heavy"
+      :hint="text.ui.cards.heavyHelp"
+      :color="s.heavyOverlap ? 'var(--destructive)' : null"
+      :action-label="text.ui.cards.showList"
+      :value="String(s.heavyJobs.length)"
+      :unit="text.ui.cards.count"
+      @action="emit('tab', 'heavy')"
+    >
+      <template #badge>
+        <Badge v-if="s.heavyOverlap" variant="destructive" class="text-[10px] font-normal">{{
+          text.ui.cards.overlap
+        }}</Badge>
+      </template>
+      <span class="min-w-0 truncate">{{ text.ui.cards.heavyRunning }}</span>
+      <span class="shrink-0 tabular-nums" :title="text.ui.cards.memorySum">{{
+        formatBytes(heavyMemory)
+      }}</span>
+    </CompactCard>
+    <Card v-else size="sm" class="h-60 gap-3">
       <PanelHeader
         :icon="Hammer"
         :title="text.ui.cards.heavy"
@@ -570,7 +676,23 @@ const diskSub = computed(() => {
     </Card>
 
     <!-- 남은 프로세스 -->
-    <Card size="sm" class="h-60 gap-3">
+    <CompactCard
+      v-if="compact"
+      :icon="Unplug"
+      :title="text.ui.cards.leftovers"
+      :hint="text.ui.cards.leftoversHelp"
+      :color="freeLeftovers.length ? 'var(--peach)' : null"
+      :action-label="text.ui.cards.showList"
+      :value="String(freeLeftovers.length)"
+      :unit="text.ui.cards.count"
+      @action="emit('tab', 'leftovers')"
+    >
+      <span class="min-w-0 truncate">{{ text.ui.cards.leftoversSub }}</span>
+      <span class="shrink-0 tabular-nums" :title="text.ui.cards.memorySum">{{
+        formatBytes(leftoverMemory)
+      }}</span>
+    </CompactCard>
+    <Card v-else size="sm" class="h-60 gap-3">
       <PanelHeader
         :icon="Unplug"
         :title="text.ui.cards.leftovers"
@@ -620,7 +742,18 @@ const diskSub = computed(() => {
     </Card>
 
     <!-- 디스크 정리 -->
-    <Card size="sm" class="h-60 gap-3">
+    <CompactCard
+      v-if="compact"
+      :icon="HardDrive"
+      :title="text.ui.cards.disk"
+      color="var(--chart-4)"
+      :action-label="text.ui.cards.showList"
+      :value="diskReady ? formatBytes(diskBytes) : text.ui.none"
+      @action="emit('tab', 'disk')"
+    >
+      <span class="min-w-0 truncate" :title="diskSub">{{ diskSub }}</span>
+    </CompactCard>
+    <Card v-else size="sm" class="h-60 gap-3">
       <PanelHeader
         :icon="HardDrive"
         :title="text.ui.cards.disk"

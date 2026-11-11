@@ -259,20 +259,25 @@
   -webkit-app-region: no-drag;
 }
 
-/* NeoHtop app.css: 맨 위 카드 줄. pitwall 은 카드가 6개(메모리 칸이 넓다). */
+/*
+  NeoHtop app.css: 맨 위 카드 줄. pitwall 은 카드가 6개(메모리 칸이 넓다).
+  아래 여백은 바로 밑 손잡이 줄(TopSplitter)이 맡아 4px 만 둔다. 위·아래 여백(16px·4px)은 창 너비와 상관없이
+  그대로다 — layoutState.ts 의 TOP_HEIGHTS(끄는 높이·붙는 단계)가 이 값으로 카드 영역 높이를 센다.
+*/
 .resource-grid {
   display: grid;
   grid-template-columns:
     minmax(0, 1.5fr) repeat(3, minmax(0, 1fr)) minmax(0, 1.05fr)
     minmax(0, 1.2fr);
   gap: 12px;
-  padding: 16px;
+  padding: 16px 16px 4px;
 }
 .resource-grid > [data-slot='card'] {
   min-width: 0;
 }
 .resource-grid [data-slot='card-header'],
-.resource-grid [data-slot='card-content'] {
+.resource-grid [data-slot='card-content'],
+.resource-grid [data-compact-body] {
   padding-inline: 16px;
 }
 
@@ -343,16 +348,17 @@
 @media (max-width: 1200px) {
   .resource-grid {
     gap: 8px;
-    padding: 12px;
+    padding-inline: 12px;
   }
   .resource-grid [data-slot='card-header'],
-  .resource-grid [data-slot='card-content'] {
+  .resource-grid [data-slot='card-content'],
+  .resource-grid [data-compact-body] {
     padding-inline: 12px;
   }
 }
 /*
   좁은 창: NeoHtop 은 900px 아래에서 2칸으로 접고 높이를 넘으면 스크롤한다.
-  pitwall 은 카드가 6개라 접으면 표 자리가 없어지므로, 카드를 한 줄에 두고 옆으로 스크롤한다.
+  pitwall 은 카드가 6개라 접으면 표 자리가 없어지므로, 카드를 한 줄에 두고 옆으로 스크롤한다(자세히·간단히 모두).
   한글 제목·숫자가 잘리지 않게 카드 한 칸이 200px 아래로 줄어들 폭(1180px)부터 그렇게 한다.
 */
 @media (max-width: 1180px) {
@@ -363,12 +369,15 @@
     overflow-x: auto;
   }
 }
-/* 낮은 창: 표가 너무 낮아지지 않게 화면 전체를 세로로 스크롤한다. */
+/*
+  낮은 창: 표가 너무 낮아지지 않게 화면 전체를 세로로 스크롤한다. 카드가 높은 자세히 단계에만 —
+  간단히·접기는 카드 줄이 낮아 표가 남는 높이를 다 쓰는 편이 낫다(스크롤하면 표가 창 아래로 밀려난다).
+*/
 @media (max-height: 720px) {
-  .dashboard-main {
+  .dashboard-main[data-top-mode='full'] {
     overflow-y: auto !important;
   }
-  .dashboard-main .table-section {
+  .dashboard-main[data-top-mode='full'] .table-section {
     flex: none;
     height: max(360px, calc(100vh - 160px));
   }

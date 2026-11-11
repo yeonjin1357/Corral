@@ -8,6 +8,7 @@ import type { NavigateTarget, PitwallApi } from '../../shared/ipc'
 import type { PitEvent } from '../../shared/events'
 import type { DashboardSnapshot } from '../../shared/types'
 import { selectionKey } from '../../shared/keys'
+import { TOP_HEIGHTS } from './layoutState'
 import {
   MB,
   agentRow,
@@ -836,6 +837,68 @@ test('상세 패널에서 고른 포트를 연다', async () => {
     .click()
   await flushPromises()
   expect(f.api.openPort).toHaveBeenCalledWith(8081)
+  w.unmount()
+})
+
+// ── 카드 영역 세 단계(G2) ──
+/** 표의 줄(작업 공간 탭의 묶음 머리). */
+const groupRows = (w: VueWrapper): string[] =>
+  w.findAll('tbody tr[data-group]').map((tr) => tr.attributes('data-group')!)
+
+test('접기를 고르면 카드가 없고 다시 켜도 기억한다', async () => {
+  const w = await start(fake())
+  // 처음은 자세히.
+  expect(w.findAll('.resource-grid [data-slot=card]')).toHaveLength(6)
+  expect(w.find('[data-mode="full"]').attributes('aria-pressed')).toBe('true')
+  await w.find('[data-mode="collapsed"]').trigger('click')
+  // 카드는 없고 손잡이 줄과 표는 남는다.
+  expect(w.find('.resource-grid').exists()).toBe(false)
+  expect(w.find('[role="separator"]').exists()).toBe(true)
+  expect(groupRows(w)).toEqual(['ws:c:\\work\\ws', 'ws:?'])
+  w.unmount()
+  // 다시 켠다(저장소는 그대로).
+  window.pitwall = fake().api
+  const again = mount(App, { attachTo: document.body })
+  await flushPromises()
+  expect(again.find('.resource-grid').exists()).toBe(false)
+  expect(again.find('[data-mode="collapsed"]').attributes('aria-pressed')).toBe('true')
+  // 손잡이를 더블클릭하면 자세히로 돌아오고, 그것도 기억한다.
+  await again.find('[role="separator"]').trigger('dblclick')
+  expect(again.findAll('.resource-grid [data-slot=card]')).toHaveLength(6)
+  expect(localStorage.getItem('pitwall.topMode')).toBe('full')
+  again.unmount()
+})
+
+test('간단히에서도 표가 보인다', async () => {
+  const w = await start(fake())
+  await w.find('[data-mode="compact"]').trigger('click')
+  // 카드는 여섯 장 그대로, 낮은 한 줄 모양.
+  const cards = w.findAll('.resource-grid [data-slot=card]')
+  expect(cards).toHaveLength(6)
+  for (const c of cards) expect(c.find('[data-compact-value]').exists()).toBe(true)
+  // 낮은 창에서 화면 전체를 스크롤하는 규칙은 자세히에만 걸린다(표가 아래로 밀려나지 않게).
+  expect(w.find('main').attributes('data-top-mode')).toBe('compact')
+  expect(w.find('.table-section').exists()).toBe(true)
+  expect(groupRows(w)).toEqual(['ws:c:\\work\\ws', 'ws:?'])
+  // 간단히 카드를 눌러도 자세히의 ↗ 처럼 그 탭으로 간다.
+  await cards[1].find('button').trigger('click')
+  expect(pressedTab(w)).toBe('ports')
+  expect(localStorage.getItem('pitwall.topMode')).toBe('compact')
+  w.unmount()
+})
+
+test('손잡이를 끄는 동안 카드 영역이 그 높이를 따르고 놓으면 단계에 붙는다', async () => {
+  const w = await start(fake())
+  const handle = w.find('[role="separator"]')
+  const area = (): HTMLElement => w.find('.resource-grid').element.parentElement!
+  await handle.trigger('pointerdown', { clientY: 500, button: 0, pointerId: 1 })
+  await handle.trigger('pointermove', { clientY: 380, pointerId: 1 })
+  // 끄는 동안: 그 높이로 잘라 보이고, 놓으면 붙을 단계(간단히) 모양으로 미리 보인다.
+  expect(area().style.height).toBe(`${TOP_HEIGHTS.full - 120}px`)
+  expect(w.find('.resource-grid [data-compact-value]').exists()).toBe(true)
+  await handle.trigger('pointerup', { clientY: 380, pointerId: 1 })
+  expect(area().style.height).toBe('')
+  expect(w.find('[data-mode="compact"]').attributes('aria-pressed')).toBe('true')
   w.unmount()
 })
 

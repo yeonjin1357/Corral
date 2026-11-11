@@ -390,6 +390,12 @@ export const text = {
       diskScanned: (time: string): string => `${time} 에 찾음`,
       rescan: '다시 찾기'
     },
+    /** 카드 영역과 표 사이의 손잡이 줄(G2). */
+    layout: {
+      modes: { full: '자세히', compact: '간단히', collapsed: '접기' },
+      handle: '끌어서 위아래 크기 조절 · 더블클릭: 자세히 ↔ 접기',
+      editCards: '카드 편집'
+    },
     /** 표 위 탭(NeoHtop ToolBar). */
     tabs: {
       label: '보기',

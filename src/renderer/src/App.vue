@@ -52,9 +52,11 @@ import {
   type TabKey
 } from './rows'
 import { readServerView, writeServerView, type ServerView } from './viewState'
+import { TOP_HEIGHTS, readTopMode, snapTopMode, writeTopMode, type TopMode } from './layoutState'
 import logo from '../../../resources/icon.png'
 import TitleBar from './components/TitleBar.vue'
 import StatsBar from './components/StatsBar.vue'
+import TopSplitter from './components/TopSplitter.vue'
 import ToolBar from './components/ToolBar.vue'
 import ItemTable from './components/ItemTable.vue'
 import ItemSheet, { type Selected } from './components/ItemSheet.vue'
@@ -620,6 +622,20 @@ const storage = ((): Storage | null => {
 const sorts = ref<Sorts>(readSorts(storage))
 const serverView = ref<ServerView>(readServerView(storage))
 watch(serverView, (v) => writeServerView(storage, v))
+/** 카드 영역 단계(G2): 자세히·간단히·접기. 다시 켜도 기억한다. */
+const topMode = ref<TopMode>(readTopMode(storage))
+watch(topMode, (m) => writeTopMode(storage, m))
+/** 손잡이를 끄는 동안의 카드 영역 높이(px). 끌지 않을 때는 null(카드 영역은 제 높이). */
+const topDrag = ref<number | null>(null)
+const showCards = computed(() =>
+  topDrag.value != null ? topDrag.value > 0 : topMode.value !== 'collapsed'
+)
+/** 끄는 동안은 놓으면 붙을 단계의 모양으로 미리 보인다(자세히가 아니면 간단히 카드를 잘라 보인다). */
+const compactCards = computed(() =>
+  topDrag.value != null
+    ? snapTopMode(topDrag.value, TOP_HEIGHTS) !== 'full'
+    : topMode.value === 'compact'
+)
 /** 접은 작업 공간 묶음. 갱신해도 유지한다(앱을 다시 켜면 모두 펼침). */
 const collapsedGroups = ref<string[]>([])
 const grouping = computed<((rows: Row[]) => GroupedRows[]) | null>(() => {
@@ -833,6 +849,7 @@ const takenAt = computed(() =>
     <main
       v-if="page === 'dashboard'"
       class="dashboard-main flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+      :data-top-mode="topMode"
     >
       <div
         v-if="!snapshot"
@@ -847,16 +864,26 @@ const takenAt = computed(() =>
         />
       </div>
       <template v-else>
-        <StatsBar
-          :snapshot="snapshot"
-          :ram-history="history.ram"
-          :window-ms="windowMs"
-          :gap-ms="gapMs"
-          @memory="memoryOpen = true"
-          @tab="(key) => ((tab = key), (query = ''))"
-          @disk-scan="diskScan"
-          @select="select"
-        />
+        <!-- 카드 영역: 끄는 동안만 그 높이로 자르고, 아니면 고른 단계의 제 높이. 접기면 카드가 없다. -->
+        <div
+          v-if="showCards"
+          class="min-w-0 shrink-0"
+          :class="{ 'overflow-hidden': topDrag != null }"
+          :style="topDrag != null ? { height: `${topDrag}px` } : undefined"
+        >
+          <StatsBar
+            :snapshot="snapshot"
+            :ram-history="history.ram"
+            :window-ms="windowMs"
+            :gap-ms="gapMs"
+            :compact="compactCards"
+            @memory="memoryOpen = true"
+            @tab="(key) => ((tab = key), (query = ''))"
+            @disk-scan="diskScan"
+            @select="select"
+          />
+        </div>
+        <TopSplitter v-model:mode="topMode" :heights="TOP_HEIGHTS" @drag="(h) => (topDrag = h)" />
 
         <NoticeCard
           v-if="away"
