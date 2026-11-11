@@ -2,18 +2,21 @@ import { readFileSync } from 'fs'
 import { join } from 'path'
 import { pinUserData } from './userData'
 
-/** Electron app 의 가짜(appData 경로, --user-data-dir 유무). setPath 호출을 모은다. */
+/** Electron app 의 가짜(appData 경로, --user-data-dir 유무). getPath·setPath 호출을 모은다. */
 function fakeApp(switches: string[] = []): {
   app: Parameters<typeof pinUserData>[0]
+  getPath: ReturnType<typeof vi.fn>
   setPath: ReturnType<typeof vi.fn>
 } {
+  const getPath = vi.fn(() => 'C:\\Users\\dev\\AppData\\Roaming')
   const setPath = vi.fn()
   return {
     app: {
-      getPath: () => 'C:\\Users\\dev\\AppData\\Roaming',
+      getPath,
       setPath,
       commandLine: { hasSwitch: (name) => switches.includes(name) }
     },
+    getPath,
     setPath
   }
 }
@@ -22,8 +25,10 @@ function fakeApp(switches: string[] = []): {
 const fakeJoin = (...parts: string[]): string => parts.join('/')
 
 test('설정 폴더는 이름이 바뀌어도 appData/pitwall 로 고정한다', () => {
-  const { app, setPath } = fakeApp()
+  const { app, getPath, setPath } = fakeApp()
   expect(pinUserData(app, fakeJoin)).toBe('C:\\Users\\dev\\AppData\\Roaming/pitwall')
+  // userData(이름이 바뀌면 Corral 폴더)가 아니라 appData 에서 계산한다.
+  expect(getPath).toHaveBeenCalledWith('appData')
   expect(setPath).toHaveBeenCalledTimes(1)
   expect(setPath).toHaveBeenCalledWith('userData', 'C:\\Users\\dev\\AppData\\Roaming/pitwall')
 })

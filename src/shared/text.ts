@@ -1,6 +1,22 @@
 import type { PitEventKind } from './events'
 import type { MemoryLevel, WaitReason } from './types'
 
+/**
+ * 맨 위 카드 줄의 카드 이름(카드 이름 키는 layoutState 의 CardId). 카드 제목(ui.cards.*)과 카드 편집의 이름
+ * (ui.cardsEdit.title — 편집 막대의 칩·새 카드 제목)이 같은 글을 쓰도록 한 번만 적는다.
+ */
+const cardTitles = {
+  memory: '메모리',
+  servers: '개발 서버',
+  agents: '에이전트',
+  heavy: '무거운 작업',
+  leftovers: '남은 프로세스',
+  disk: '디스크 정리',
+  waiting: '응답 대기',
+  tokens: '토큰·한도',
+  events: '최근 기록'
+} as const
+
 /** 화면·트레이·확인 창에 나오는 문구는 모두 여기 모은다(나중에 다국어로 넓힐 때 이 파일만 바꾸면 되도록). */
 export const text = {
   appName: 'Corral',
@@ -316,7 +332,7 @@ export const text = {
     },
     /** 맨 위 카드 줄(NeoHtop StatsBar). */
     cards: {
-      memory: '메모리',
+      memory: cardTitles.memory,
       memoryOf: (used: string, total: string, free: string): string =>
         `${total} 중 ${used} 사용 · 남은 ${free}`,
       /** 커밋 사용량(단위가 같으면 앞 값의 단위는 뺀다: "104.8 / 127.7 GB"). */
@@ -334,14 +350,14 @@ export const text = {
       showList: '목록에서 보기',
       count: '개',
       memorySum: '메모리',
-      ports: '개발 서버',
+      ports: cardTitles.servers,
       portsSub: (ports: number, workspaces: number): string =>
         workspaces > 0 ? `포트 ${ports}개 · 작업 공간 ${workspaces}곳` : `포트 ${ports}개`,
       portJudge: '정리 판단',
       candidate: '정리 후보',
       check: '확인해볼 것',
       inUse: '사용 중',
-      agents: '에이전트',
+      agents: cardTitles.agents,
       agentsSub: '실행 중',
       stateSource: '상태 판단',
       sourceHook: 'Claude 훅',
@@ -367,18 +383,18 @@ export const text = {
       windowDays: (n: number): string => `${n}일`,
       windowHours: (n: number): string => `${n}시간`,
       windowMinutes: (n: number): string => `${n}분`,
-      heavy: '무거운 작업',
+      heavy: cardTitles.heavy,
       heavyRunning: '실행 중',
       overlap: '겹침',
       /** pressure: pressureText 결과("RAM 85%" 또는 "커밋 86%"). */
       overlapNote: (pressure: string): string => `${pressure} 에서 겹쳐 도는 중`,
       heavyHelp:
         '설정한 무거운 명령(타입 검사·빌드 등)이에요. 둘 이상 겹치고 RAM 이 경고 기준을 넘으면 알려요.',
-      leftovers: '남은 프로세스',
+      leftovers: cardTitles.leftovers,
       leftoversSub: '남은 개발 도구',
       leftoversAgent: (n: number): string => `에이전트 워크트리 ${n}개는 뺐어요.`,
       leftoversHelp: '실행한 에이전트·터미널이 끝났는데 10분 넘게 남아 있는 개발 도구예요.',
-      disk: '디스크 정리',
+      disk: cardTitles.disk,
       /** finished·stale: 사용 중이 아닌 끝난·오래 안 쓴 워크트리 수. 오래 안 쓴 곳이 없으면 예전 문구. */
       diskSub: (finished: number, stale = 0): string =>
         stale > 0
@@ -398,17 +414,7 @@ export const text = {
     },
     /** 카드 고르기(G3): 카드 이름(편집 막대의 칩·새 카드 제목), 편집 단추, 새 카드의 빈 상태. */
     cardsEdit: {
-      title: {
-        memory: '메모리',
-        servers: '개발 서버',
-        agents: '에이전트',
-        heavy: '무거운 작업',
-        leftovers: '남은 프로세스',
-        disk: '디스크 정리',
-        waiting: '응답 대기',
-        tokens: '토큰·한도',
-        events: '최근 기록'
-      },
+      title: cardTitles,
       hide: '숨기기',
       show: '보이기',
       remove: '빼기',

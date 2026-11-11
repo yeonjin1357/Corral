@@ -314,6 +314,27 @@ describe('메모리 카드: 전체 RAM 을 묶음별로 쌓은 막대(G4)', () =
     ])
   })
 
+  test('1% 아래 묶음은 범례가 <1% 이고 풍선말도 1% 로 보이지 않는다', () => {
+    // 에이전트 0.96 GB / 100 GB = 0.96%: 반올림하면 1% 지만 범례는 "<1%" 다.
+    const base = withGroups(0)
+    const w = bar(
+      snapshot({
+        ...base,
+        groups: base.groups.map((g) =>
+          g.group === 'agent'
+            ? { ...g, memoryBytes: Math.round(0.96 * GB) }
+            : g.group === 'otherApps'
+              ? { ...g, memoryBytes: Math.round(29.04 * GB) }
+              : g
+        )
+      })
+    )
+    expect(legend(w)[1]).toEqual(['에이전트', '<1%'])
+    const tip = memoryCard(w).find('[data-memory-legend=agent]').attributes('title')
+    expect(tip).toBe('에이전트 983 MB · 전체 RAM 의 0.9%')
+    expect(memoryCard(w).find('[data-memory-part=agent]').attributes('title')).toBe(tip)
+  })
+
   test('메모리를 아직 모르면 쌓은 막대가 없다', () => {
     const w = bar(withGroups(0, 0))
     expect(memoryCard(w).find('[data-memory-bar]').exists()).toBe(false)
@@ -680,9 +701,10 @@ describe('카드 배치', () => {
       setBoxHeights(grid, 260, 260)
       watch.fire()
       expect(w.emitted('scrollbar')).toEqual([[0], [6], [0]])
-      const before = resize.disconnected()
+      // 떨어질 때 카드 줄을 지켜보던 관찰자가 끊긴다(추이 그래프의 너비 관찰자와 따로 본다).
+      expect(watch.disconnected()).toBe(false)
       w.unmount()
-      expect(resize.disconnected()).toBeGreaterThan(before)
+      expect(watch.disconnected()).toBe(true)
     } finally {
       resize.restore()
     }

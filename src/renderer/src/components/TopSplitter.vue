@@ -14,7 +14,7 @@ import { TOP_MODES, snapTopMode, type CardId, type TopMode } from '../layoutStat
 const props = defineProps<{
   /** 단계마다 카드 영역 높이(px). 끄는 높이의 시작점과 붙을 단계를 정한다. */
   heights: Record<TopMode, number>
-  /** 카드 편집 중(카드 편집 버튼이 눌린 모양·완료). */
+  /** 카드 편집 중(카드 편집 버튼이 완료로 바뀌고 단계 버튼 자리에 편집 막대). */
   editing?: boolean
   /** 편집 막대의 칩: 카드 줄에 아직 없는 새 카드. */
   addable?: CardId[]
@@ -44,7 +44,8 @@ let start: { y: number; height: number } | null = null
 const dragHeight = ref<number | null>(null)
 
 function onPointerDown(e: PointerEvent): void {
-  if (e.button !== 0) return
+  // 끄는 중에 다른 포인터(둘째 손가락·펜)가 눌려도 시작점을 바꾸지 않는다.
+  if (start || e.button !== 0) return
   start = { y: e.clientY, height: props.heights[mode.value] }
   // 손잡이 밖으로 나가도 놓을 때까지 이 줄이 포인터를 받는다.
   ;(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId)
@@ -158,11 +159,12 @@ function onKeydown(e: KeyboardEvent): void {
         {{ text.ui.layout.modes[m] }}
       </button>
     </div>
-    <!-- 편집 중에는 완료(눌린 모양, 눈에 띄는 색). -->
+    <!--
+      편집 중이 아니면 카드 편집, 편집 중에는 완료(눈에 띄는 색). 글자가 바뀌는 두 단추라 켜고 끄는 단추(aria-pressed)가 아니다.
+    -->
     <button
       type="button"
       data-action="cards-edit"
-      :aria-pressed="!!editing"
       class="relative h-5 shrink-0 rounded-md border px-1.5 text-[11px] outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
       :class="
         editing

@@ -36,10 +36,11 @@ export const clamp01 = (n: number): number => Math.max(0, Math.min(1, n))
 
 /**
  * 풍선말의 %(메모리 카드·표의 메모리 칸): 반올림하되 0 보다 크고 1% 아래는 소수 한 자리
- * (범례가 "<1%" 인 묶음이나 작은 줄이 "0%" 로 보이지 않게).
+ * (범례가 "<1%" 인 묶음이나 작은 줄이 "0%" 로 보이지 않게). 1% 아래는 0.9 까지 — 0.95~1% 를 반올림해
+ * "1%" 로 보이면 같은 묶음의 범례 "<1%" 와 어긋난다.
  */
 export const tipPercent = (share: number): number =>
-  share > 0 && share < 0.01 ? Math.round(share * 1000) / 10 : Math.round(share * 100)
+  share > 0 && share < 0.01 ? Math.min(0.9, Math.round(share * 1000) / 10) : Math.round(share * 100)
 
 /**
  * 전체 RAM 의 묶음별 몫과 남은 메모리. 전체를 모르면(0) null.

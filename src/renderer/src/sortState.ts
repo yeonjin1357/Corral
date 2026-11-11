@@ -3,17 +3,13 @@
  * 이 PC 화면에서만 쓰는 편의 값이라 브라우저 저장소(localStorage)에 둔다. 막히거나 깨져도 기본 정렬로 넘어간다.
  */
 import type { Table, TabKey } from './rows'
+import type { StorageLike } from './storage'
 
 export interface SortState {
   id: string
   dir: 'asc' | 'desc'
 }
 export type Sorts = Partial<Record<TabKey, SortState>>
-
-interface StorageLike {
-  getItem(key: string): string | null
-  setItem(key: string, value: string): void
-}
 
 const KEY = 'pitwall.tableSort'
 

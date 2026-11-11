@@ -1320,6 +1320,9 @@ describe('메모리 막대(G5)', () => {
     const head = groupServers(filtered, s.servers, [], 0, [], total).find((g) => g.group)?.group
     expect(head?.memoryShare).toBe(0.75)
     expect(filtered.map((r) => r.cells.memory.share)).toEqual([900 / 1600])
+    // 머리 합(1200 MB)이 분모보다 커도 막대는 1 까지.
+    const over = groupServers(t.rows, s.servers, [], 0, [], 1000 * MB).find((g) => g.group)
+    expect(over?.group?.memoryShare).toBe(1)
     // 기준이 없으면 머리에도 막대가 없다.
     const plain = groupServers(t.rows, s.servers, []).find((g) => g.group)?.group
     expect(plain?.memoryShare).toBeUndefined()

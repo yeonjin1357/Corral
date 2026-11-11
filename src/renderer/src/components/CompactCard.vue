@@ -1,11 +1,11 @@
 <!--
   간단히 단계(G2)의 카드 한 장: 아이콘·제목·큰 값이 한 줄, 그 아래 짧은 설명 한 줄(높이 72px — layoutState 의 TOP_HEIGHTS).
-  카드 전체가 버튼이라 누르면 자세히 카드의 ↗ 와 같은 곳으로 간다. 아이콘 칩은 PanelHeader 와 같은 모양.
+  카드 전체가 버튼이라 누르면 자세히 카드의 ↗ 와 같은 곳으로 간다. 아이콘 칩은 PanelHeader 와 같은 IconChip.
 -->
 <script setup lang="ts">
 import type { Component } from 'vue'
 import Card from '../ui/Card.vue'
-import Badge from '../ui/Badge.vue'
+import IconChip from './IconChip.vue'
 
 defineProps<{
   icon: Component
@@ -36,18 +36,7 @@ const emit = defineEmits<{ action: [] }>()
       @click="emit('action')"
     >
       <span class="flex w-full min-w-0 items-center gap-2">
-        <Badge
-          variant="secondary"
-          :class="
-            color
-              ? 'size-5 rounded-md border-0 p-0 bg-primary/10 text-primary [&>svg]:size-3!'
-              : 'size-5 rounded-md border-0 p-0 bg-muted text-muted-foreground [&>svg]:size-3!'
-          "
-          :style="color ? { '--primary': color } : undefined"
-          aria-hidden="true"
-        >
-          <component :is="icon" />
-        </Badge>
+        <IconChip :icon="icon" :color="color" />
         <span
           data-slot="card-title"
           class="min-w-0 truncate text-sm font-medium text-muted-foreground"

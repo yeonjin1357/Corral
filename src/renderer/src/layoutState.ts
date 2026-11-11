@@ -2,6 +2,8 @@
  * 메인 창 위쪽 카드 영역의 단계(G2): 자세히(지금 카드)·간단히(카드마다 한 줄)·접기(카드 없음), 그리고 카드 배치(G3).
  * 정렬·보기처럼 이 PC 화면에서만 쓰는 편의 값이라 localStorage 에 둔다. 막히거나 깨지면 자세히·기본 배치로 넘어간다.
  */
+import type { StorageLike } from './storage'
+
 export type TopMode = 'full' | 'compact' | 'collapsed'
 
 /** 큰 단계부터. 손잡이의 ↑ 는 다음 칸(작게), ↓ 는 앞 칸(크게). */
@@ -34,11 +36,6 @@ export function withScrollbar(
     compact: heights.compact + extra,
     collapsed: heights.collapsed
   }
-}
-
-interface StorageLike {
-  getItem(key: string): string | null
-  setItem(key: string, value: string): void
 }
 
 const TOP_MODE_KEY = 'pitwall.topMode'

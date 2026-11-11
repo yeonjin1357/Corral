@@ -6,8 +6,8 @@ import type { Component } from 'vue'
 import { ArrowUpRight } from '@lucide/vue'
 import CardHeader from '../ui/CardHeader.vue'
 import CardTitle from '../ui/CardTitle.vue'
-import Badge from '../ui/Badge.vue'
 import Button from '../ui/Button.vue'
+import IconChip from './IconChip.vue'
 
 defineProps<{
   icon: Component
@@ -28,18 +28,7 @@ const emit = defineEmits<{ action: [] }>()
       class="flex min-w-0 items-center gap-2 text-sm font-medium text-muted-foreground"
       :title="hint ?? undefined"
     >
-      <Badge
-        variant="secondary"
-        :class="
-          color
-            ? 'size-5 rounded-md border-0 p-0 bg-primary/10 text-primary [&>svg]:size-3!'
-            : 'size-5 rounded-md border-0 p-0 bg-muted text-muted-foreground [&>svg]:size-3!'
-        "
-        :style="color ? { '--primary': color } : undefined"
-        aria-hidden="true"
-      >
-        <component :is="icon" />
-      </Badge>
+      <IconChip :icon="icon" :color="color" />
       <span class="truncate">{{ title }}</span>
     </CardTitle>
     <div class="flex items-center gap-1">

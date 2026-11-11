@@ -100,6 +100,32 @@ test('끌어서 놓으면 가까운 단계에 붙는다', async () => {
   expect(modes(w)).toEqual(['compact', 'full', 'collapsed'])
 })
 
+test('끄는 중에 다른 포인터를 눌러도 끌기는 처음 포인터 그대로', async () => {
+  const w = splitter('full')
+  const drags = (): (number | null)[] => (w.emitted('drag') ?? []).map((e) => e[0] as number)
+  await handle(w).trigger('pointerdown', { clientY: 400, button: 0, pointerId: 1 })
+  await handle(w).trigger('pointermove', { clientY: 330, pointerId: 1 })
+  // 둘째 손가락·펜이 눌려도 끌기의 시작점을 바꾸지 않는다.
+  await handle(w).trigger('pointerdown', { clientY: 100, button: 0, pointerId: 2 })
+  await handle(w).trigger('pointermove', { clientY: 280, pointerId: 1 })
+  expect(drags()).toEqual([190, 140])
+  await handle(w).trigger('pointerup', { clientY: 280, pointerId: 1 })
+  expect(modes(w)).toEqual(['compact'])
+})
+
+test('포인터 잡기를 잃으면(lostpointercapture) 끌기를 끝내고 가까운 단계에 붙는다', async () => {
+  const w = splitter('full')
+  const drags = (): (number | null)[] => (w.emitted('drag') ?? []).map((e) => e[0] as number)
+  await handle(w).trigger('pointerdown', { clientY: 400, button: 0, pointerId: 1 })
+  await handle(w).trigger('pointermove', { clientY: 200, pointerId: 1 })
+  await handle(w).trigger('lostpointercapture', { pointerId: 1 })
+  expect(drags()).toEqual([60, null])
+  expect(modes(w)).toEqual(['compact'])
+  // 끝난 뒤의 움직임은 끌기가 아니다.
+  await handle(w).trigger('pointermove', { clientY: 500, pointerId: 1 })
+  expect(drags()).toEqual([60, null])
+})
+
 test('↑·↓ 로 한 단계씩', async () => {
   const w = splitter('full')
   const key = (k: string): Promise<void> => handle(w).trigger('keydown', { key: k })
@@ -124,15 +150,15 @@ test('카드 편집 버튼은 edit 를 보낸다', async () => {
   const w = splitter('compact')
   const edit = w.find('[data-action="cards-edit"]')
   expect(edit.text()).toBe('카드 편집')
-  expect(edit.attributes('aria-pressed')).toBe('false')
   await edit.trigger('click')
   expect(w.emitted('edit')).toHaveLength(1)
   // 단계는 그대로.
   expect(modes(w)).toEqual([])
-  // 편집 중이면 눌린 모양.
-  expect(splitter('full', true).find('[data-action="cards-edit"]').attributes('aria-pressed')).toBe(
-    'true'
-  )
+  // 편집 중에는 글자가 완료로 바뀌는 다른 단추라 켜고 끄는 단추(aria-pressed)가 아니다.
+  expect(edit.attributes('aria-pressed')).toBeUndefined()
+  const done = splitter('full', true).find('[data-action="cards-edit"]')
+  expect(done.text()).toBe('완료')
+  expect(done.attributes('aria-pressed')).toBeUndefined()
 })
 
 test('더할 수 있는 카드 칩·기본값으로·완료', async () => {

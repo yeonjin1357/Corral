@@ -977,6 +977,32 @@ test('카드 줄에 가로 스크롤바가 생기면 끄는 높이·붙는 높�
   }
 })
 
+test('접었다가 자세히로 돌아오면 새 카드 줄을 다시 지켜봐 손잡이 최대 높이가 따라간다', async () => {
+  const resize = fakeResizeObserver()
+  try {
+    const w = await start(fake())
+    const handle = w.find('[role="separator"]')
+    const grid = w.find('.resource-grid').element
+    const oldWatch = resize.watches.find((x) => x.el === grid)!
+    await w.find('[data-mode="collapsed"]').trigger('click')
+    // 접으면 카드 줄이 없어지고 그 관찰자도 끊긴다.
+    expect(w.find('.resource-grid').exists()).toBe(false)
+    expect(oldWatch.disconnected()).toBe(true)
+    await w.find('[data-mode="full"]').trigger('click')
+    await flushPromises()
+    const again = w.find('.resource-grid').element
+    expect(again).not.toBe(grid)
+    // 새 카드 줄에 8px 스크롤바가 생기면 손잡이의 최대 높이가 그만큼 는다.
+    setBoxHeights(again, TOP_HEIGHTS.full + 8, TOP_HEIGHTS.full)
+    resize.watches.find((x) => x.el === again)!.fire()
+    await flushPromises()
+    expect(handle.attributes('aria-valuemax')).toBe(String(TOP_HEIGHTS.full + 8))
+    w.unmount()
+  } finally {
+    resize.restore()
+  }
+})
+
 // ── 카드 고르기(G3) ──
 /** 카드 줄의 칸 이름(data-card) 순서. */
 const cardIds = (w: VueWrapper): string[] =>
@@ -1049,7 +1075,7 @@ test('접기에서 카드 편집을 누르면 자세히로 바뀐다', async () 
   await w.find('[role="separator"]').trigger('dblclick')
   expect(w.find('.resource-grid').exists()).toBe(false)
   expect(w.findAll('[data-mode]')).toHaveLength(3)
-  expect(w.find('[data-action="cards-edit"]').attributes('aria-pressed')).toBe('false')
+  expect(w.find('[data-action="cards-edit"]').text()).toBe('카드 편집')
   // 자세히로 돌아와 응답 대기 카드의 줄을 누르면 그 에이전트의 상세 패널.
   await w.find('[data-mode="full"]').trigger('click')
   await w.find('[data-card="waiting"] [data-waiting] button').trigger('click')
