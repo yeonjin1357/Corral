@@ -314,7 +314,7 @@ export const text = {
       theme: '화면 테마',
       themeTitle: '화면 테마 고르기',
       themes: {
-        light: { label: '밝게', sub: 'GitHub Light' },
+        light: { label: '밝게', sub: '흰 바탕' },
         dark: { label: '어둡게', sub: 'Catppuccin' },
         auto: { label: 'OS 따라', sub: '밝게·어둡게 자동' }
       },
@@ -735,10 +735,10 @@ export const text = {
         heavy: '겹쳐 돌면 알려 줄 무거운 명령이에요.',
         notifications: '어떤 때 OS 알림을 보낼지 골라요.',
         disk: '끝난 워크트리에서 지울 폴더와 더 살펴볼 저장소예요.',
-        claude: 'Claude Code·Codex 훅으로 작업 중·응답 대기와 기다리는 도구를 정확히 알아요.',
-        about:
-          '로컬 AI 코딩 에이전트·개발 서버 포트·RAM·디스크를 한눈에 보고 정리하는 트레이 앱이에요.'
+        claude: 'Claude Code·Codex 훅으로 작업 중·응답 대기와 기다리는 도구를 정확히 알아요.'
       },
+      /** 정보 쪽의 제목 아래 줄(다른 쪽의 pageDesc 자리). */
+      currentVersion: (v: string): string => `현재 버전: ${v}`,
       groups: {
         check: '확인 주기',
         look: '화면',
@@ -750,9 +750,7 @@ export const text = {
         dirs: '지울 폴더',
         stale: '오래 안 쓴 워크트리',
         repos: '더 살펴볼 저장소',
-        hook: '연동 상태',
-        app: 'Corral',
-        links: '링크'
+        hook: '연동 상태'
       },
       saveFailed: (detail: string): string => `저장하지 못했어요: ${detail}`,
       refresh: '갱신 주기',
@@ -765,7 +763,7 @@ export const text = {
       launchAtLoginHelp: '설치한 앱에서만 적용돼요(개발 실행에서는 등록하지 않아요).',
       updateCheck: '새 버전 확인',
       updateCheckHelp:
-        'GitHub 에서 새 버전이 있는지 확인해요. Corral 이 하는 유일한 인터넷 접속이에요.',
+        '새 버전이 나왔는지 인터넷으로 확인해요. Corral 이 하는 유일한 인터넷 접속이에요.',
       ramWarn: 'RAM 경고 기준',
       ramWarnHelp:
         'RAM 사용률이나 커밋 사용률이 이 이상이면 주황색이 되고, 무거운 작업이 겹칠 때 알려요.',
@@ -837,13 +835,9 @@ export const text = {
       removeRepo: '빼기',
       noRepos: '더한 저장소가 없어요.',
       settingsFile: (path: string): string => `설정 파일: ${path}`,
-      version: (v: string): string => `Corral ${v}`,
-      repo: 'GitHub 저장소',
-      license: '라이선스: MIT',
-      notices: '가져온 오픈소스와 라이선스',
       updates: {
-        title: '새 버전',
-        idle: '아직 확인하지 않았어요.',
+        /** 시각은 main/index.ts 의 UPDATE_FIRST_CHECK_MS·UPDATE_CHECK_EVERY_MS 와 맞춘다. */
+        auto: '업데이트는 Corral 을 시작할 때 자동으로 확인하고, 켜 두는 동안에는 6시간마다 다시 확인해요.',
         disabledOff: '새 버전 확인이 꺼져 있어요(설정 > 일반).',
         disabledDev: '개발 실행에서는 새 버전을 확인하지 않아요.',
         checking: '확인하는 중…',
@@ -852,12 +846,10 @@ export const text = {
         downloading: (v: string): string => `새 버전 ${v} 을 내려받는 중이에요.`,
         ready: (v: string): string => `새 버전 ${v} 을 받았어요. 다시 시작하면 설치돼요.`,
         error: (e: string): string => `새 버전을 확인하지 못했어요: ${e}`,
-        check: '지금 확인',
+        check: '업데이트 확인',
         install: '다시 시작해 설치',
         download: '내려받기 페이지'
-      },
-      description:
-        '로컬 AI 코딩 에이전트·개발 서버 포트·RAM·디스크를 한눈에 보고 정리하는 트레이 앱이에요.'
+      }
     },
     refresh: '지금 새로고침',
     list: {

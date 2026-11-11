@@ -617,7 +617,7 @@ const updater = createUpdater({
     const response = await net.fetch(url, {
       headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Corral' }
     })
-    if (!response.ok) throw new Error(`GitHub ${response.status}`)
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
     return response.json()
   },
   // 설치한 Windows 앱만 자동 업데이트(macOS 는 서명이 없어 설치할 수 없다).

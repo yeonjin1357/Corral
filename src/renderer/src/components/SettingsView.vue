@@ -14,6 +14,7 @@ import {
   Hammer,
   HardDrive,
   Info,
+  RefreshCw,
   Settings2
 } from '@lucide/vue'
 import type { ClaudeHookStatus, CodexHookStatus, UpdateStatus } from '../../../shared/types'
@@ -191,15 +192,16 @@ const guardNeedsHook = computed(
 )
 const codexControls = computed(() => hookControls(props.codexHook ?? null, text.ui.codexHook))
 
-const updateText = computed(() => {
+/** 확인 결과 줄. 아직 확인하지 않았으면 없다(자동 확인 안내만 보인다). */
+const updateText = computed((): string | null => {
   const u = props.update
   const t = S.updates
-  if (!u) return t.idle
+  if (!u) return null
   switch (u.state) {
     case 'disabled':
       return props.settings.updateCheck ? t.disabledDev : t.disabledOff
     case 'idle':
-      return t.idle
+      return null
     case 'checking':
       return t.checking
     case 'none':
@@ -213,17 +215,22 @@ const updateText = computed(() => {
     case 'error':
       return t.error(u.error ?? '')
   }
-  return t.idle
+  return null
 })
+/** 자동 확인 안내: 확인을 껐거나 개발 실행이라 확인하지 않을 때는 뺀다. */
+const autoChecks = computed(() => props.settings.updateCheck && props.update?.state !== 'disabled')
+const updateBusy = computed(
+  () => props.update?.state === 'checking' || props.update?.state === 'downloading'
+)
+const pageSubtitle = computed(() =>
+  page.value === 'about' ? S.currentVersion(props.version ?? '') : S.pageDesc[page.value]
+)
 
 const status = computed(() => {
   if (notice.value) return notice.value
   if (saving.value) return { text: S.saving, failed: false }
   return { text: dirty.value ? S.dirty : S.clean, failed: false }
 })
-
-const REPO_URL = 'https://github.com/yeonjin1357/Corral'
-const NOTICES_URL = `${REPO_URL}/blob/main/THIRD_PARTY_NOTICES.md`
 </script>
 
 <template>
@@ -254,7 +261,7 @@ const NOTICES_URL = `${REPO_URL}/blob/main/THIRD_PARTY_NOTICES.md`
     >
       <div class="mx-auto w-full max-w-2xl">
         <h1 class="text-lg font-semibold tracking-tight">{{ S.menu[page] }}</h1>
-        <p class="mt-1 mb-5 text-sm text-muted-foreground">{{ S.pageDesc[page] }}</p>
+        <p class="mt-1 mb-5 text-sm text-muted-foreground">{{ pageSubtitle }}</p>
 
         <div v-if="page === 'general'" class="space-y-5">
           <Card size="sm">
@@ -799,30 +806,17 @@ const NOTICES_URL = `${REPO_URL}/blob/main/THIRD_PARTY_NOTICES.md`
 
         <div v-else-if="page === 'about'" class="space-y-5">
           <Card size="sm">
-            <CardHeader
-              ><CardTitle>{{ S.version(version ?? '') }}</CardTitle></CardHeader
-            >
             <CardContent>
-              <p class="text-sm leading-relaxed text-muted-foreground">{{ S.description }}</p>
               <div class="flex flex-wrap gap-2">
-                <Button variant="outline" size="sm" :href="REPO_URL">{{ S.repo }}</Button>
-                <Button variant="outline" size="sm" :href="NOTICES_URL">{{ S.notices }}</Button>
-              </div>
-              <p class="text-xs text-muted-foreground">{{ S.license }}</p>
-            </CardContent>
-          </Card>
-          <Card size="sm">
-            <CardHeader
-              ><CardTitle>{{ S.updates.title }}</CardTitle></CardHeader
-            >
-            <CardContent>
-              <p
-                class="update-state text-sm"
-                :class="{ 'text-destructive': update?.state === 'error' }"
-              >
-                {{ updateText }}
-              </p>
-              <div class="flex flex-wrap gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  data-action="update-check"
+                  :disabled="updateBusy"
+                  @click="emit('updateCheck')"
+                >
+                  <RefreshCw :class="{ 'animate-spin': updateBusy }" />{{ S.updates.check }}
+                </Button>
                 <Button
                   v-if="update?.state === 'ready'"
                   size="sm"
@@ -838,16 +832,17 @@ const NOTICES_URL = `${REPO_URL}/blob/main/THIRD_PARTY_NOTICES.md`
                 >
                   {{ S.updates.download }}
                 </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  data-action="update-check"
-                  :disabled="update?.state === 'checking' || update?.state === 'downloading'"
-                  @click="emit('updateCheck')"
-                >
-                  {{ S.updates.check }}
-                </Button>
               </div>
+              <p
+                v-if="updateText"
+                class="update-state text-sm"
+                :class="{ 'text-destructive': update?.state === 'error' }"
+              >
+                {{ updateText }}
+              </p>
+              <p v-if="autoChecks" class="update-auto text-xs text-muted-foreground">
+                {{ S.updates.auto }}
+              </p>
             </CardContent>
           </Card>
         </div>
