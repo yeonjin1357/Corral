@@ -89,9 +89,27 @@ const resolveHex = (set: Record<string, string>, name: string): string => {
   return ref ? resolveHex(set, ref[1]) : v
 }
 
-function checkContrast(set: Record<string, string>, pill: number): void {
+/** 알약이 앉는 줄 배경들(밝기가 가장 불리한 합성까지): 바탕·카드, 줄 마우스 올림(bg-muted/50 over 바탕),
+ * 묶음 머리 줄(bg-muted/40 over 바탕), 동작 칸 마우스 올림(card+muted 50%), 선택한 줄(primary 6% over card). */
+function rowBackgrounds(set: Record<string, string>): Record<string, string> {
   const bg = resolveHex(set, '--background')
   const card = resolveHex(set, '--card')
+  const muted = resolveHex(set, '--muted')
+  return {
+    background: bg,
+    card,
+    hover: mix(muted, bg, 0.5),
+    'group-head': mix(muted, bg, 0.4),
+    'actions-hover': mix(muted, card, 0.5),
+    selected: mix(resolveHex(set, '--primary'), card, 0.06)
+  }
+}
+
+function checkContrast(set: Record<string, string>, extraRows: boolean): void {
+  const bg = resolveHex(set, '--background')
+  const card = resolveHex(set, '--card')
+  const pill = parseFloat(set['--pill-tint']) / 100
+  expect(pill, '--pill-tint').toBeGreaterThan(0)
   const names = [
     '--status-running', '--status-waiting', '--status-stopped', '--status-idle', '--info',
     '--muted-foreground', '--primary'
@@ -100,7 +118,22 @@ function checkContrast(set: Record<string, string>, pill: number): void {
     const c = resolveHex(set, name)
     expect(contrast(c, bg), `${name} on background`).toBeGreaterThanOrEqual(4.5)
     expect(contrast(c, card), `${name} on card`).toBeGreaterThanOrEqual(4.5)
-    expect(contrast(c, mix(c, card, pill)), `${name} on pill`).toBeGreaterThanOrEqual(4.5)
+  }
+  // 알약(글자색 = 알약 색, 배경 = 알약 색을 옅게 + 줄 배경)은 표가 실제로 앉는 모든 줄 배경 위에서 본다.
+  // (어두운 테마는 기존대로 바탕·카드만 본다. 합성 줄 배경 검사는 밝은 테마 보완용.)
+  for (const [rowName, row] of Object.entries(rowBackgrounds(set))) {
+    if (!extraRows && rowName !== 'background' && rowName !== 'card') continue
+    for (const name of names.slice(0, 4)) {
+      const c = resolveHex(set, name)
+      expect(contrast(c, mix(c, row, pill)), `${name} pill on ${rowName}`).toBeGreaterThanOrEqual(
+        4.5
+      )
+    }
+    // 흐린 글자(없음·위치 등)도 줄 배경 위에서 읽혀야 한다.
+    expect(
+      contrast(resolveHex(set, '--muted-foreground'), row),
+      `muted-foreground on ${rowName}`
+    ).toBeGreaterThanOrEqual(4.5)
   }
   expect(
     contrast(resolveHex(set, '--primary-foreground'), resolveHex(set, '--primary'))
@@ -110,7 +143,14 @@ function checkContrast(set: Record<string, string>, pill: number): void {
   ).toBeGreaterThanOrEqual(4.5)
 }
 
+test('알약 옅은 배경 비율은 밝게 6%·어둡게 14% 이고 CSS 가 그 변수를 쓴다', () => {
+  expect(LIGHT['--pill-tint']).toBe('6%')
+  expect(DARK['--pill-tint']).toBe('14%')
+  expect(CSS).toMatch(/\.status-pill \{[^}]*var\(--pill-tint\)/)
+})
+
 describe('글자 대비', () => {
-  test('밝은 테마 글자 대비가 4.5:1 이상(바탕·카드·옅은 알약 위)', () => checkContrast(LIGHT, 0.13))
-  test('어두운 테마 글자 대비도 4.5:1 이상', () => checkContrast(DARK, 0.14))
+  test('밝은 테마 글자 대비가 4.5:1 이상(바탕·카드·줄 배경 위 알약 포함)', () =>
+    checkContrast(LIGHT, true))
+  test('어두운 테마 글자 대비도 4.5:1 이상', () => checkContrast(DARK, false))
 })

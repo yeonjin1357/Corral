@@ -120,6 +120,8 @@
   --group-system: #a5a8a1;
   --scrollbar-thumb: #b7b9b2;
   --scrollbar-thumb-hover: #9a9d96;
+  /* 상태 알약 옅은 배경의 색 비율. 밝은 바탕에선 진해지면 글자 대비가 4.5:1 아래로 떨어져 옅게 둔다. */
+  --pill-tint: 6%;
   --radius: 0.625rem;
   color-scheme: light;
 }
@@ -162,6 +164,7 @@
   --group-system: #5e6267;
   --scrollbar-thumb: #4a4d52;
   --scrollbar-thumb-hover: #5d6066;
+  --pill-tint: 14%;
   color-scheme: dark;
 }
 
@@ -364,7 +367,7 @@
   padding-inline: 0.5rem;
   border-radius: 9999px;
   font-size: 0.75rem;
-  background: color-mix(in srgb, var(--pill) 13%, transparent);
+  background: color-mix(in srgb, var(--pill) var(--pill-tint), transparent);
   color: var(--pill);
 }
 .group-head[data-tone] > td:first-child {

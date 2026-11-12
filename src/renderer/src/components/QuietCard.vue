@@ -41,7 +41,7 @@ const emit = defineEmits<{ action: [] }>()
       <span
         data-quiet-none
         :data-compact-value="compact || undefined"
-        class="shrink-0 text-muted-foreground/60"
+        class="shrink-0 text-muted-foreground"
         :class="compact ? 'text-[11px] leading-4' : 'text-sm'"
         >{{ text.ui.cards.none }}</span
       >
