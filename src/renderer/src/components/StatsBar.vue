@@ -661,6 +661,7 @@ const diskSub = computed(() => {
                 range="0–100%"
                 :warn="warnPercent ?? DEFAULT_THRESHOLDS.ramWarnPercent"
                 :danger="dangerPercent ?? DEFAULT_THRESHOLDS.ramDangerPercent"
+                :gap-ms="gapMs"
               />
             </CardContent>
           </Card>
@@ -767,13 +768,15 @@ const diskSub = computed(() => {
             :unit="text.ui.cards.count"
             @action="emit('tab', 'agents')"
           >
-            <!-- 좁은 카드에 들어가게 사람이 볼 일(응답 대기)과 정리할 거리(오래 쉼)만. -->
+            <!-- 좁은 카드에 들어가게 사람이 볼 일(응답 대기)과 정리할 거리(오래 쉼)만. 응답 대기 줄이 나오면 오래 쉼은 감추고,
+                 잘릴 수 있는 줄은 title 로 전체를 읽게 한다. -->
             <span
               class="min-w-0 truncate tabular-nums"
+              :title="waitingLine ?? undefined"
               :style="agentCounts.waiting > 0 ? { color: 'var(--status-waiting)' } : undefined"
               >{{ waitingLine ?? `${text.ui.agent.states.waiting} 0` }}</span
             >
-            <span v-if="agentCounts.parked > 0" class="shrink-0 tabular-nums">{{
+            <span v-if="agentCounts.parked > 0 && !waitingLine" class="shrink-0 tabular-nums">{{
               text.ui.cards.agentParked(agentCounts.parked)
             }}</span>
           </CompactCard>

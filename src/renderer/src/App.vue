@@ -878,11 +878,17 @@ const recommendation = computed(() =>
 )
 /** 닫은 줄(id → 닫을 때의 state). state 가 바뀌면 다시 보인다. 앱을 다시 켜면 비어 있다. */
 const dismissed = ref(new Map<string, string>())
-const attention = computed(() =>
-  snapshot.value
-    ? visibleAttention(attentionItems(snapshot.value, snapshot.value.takenAt), dismissed.value)
-    : []
+const allAttention = computed(() =>
+  snapshot.value ? attentionItems(snapshot.value, snapshot.value.takenAt) : []
 )
+const attention = computed(() => visibleAttention(allAttention.value, dismissed.value))
+// 지금 후보에 없는 줄의 기록은 버린다(다시 나타난 줄은 닫힌 채로 남지 않고, 맵도 자라지 않는다).
+watch(allAttention, (all) => {
+  if (dismissed.value.size === 0) return
+  const ids = new Set(all.map((i) => i.id))
+  const kept = [...dismissed.value].filter(([id]) => ids.has(id))
+  if (kept.length !== dismissed.value.size) dismissed.value = new Map(kept)
+})
 function dismissAttention(id: string, state: string): void {
   dismissed.value = new Map(dismissed.value).set(id, state)
 }
@@ -1041,6 +1047,7 @@ const takenAt = computed(() => (snapshot.value ? formatTimeOfDay(snapshot.value.
         <AttentionStrip
           :items="attention"
           :busy="recommendBusy"
+          :busy-key="busyKey"
           :chips="recommendChips"
           @focus="focusAgent"
           @kill="(key) => act('kill', key)"

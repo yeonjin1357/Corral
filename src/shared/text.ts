@@ -339,7 +339,9 @@ export const text = {
       about: 'Corral 정보',
       checkUpdate: '새 버전 확인…',
       back: '대시보드로',
-      dismiss: '닫기'
+      dismiss: '닫기',
+      /** 할 일 줄 닫기 단추(어느 줄인지 읽어 주기용). */
+      dismissItem: (name: string): string => `${name} 닫기`
     },
     trend: {
       window: (ms: number): string => {
@@ -351,7 +353,7 @@ export const text = {
       },
       collecting: '기록을 모으는 중…'
     },
-    /** 맨 위 카드 줄(NeoHtop StatsBar). */
+    /** 할 일 띠. */
     attention: {
       label: '할 일',
       idleFor: (d: string): string => `${d} 동안 아무도 안 써요`,

@@ -385,12 +385,17 @@ test('간단히: 카드마다 제목·큰 값·한 줄', async () => {
     // 메모리는 설명 줄 대신 얇은 쌓은 막대.
     ['메모리', '82%', []],
     ['개발 서버', '2개', ['포트 3개 · 작업 공간 1곳']],
-    ['에이전트', '3개', ['응답 대기 1 · Claude Code', '오래 쉼 1']],
+    ['에이전트', '3개', ['응답 대기 1 · Claude Code']],
     // 값이 0 인 카드는 조용한 카드(제목과 "없음"만).
     ['무거운 작업', '없음', []],
     ['남은 프로세스', '없음', []],
     ['디스크 정리', '1.0 GB', ['끝난 워크트리 1곳에서 확보 가능']]
   ])
+  // 응답 대기 줄이 나오면 오래 쉼은 감추고, 줄 전체는 title 로 읽게 한다.
+  const agents = cards[3 - 1]
+  expect(agents.find('[data-compact-sub] > span[title]').attributes('title')).toBe(
+    '응답 대기 1 · Claude Code'
+  )
   // 카드는 낮은 한 줄(72px): 추이 그래프·아래 칸·항목 목록이 없다.
   for (const c of cards) expect(c.classes()).toContain('h-18')
   expect(w.findComponent(ResourceTrend).exists()).toBe(false)
@@ -800,12 +805,13 @@ test('메모리 카드(자세히)의 추이는 24칸 픽셀 막대이고, 경고
     props: {
       snapshot: snapshot(),
       ramHistory: [
-        { t: 10_000, value: 40 },
+        { t: 30_000, value: 40 },
         { t: 600_000, value: 85 }
       ],
       windowMs: 600_000,
       warnPercent: 80,
-      dangerPercent: 90
+      dangerPercent: 90,
+      gapMs: 60_000
     }
   })
   const trend = w.find('[data-pixel-trend]')

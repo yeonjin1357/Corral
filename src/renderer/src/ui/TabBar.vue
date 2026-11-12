@@ -26,7 +26,7 @@ const root = ref<HTMLElement | null>(null)
 const moreSelected = computed(() => props.more?.find((o) => o.value === model.value))
 
 const TAB_CLASS =
-  'inline-flex h-8 shrink-0 cursor-pointer items-center gap-1 border-b-2 border-transparent px-3 text-sm whitespace-nowrap text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 [&_svg]:size-3.5 [&_svg]:shrink-0'
+  'inline-flex h-8 shrink-0 cursor-pointer items-center gap-1 border-b-2 border-transparent px-3 text-sm whitespace-nowrap text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring [&_svg]:size-3.5 [&_svg]:shrink-0'
 const SELECTED_CLASS = 'border-primary font-semibold text-foreground'
 
 /** ←/→: 이웃한 칸(탭·더 보기 단추)에 초점을 옮긴다. 끝에서는 처음으로 돌고, 탭이면 바로 고른다. */

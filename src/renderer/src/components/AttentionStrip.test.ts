@@ -39,7 +39,7 @@ test('응답 대기 줄의 창으로 가기는 focus(키), 닫기는 dismiss(id,
   await row.find('[data-action="act"]').trigger('click')
   expect(w.emitted('focus')?.[0]).toEqual(['agent:1'])
   expect(row.find('[data-action="act"]').text()).toBe('창으로 가기')
-  await row.find('[aria-label="닫기"]').trigger('click')
+  await row.find('[aria-label="Codex 닫기"]').trigger('click')
   expect(w.emitted('dismiss')?.[0]).toEqual(['waiting:a1', '1'])
 })
 
@@ -92,4 +92,23 @@ test('추천 항목이 칩보다 많으면 칩 줄에 "외 n개"를 보인다', 
   })
   expect(w.findAll('.recommend-item')).toHaveLength(4)
   expect(w.text()).toContain('외 2개')
+})
+
+test('후보 줄의 내리기는 그 서버를 처리하는 동안 잠긴다', () => {
+  const items = [
+    item(1, { id: 'candidate:s', kind: 'candidate', key: 'server:3' }),
+    item(2, { id: 'candidate:t', kind: 'candidate', key: 'server:4' })
+  ]
+  const w = mount(AttentionStrip, { props: { items, busyKey: 'server:3' } })
+  const buttons = w.findAll('[data-action="act"]')
+  expect(buttons[0].attributes('disabled')).toBeDefined()
+  expect(buttons[1].attributes('disabled')).toBeUndefined()
+})
+
+test('닫기 단추는 줄 이름을 넣어 서로 구별된다', () => {
+  const w = mount(AttentionStrip, {
+    props: { items: [item(1, { name: 'Codex' }), item(2, { name: 'Claude Code' })] }
+  })
+  const labels = w.findAll('[data-action="dismiss"]').map((b) => b.attributes('aria-label'))
+  expect(labels).toEqual(['Codex 닫기', 'Claude Code 닫기'])
 })

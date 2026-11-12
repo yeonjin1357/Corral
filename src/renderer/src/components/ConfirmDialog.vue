@@ -20,11 +20,11 @@ const emit = defineEmits<{
 }>()
 
 type Look = 'danger' | 'error' | 'normal'
-/** 위험 = 주황 경고 삼각형, 오류 = 빨간 원, 보통 = 파란 정보. */
+/** 위험 = 주황 경고 삼각형, 오류 = 빨간 원, 보통 = 파란(info) 정보. */
 const LOOKS: Record<Look, { icon: Component; color: string }> = {
   danger: { icon: TriangleAlert, color: 'var(--status-waiting)' },
   error: { icon: CircleX, color: 'var(--status-stopped)' },
-  normal: { icon: Info, color: 'var(--primary)' }
+  normal: { icon: Info, color: 'var(--info)' }
 }
 const look = computed<Look>(() =>
   props.request.kind === 'error' ? 'error' : props.request.tone === 'danger' ? 'danger' : 'normal'

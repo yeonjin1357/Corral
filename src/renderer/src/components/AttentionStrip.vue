@@ -23,7 +23,13 @@ export interface RecommendChip {
 }
 
 const SHOWN = 3
-const props = defineProps<{ items: AttentionItem[]; busy?: boolean; chips?: RecommendChip[] }>()
+const props = defineProps<{
+  items: AttentionItem[]
+  busy?: boolean
+  /** 지금 처리 중인 서버·프로세스 키(App 의 busyKey). 그 줄의 단추는 잠근다. */
+  busyKey?: string | null
+  chips?: RecommendChip[]
+}>()
 const emit = defineEmits<{
   focus: [key: string]
   kill: [key: string]
@@ -78,7 +84,10 @@ const label = (item: AttentionItem): string =>
           :variant="item.kind === 'recommend' ? 'destructive' : 'outline'"
           size="sm"
           :data-action="item.kind === 'recommend' ? 'kill-many' : 'act'"
-          :disabled="item.kind === 'recommend' && busy"
+          :disabled="
+            (item.kind === 'recommend' && busy) ||
+            (item.kind === 'candidate' && item.key != null && item.key === busyKey)
+          "
           @click="act(item)"
         >
           <X v-if="item.kind === 'recommend'" />{{ label(item) }}
@@ -86,8 +95,8 @@ const label = (item: AttentionItem): string =>
         <Button
           variant="ghost"
           size="icon-sm"
-          :aria-label="text.ui.bar.dismiss"
-          :title="text.ui.bar.dismiss"
+          :aria-label="text.ui.bar.dismissItem(item.name)"
+          :title="text.ui.bar.dismissItem(item.name)"
           data-action="dismiss"
           @click="emit('dismiss', item.id, item.state)"
         >
