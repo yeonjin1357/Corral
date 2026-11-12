@@ -326,6 +326,45 @@
   background-size: var(--memory-share, 0%) calc(100% - 8px);
 }
 
+/*
+  표의 상태 알약(G5): 칸의 색(Tone)을 옅은 배경 + 같은 색 글자로. warn 은 응답 대기·주의라 노랑(--status-waiting).
+  묶음 머리 줄은 같은 색을 왼쪽 3px 막대로, 묶음 안 구성원 이름 칸은 └ 모양 가지 선(왼쪽 28px 들여쓰기 안)으로 잇는다.
+*/
+[data-tone='running'] {
+  --pill: var(--status-running);
+}
+[data-tone='warn'] {
+  --pill: var(--status-waiting);
+}
+[data-tone='stopped'] {
+  --pill: var(--status-stopped);
+}
+[data-tone='idle'] {
+  --pill: var(--status-idle);
+}
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  padding-inline: 0.5rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  background: color-mix(in srgb, var(--pill) 13%, transparent);
+  color: var(--pill);
+}
+.group-head[data-tone] > td:first-child {
+  box-shadow: inset 3px 0 var(--pill);
+}
+[data-tree] {
+  position: absolute;
+  left: -20px;
+  top: -1rem;
+  width: 10px;
+  height: calc(50% + 1rem);
+  border-left: 1px solid color-mix(in srgb, var(--border), var(--foreground) 15%);
+  border-bottom: 1px solid color-mix(in srgb, var(--border), var(--foreground) 15%);
+  border-bottom-left-radius: 4px;
+}
+
 @media (max-width: 1200px) {
   .resource-grid {
     gap: 8px;

@@ -8,7 +8,7 @@ import {
   tableFor,
   withMemoryShares
 } from '../rows'
-import { MB, heavyJob, serverRow, snapshot, workspaceRow } from '../testing/fixtures'
+import { MB, agentRow, heavyJob, serverRow, snapshot, workspaceRow } from '../testing/fixtures'
 import type { DashboardSnapshot } from '../../../shared/types'
 import { selectionKey } from '../../../shared/keys'
 
@@ -357,4 +357,95 @@ test('첫 칸은 이름 칸이 아니어도 왼쪽 여백을 갖는다', () => {
   const cells = w.findAll('tbody tr td')
   expect(cells[0].classes()).toContain('pl-4')
   expect(cells[1].classes()).not.toContain('pl-4')
+})
+
+describe('상태 알약·묶음 막대·가지 선(G5)', () => {
+  const WS = { root: 'C:\\work\\ws', name: 'ws', branch: 'main', outer: true }
+  const grouped = snapshot({
+    servers: [
+      serverRow({ pid: 1, ports: [5173], workspace: WS, memoryBytes: 100 * MB }),
+      serverRow({ pid: 2, ports: [8081], workspace: WS, memoryBytes: 200 * MB }),
+      serverRow({ pid: 3, ports: [3000], memoryBytes: 50 * MB })
+    ]
+  })
+
+  test('상태 칸은 그 칸의 색(Tone)을 가진 알약으로 보인다', () => {
+    const now = 60 * 60_000
+    const s = snapshot({
+      takenAt: now,
+      agents: [agentRow({ pid: 2, state: 'waiting', stateSince: now - 3 * 60_000 })]
+    })
+    const table = tableFor('agents', s)
+    const w = mount(ItemTable, {
+      props: { ...props(s, { id: 'port', dir: 'asc' }), table, rows: table.rows }
+    })
+    const pill = w.find('[data-pill]')
+    expect(pill.attributes('data-tone')).toBe('warn')
+    expect(pill.text()).toBe('응답 대기 · 3분')
+    expect(pill.classes()).toContain('status-pill')
+  })
+
+  test('묶음 머리 줄은 머리 상태 색을 data-tone 으로 갖고, 상태 글자가 없으면 idle', () => {
+    const waitingAgent = agentRow({ pid: 1, state: 'waiting', stateSince: 1 })
+    const waiting = snapshot({
+      takenAt: 60 * 60_000,
+      agents: [waitingAgent],
+      workspaces: [
+        workspaceRow({
+          key: 'ws:c:\\work\\a',
+          root: 'C:\\work\\a',
+          name: 'a',
+          agentKeys: [selectionKey.agent(waitingAgent)]
+        })
+      ]
+    })
+    const t = tableFor('workspaces', waiting)
+    const w = mount(ItemTable, {
+      props: {
+        ...props(waiting, { id: 'port', dir: 'asc' }),
+        table: t,
+        rows: t.rows,
+        group: (rows) => groupWorkspaces(rows, waiting, waiting.takenAt)
+      }
+    })
+    const head = w.find('tr[data-group]')
+    expect(head.attributes('data-tone')).toBe('warn')
+    expect(head.find('[data-pill]').attributes('data-tone')).toBe('warn')
+    // 상태 글자가 없는 머리(dot 이 남아 있어도)는 idle 이고 알약이 없다.
+    const p = mount(ItemTable, {
+      props: {
+        ...props(grouped, { id: 'port', dir: 'asc' }),
+        group: (rows) =>
+          groupServers(rows, grouped.servers, []).map((g) =>
+            g.group
+              ? { ...g, group: { ...g.group, status: { text: '', dot: 'running' as const } } }
+              : g
+          )
+      }
+    })
+    expect(p.find('tr[data-group]').attributes('data-tone')).toBe('idle')
+    expect(p.find('tr[data-group] [data-pill]').exists()).toBe(false)
+  })
+
+  test('묶음 안 구성원 줄의 이름 칸에는 가지 선이 있고, 묶음 없는 표에는 없다', () => {
+    const w = mount(ItemTable, {
+      props: {
+        ...props(grouped, { id: 'port', dir: 'asc' }),
+        group: (rows) => groupServers(rows, grouped.servers, [])
+      }
+    })
+    expect(w.findAll('tr[data-depth="1"] [data-tree]')).toHaveLength(2)
+    expect(w.find('tr[data-key="server:3:200"] [data-tree]').exists()).toBe(false)
+    const plain = mount(ItemTable, { props: props(grouped, { id: 'port', dir: 'asc' }) })
+    expect(plain.find('[data-tree]').exists()).toBe(false)
+  })
+
+  test('메모리 증가 배지는 알약 밖에 그대로 있다', () => {
+    const s = snapshot({
+      servers: [serverRow({ memoryGrowth: { fromBytes: 1, toBytes: 3 * 1024 * MB, minutes: 30 } })]
+    })
+    const w = mount(ItemTable, { props: props(s, { id: 'port', dir: 'asc' }) })
+    expect(w.find('[data-pill] [data-slot="badge"]').exists()).toBe(false)
+    expect(w.find('[data-slot="badge"]').text()).toBe('메모리 증가')
+  })
 })

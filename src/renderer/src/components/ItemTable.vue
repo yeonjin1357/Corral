@@ -26,8 +26,8 @@ import {
   Trash2,
   X
 } from '@lucide/vue'
-import type { ActionKind, Column, GroupHead, GroupedRows, Row, Table, Tone } from '../rows'
-import { TONE_COLOR, sortRows } from '../rows'
+import type { ActionKind, Column, GroupHead, GroupedRows, Row, Table } from '../rows'
+import { sortRows } from '../rows'
 import type { SortState } from '../sortState'
 import { formatBytes } from '../../../shared/format'
 import { text } from '../../../shared/text'
@@ -164,7 +164,6 @@ const statusTitle = (group: GroupHead): string =>
 const barStyle = (share: number | undefined): Record<string, string> | undefined =>
   share == null ? undefined : { '--memory-share': `${Math.round(share * 1000) / 10}%` }
 
-const TONE: Record<Tone, string> = TONE_COLOR
 const ICON: Record<ActionKind, unknown> = {
   open: ExternalLink,
   details: Info,
@@ -236,6 +235,7 @@ const G = text.ui.group
                 v-if="block.group"
                 data-slot="table-row"
                 :data-group="block.group.key"
+                :data-tone="block.group.status.text ? (block.group.status.dot ?? 'idle') : 'idle'"
                 :class="[TABLE.row, 'group-head bg-muted/40']"
               >
                 <td
@@ -311,12 +311,12 @@ const G = text.ui.group
                   >
                     <template v-if="block.group.status.text">
                       <span
-                        class="size-1.5 shrink-0 rounded-full"
-                        :style="{ background: TONE[block.group.status.dot ?? 'idle'] }"
-                      ></span>
-                      <span :class="block.group.summary ? 'shrink-0' : 'truncate'">{{
-                        block.group.status.text
-                      }}</span>
+                        class="status-pill"
+                        :class="block.group.summary ? 'shrink-0' : 'min-w-0'"
+                        data-pill
+                        :data-tone="block.group.status.dot ?? 'idle'"
+                        ><span class="truncate">{{ block.group.status.text }}</span></span
+                      >
                     </template>
                     <!-- 작업 공간 탭: 서버 3 · 무거운 작업 1 · 변경 12 · 마지막 활동(한 줄, 넘치면 잘리고 title 에 전부) -->
                     <span
@@ -417,9 +417,10 @@ const G = text.ui.group
                 >
                   <div
                     v-if="col.id === 'name'"
-                    class="flex min-w-0 items-center gap-2"
+                    class="relative flex min-w-0 items-center gap-2"
                     :style="block.group ? { paddingLeft: '28px' } : undefined"
                   >
+                    <span v-if="block.group" data-tree aria-hidden="true"></span>
                     <span
                       v-if="row.cells.name.icon"
                       class="flex shrink-0"
@@ -457,11 +458,9 @@ const G = text.ui.group
                     class="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground"
                     :title="row.cells[col.id].title ?? row.cells[col.id].text"
                   >
-                    <span
-                      class="size-1.5 shrink-0 rounded-full"
-                      :style="{ background: TONE[row.cells[col.id].dot!] }"
-                    ></span>
-                    <span class="truncate">{{ row.cells[col.id].text }}</span>
+                    <span class="status-pill min-w-0" data-pill :data-tone="row.cells[col.id].dot"
+                      ><span class="truncate">{{ row.cells[col.id].text }}</span></span
+                    >
                     <Badge
                       v-if="row.cells[col.id].badge"
                       variant="outline"
