@@ -6,7 +6,7 @@ import MemorySheet from './components/MemorySheet.vue'
 import { DEFAULT_SETTINGS, type Settings } from '../../shared/settings'
 import type { NavigateTarget, PitwallApi } from '../../shared/ipc'
 import type { PitEvent } from '../../shared/events'
-import type { ConfirmRequest, DashboardSnapshot, KillResult } from '../../shared/types'
+import type { ConfirmRequest, DashboardSnapshot, KillResult, ServerRow } from '../../shared/types'
 import { selectionKey } from '../../shared/keys'
 import { TOP_HEIGHTS } from './layoutState'
 import { fakeResizeObserver, setBoxHeights } from './testing/resizeObserver'
@@ -1502,6 +1502,89 @@ describe('앱 안 확인 창', () => {
     expect(document.querySelectorAll('[role="alertdialog"]')).toHaveLength(1)
     expect(dialog()!.textContent).toContain('새 질문')
     expect(dialog()!.textContent).not.toContain('옛 질문')
+    w.unmount()
+  })
+})
+
+describe('할 일 띠', () => {
+  const idle = (pid: number, port: number): ServerRow =>
+    serverRow({
+      pid,
+      ports: [port],
+      judgement: 'candidate',
+      idleSince: 1_000,
+      memoryBytes: 500 * MB
+    })
+  const waiting = agentRow({ pid: 5100, state: 'waiting', stateSince: 2_000 })
+  const attentionSnap = (servers: ServerRow[]): DashboardSnapshot =>
+    snapshot({ servers, agents: [waiting], takenAt: 60 * 60_000 })
+
+  /** 스냅샷을 밀어 줄 수 있는 앱. */
+  async function startWith(first: DashboardSnapshot): Promise<{
+    f: Fake
+    w: VueWrapper
+    push: (s: DashboardSnapshot) => Promise<void>
+  }> {
+    let cb: (s: DashboardSnapshot) => void = () => {}
+    const f = fake({
+      getLatest: async () => first,
+      onSnapshot: (c: (s: DashboardSnapshot) => void) => {
+        cb = c
+        return () => {}
+      }
+    } as Partial<PitwallApi>)
+    const w = await start(f)
+    return {
+      f,
+      w,
+      push: async (s) => {
+        cb(s)
+        await flushPromises()
+      }
+    }
+  }
+
+  test('정리 추천의 모두 끄기는 killMany 를 부른다', async () => {
+    const a = idle(10, 5173)
+    const { f, w } = await startWith(attentionSnap([a]))
+    expect(w.find('[data-attention-item][data-kind="recommend"]').exists()).toBe(true)
+    await w.find('[data-action="kill-many"]').trigger('click')
+    await flushPromises()
+    expect(f.api.killMany).toHaveBeenCalledWith([selectionKey.server(a)])
+    w.unmount()
+  })
+
+  test('응답 대기 줄의 창으로 가기는 focusAgent 를 부른다', async () => {
+    const { f, w } = await startWith(attentionSnap([]))
+    await w.find('[data-attention-item][data-kind="waiting"] [data-action="act"]').trigger('click')
+    await flushPromises()
+    expect(f.api.focusAgent).toHaveBeenCalledWith(selectionKey.agent(waiting))
+    w.unmount()
+  })
+
+  test('닫은 추천 줄은 후보가 바뀌면 다시 보인다', async () => {
+    const a = idle(10, 5173)
+    const { w, push } = await startWith(attentionSnap([a]))
+    const rec = (): boolean => w.find('[data-attention-item][data-kind="recommend"]').exists()
+    await w.find('[data-kind="recommend"] [data-action="dismiss"]').trigger('click')
+    expect(rec()).toBe(false)
+    await push(attentionSnap([a])) // 같은 상태: 계속 닫혀 있다.
+    expect(rec()).toBe(false)
+    await push(attentionSnap([a, idle(11, 5174)])) // 끌 거리가 달라짐.
+    expect(rec()).toBe(true)
+    w.unmount()
+  })
+
+  test('무거운 작업 겹침 줄의 목록에서 보기는 무거운 작업 탭으로 간다', async () => {
+    const { w } = await startWith({ ...attentionSnap([]), heavyOverlap: true })
+    await w.find('[data-kind="overlap"] [data-action="act"]').trigger('click')
+    expect(pressedTab(w)).toBe('heavy')
+    w.unmount()
+  })
+
+  test('줄이 없으면 띠가 없다', async () => {
+    const { w } = await startWith(snapshot({ servers: [], agents: [], takenAt: 1 }))
+    expect(w.find('section[aria-label="할 일"]').exists()).toBe(false)
     w.unmount()
   })
 })

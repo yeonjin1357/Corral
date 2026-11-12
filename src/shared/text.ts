@@ -352,6 +352,12 @@ export const text = {
       collecting: '기록을 모으는 중…'
     },
     /** 맨 위 카드 줄(NeoHtop StatsBar). */
+    attention: {
+      label: '할 일',
+      idleFor: (d: string): string => `${d} 동안 아무도 안 써요`,
+      more: (n: number): string => `외 ${n}개`,
+      less: '접기'
+    },
     cards: {
       memory: cardTitles.memory,
       memoryOf: (used: string, total: string, free: string): string =>

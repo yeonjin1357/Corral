@@ -6,7 +6,7 @@
 -->
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { RefreshCw, Trash2, X } from '@lucide/vue'
+import { RefreshCw, Trash2 } from '@lucide/vue'
 import type {
   ConfirmRequest,
   DashboardSnapshot,
@@ -21,13 +21,7 @@ import {
   hiddenLabel,
   hiddenMatches
 } from '../../shared/settings'
-import {
-  describeKillResult,
-  formatBytes,
-  formatFreed,
-  formatTimeOfDay,
-  pressureText
-} from '../../shared/format'
+import { describeKillResult, formatBytes, formatTimeOfDay } from '../../shared/format'
 import { cleanupRecommendation } from '../../shared/recommend'
 import type { QuickKind } from '../../shared/ipc'
 import type { PitEvent } from '../../shared/events'
@@ -89,7 +83,8 @@ import ItemTable from './components/ItemTable.vue'
 import ItemSheet, { type Selected } from './components/ItemSheet.vue'
 import MemorySheet from './components/MemorySheet.vue'
 import NoticeCard from './components/NoticeCard.vue'
-import ItemIcon from './components/ItemIcon.vue'
+import AttentionStrip, { type RecommendChip } from './components/AttentionStrip.vue'
+import { attentionItems, visibleAttention } from './attention'
 import IntegrationButton from './components/IntegrationButton.vue'
 import SettingsView from './components/SettingsView.vue'
 import ConfirmDialog from './components/ConfirmDialog.vue'
@@ -875,35 +870,25 @@ const emptyText = computed(() => {
   return ''
 })
 
-// ── 알림 카드 ──
+// ── 할 일 띠 ──
 const recommendation = computed(() =>
   snapshot.value
     ? cleanupRecommendation(snapshot.value)
     : { items: [], totalBytes: 0, totalCommitBytes: null }
 )
-/**
- * 정리 추천 카드를 닫으면(NeoHtop 알림 카드의 X) 그때의 상태를 기억해 둔다.
- * RAM 단계가 바뀌거나 끌 거리가 달라지면 다시 보인다(RAM 이 늘 높은 PC 에서 같은 카드가 자리를 차지하지 않게).
- */
-const recommendState = computed(
-  () =>
-    `${snapshot.value?.memory.level}|${recommendation.value.items
-      .map((i) => i.key)
-      .sort()
-      .join(',')}`
+/** 닫은 줄(id → 닫을 때의 state). state 가 바뀌면 다시 보인다. 앱을 다시 켜면 비어 있다. */
+const dismissed = ref(new Map<string, string>())
+const attention = computed(() =>
+  snapshot.value
+    ? visibleAttention(attentionItems(snapshot.value, snapshot.value.takenAt), dismissed.value)
+    : []
 )
-const recommendDismissed = ref<string | null>(null)
-const showRecommend = computed(
-  () =>
-    !!snapshot.value &&
-    snapshot.value.memory.totalBytes > 0 &&
-    snapshot.value.memory.level !== 'normal' &&
-    recommendation.value.items.length > 0 &&
-    recommendDismissed.value !== recommendState.value
-)
+function dismissAttention(id: string, state: string): void {
+  dismissed.value = new Map(dismissed.value).set(id, state)
+}
 const RECOMMEND_SHOWN = 4
 /** 추천 칩: 표와 같은 아이콘을 붙인다. */
-const recommendChips = computed(() => {
+const recommendChips = computed<RecommendChip[]>(() => {
   const s = snapshot.value
   return recommendation.value.items.slice(0, RECOMMEND_SHOWN).map((item) => {
     const server =
@@ -1051,74 +1036,17 @@ const takenAt = computed(() => (snapshot.value ? formatTimeOfDay(snapshot.value.
           </template>
         </NoticeCard>
 
-        <NoticeCard
-          v-if="showRecommend"
-          class="recommend-box"
-          dismissible
-          :title="text.ui.home.recommendTitle"
-          @dismiss="recommendDismissed = recommendState"
-        >
-          {{
-            text.ui.home.recommendSummary(
-              recommendation.items.length,
-              formatFreed(recommendation.totalBytes, recommendation.totalCommitBytes)
-            )
-          }}
-          <template #below>
-            <div class="mt-2 flex flex-wrap gap-1.5">
-              <Button
-                v-for="item in recommendChips"
-                :key="item.key"
-                variant="secondary"
-                size="xs"
-                class="recommend-item max-w-80 font-normal"
-                :title="item.where"
-                @click="select(item.key)"
-              >
-                <ItemIcon v-if="item.icon" :icon="item.icon" :size="12" />
-                <span>{{ item.title }}</span>
-                <span class="truncate text-muted-foreground">{{ item.where }}</span>
-                <span class="tabular-nums">{{
-                  item.commitBytes == null
-                    ? formatBytes(item.memoryBytes)
-                    : text.ui.home.chipSize(
-                        formatBytes(item.memoryBytes),
-                        formatBytes(item.commitBytes)
-                      )
-                }}</span>
-              </Button>
-              <span
-                v-if="recommendation.items.length > RECOMMEND_SHOWN"
-                class="self-center text-xs text-muted-foreground"
-                >{{ text.ui.recommend.more(recommendation.items.length - RECOMMEND_SHOWN) }}</span
-              >
-            </div>
-          </template>
-          <template #actions>
-            <Button
-              variant="destructive"
-              size="sm"
-              data-action="kill-many"
-              :disabled="recommendBusy"
-              @click="killMany(recommendation.items.map((i) => i.key))"
-            >
-              <X />{{ text.ui.home.killAll }}
-            </Button>
-          </template>
-        </NoticeCard>
-
-        <NoticeCard
-          v-if="snapshot.heavyOverlap"
-          class="heavy-box"
-          :title="text.ui.recommend.overlapTitle"
-        >
-          {{ text.ui.home.heavyOverlap(pressureText(snapshot.memory), snapshot.heavyJobs.length) }}
-          <template #actions>
-            <Button variant="outline" size="sm" @click="((tab = 'heavy'), (query = ''))">
-              {{ text.ui.cards.showList }}
-            </Button>
-          </template>
-        </NoticeCard>
+        <AttentionStrip
+          :items="attention"
+          :busy="recommendBusy"
+          :chips="recommendChips"
+          @focus="focusAgent"
+          @kill="(key) => act('kill', key)"
+          @kill-many="killMany"
+          @show-heavy="((tab = 'heavy'), (query = ''))"
+          @select="select"
+          @dismiss="dismissAttention"
+        />
 
         <ToolBar
           v-model:tab="tab"
