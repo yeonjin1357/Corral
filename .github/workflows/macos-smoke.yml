@@ -4,18 +4,25 @@ name: macOS smoke
 # - collect: 진짜 ps·lsof·vm_stat 으로 수집(src/main/collect/darwin.real.test.ts)과 전체 단위 테스트
 # - app: dmg 를 팀원이 받는 것처럼 설치하고, 앱을 띄워 수집·끄기·연동·디스크 정리를 해 본다(scripts/macos-smoke)
 # 결과 표는 실행 요약에, 스크린샷·스냅샷은 아티팩트에 남는다.
+# 직접 돌린다(Actions > macOS smoke > Run workflow, 또는 `gh workflow run macos-smoke.yml`). 릴리스 전에 한 번 돌려 본다.
 on:
   workflow_dispatch:
-  push:
-    branches: ['test/macos-smoke']
+    inputs:
+      dmg_from:
+        description: 'build: 이 커밋으로 새로 만든 dmg, release: 릴리스에 올라간 dmg(팀원이 받을 바로 그 파일)'
+        type: choice
+        options: [build, release]
+        default: build
+      release_tag:
+        description: 'release 일 때 받을 태그(예: v0.2.0). 비우면 최신 릴리스'
+        default: ''
 
 permissions:
   contents: read
 
 env:
-  # release: 아래 태그의 릴리스 dmg(팀원이 받을 바로 그 파일), build: 이 커밋으로 새로 만든 dmg
-  DMG_FROM: release
-  RELEASE_TAG: v0.2.0
+  DMG_FROM: ${{ inputs.dmg_from }}
+  RELEASE_TAG: ${{ inputs.release_tag }}
   TZ: Asia/Seoul
 
 jobs:
@@ -78,7 +85,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           ARCH=$(uname -m); [ "$ARCH" = x86_64 ] && ARCH=x64
-          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+          # 태그를 비우면 최신 릴리스를 받는다.
+          gh release download ${RELEASE_TAG:+"$RELEASE_TAG"} --repo "$GITHUB_REPOSITORY" \
             --pattern "corral-*-$ARCH.dmg" --dir "$SMOKE_DMG_DIR"
           ls -la "$SMOKE_DMG_DIR"
       - name: 이 커밋으로 dmg 만들기
