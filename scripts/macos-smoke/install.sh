@@ -148,7 +148,8 @@ EOF
 with_timeout 40 osascript "$OUT/gatekeeper-dialog.applescript" > "$OUT/gatekeeper-dialog.txt" 2>&1 || true
 fact gatekeeper_dialog "$(tr '\n' ' ' < "$OUT/gatekeeper-dialog.txt" | cut -c1-600)"
 
-# 다음 단계가 처음 실행부터 보도록 치운다.
+# 다음 단계가 처음 실행부터 보도록 치운다(경고 창은 "Done" 을 눌러 닫는다).
+with_timeout 20 osascript -e 'tell application "System Events" to tell process "CoreServicesUIAgent" to click button "Done" of window 1' > /dev/null 2>&1 || true
 kill -9 "$OPEN_PID" 2> /dev/null || true
 pkill -9 -x Corral 2> /dev/null || true
 killall CoreServicesUIAgent 2> /dev/null || true

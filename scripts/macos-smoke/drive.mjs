@@ -4,8 +4,8 @@
  *
  * 확인마다 등급이 있다 — required: 실패하면 작업이 실패한다, info: 러너 사정으로 안 될 수 있어 기록만 한다.
  */
-import { spawnSync } from 'node:child_process'
-import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { spawn, spawnSync } from 'node:child_process'
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
@@ -54,6 +54,36 @@ function alive(pid) {
 }
 
 const appRunning = () => sh('pgrep', ['-x', 'Corral']).status === 0
+
+const osa = (script, timeout = 30_000) => sh('osascript', ['-e', script], { timeout })
+
+/** 지금 맨 앞에 있는 앱 이름. */
+const frontmost = () =>
+  osa(
+    'tell application "System Events" to get name of first application process whose frontmost is true'
+  ).stdout.trim()
+
+/** OS 가 띄운 창(권한 요청·경고·알림)의 글자. 읽지 못하면 빈 문자열. */
+function systemDialogs() {
+  const r = osa(`set AppleScript's text item delimiters to " / "
+set found to ""
+tell application "System Events"
+  repeat with procName in {"UserNotificationCenter", "CoreServicesUIAgent", "NotificationCenter"}
+    repeat with p in (every process whose name is procName)
+      repeat with w in (every window of p)
+        try
+          set found to found & procName & ": " & ((value of every static text of w) as text) & " [" & ((name of every button of w) as text) & "]" & linefeed
+        end try
+        try
+          set found to found & procName & " (안쪽): " & ((value of every static text of entire contents of w) as text) & linefeed
+        end try
+      end repeat
+    end repeat
+  end repeat
+end tell
+return found`)
+  return (r.stdout ?? '').replace(/\s+/g, ' ').trim()
+}
 
 /** macOS 기본 파일 시스템은 대소문자·정규화를 가리지 않는다. */
 const pathKey = (path) =>
@@ -438,6 +468,44 @@ await check('작업 공간으로 묶는다', 'required', async () => {
   return all.join(' · ')
 })
 
+await check('Finder 로 만든 것 같은 한글 폴더(자소 분리형 이름)의 서버', 'info', async () => {
+  assert(fixtures.nfd?.pid, '준비하지 못했다')
+  const row = snap.servers.find((r) => r.ports.includes(fixtures.nfd.port))
+  assert(row, `${fixtures.nfd.port} 포트 서버가 없다`)
+  const root = row.worktree?.root
+  assert(root, `워크트리를 모른다(unresolvable=${row.unresolvable})`)
+  assert(samePath(root, fixtures.nfd.doneRoot), `워크트리 ${root} ≠ ${fixtures.nfd.doneRoot}`)
+  assert(row.worktree.branch === 'feature/blog-done', `브랜치 ${row.worktree.branch}`)
+  const form = root === root.normalize('NFC') ? '조합형(NFC)' : '자소 분리형(NFD)'
+  return `${root} [${row.worktree.branch}] — Corral 이 든 경로는 ${form}, 작업 공간 ${row.workspace?.name}`
+})
+
+await check('터미널 안에서 띄운 에이전트: 띄운 앱(Terminal)을 안다', 'info', async () => {
+  assert(fixtures.terminalAgent?.pid, '터미널에서 띄우지 못했다')
+  const row = snap.agents.find((a) => a.pid === fixtures.terminalAgent.pid)
+  assert(row, `에이전트가 없다: ${JSON.stringify(snap.agents.map((a) => a.pid))}`)
+  assert(/Terminal\.app$/.test(row.host?.app ?? ''), `띄운 앱: ${JSON.stringify(row.host)}`)
+  return row.host.app
+})
+
+await check('창으로 가기: 에이전트가 떠 있는 Terminal 이 앞으로 온다', 'info', async () => {
+  assert(fixtures.terminalAgent?.pid, '터미널에서 띄우지 못했다')
+  const row = snap.agents.find((a) => a.pid === fixtures.terminalAgent.pid)
+  assert(row, '에이전트가 없다')
+  sh('open', [APP])
+  await sleep(1500)
+  const before = frontmost()
+  const key = `agent:${row.pid}:${row.startedAt ?? ''}`
+  const ok = await page.eval(`window.pitwall.focusAgent(${JSON.stringify(key)})`)
+  assert(ok === true, `focusAgent 가 ${ok}`)
+  const moved = await waitFor(() => frontmost() === 'Terminal', 10_000)
+  assert(moved, `맨 앞 앱이 ${frontmost()}(누르기 전 ${before})`)
+  screenShot('screen-focus-terminal')
+  sh('open', [APP])
+  await sleep(1000)
+  return `${before} → Terminal`
+})
+
 for (const [tool, started] of [
   ['claude', fixtures.realClaude],
   ['codex', fixtures.realCodex]
@@ -458,7 +526,10 @@ for (const [tool, started] of [
         live.length > 0,
         '실행 중인 CLI 프로세스가 없어 확인하지 못했다(로그인 없이 바로 끝났을 수 있다)'
       )
-      const rows = snap.agents.filter((a) => a.tool === tool && a.pid !== fixtures.agent.pid)
+      const rows = snap.agents.filter(
+        (a) =>
+          a.tool === tool && a.pid !== fixtures.agent.pid && a.pid !== fixtures.terminalAgent?.pid
+      )
       assert(
         rows.length > 0,
         `Corral 이 알아보지 못했다. ps 가 본 것: ${live.map((l) => l.trim()).join(' ; ')}`
@@ -558,7 +629,6 @@ await check('터미널에서 열기', 'info', async () => {
   assert(running, 'Terminal 이 뜨지 않았다')
   await sleep(2000)
   screenShot('screen-terminal')
-  sh('pkill', ['-x', 'Terminal'])
 })
 
 // ── Claude 훅 연동: 켜고, 설정 파일에 들어간 명령을 Claude 가 하듯 실행해 이벤트가 닿는지 본다 ──
@@ -598,6 +668,7 @@ function sendHook(event) {
   assert(r.status === 0, `훅 명령이 ${r.status} 로 끝났다: ${r.stderr}`)
 }
 
+let notification = null
 const agentRow = async () => {
   await page.eval('window.pitwall.refreshNow()')
   return (await latest()).agents.find((a) => a.pid === fixtures.agent.pid)
@@ -625,6 +696,9 @@ await check(
       `요청 문구(한글)가 다르다: ${JSON.stringify(working.activity)}`
     )
 
+    // Corral 창이 앞에 있으면 알림을 보내지 않는다. 다른 앱을 앞에 두고 응답 대기로 만든다.
+    osa('tell application "Finder" to activate')
+    await waitFor(() => frontmost() !== 'Corral', 8000)
     sendHook({
       hook_event_name: 'PermissionRequest',
       tool_name: 'Bash',
@@ -643,7 +717,28 @@ await check(
     await sleep(1500)
     await shot('agent-waiting')
     // 응답 대기 알림(OS 알림)이 화면에 보이는지.
+    await sleep(3500)
     screenShot('screen-notification')
+    notification = { front: frontmost(), dialogs: systemDialogs() }
+    const noteLog = sh(
+      'log',
+      [
+        'show',
+        '--last',
+        '1m',
+        '--style',
+        'compact',
+        '--predicate',
+        '(process == "usernoted" OR process == "NotificationCenter" OR process BEGINSWITH "Corral") AND (eventMessage CONTAINS[c] "notif" OR eventMessage CONTAINS[c] "pitwall")'
+      ],
+      { timeout: 90_000, maxBuffer: 64 * 1024 * 1024 }
+    )
+    writeFileSync(
+      join(OUT, 'notification-log.txt'),
+      (noteLog.stdout ?? '').split('\n').slice(-200).join('\n')
+    )
+    sh('open', [APP])
+    await sleep(1000)
 
     sendHook({ hook_event_name: 'Stop' })
     const idle = await waitFor(
@@ -658,6 +753,16 @@ await check(
     return `요청 "${working.activity.prompt}", 대기 도구 ${waiting.activity?.waiting?.tool ?? '?'}`
   }
 )
+
+await check('응답 대기 알림(OS 알림)이 뜬다', 'info', async () => {
+  assert(notification, '응답 대기까지 가지 못했다')
+  assert(notification.front !== 'Corral', 'Corral 이 앞에 있어 알림을 보내지 않는 상황이었다')
+  assert(
+    /Corral|Claude|응답|권한|Notifications/i.test(notification.dialogs),
+    `화면에서 알림 글자를 읽지 못했다(스크린샷 screen-notification 을 볼 것). 읽은 것: ${notification.dialogs || '없음'}`
+  )
+  return notification.dialogs.slice(0, 300)
+})
 
 await check('Claude 연동 끄기(넣은 훅만 뺀다)', 'required', async () => {
   const { value } = await callWithConfirm(
@@ -706,6 +811,24 @@ await check('디스크 정리: 확인 뒤 의존성 폴더만 지운다', 'requi
   assert(existsSync(join(fixtures.doneRoot, 'done.txt')), '소스 파일까지 지워졌다')
   return value.message ?? JSON.stringify(value.freed)
 })
+
+await check(
+  '한글 폴더(자소 분리형)의 워크트리: 서버가 도는 동안은 사용 중으로 본다',
+  'info',
+  async () => {
+    assert(fixtures.nfd?.pid, '준비하지 못했다')
+    assert(alive(fixtures.nfd.pid), '서버가 이미 끝났다')
+    const rows = (await latest()).disk?.rows ?? []
+    const row = rows.find((r) => samePath(r.worktreeRoot, fixtures.nfd.doneRoot))
+    assert(row, `목록에 없다(목록: ${rows.map((r) => r.worktreeRoot).join(', ') || '비어 있음'})`)
+    const form = row.worktreeRoot === row.worktreeRoot.normalize('NFC') ? 'NFC' : 'NFD'
+    assert(
+      row.inUse === true,
+      `서버(:${fixtures.nfd.port})가 그 폴더에서 도는데 사용 중이 아니라고 본다 — 지울 수 있는 줄로 나온다(git 이 준 경로는 ${form})`
+    )
+    return `사용 중으로 봄(git 이 준 경로는 ${form})`
+  }
+)
 
 // ── 끄기 ──
 await check('서버 끄기: 확인 뒤 종료(SIGTERM)', 'required', async () => {
@@ -839,17 +962,68 @@ await check('메뉴 막대 아이콘을 누르면 요약 창이 뜬다', 'info',
 
 // ── 창 닫기 = 숨기기, 다시 열기 ──
 await check('창을 닫으면 숨기만 하고 계속 돈다, 다시 열면 보인다', 'info', async () => {
-  const r = sh('osascript', [
-    '-e',
-    'tell application "System Events" to tell process "Corral" to click (first button of (first window whose subrole is "AXStandardWindow") whose subrole is "AXCloseButton")'
-  ])
-  assert(r.status === 0, `닫기 버튼을 누르지 못했다: ${r.stderr.trim()}`)
+  sh('open', [APP])
+  await sleep(1500)
+  let how = '닫기 버튼'
+  let r = osa(`tell application "System Events" to tell process "Corral"
+  set w to first window whose subrole is "AXStandardWindow"
+  click (first button of w whose subrole is "AXCloseButton")
+end tell`)
+  if (r.status !== 0) {
+    how = `Cmd+W(닫기 버튼은 ${r.stderr.trim().slice(0, 120)})`
+    r = osa('tell application "System Events" to keystroke "w" using command down')
+  }
+  assert(r.status === 0, `창을 닫지 못했다: ${r.stderr.trim()}`)
   const hidden = await waitFor(() => page.eval(`document.visibilityState === 'hidden'`), 10_000)
-  assert(hidden, '창이 숨지 않았다')
+  assert(hidden, `창이 숨지 않았다(${how})`)
   assert(appRunning(), '앱이 끝났다')
+  await sleep(1000)
+  screenShot('screen-window-closed')
+  const dock = osa(
+    'tell application "System Events" to get name of every application process whose background only is false'
+  ).stdout
   sh('open', [APP])
   const shown = await waitFor(() => page.eval(`document.visibilityState === 'visible'`), 15_000)
   assert(shown, '다시 열어도 창이 보이지 않는다')
+  return `${how}; 숨긴 동안 Dock 에 ${/Corral/.test(dock) ? '남아 있음' : '없음'}`
+})
+
+// ── 문서 폴더(macOS 가 앱마다 접근 허락을 묻는 곳)의 저장소 ──
+await check('문서 폴더 안의 저장소: 권한을 묻는지, 그동안 수집이 멈추는지', 'info', async () => {
+  const dir = join(homedir(), 'Documents', 'corral-smoke-docs')
+  mkdirSync(dir, { recursive: true })
+  const setup = sh('bash', [
+    '-c',
+    'cd "$1" && git -c init.defaultBranch=main init -q . && cp "$2/server.js" . && git add -A && git -c user.name=smoke -c user.email=smoke@example.invalid commit -qm init',
+    '_',
+    dir,
+    fixtures.mainRoot
+  ])
+  assert(setup.status === 0, `저장소를 만들지 못했다: ${setup.stderr}`)
+  const server = spawn('node', ['server.js', '5175'], { cwd: dir, detached: true, stdio: 'ignore' })
+  server.unref()
+  await sleep(1500)
+  const startedAt = Date.now()
+  page.eval('window.pitwall.refreshNow()', 60_000).catch(() => {})
+  const row = await waitFor(
+    async () => (await latest()).servers.find((r) => r.ports.includes(5175)),
+    30_000,
+    1000
+  )
+  const tookMs = Date.now() - startedAt
+  await sleep(3000)
+  screenShot('screen-documents-permission')
+  const dialogs = systemDialogs()
+  const now = await latest()
+  const facts = `서버 줄 ${row ? `${tookMs}ms 만에 나옴` : '안 나옴'}, 워크트리 ${row?.worktree?.root ?? '모름'}, 브랜치 ${row?.worktree?.branch ?? '모름'}, 수집 지연 ${now.stale}, 오류 ${now.error ?? '없음'}, OS 창: ${dialogs || '없음'}`
+  try {
+    process.kill(server.pid, 'SIGKILL')
+  } catch {
+    // 이미 끝났으면 됐다.
+  }
+  assert(row, facts)
+  assert(row.worktree?.branch === 'main', facts)
+  return facts
 })
 
 // ── 종료 ──

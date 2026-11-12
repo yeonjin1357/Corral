@@ -79,7 +79,55 @@ mkdir -p "$ROOT/bin"
 cp "$(command -v node)" "$ROOT/bin/claude"
 start agent "$ROOT/shop-web-login" "$ROOT/bin/claude" -e 'setInterval(()=>{},1000)'
 
-for port in 5173 5174; do
+echo "== 터미널 창 안에서 띄운 가짜 에이전트(창으로 가기 확인용)"
+cat > "$ROOT/agent-in-terminal.command" <<EOF
+#!/bin/bash
+cd "$ROOT/shop-web"
+exec "$ROOT/bin/claude" -e 'setInterval(()=>{},1000)' corral-terminal-agent
+EOF
+chmod +x "$ROOT/agent-in-terminal.command"
+open -a Terminal "$ROOT/agent-in-terminal.command" || true
+TERMINAL_AGENT_PID=
+for _ in $(seq 1 30); do
+  TERMINAL_AGENT_PID=$(pgrep -f corral-terminal-agent | head -1 || true)
+  [ -n "$TERMINAL_AGENT_PID" ] && break
+  sleep 0.5
+done
+echo "터미널 에이전트 pid: ${TERMINAL_AGENT_PID:-없음}"
+
+echo "== 한글 폴더 이름이 자소 분리형(NFD)인 저장소 — Finder 로 만든 한글 폴더가 이렇게 저장된다"
+NFD_DIR="$ROOT/$(printf '프로젝트' | iconv -f UTF-8 -t UTF-8-MAC)"
+mkdir -p "$NFD_DIR"
+(
+  cd "$NFD_DIR"
+  git -c init.defaultBranch=main init -q --bare remote.git
+  git clone -q remote.git blog 2> /dev/null
+  cd blog
+  git symbolic-ref HEAD refs/heads/main
+  printf 'node_modules/\n' > .gitignore
+  cp "$ROOT/shop-web/server.js" .
+  git add -A
+  git commit -qm 'init'
+  git push -q -u origin main
+  git remote set-head origin main
+  # 끝난 워크트리인데(원격 브랜치가 지워짐) 그 안에서 서버가 아직 돈다 → 디스크 정리는 "사용 중"으로 봐야 한다.
+  git worktree add -q ../blog-done -b feature/blog-done
+  cd ../blog-done
+  echo done > done.txt
+  git add -A
+  git commit -qm 'done'
+  git push -q -u origin feature/blog-done
+  git push -q origin --delete feature/blog-done
+  git fetch -q --prune
+  mkdir -p node_modules/pkg
+  dd if=/dev/zero of=node_modules/pkg/blob bs=1048576 count=3 2> /dev/null
+  echo "git 이 보는 워크트리:"
+  git worktree list
+  git config --get core.precomposeunicode || true
+)
+start server-nfd "$NFD_DIR/blog-done" node server.js 5176
+
+for port in 5173 5174 5176; do
   for _ in $(seq 1 30); do
     curl -s -o /dev/null "http://127.0.0.1:$port" && break
     sleep 0.5
@@ -122,7 +170,8 @@ echo "== 에이전트 프로세스(ps 가 보는 이름·명령줄)"
 /bin/ps -axww -o pid=,ppid=,comm= | grep -iE 'claude|codex' | grep -v grep | tee "$OUT/agents-ps-comm.txt" || true
 /bin/ps -axww -o pid=,args= | grep -iE 'claude|codex' | grep -v grep | tee "$OUT/agents-ps-args.txt" || true
 
-REAL_CLAUDE=$REAL_CLAUDE REAL_CODEX=$REAL_CODEX node - "$OUT" "$ROOT" <<'EOF'
+REAL_CLAUDE=$REAL_CLAUDE REAL_CODEX=$REAL_CODEX TERMINAL_AGENT_PID=$TERMINAL_AGENT_PID NFD_DIR=$NFD_DIR \
+  node - "$OUT" "$ROOT" <<'EOF'
 const fs = require('fs')
 const [out, root] = process.argv.slice(2)
 const pid = (name) => {
@@ -141,6 +190,13 @@ const fixtures = {
   serverA: { pid: pid('server-a'), port: 5173 },
   serverB: { pid: pid('server-b'), port: 5174, childPid: pid('server-b-child') },
   agent: { pid: pid('agent') },
+  terminalAgent: { pid: Number(process.env.TERMINAL_AGENT_PID) || null },
+  // realpath 는 디스크에 저장된 이름(자소 분리형) 그대로 돌려준다.
+  nfd: {
+    pid: pid('server-nfd'),
+    port: 5176,
+    doneRoot: fs.realpathSync(`${process.env.NFD_DIR}/blog-done`)
+  },
   realClaude: process.env.REAL_CLAUDE === 'yes',
   realCodex: process.env.REAL_CODEX === 'yes'
 }
