@@ -9,6 +9,7 @@ import { splitAtGaps, type Point } from '../history'
 import { useElementWidth } from '../useElementWidth'
 import { formatTimeOfDay } from '../../../shared/format'
 import { text } from '../../../shared/text'
+import ChartTooltip from './ChartTooltip.vue'
 
 const props = withDefaults(
   defineProps<{
@@ -179,28 +180,15 @@ const describe = computed(() =>
     <div class="min-h-3 truncate text-[10px] leading-3 text-muted-foreground tabular-nums">
       {{ caption }}
     </div>
-    <!-- NeoHtop (MIT) ui/chart/chart-tooltip.svelte 모양(색 점 + 이름 + 값). -->
-    <Teleport to="body">
-      <div
-        v-if="tip"
-        data-slot="chart-tooltip"
-        role="tooltip"
-        class="pointer-events-none fixed z-50 grid min-w-32 items-start gap-1.5 rounded-lg border border-border/50 bg-background px-2.5 py-1.5 text-xs shadow-xl"
-        :style="{
-          left: `${tip.left}px`,
-          top: `${tip.top}px`,
-          transform: tip.below ? 'translateX(-50%)' : 'translate(-50%, -100%)'
-        }"
-      >
-        <div class="font-medium tabular-nums">{{ tip.time }}</div>
-        <div class="flex w-full items-center gap-2">
-          <div class="h-2.5 w-2.5 shrink-0 rounded-[2px]" :style="{ background: color }"></div>
-          <div class="flex flex-1 shrink-0 items-center justify-between gap-4 leading-none">
-            <span class="text-muted-foreground">{{ label }}</span>
-            <span class="font-mono font-medium text-foreground tabular-nums">{{ tip.value }}</span>
-          </div>
-        </div>
-      </div>
-    </Teleport>
+    <ChartTooltip
+      v-if="tip"
+      :left="tip.left"
+      :top="tip.top"
+      :below="tip.below"
+      :time="tip.time"
+      :label="label"
+      :value="tip.value"
+      :color="color"
+    />
   </div>
 </template>

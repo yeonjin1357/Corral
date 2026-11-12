@@ -1000,6 +1000,8 @@ const takenAt = computed(() => (snapshot.value ? formatTimeOfDay(snapshot.value.
             :ram-history="history.ram"
             :window-ms="windowMs"
             :gap-ms="gapMs"
+            :warn-percent="settings.ramWarnPercent"
+            :danger-percent="settings.ramDangerPercent"
             :compact="compactCards"
             :editing="editingCards"
             :events="events"

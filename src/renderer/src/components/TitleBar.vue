@@ -64,7 +64,7 @@ const shortcut = navigator.userAgent.includes('Mac') ? '⌘,' : 'Ctrl+,'
     <div class="title-bar-actions flex items-center gap-1">
       <span class="mr-2 flex items-center gap-1.5 text-xs text-muted-foreground" role="status">
         <span
-          class="size-1.5 rounded-full"
+          class="size-1.5 rounded-[1px]"
           :style="{ background: stale ? 'var(--status-waiting)' : 'var(--status-running)' }"
         ></span
         >{{ stale ? text.ui.stale : text.ui.bar.live(liveSec) }}

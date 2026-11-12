@@ -28,6 +28,7 @@ import type { DashboardSnapshot, ProcessGroup } from '../../../shared/types'
 import type { PitEvent } from '../../../shared/events'
 import { formatBytes, formatDuration, codexLimitView, pressureText } from '../../../shared/format'
 import { text } from '../../../shared/text'
+import { DEFAULT_THRESHOLDS } from '../../../shared/defaults'
 import type { Point } from '../history'
 import {
   DEFAULT_CARDS,
@@ -48,7 +49,7 @@ import Button from '../ui/Button.vue'
 import type { BadgeVariant } from '../ui/variants'
 import PanelHeader from './PanelHeader.vue'
 import StatItem from './StatItem.vue'
-import ResourceTrend from './ResourceTrend.vue'
+import PixelTrend from './PixelTrend.vue'
 import ItemIcon from './ItemIcon.vue'
 import CompactCard from './CompactCard.vue'
 import QuietCard from './QuietCard.vue'
@@ -65,6 +66,9 @@ const props = defineProps<{
   ramHistory: Point[]
   /** 추이 그래프 가로축(ms). */
   windowMs: number
+  /** 메모리 추이 막대 색 기준(RAM %): 이상이면 노랑·빨강. 없으면 기본 기준. */
+  warnPercent?: number
+  dangerPercent?: number
   /** 기록이 이보다 끊기면 그래프를 잇지 않는다(앱이 꺼져 있었음). */
   gapMs?: number | null
   /** 간단히 단계: 카드마다 제목·큰 값·설명 한 줄(추이 그래프·아래 칸 없음). */
@@ -649,15 +653,14 @@ const diskSub = computed(() => {
                   </li>
                 </ul>
               </div>
-              <ResourceTrend
+              <PixelTrend
                 :points="ramHistory"
                 :window-ms="windowMs"
-                :gap-ms="gapMs"
-                :max="100"
-                color="var(--chart-3)"
                 :label="text.ui.cards.memory"
                 :format="(v) => `${Math.floor(v)}%`"
                 range="0–100%"
+                :warn="warnPercent ?? DEFAULT_THRESHOLDS.ramWarnPercent"
+                :danger="dangerPercent ?? DEFAULT_THRESHOLDS.ramDangerPercent"
               />
             </CardContent>
           </Card>

@@ -794,3 +794,24 @@ describe('카드 강조·조용한 카드(G2)', () => {
     expect(bar(s).findAll('[data-attention]')).toHaveLength(0)
   })
 })
+
+test('메모리 카드(자세히)의 추이는 24칸 픽셀 막대이고, 경고 기준을 넘은 칸은 노랑', () => {
+  const w = mount(StatsBar, {
+    props: {
+      snapshot: snapshot(),
+      ramHistory: [
+        { t: 10_000, value: 40 },
+        { t: 600_000, value: 85 }
+      ],
+      windowMs: 600_000,
+      warnPercent: 80,
+      dangerPercent: 90
+    }
+  })
+  const trend = w.find('[data-pixel-trend]')
+  expect(trend.exists()).toBe(true)
+  expect(w.findComponent(ResourceTrend).exists()).toBe(false)
+  expect(trend.findAll('[data-bar]')).toHaveLength(24)
+  const filled = trend.findAll('[data-bar][data-level]')
+  expect(filled.map((b) => b.attributes('data-level'))).toEqual(['ok', 'warn'])
+})
