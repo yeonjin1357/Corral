@@ -675,15 +675,16 @@ const diskSub = computed(() => {
             :unit="text.ui.cards.count"
             @action="emit('tab', 'ports')"
           >
-            <span class="min-w-0 truncate">{{
-              text.ui.cards.portsSub(portCount, workspaceCount)
-            }}</span>
+            <!-- 정리 후보가 있으면 설명 줄을 "정리 후보 n"(빨강)으로 바꾼다. -->
             <span
               v-if="portCounts.candidate > 0"
-              class="shrink-0 font-bold tabular-nums"
+              class="min-w-0 truncate font-bold tabular-nums"
               :style="{ color: 'var(--status-stopped)' }"
               >{{ text.ui.cards.candidateLine(portCounts.candidate) }}</span
             >
+            <span v-else class="min-w-0 truncate">{{
+              text.ui.cards.portsSub(portCount, workspaceCount)
+            }}</span>
           </CompactCard>
           <Card v-else size="sm" class="h-60 gap-3">
             <PanelHeader

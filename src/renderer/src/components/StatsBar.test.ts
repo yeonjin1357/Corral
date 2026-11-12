@@ -759,6 +759,17 @@ describe('카드 강조·조용한 카드(G2)', () => {
     expect(cell(w, 'agents').attributes('data-attention')).toBe('warn')
     expect(subs(w, 'agents')[0]).toBe('응답 대기 2 · Codex 3분')
     expect(cell(bar(s), 'agents').attributes('data-attention')).toBe('warn')
+    // 응답 대기 카드도 같이 강조된다.
+    const waitingBar = mount(StatsBar, {
+      props: {
+        snapshot: s,
+        ramHistory: [],
+        windowMs: 600_000,
+        layout: { order: ['memory', 'waiting'], hidden: [] }
+      }
+    })
+    expect(cell(waitingBar, 'waiting').attributes('data-attention')).toBe('warn')
+    expect(cell(waitingBar, 'waiting').attributes('data-quiet')).toBeUndefined()
   })
 
   test('응답 대기 시작 시각을 모르면 간단히 줄은 경과 없이 "응답 대기 1 · Codex"', () => {
@@ -771,7 +782,8 @@ describe('카드 강조·조용한 카드(G2)', () => {
   test('정리 후보가 있으면 개발 서버 카드에 data-attention="stopped", 간단히 줄은 "정리 후보 1"', () => {
     const s = snapshot({ servers: [serverRow({ judgement: 'candidate' }), serverRow({ pid: 2 })] })
     expect(cell(bar(s), 'servers').attributes('data-attention')).toBe('stopped')
-    expect(subs(compactBar(s), 'servers')).toContain('정리 후보 1')
+    // 설명 줄을 바꾼다(포트 수 줄은 사라진다).
+    expect(subs(compactBar(s), 'servers')).toEqual(['정리 후보 1'])
   })
 
   test('할 일이 없으면 data-attention 이 없다', () => {
