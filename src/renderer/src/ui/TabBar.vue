@@ -4,7 +4,7 @@
   목록/묶음 같은 보기 전환은 이 탭이 아니라 ToggleGroup 을 쓴다.
 -->
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import { ChevronDown } from '@lucide/vue'
 import { cn } from './cn'
 import Popover from './Popover.vue'
@@ -42,6 +42,48 @@ function onKeydown(event: KeyboardEvent): void {
   const next = stops[(at + step + stops.length) % stops.length]
   next.focus()
   if (next.dataset.slot === 'tab') model.value = next.dataset.value as string
+}
+
+function moreButton(): HTMLElement | null {
+  return root.value?.querySelector<HTMLElement>('[data-slot="tab-more"]') ?? null
+}
+function menuItems(): HTMLElement[] {
+  return Array.from(root.value?.querySelectorAll<HTMLElement>('[data-slot="tab-more-item"]') ?? [])
+}
+/** 메뉴가 그려진 뒤 고른 줄(없으면 첫 줄)로 초점을 옮긴다. */
+async function focusMenu(): Promise<void> {
+  await nextTick()
+  const items = menuItems()
+  ;(items.find((i) => i.dataset.value === model.value) ?? items[0])?.focus()
+}
+/** 더 보기 단추: ↓ 로 열고, 키보드(Enter·Space)로 열 때도 메뉴로 초점을 옮긴다. */
+function onMoreClick(event: MouseEvent, open: boolean, toggle: () => void): void {
+  toggle()
+  if (!open && event.detail === 0) void focusMenu()
+}
+function onMoreDown(open: boolean, toggle: () => void): void {
+  if (!open) toggle()
+  void focusMenu()
+}
+/** 메뉴 줄: ↑/↓ 로 옮기고(끝에서 돈다), Esc 는 닫고 더 보기 단추로 초점을 돌려준다. */
+function onMenuKeydown(event: KeyboardEvent, close: () => void): void {
+  if (event.key === 'Escape') {
+    close()
+    moreButton()?.focus()
+    return
+  }
+  const step = event.key === 'ArrowDown' ? 1 : event.key === 'ArrowUp' ? -1 : 0
+  if (!step) return
+  const items = menuItems()
+  const at = items.indexOf(event.target as HTMLElement)
+  if (at < 0) return
+  event.preventDefault()
+  items[(at + step + items.length) % items.length].focus()
+}
+function chooseMore(value: string, close: () => void): void {
+  model.value = value
+  close()
+  moreButton()?.focus()
 }
 </script>
 
@@ -88,28 +130,30 @@ function onKeydown(event: KeyboardEvent): void {
           :aria-expanded="open"
           :tabindex="moreSelected ? 0 : -1"
           :class="cn(TAB_CLASS, moreSelected && SELECTED_CLASS)"
-          @click="toggle"
-          @keydown.down.prevent="open || toggle()"
+          @click="onMoreClick($event, open, toggle)"
+          @keydown.down.prevent="onMoreDown(open, toggle)"
         >
           {{ moreSelected ? moreSelected.label : moreLabel }}
           <ChevronDown />
         </button>
       </template>
       <template #default="{ close }">
-        <button
-          v-for="option in more"
-          :key="option.value"
-          type="button"
-          role="menuitemradio"
-          data-slot="tab-more-item"
-          :data-value="option.value"
-          :aria-checked="model === option.value"
-          :class="cn(MENU_ITEM_CLASS, model === option.value && 'font-semibold')"
-          @click="((model = option.value), close())"
-        >
-          <component :is="option.icon" v-if="option.icon" />
-          {{ option.label }}
-        </button>
+        <div role="menu" class="flex flex-col" @keydown="onMenuKeydown($event, close)">
+          <button
+            v-for="option in more"
+            :key="option.value"
+            type="button"
+            role="menuitemradio"
+            data-slot="tab-more-item"
+            :data-value="option.value"
+            :aria-checked="model === option.value"
+            :class="cn(MENU_ITEM_CLASS, model === option.value && 'font-semibold')"
+            @click="chooseMore(option.value, close)"
+          >
+            <component :is="option.icon" v-if="option.icon" />
+            {{ option.label }}
+          </button>
+        </div>
       </template>
     </Popover>
   </div>

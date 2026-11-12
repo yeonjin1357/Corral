@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { mount, type VueWrapper } from '@vue/test-utils'
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import TabBar from './TabBar.vue'
 
 const options = [
@@ -85,4 +85,59 @@ test('더 보기에서 기록을 고르면 v-model 이 events, 단추 글자가 
 test('more 가 없으면 더 보기 단추도 없다', () => {
   w = make()
   expect(w.find('[data-slot="tab-more"]').exists()).toBe(false)
+})
+
+const active = (): Element | null => document.activeElement
+const item = (v: string): Element =>
+  w.find(`[data-slot="tab-more-item"][data-value="${v}"]`).element
+
+test('↓ 로 열면 첫 줄(고른 값이 메뉴 안이면 그 줄)에 초점이 가고, ↑/↓ 로 돌며 옮긴다', async () => {
+  w = make({ more, moreLabel: '더 보기' })
+  const moreBtn = w.find('[data-slot="tab-more"]')
+  ;(moreBtn.element as HTMLElement).focus()
+  await moreBtn.trigger('keydown', { key: 'ArrowDown' })
+  await flushPromises()
+  expect(w.find('[role="menu"]').exists()).toBe(true)
+  expect(active()).toBe(item('apps'))
+  await w.find('[data-slot="tab-more-item"][data-value="apps"]').trigger('keydown', {
+    key: 'ArrowDown'
+  })
+  expect(active()).toBe(item('events'))
+  await w.find('[data-slot="tab-more-item"][data-value="events"]').trigger('keydown', {
+    key: 'ArrowDown'
+  })
+  expect(active()).toBe(item('apps'))
+  await w.find('[data-slot="tab-more-item"][data-value="apps"]').trigger('keydown', {
+    key: 'ArrowUp'
+  })
+  expect(active()).toBe(item('events'))
+
+  // 고른 값이 메뉴 안이면 그 줄로.
+  await w.setProps({ modelValue: 'events' })
+  await w.find('[data-slot="tab-more-item"][data-value="events"]').trigger('keydown', {
+    key: 'Escape'
+  })
+  await moreBtn.trigger('keydown', { key: 'ArrowDown' })
+  await flushPromises()
+  expect(active()).toBe(item('events'))
+})
+
+test('메뉴 줄을 고르면 더 보기 단추로 초점이 돌아온다', async () => {
+  w = make({ more, moreLabel: '더 보기' })
+  await w.find('[data-slot="tab-more"]').trigger('keydown', { key: 'ArrowDown' })
+  await flushPromises()
+  await w.find('[data-slot="tab-more-item"][data-value="events"]').trigger('click')
+  expect(w.emitted('update:modelValue')?.[0]).toEqual(['events'])
+  expect(active()).toBe(w.find('[data-slot="tab-more"]').element)
+})
+
+test('Esc 는 메뉴를 닫고 더 보기 단추로 초점을 돌려준다', async () => {
+  w = make({ more, moreLabel: '더 보기' })
+  await w.find('[data-slot="tab-more"]').trigger('keydown', { key: 'ArrowDown' })
+  await flushPromises()
+  await w.find('[data-slot="tab-more-item"][data-value="apps"]').trigger('keydown', {
+    key: 'Escape'
+  })
+  expect(w.find('[role="menu"]').exists()).toBe(false)
+  expect(active()).toBe(w.find('[data-slot="tab-more"]').element)
 })
