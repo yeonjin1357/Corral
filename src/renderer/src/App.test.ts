@@ -160,11 +160,23 @@ const notice = (w: VueWrapper, slot = 'action'): string =>
 
 /** 탭을 고른다(처음 탭은 작업 공간). */
 async function openTab(w: VueWrapper, tab: string): Promise<void> {
-  await w.find(`[data-slot="toggle-group-item"][data-value="${tab}"]`).trigger('click')
+  if (tab === 'apps' || tab === 'events') {
+    await w.find('[data-slot="tab-more"]').trigger('click')
+    await w.find(`[data-slot="tab-more-item"][data-value="${tab}"]`).trigger('click')
+    return
+  }
+  await w.find(`[data-slot="tab"][data-value="${tab}"]`).trigger('click')
 }
 
-const pressedTab = (w: VueWrapper): string | undefined =>
-  w.find('[data-slot="toggle-group-item"][aria-pressed="true"]').attributes('data-value')
+/** 고른 탭의 값. 더 보기 안 탭이면 더 보기 메뉴의 고른 줄이 알려 준다(메뉴가 닫혀 있으면 단추 글자로). */
+const pressedTab = (w: VueWrapper): string | undefined => {
+  const tab = w.find('[data-slot="tab"][aria-selected="true"]')
+  if (tab.exists()) return tab.attributes('data-value')
+  const label = w.find('[data-slot="tab-more"]').text()
+  return { '다른 앱': 'apps', 기록: 'events' }[label]
+}
+const selectedTab = (w: VueWrapper): ReturnType<VueWrapper['find']> =>
+  w.find('[data-slot="tab"][aria-selected="true"], [data-slot="tab-more"][tabindex="0"]')
 
 afterEach(() => {
   document.body.innerHTML = ''
@@ -255,10 +267,7 @@ test('서버를 끄면 그 서버(맨 위 pid)를 끄고, 실패하면 결과 �
 test('디스크 정리 결과 알림', async () => {
   const f = fake()
   const w = await start(f)
-  const diskTab = w
-    .findAll('[data-slot="toggle-group-item"]')
-    .find((b) => b.text().startsWith('디스크'))!
-  await diskTab.trigger('click')
+  await openTab(w, 'disk')
   await w.find('[data-action="remove"]').trigger('click')
   await flushPromises()
   expect(f.api.diskRemove).toHaveBeenCalledWith(diskRow().worktreeRoot)
@@ -355,7 +364,7 @@ test('OS 알림에서 온 이동은 그 탭·그 항목 상세를 연다', async
   const w = await start(f)
   f.navigate({ page: 'dashboard', key: selectionKey.agent(agent) })
   await flushPromises()
-  const pressed = w.find('[data-slot="toggle-group-item"][aria-pressed="true"]')
+  const pressed = selectedTab(w)
   expect(pressed.text()).toContain('에이전트')
   expect(document.body.textContent).toContain('Claude Code · PID 5000')
   w.unmount()
@@ -625,10 +634,7 @@ test('검색·탭·정렬', async () => {
   const memory = w.findAll('th').find((th) => th.text().includes('메모리'))!
   await memory.find('button').trigger('click')
   expect(keys()).toEqual([api, front, solo].map((r) => selectionKey.server(r)))
-  const agents = w
-    .findAll('[data-slot="toggle-group-item"]')
-    .find((b) => b.text().startsWith('에이전트'))!
-  await agents.trigger('click')
+  await openTab(w, 'agents')
   expect(keys()).toEqual([selectionKey.agent(agent)])
   w.unmount()
 })
@@ -727,9 +733,7 @@ test('메모리 상세의 묶음을 누르면 상세를 닫고 그 탭으로 간
   agent.click()
   await flushPromises()
   expect(document.body.querySelector('[data-memory-group]')).toBeNull()
-  expect(
-    w.find('[data-slot="toggle-group-item"][data-value="agents"]').attributes('data-state')
-  ).toBe('on')
+  expect(pressedTab(w)).toBe('agents')
   expect((w.find('input[type="search"], input').element as HTMLInputElement).value).toBe('')
   w.unmount()
 })
@@ -969,7 +973,7 @@ test('다른 포트 보기에서 검색하면 전체 수는 다른 포트 수', 
   await w.find('input[placeholder^="이름"]').setValue('chrome')
   expect(w.find('.toolbar').text()).toContain('5개 중 4개')
   // 탭 숫자는 그대로 개발 서버 수.
-  expect(w.find('[data-slot="toggle-group-item"][data-value="ports"]').text()).toBe('개발 서버 3')
+  expect(w.find('[data-slot="tab"][data-value="ports"]').text()).toBe('개발 서버 3')
   w.unmount()
 })
 
@@ -982,7 +986,7 @@ test('숨긴 서버 보기에서 검색하면 전체 수는 숨긴 서버 수', 
   await w.find('[data-action="toggle-hidden"]').trigger('click')
   await w.find('input[placeholder^="이름"]').setValue(':2375')
   expect(w.find('.toolbar').text()).toContain('2개 중 1개')
-  expect(w.find('[data-slot="toggle-group-item"][data-value="ports"]').text()).toBe('개발 서버 3')
+  expect(w.find('[data-slot="tab"][data-value="ports"]').text()).toBe('개발 서버 3')
   w.unmount()
 })
 
@@ -1265,7 +1269,7 @@ describe('자리 비운 사이', () => {
       .findAll('button')
       .find((b) => b.text() === '기록 보기')!
       .trigger('click')
-    const pressed = w.find('[data-slot="toggle-group-item"][aria-pressed="true"]')
+    const pressed = selectedTab(w)
     expect(pressed.text()).toContain('기록')
     expect(w.findAll('tbody tr').length).toBe(2)
     expect(w.find('[data-away]').exists()).toBe(false)
@@ -1345,7 +1349,7 @@ describe('자리 비운 사이', () => {
     })
     const w = await start(f)
     // 기록 탭에는 숫자가 없어(ToolBar) 탭을 열고 아래 줄의 개수로 본다.
-    await w.find('[data-slot="toggle-group-item"][data-value="events"]').trigger('click')
+    await openTab(w, 'events')
     expect(w.find('footer').text()).toContain('기록 0개')
     push([done(1, T0)])
     await flushPromises()

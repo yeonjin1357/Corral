@@ -11,6 +11,7 @@ import { text } from '../../../shared/text'
 import type { TabKey } from '../rows'
 import type { ServerView } from '../viewState'
 import ToggleGroup, { type ToggleOption } from '../ui/ToggleGroup.vue'
+import TabBar, { type TabOption } from '../ui/TabBar.vue'
 import Input from '../ui/Input.vue'
 import Button from '../ui/Button.vue'
 import Badge from '../ui/Badge.vue'
@@ -35,25 +36,19 @@ const viewValue = computed({
   set: (v: string) => (view.value = v === 'list' ? 'list' : 'group')
 })
 
-const ORDER: TabKey[] = [
-  'workspaces',
-  'ports',
-  'agents',
-  'leftovers',
-  'heavy',
-  'disk',
-  'apps',
-  'events'
-]
+const ORDER: TabKey[] = ['workspaces', 'ports', 'agents', 'leftovers', 'heavy', 'disk']
+/** 자주 안 쓰는 탭은 "더 보기" 메뉴에 둔다. */
+const MORE: TabKey[] = ['apps', 'events']
 /** 숫자를 달지 않는 탭: 수가 늘 크고(앱 수백 개·기록 수백 줄) 손댈 일의 양을 뜻하지 않아 눈에 거슬리기만 한다. */
 const UNCOUNTED: ReadonlySet<TabKey> = new Set(['apps', 'events'])
-const options = computed<ToggleOption[]>(() =>
+const options = computed<TabOption[]>(() =>
   ORDER.map((key) => ({
     value: key,
     label: text.ui.tabs[key],
     count: UNCOUNTED.has(key) ? null : props.counts[key]
   }))
 )
+const moreOptions: TabOption[] = MORE.map((key) => ({ value: key, label: text.ui.tabs[key] }))
 const tabValue = computed({
   get: () => tab.value as string,
   set: (v: string) => (tab.value = v as TabKey)
@@ -73,7 +68,13 @@ onBeforeUnmount(() => window.removeEventListener('keydown', focusSearch))
 <template>
   <div class="toolbar shrink-0 border-y border-border bg-card px-4 py-3">
     <div class="flex flex-wrap items-center gap-3">
-      <ToggleGroup v-model="tabValue" :options="options" :aria-label="text.ui.tabs.label" />
+      <TabBar
+        v-model="tabValue"
+        :options="options"
+        :more="moreOptions"
+        :more-label="text.ui.tabs.more"
+        :aria-label="text.ui.tabs.label"
+      />
       <div class="flex min-w-56 max-w-md flex-1 items-center gap-1">
         <div class="relative min-w-0 flex-1">
           <Search

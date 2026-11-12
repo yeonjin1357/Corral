@@ -458,7 +458,8 @@ export const text = {
       heavy: '무거운 작업',
       disk: '디스크 정리',
       apps: '다른 앱',
-      events: '기록'
+      events: '기록',
+      more: '더 보기'
     },
     /** 기록 탭(G3g): 종류 이름과 내용 문구. 내용(프롬프트·명령)은 기록에 없으니 숫자·이름만 쓴다. */
     events: {

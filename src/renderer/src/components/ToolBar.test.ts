@@ -22,24 +22,22 @@ test('작업 공간이 탭의 맨 앞에 있고 숫자는 작업 공간 수다',
   const w = mount(ToolBar, {
     props: { tab: 'workspaces', query: '', counts: { ...counts, workspaces: 3 }, matching: 3 }
   })
-  const items = w.findAll('[data-slot="toggle-group-item"]')
+  const items = w.findAll('[data-slot="tab"]')
   expect(items.map((b) => b.attributes('data-value'))).toEqual([
     'workspaces',
     'ports',
     'agents',
     'leftovers',
     'heavy',
-    'disk',
-    'apps',
-    'events'
+    'disk'
   ])
   expect(items[0].text()).toBe('작업 공간 3')
-  expect(items[0].attributes('aria-pressed')).toBe('true')
+  expect(items[0].attributes('aria-selected')).toBe('true')
   // 목록/묶음 전환은 개발 서버 탭에만.
   expect(w.find('[aria-label="개발 서버 보기"]').exists()).toBe(false)
 })
 
-test('기록이 탭의 맨 끝에 있고, 다른 앱·기록 탭에는 숫자를 달지 않는다', () => {
+test('다른 앱·기록은 더 보기 메뉴 안에 있고 숫자를 달지 않는다', async () => {
   const w = mount(ToolBar, {
     props: {
       tab: 'ports',
@@ -49,13 +47,17 @@ test('기록이 탭의 맨 끝에 있고, 다른 앱·기록 탭에는 숫자를
       view: 'group'
     }
   })
-  const items = w
-    .findAll('[data-slot="toggle-group-item"]')
-    .filter((b) => b.attributes('aria-pressed') != null && !['목록', '묶음'].includes(b.text()))
-  const last = items[items.length - 1]
-  expect(last.text()).toBe('기록')
-  const apps = w.find('[data-slot="toggle-group-item"][data-value="apps"]')
-  expect(apps.text()).toBe('다른 앱')
+  expect(w.find('[data-slot="tab"][data-value="apps"]').exists()).toBe(false)
+  const more = w.find('[data-slot="tab-more"]')
+  expect(more.text()).toBe('더 보기')
+  await more.trigger('click')
+  const items = w.findAll('[data-slot="tab-more-item"]')
+  expect(items.map((b) => [b.attributes('data-value'), b.text()])).toEqual([
+    ['apps', '다른 앱'],
+    ['events', '기록']
+  ])
+  await items[1].trigger('click')
+  expect(w.emitted('update:tab')?.[0]).toEqual(['events'])
 })
 
 test('다른 앱·기록 탭도 검색 결과 줄의 전체 수는 탭의 수', () => {
@@ -78,7 +80,7 @@ test('검색 결과 줄의 전체 수는 지금 보이는 표의 수', async () 
   })
   expect(w.text()).toContain('300개 중 1개')
   // 탭 숫자는 그대로 탭의 수.
-  const ports = w.find('[data-slot="toggle-group-item"][data-value="ports"]')
+  const ports = w.find('[data-slot="tab"][data-value="ports"]')
   expect(ports.text()).toBe('개발 서버 2')
   // 따로 주지 않으면 탭의 수.
   await w.setProps({ total: undefined })

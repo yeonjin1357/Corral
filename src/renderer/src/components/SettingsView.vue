@@ -32,7 +32,7 @@ import { formatDuration } from '../../../shared/format'
 import { hookControls } from '../hook'
 import { toolIcon } from '../rows'
 import ItemIcon from './ItemIcon.vue'
-import ToggleGroup, { type ToggleOption } from '../ui/ToggleGroup.vue'
+import TabBar, { type TabOption } from '../ui/TabBar.vue'
 import Card from '../ui/Card.vue'
 import CardHeader from '../ui/CardHeader.vue'
 import CardTitle from '../ui/CardTitle.vue'
@@ -78,11 +78,11 @@ const PAGE_ICONS: Record<Page, unknown> = {
   claude: Bot,
   about: Info
 }
-const pageOptions = computed<ToggleOption[]>(() =>
+const pageOptions = computed<TabOption[]>(() =>
   (Object.keys(PAGE_ICONS) as Page[]).map((key) => ({
     value: key,
     label: S.menu[key],
-    icon: PAGE_ICONS[key] as ToggleOption['icon']
+    icon: PAGE_ICONS[key] as TabOption['icon']
   }))
 )
 const pageValue = computed({
@@ -245,13 +245,7 @@ const status = computed(() => {
         <ArrowLeft />{{ text.ui.bar.back }}
       </Button>
       <div class="flex min-w-0 flex-1 justify-center">
-        <ToggleGroup
-          v-model="pageValue"
-          :options="pageOptions"
-          size="default"
-          item-class="px-3"
-          :aria-label="S.title"
-        />
+        <TabBar v-model="pageValue" :options="pageOptions" :aria-label="S.title" />
       </div>
       <div class="w-[88px] shrink-0 max-lg:hidden" aria-hidden="true"></div>
     </header>
