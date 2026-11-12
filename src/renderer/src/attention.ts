@@ -105,7 +105,7 @@ export function attentionItems(s: DashboardSnapshot, now: number): AttentionItem
         id: `candidate:${key}`,
         state: `${p.idleSince}`,
         kind: 'candidate',
-        tone: 'idle',
+        tone: 'stopped',
         name: `${serverName(p, s.platform)} :${p.ports[0]}`,
         where: p.workspace?.name ?? folderOf(p.worktree),
         message: text.ui.attention.idleFor(

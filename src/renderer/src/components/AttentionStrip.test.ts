@@ -76,3 +76,20 @@ test('정리 추천은 모두 끄기(killMany)와 칩, 후보는 내리기(kill)
   await heavy.trigger('click')
   expect(w.emitted('showHeavy')).toHaveLength(1)
 })
+
+test('추천 항목이 칩보다 많으면 칩 줄에 "외 n개"를 보인다', () => {
+  const keys = ['a', 'b', 'c', 'd', 'e', 'f']
+  const chips = keys.slice(0, 4).map((key) => ({
+    key,
+    icon: null,
+    title: key,
+    where: 'shop',
+    memoryBytes: 1 << 20,
+    commitBytes: null
+  }))
+  const w = mount(AttentionStrip, {
+    props: { items: [item(1, { id: 'recommend', kind: 'recommend', key: null, keys })], chips }
+  })
+  expect(w.findAll('.recommend-item')).toHaveLength(4)
+  expect(w.text()).toContain('외 2개')
+})

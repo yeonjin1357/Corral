@@ -116,6 +116,11 @@ const label = (item: AttentionItem): string =>
               : text.ui.home.chipSize(formatBytes(chip.memoryBytes), formatBytes(chip.commitBytes))
           }}</span>
         </Button>
+        <span
+          v-if="(item.keys?.length ?? 0) > chips.length"
+          class="self-center text-xs text-muted-foreground"
+          >{{ text.ui.recommend.more((item.keys?.length ?? 0) - chips.length) }}</span
+        >
       </div>
     </template>
     <div v-if="items.length > SHOWN" class="border-t px-3 py-1">

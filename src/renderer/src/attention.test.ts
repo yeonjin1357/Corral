@@ -75,6 +75,7 @@ test('메모리가 정상이면 추천 줄은 없고 정리 후보 서버가 한
   )
   const items = attentionItems(s, NOW)
   expect(items.map((i) => i.kind)).toEqual(['candidate', 'candidate', 'candidate'])
+  expect(items.every((i) => i.tone === 'stopped')).toBe(true)
   const vite = items.find((i) => i.name === 'Vite :5173')!
   expect(vite.message).toBe('42분 동안 아무도 안 써요')
   expect(vite.where).toBe('shop-web')
