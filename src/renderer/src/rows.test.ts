@@ -855,8 +855,8 @@ describe('작업 공간 탭(G4)', () => {
     const own = (tab: SnapshotTab, key: string): (typeof t.rows)[number] =>
       tableFor(tab, s).rows.find((r) => r.key === key)!
     const cases: [SnapshotTab, string, string, string][] = [
-      ['ports', selectionKey.server(api), 'api', '서버'],
-      ['agents', selectionKey.agent(claude), 'shop', '에이전트'],
+      ['ports', selectionKey.server(api), 'Vite', '서버'],
+      ['agents', selectionKey.agent(claude), 'Claude Code', '에이전트'],
       ['heavy', selectionKey.heavy(build), 'vue-tsc', '무거운 작업'],
       ['leftovers', selectionKey.leftover(gradle), 'Gradle 데몬', '남은 프로세스']
     ]
@@ -913,6 +913,76 @@ describe('작업 공간 탭(G4)', () => {
       memoryBytes: 100 * MB,
       actions: []
     })
+  })
+
+  test('작업 공간 탭 구성원 이름은 무엇인지 — 도구·브랜드·이름', () => {
+    const codex = agentRow({ pid: 11, tool: 'codex', workspace: SHOP })
+    const vite = serverRow({
+      pid: 12,
+      commandLine: 'node node_modules/vite/bin/vite.js',
+      workspace: SHOP
+    })
+    const java = serverRow({
+      pid: 13,
+      commandLine: 'mysvc.exe --port 9',
+      processName: 'mysvc.exe',
+      workspace: SHOP
+    })
+    const pw = leftoverRow({ pid: 31, label: 'Playwright 브라우저', workspace: SHOP })
+    const t = snapshot({
+      takenAt: now,
+      servers: [vite, java],
+      agents: [codex],
+      leftovers: [pw],
+      workspaces: [
+        workspaceRow({
+          root: 'C:\\work\\shop',
+          agentKeys: [selectionKey.agent(codex)],
+          serverKeys: [selectionKey.server(vite), selectionKey.server(java)],
+          leftoverKeys: [selectionKey.leftover(pw)]
+        })
+      ]
+    })
+    const names = Object.fromEntries(workspaceTable(t).rows.map((r) => [r.key, r.cells.name.text]))
+    expect(names).toEqual({
+      [selectionKey.agent(codex)]: 'Codex',
+      [selectionKey.server(vite)]: 'Vite',
+      [selectionKey.server(java)]: 'mysvc',
+      [selectionKey.leftover(pw)]: 'Playwright 브라우저'
+    })
+    // 이름이 검색에도 든다.
+    expect(filterRows(workspaceTable(t).rows, 'codex').map((r) => r.key)).toEqual([
+      selectionKey.agent(codex)
+    ])
+  })
+
+  test('바깥 작업 공간에 든 다른 워크트리면 이름 뒤에 폴더 · 브랜치, 같은 폴더면 없다', () => {
+    const rows = workspaceTable(s).rows
+    const sub = (key: string): string | undefined => rows.find((r) => r.key === key)!.cells.name.sub
+    expect(sub(selectionKey.server(api))).toBe('api · feat/api')
+    expect(sub(selectionKey.server(front))).toBe('front · main')
+    expect(sub(selectionKey.agent(claude))).toBeUndefined()
+    // 대소문자·끝 구분자만 다른 같은 경로도 같은 폴더.
+    const same = agentRow({
+      pid: 50,
+      worktree: { root: 'c:\\WORK\\shop\\', branch: 'main', isLinkedWorktree: false },
+      workspace: SHOP
+    })
+    const t = snapshot({
+      takenAt: now,
+      agents: [same],
+      workspaces: [workspaceRow({ root: 'C:\\work\\shop', agentKeys: [selectionKey.agent(same)] })]
+    })
+    expect(workspaceTable(t).rows[0].cells.name.sub).toBeUndefined()
+  })
+
+  test('다른 탭의 이름 칸은 그대로 폴더 이름이다', () => {
+    const a = tableFor('agents', s).rows[0].cells.name
+    expect(a.text).toBe('shop')
+    expect(a.sub).toBeUndefined()
+    expect(
+      tableFor('ports', s).rows.find((r) => r.key === selectionKey.server(api))!.cells.name
+    ).toMatchObject({ text: 'api' })
   })
 
   test('묶음 순서는 스냅샷 순서이고, 정렬은 묶음 안 줄만 바꾼다', () => {

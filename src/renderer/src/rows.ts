@@ -81,6 +81,8 @@ export interface Cell {
   /** 정렬 기준(없으면 text). */
   sort?: number | string
   title?: string
+  /** 이름 칸에서 이름 뒤에 흐리게 붙는 글자(작업 공간 탭의 "폴더 · 브랜치"). */
+  sub?: string
   mono?: boolean
   muted?: boolean
   dot?: Tone
@@ -268,6 +270,10 @@ export function serverIcon(row: ServerRow, platform: Platform | null): RowIcon {
     title: brand?.title ?? row.processName
   }
 }
+/** 서버가 무엇인지(Vite 등). 알아보는 브랜드가 없으면 프로세스 이름에서 `.exe` 를 뗀다. */
+export function serverName(row: ServerRow, platform: Platform | null): string {
+  return serverIcon(row, platform).brand?.title ?? row.processName.replace(/\.exe$/i, '')
+}
 /** Claude Code·Codex 로고(에이전트 행·연동 상태·설정 화면이 같이 쓴다). */
 export function toolIcon(tool: AgentTool): RowIcon {
   return {
@@ -405,7 +411,7 @@ function serverLine(p: ServerRow, s: DashboardSnapshot): Row {
   }
 }
 
-function agentLine(a: AgentRow, s: DashboardSnapshot): Row {
+export function agentLine(a: AgentRow, s: DashboardSnapshot): Row {
   const key = selectionKey.agent(a)
   return {
     key,
@@ -483,13 +489,23 @@ const NONE: Cell = { text: text.ui.none, sort: -1, muted: true }
  * 작업 공간 탭의 한 줄: 그 항목의 탭과 같은 줄(이름·상태·아이콘·동작·검색)에서 칸을 골라 종류 칸을 더한다.
  * 그 탭에 없는 칸(무거운 작업의 상태, 서버가 아닌 것의 포트, 서버·에이전트가 아닌 것의 CPU)은 —.
  */
-function memberLine(line: Row, kind: MemberKind): Row {
+function memberLine(
+  line: Row,
+  kind: MemberKind,
+  who: { name: string; worktree: WorktreeInfo | null; workspaceRoot: string | null }
+): Row {
   const label = text.ui.workspaces.kinds[kind]
   const pick = (id: string): Cell => line.cells[id] ?? NONE
+  const { worktree, workspaceRoot } = who
+  // 작업 공간 폴더가 아닌 다른 워크트리에서 돌면 어디서 도는지를 이름 뒤에 덧붙인다.
+  const sub =
+    worktree && workspaceRoot && !samePath(worktree.root, workspaceRoot)
+      ? `${folderOf(worktree)} · ${worktree.branch ?? text.detached}`
+      : undefined
   return {
     ...line,
     cells: {
-      name: line.cells.name,
+      name: { ...line.cells.name, text: who.name, ...(sub ? { sub } : {}) },
       kind: { text: label, muted: true },
       status: pick('status'),
       port: pick('port'),
@@ -497,9 +513,12 @@ function memberLine(line: Row, kind: MemberKind): Row {
       memory: line.cells.memory,
       commit: line.cells.commit
     },
-    search: searchOf(line.search, label)
+    search: searchOf(line.search, label, who.name)
   }
 }
+
+/** 같은 경로인가(대소문자·끝 구분자는 무시 — 메인 disk.ts 의 samePath 와 같은 규칙). */
+const samePath = (a: string, b: string): boolean => agentCovers([a], b) && agentCovers([b], a)
 
 /** 작업 공간 줄에 든 구성원만(스냅샷에 없는 키는 건너뛰고, 어느 작업 공간에도 없는 항목은 넣지 않는다). */
 function workspaceRows(s: DashboardSnapshot): Row[] {
@@ -511,11 +530,41 @@ function workspaceRows(s: DashboardSnapshot): Row[] {
       ...w.leftoverKeys
     ])
   )
+  // 그 줄의 키가 든 작업 공간 줄의 폴더.
+  const rootOf = (key: string): string | null =>
+    s.workspaces.find((w) =>
+      [...w.agentKeys, ...w.serverKeys, ...w.heavyKeys, ...w.leftoverKeys].includes(key)
+    )?.root ?? null
+  const who = (
+    key: string,
+    name: string,
+    worktree: WorktreeInfo | null
+  ): { name: string; worktree: WorktreeInfo | null; workspaceRoot: string | null } => ({
+    name,
+    worktree,
+    workspaceRoot: rootOf(key)
+  })
   return [
-    ...s.agents.map((a) => memberLine(agentLine(a, s), 'agent')),
-    ...s.servers.map((p) => memberLine(serverLine(p, s), 'server')),
-    ...s.heavyJobs.map((j) => memberLine(heavyLine(j, s), 'heavy')),
-    ...s.leftovers.map((l) => memberLine(leftoverLine(l, s), 'leftover'))
+    ...s.agents.map((a) =>
+      memberLine(
+        agentLine(a, s),
+        'agent',
+        who(selectionKey.agent(a), text.ui.agent.toolNames[a.tool], a.worktree)
+      )
+    ),
+    ...s.servers.map((p) =>
+      memberLine(
+        serverLine(p, s),
+        'server',
+        who(selectionKey.server(p), serverName(p, s.platform), p.worktree)
+      )
+    ),
+    ...s.heavyJobs.map((j) =>
+      memberLine(heavyLine(j, s), 'heavy', who(selectionKey.heavy(j), j.label, j.worktree))
+    ),
+    ...s.leftovers.map((l) =>
+      memberLine(leftoverLine(l, s), 'leftover', who(selectionKey.leftover(l), l.label, l.worktree))
+    )
   ].filter((row) => row.key != null && members.has(row.key))
 }
 

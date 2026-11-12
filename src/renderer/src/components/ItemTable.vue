@@ -436,12 +436,22 @@ const G = text.ui.group
                       @click="emit('select', row.key)"
                     >
                       <span class="truncate">{{ row.cells.name.text }}</span>
+                      <span
+                        v-if="row.cells.name.sub"
+                        class="ml-2 truncate text-xs text-muted-foreground"
+                        >{{ row.cells.name.sub }}</span
+                      >
                     </Button>
                     <span
                       v-else
                       class="truncate text-[13px]"
                       :title="row.cells.name.title ?? row.cells.name.text"
-                      >{{ row.cells.name.text }}</span
+                      >{{ row.cells.name.text
+                      }}<span
+                        v-if="row.cells.name.sub"
+                        class="ml-2 text-xs text-muted-foreground"
+                        >{{ row.cells.name.sub }}</span
+                      ></span
                     >
                   </div>
                   <Button
