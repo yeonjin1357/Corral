@@ -385,9 +385,10 @@ test('간단히: 카드마다 제목·큰 값·한 줄', async () => {
     // 메모리는 설명 줄 대신 얇은 쌓은 막대.
     ['메모리', '82%', []],
     ['개발 서버', '2개', ['포트 3개 · 작업 공간 1곳']],
-    ['에이전트', '3개', ['응답 대기 1', '오래 쉼 1']],
-    ['무거운 작업', '0개', ['실행 중', '0 MB']],
-    ['남은 프로세스', '0개', ['남은 개발 도구', '0 MB']],
+    ['에이전트', '3개', ['응답 대기 1 · Claude Code', '오래 쉼 1']],
+    // 값이 0 인 카드는 조용한 카드(제목과 "없음"만).
+    ['무거운 작업', '없음', []],
+    ['남은 프로세스', '없음', []],
     ['디스크 정리', '1.0 GB', ['끝난 워크트리 1곳에서 확보 가능']]
   ])
   // 카드는 낮은 한 줄(72px): 추이 그래프·아래 칸·항목 목록이 없다.
@@ -524,13 +525,14 @@ describe('카드 배치', () => {
       '최근 기록'
     ])
     // 열은 보이는 카드로 만든다(cardColumns: 카드마다 비중과 최소 너비).
+    // 기본 스냅샷은 응답 대기·에이전트·남은 프로세스가 0 이라 그 칸은 104px 고정(조용한 카드).
     expect(w.find('.resource-grid').attributes('style')).toContain(
       [
         'minmax(150px, 1.2fr)',
-        'minmax(150px, 1fr)',
+        'minmax(104px, 104px)',
         'minmax(240px, 1.5fr)',
-        'minmax(150px, 1fr)',
-        'minmax(150px, 1.05fr)',
+        'minmax(104px, 104px)',
+        'minmax(104px, 104px)',
         'minmax(150px, 1fr)'
       ].join(' ')
     )
@@ -708,5 +710,75 @@ describe('카드 배치', () => {
     } finally {
       resize.restore()
     }
+  })
+})
+
+describe('카드 강조·조용한 카드(G2)', () => {
+  const cell = (w: VueWrapper, id: string): DOMWrapper<Element> => w.find(`[data-card="${id}"]`)
+  const compactBar = (s: DashboardSnapshot, extra: Record<string, unknown> = {}): VueWrapper =>
+    mount(StatsBar, {
+      props: { snapshot: s, ramHistory: [], windowMs: 600_000, compact: true, ...extra }
+    })
+  const subs = (w: VueWrapper, id: string): string[] =>
+    cell(w, id)
+      .findAll('[data-compact-sub] > span')
+      .map((x) => x.text().replace(/\s+/g, ' '))
+      .filter(Boolean)
+
+  test('무거운 작업·남은 프로세스가 0 이면 그 카드는 조용한 카드(없음), 편집 중에는 접지 않는다', () => {
+    const w = bar(snapshot({ agents: [agentRow()], servers: [serverRow()] }))
+    expect(cell(w, 'heavy').attributes('data-quiet')).toBe('true')
+    expect(cell(w, 'leftovers').attributes('data-quiet')).toBe('true')
+    expect(cell(w, 'heavy').text()).toContain('없음')
+    expect(cell(w, 'heavy').find('[data-slot=card]').classes()).toContain('h-60')
+    expect(cell(w, 'servers').attributes('data-quiet')).toBeUndefined()
+    expect(w.find('.resource-grid').attributes('style')).toContain('minmax(104px, 104px)')
+    // 간단히에서도 높이는 그대로, 누르면 그 탭으로.
+    const c = compactBar(snapshot())
+    expect(cell(c, 'heavy').find('[data-slot=card]').classes()).toContain('h-18')
+    cell(c, 'heavy').find('button').trigger('click')
+    expect(c.emitted('tab')).toEqual([['heavy']])
+    // 편집 중에는 접지 않는다.
+    const e = mount(StatsBar, {
+      props: { snapshot: snapshot(), ramHistory: [], windowMs: 600_000, editing: true }
+    })
+    expect(e.findAll('[data-quiet]')).toHaveLength(0)
+    expect(e.find('.resource-grid').attributes('style')).not.toContain('104px')
+  })
+
+  test('응답 대기가 있으면 에이전트 카드에 data-attention="warn", 간단히 단계 줄은 "응답 대기 2 · Codex 3분"', () => {
+    const now = 10_000_000
+    const s = snapshot({
+      takenAt: now,
+      agents: [
+        agentRow({ pid: 1, state: 'waiting', tool: 'claude', stateSince: now - 60_000 }),
+        agentRow({ pid: 2, state: 'waiting', tool: 'codex', stateSince: now - 180_000 })
+      ]
+    })
+    const w = compactBar(s)
+    expect(cell(w, 'agents').attributes('data-attention')).toBe('warn')
+    expect(subs(w, 'agents')[0]).toBe('응답 대기 2 · Codex 3분')
+    expect(cell(bar(s), 'agents').attributes('data-attention')).toBe('warn')
+  })
+
+  test('응답 대기 시작 시각을 모르면 간단히 줄은 경과 없이 "응답 대기 1 · Codex"', () => {
+    const s = snapshot({
+      agents: [agentRow({ state: 'waiting', tool: 'codex', stateSince: null })]
+    })
+    expect(subs(compactBar(s), 'agents')[0]).toBe('응답 대기 1 · Codex')
+  })
+
+  test('정리 후보가 있으면 개발 서버 카드에 data-attention="stopped", 간단히 줄은 "정리 후보 1"', () => {
+    const s = snapshot({ servers: [serverRow({ judgement: 'candidate' }), serverRow({ pid: 2 })] })
+    expect(cell(bar(s), 'servers').attributes('data-attention')).toBe('stopped')
+    expect(subs(compactBar(s), 'servers')).toContain('정리 후보 1')
+  })
+
+  test('할 일이 없으면 data-attention 이 없다', () => {
+    const s = snapshot({
+      agents: [agentRow()],
+      servers: [serverRow({ judgement: 'check' })]
+    })
+    expect(bar(s).findAll('[data-attention]')).toHaveLength(0)
   })
 })

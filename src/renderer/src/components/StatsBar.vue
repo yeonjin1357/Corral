@@ -11,13 +11,14 @@
   카드 줄의 가로 스크롤바 높이를 재어 알린다(scrollbar) — 손잡이의 끄는·붙는 높이에 더한다.
 -->
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, type Component } from 'vue'
 import {
   ChevronLeft,
   ChevronRight,
   Globe,
   Hammer,
   HardDrive,
+  Hourglass,
   MemoryStick,
   RefreshCw,
   SquareTerminal,
@@ -25,7 +26,7 @@ import {
 } from '@lucide/vue'
 import type { DashboardSnapshot, ProcessGroup } from '../../../shared/types'
 import type { PitEvent } from '../../../shared/events'
-import { formatBytes, codexLimitView, pressureText } from '../../../shared/format'
+import { formatBytes, formatDuration, codexLimitView, pressureText } from '../../../shared/format'
 import { text } from '../../../shared/text'
 import type { Point } from '../history'
 import {
@@ -50,6 +51,7 @@ import StatItem from './StatItem.vue'
 import ResourceTrend from './ResourceTrend.vue'
 import ItemIcon from './ItemIcon.vue'
 import CompactCard from './CompactCard.vue'
+import QuietCard from './QuietCard.vue'
 import WaitingCard from './cards/WaitingCard.vue'
 import TokensCard from './cards/TokensCard.vue'
 import EventsCard from './cards/EventsCard.vue'
@@ -92,8 +94,8 @@ const shownCards = computed(() => (props.editing ? layout.value.order : visibleC
 const isHidden = (id: CardId): boolean => layout.value.hidden.includes(id)
 /** 하나 남은 보이는 카드는 숨기거나 뺄 수 없다(조작 함수도 그대로 돌려준다 — 단추도 막아 둔다). */
 const lastVisible = computed(() => visibleCards(layout.value).length <= 1)
-/** 열 너비: 카드마다 비중과 최소 너비(cardColumns). 다 들어가지 않으면 카드 줄만 가로로 스크롤한다. */
-const columns = computed(() => cardColumns(shownCards.value))
+/** 열 너비: 카드마다 비중과 최소 너비(cardColumns), 조용한 카드는 104px. 다 들어가지 않으면 카드 줄만 가로로 스크롤한다. */
+const columns = computed(() => cardColumns(shownCards.value, quiet.value))
 
 const grid = ref<HTMLElement | null>(null)
 
@@ -339,6 +341,65 @@ const stateSourceLabel = computed(() =>
 
 const heavyMemory = computed(() => groupBytes('heavy'))
 
+// ── 카드 강조·조용한 카드(G2) ──
+/** 할 일이 있는 카드: 응답 대기가 있으면 에이전트·응답 대기 카드는 warn(노랑), 정리 후보가 있으면 개발 서버는 stopped(빨강). */
+const attention = computed<Partial<Record<CardId, 'warn' | 'stopped'>>>(() => {
+  const result: Partial<Record<CardId, 'warn' | 'stopped'>> = {}
+  if (agentCounts.value.waiting > 0) {
+    result.agents = 'warn'
+    result.waiting = 'warn'
+  }
+  if (portCounts.value.candidate > 0) result.servers = 'stopped'
+  return result
+})
+/** 값이 0 인 카드는 좁고 조용하게. 편집 중에는 모든 카드를 그대로 보여 준다. */
+const quiet = computed<CardId[]>(() => {
+  if (props.editing) return []
+  const zero: Partial<Record<CardId, boolean>> = {
+    heavy: s.value.heavyJobs.length === 0,
+    leftovers: s.value.leftovers.length === 0,
+    servers: s.value.servers.length === 0,
+    agents: s.value.agents.length === 0,
+    waiting: agentCounts.value.waiting === 0
+  }
+  return shownCards.value.filter((id) => zero[id])
+})
+/** 조용한 카드의 아이콘·제목과 누르면 가는 탭(응답 대기 카드는 갈 탭이 없다). */
+const QUIET_CARD: Partial<
+  Record<CardId, { icon: Component; title: string; tab: TabKey | null; label: string | null }>
+> = {
+  servers: { icon: Globe, title: text.ui.cards.ports, tab: 'ports', label: text.ui.cards.showList },
+  agents: {
+    icon: SquareTerminal,
+    title: text.ui.cards.agents,
+    tab: 'agents',
+    label: text.ui.cards.showList
+  },
+  heavy: { icon: Hammer, title: text.ui.cards.heavy, tab: 'heavy', label: text.ui.cards.showList },
+  leftovers: {
+    icon: Unplug,
+    title: text.ui.cards.leftovers,
+    tab: 'leftovers',
+    label: text.ui.cards.showList
+  },
+  waiting: { icon: Hourglass, title: T.title.waiting, tab: null, label: null }
+}
+/** 간단히 에이전트 카드의 "응답 대기 n · 도구 경과": 가장 오래 기다린 에이전트(시작 시각을 모르면 뒤로, 모두 모르면 첫 에이전트·경과 없음). */
+const waitingLine = computed(() => {
+  const waiting = s.value.agents.filter((a) => a.state === 'waiting')
+  if (!waiting.length) return null
+  const oldest = waiting.reduce((best, a) =>
+    (a.stateSince ?? Infinity) < (best.stateSince ?? Infinity) ? a : best
+  )
+  return text.ui.cards.waitingLine(
+    waiting.length,
+    text.ui.agent.toolNames[oldest.tool],
+    oldest.stateSince != null
+      ? formatDuration(Math.max(0, s.value.takenAt - oldest.stateSince))
+      : null
+  )
+})
+
 // 에이전트가 있는 워크트리의 남은 프로세스는 그 에이전트가 쓰고 있을 수 있어 개수에서 뺀다.
 const freeLeftovers = computed(() => s.value.leftovers.filter((l) => !l.agentInWorktree))
 const agentLeftovers = computed(() => s.value.leftovers.length - freeLeftovers.value.length)
@@ -420,6 +481,8 @@ const diskSub = computed(() => {
       :key="id"
       :data-card="id"
       :data-hidden="(editing && isHidden(id)) || undefined"
+      :data-attention="attention[id]"
+      :data-quiet="quiet.includes(id) || undefined"
       class="relative min-w-0 rounded-xl"
       :class="
         editing
@@ -444,8 +507,17 @@ const diskSub = computed(() => {
           '[&_[data-compact-sub]]:invisible': editing && compact
         }"
       >
+        <!-- 조용한 카드(값이 0): 아이콘 칩 + 제목 + 없음 -->
+        <QuietCard
+          v-if="quiet.includes(id) && QUIET_CARD[id]"
+          :icon="QUIET_CARD[id].icon"
+          :title="QUIET_CARD[id].title"
+          :compact="compact"
+          :action-label="QUIET_CARD[id].label"
+          @action="QUIET_CARD[id].tab && emit('tab', QUIET_CARD[id].tab)"
+        />
         <!-- 메모리(넓은 칸) -->
-        <template v-if="id === 'memory'">
+        <template v-else-if="id === 'memory'">
           <CompactCard
             v-if="compact"
             :icon="MemoryStick"
@@ -606,6 +678,12 @@ const diskSub = computed(() => {
             <span class="min-w-0 truncate">{{
               text.ui.cards.portsSub(portCount, workspaceCount)
             }}</span>
+            <span
+              v-if="portCounts.candidate > 0"
+              class="shrink-0 font-bold tabular-nums"
+              :style="{ color: 'var(--status-stopped)' }"
+              >{{ text.ui.cards.candidateLine(portCounts.candidate) }}</span
+            >
           </CompactCard>
           <Card v-else size="sm" class="h-60 gap-3">
             <PanelHeader
@@ -647,7 +725,10 @@ const diskSub = computed(() => {
                     </dt>
                     <dd
                       class="mt-0.5 text-sm font-medium tabular-nums"
-                      :class="{ 'text-destructive': portCounts.candidate > 0 }"
+                      :class="{ 'font-bold': portCounts.candidate > 0 }"
+                      :style="
+                        portCounts.candidate > 0 ? { color: 'var(--status-stopped)' } : undefined
+                      "
                     >
                       {{ portCounts.candidate }}
                     </dd>
@@ -686,7 +767,7 @@ const diskSub = computed(() => {
             <span
               class="min-w-0 truncate tabular-nums"
               :style="agentCounts.waiting > 0 ? { color: 'var(--status-waiting)' } : undefined"
-              >{{ text.ui.agent.states.waiting }} {{ agentCounts.waiting }}</span
+              >{{ waitingLine ?? `${text.ui.agent.states.waiting} 0` }}</span
             >
             <span v-if="agentCounts.parked > 0" class="shrink-0 tabular-nums">{{
               text.ui.cards.agentParked(agentCounts.parked)
@@ -759,6 +840,7 @@ const diskSub = computed(() => {
                     </dt>
                     <dd
                       class="mt-0.5 text-sm font-medium tabular-nums"
+                      :class="{ 'font-bold': agentCounts.waiting > 0 }"
                       :style="
                         agentCounts.waiting > 0 ? { color: 'var(--status-waiting)' } : undefined
                       "

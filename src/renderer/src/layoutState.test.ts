@@ -113,6 +113,13 @@ test('카드 열 너비: 카드마다 비중과 최소 너비, 순서는 배치�
   expect(cardColumns([])).toBe('')
 })
 
+test('조용한 카드 칸은 104px 고정, 나머지는 그대로', () => {
+  expect(cardColumns(['memory', 'heavy'], ['heavy'])).toBe(
+    'minmax(240px, 1.5fr) minmax(104px, 104px)'
+  )
+  expect(cardColumns(['memory', 'heavy'], [])).toBe(cardColumns(['memory', 'heavy']))
+})
+
 test('1280px 창에서 일곱 장(기본 여섯 + 새 카드 하나)이 스크롤 없이 한 줄에 들어간다', () => {
   // 카드 줄 너비 = 1280 − 좌우 여백 16×2 − 카드 사이 틈 12×6 = 1176px(app.css `.resource-grid`).
   const row = 1280 - 2 * 16 - 6 * 12

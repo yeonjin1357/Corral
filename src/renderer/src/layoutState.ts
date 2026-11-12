@@ -146,11 +146,18 @@ const CARD_WIDTH: Record<CardId, { weight: number; minPx: number }> = {
 }
 
 /**
- * 카드 줄의 grid-template-columns: 받은 카드 순서대로 `minmax(최소, 비중fr)`. 카드는 몇 장이든 한 줄이라
- * 최소 너비의 합이 창보다 넓으면 카드 줄만 가로로 스크롤한다(app.css `.resource-grid`).
+ * 카드 줄의 grid-template-columns: 받은 카드 순서대로 `minmax(최소, 비중fr)`. 조용한 카드(quiet, 값이 0 인 카드)는
+ * 104px 고정으로 좁힌다. 카드는 몇 장이든 한 줄이라 최소 너비의 합이 창보다 넓으면 카드 줄만 가로로 스크롤한다
+ * (app.css `.resource-grid`).
  */
-export function cardColumns(ids: CardId[]): string {
-  return ids.map((id) => `minmax(${CARD_WIDTH[id].minPx}px, ${CARD_WIDTH[id].weight}fr)`).join(' ')
+export function cardColumns(ids: CardId[], quiet: CardId[] = []): string {
+  return ids
+    .map((id) =>
+      quiet.includes(id)
+        ? 'minmax(104px, 104px)'
+        : `minmax(${CARD_WIDTH[id].minPx}px, ${CARD_WIDTH[id].weight}fr)`
+    )
+    .join(' ')
 }
 
 /** 숨기거나 다시 보인다. 마지막 보이는 카드를 숨기려 하면 그대로. */

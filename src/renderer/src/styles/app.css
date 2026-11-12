@@ -262,6 +262,21 @@
   padding-inline: 16px;
 }
 
+/* 카드 강조(G2): 할 일이 있는 카드는 위쪽 3px 띠와 상태 색을 섞은 링. 카드는 테두리 대신 링으로 윤곽을 그린다. */
+[data-card][data-attention='warn'] {
+  --attn: var(--status-waiting);
+}
+[data-card][data-attention='stopped'] {
+  --attn: var(--status-stopped);
+}
+[data-card][data-attention] [data-slot='card'] {
+  /* Tailwind 의 링도 box-shadow 라 덮어쓰면 링이 사라진다 — 링(1px)을 상태 색으로 여기서 다시 그리고 그림자는 이어 붙인다. */
+  box-shadow:
+    inset 0 3px 0 var(--attn),
+    0 0 0 1px color-mix(in srgb, var(--attn) 45%, var(--border)),
+    var(--tw-shadow, 0 0 #0000);
+}
+
 .process-table-region {
   flex: 1;
   min-height: 0;

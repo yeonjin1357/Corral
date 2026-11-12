@@ -378,6 +378,13 @@ export const text = {
       candidate: '정리 후보',
       check: '확인해볼 것',
       inUse: '사용 중',
+      /** 조용한 카드(할 일이 없어 좁게 접힌 카드)의 값. */
+      none: '없음',
+      /** 간단히 에이전트 카드: 응답 대기 수와 가장 오래 기다린 에이전트의 도구·경과(모르면 경과 없이). */
+      waitingLine: (n: number, tool: string, duration: string | null): string =>
+        duration ? `응답 대기 ${n} · ${tool} ${duration}` : `응답 대기 ${n} · ${tool}`,
+      /** 간단히 개발 서버 카드: 정리 후보 수. */
+      candidateLine: (n: number): string => `정리 후보 ${n}`,
       agents: cardTitles.agents,
       agentsSub: '실행 중',
       stateSource: '상태 판단',
