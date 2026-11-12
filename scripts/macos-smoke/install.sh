@@ -17,6 +17,23 @@ fact() {
   echo "· $1: $2"
 }
 
+# with_timeout <초> <명령…>: 그 시간 안에 끝나지 않으면 강제로 끝낸다(macOS 에는 timeout 명령이 없다).
+with_timeout() {
+  local secs=$1
+  shift
+  "$@" &
+  local pid=$!
+  (
+    sleep "$secs"
+    kill -9 "$pid" 2> /dev/null
+  ) &
+  local killer=$!
+  wait "$pid" 2> /dev/null
+  local code=$?
+  kill "$killer" 2> /dev/null
+  return $code
+}
+
 ARCH=$(uname -m)
 [ "$ARCH" = x86_64 ] && ARCH=x64
 fact os "$(sw_vers -productName) $(sw_vers -productVersion) ($(sw_vers -buildVersion))"
@@ -91,17 +108,31 @@ fact gatekeeper_status "$(spctl --status 2>&1 | tr '\n' ' ')"
 fact gatekeeper_assess "$(spctl --assess --type execute -vv "$APP" 2>&1 | tr '\n' ' ')"
 
 echo "== 격리된 채로 열어 보기(팀원이 처음 더블클릭했을 때)"
-open "$APP" > "$OUT/open-quarantined.txt" 2>&1
-fact open_quarantined_exit "$?"
-sleep 12
-if pgrep -x Corral > /dev/null; then
-  fact gatekeeper_blocked "no (앱이 그대로 실행됨)"
+# 경고 창이 뜨면 open 은 누가 답할 때까지 끝나지 않는다. 뒤에서 띄우고 15초만 본다.
+open "$APP" > "$OUT/open-quarantined.txt" 2>&1 &
+OPEN_PID=$!
+sleep 15
+if kill -0 "$OPEN_PID" 2> /dev/null; then
+  fact open_quarantined "15초가 지나도 open 이 끝나지 않음(경고 창이 답을 기다림)"
 else
-  fact gatekeeper_blocked "yes (앱이 실행되지 않음)"
+  wait "$OPEN_PID"
+  fact open_quarantined "open 이 $? 로 끝남: $(tr '\n' ' ' < "$OUT/open-quarantined.txt" | cut -c1-300)"
 fi
-screencapture -x "$OUT/01-gatekeeper.png" 2> "$OUT/screencapture.err" || true
+CORRAL_PID=$(pgrep -x Corral | head -1)
+if [ -n "$CORRAL_PID" ]; then
+  # stat 의 T 는 멈춰 있는(아직 실행을 허락받지 못한) 프로세스.
+  fact corral_process "$(ps -o pid=,stat=,etime=,rss= -p "$CORRAL_PID" | tr -s ' ')"
+else
+  fact corral_process "없음"
+fi
+if [ -d "$HOME/Library/Application Support/pitwall" ]; then
+  fact gatekeeper_blocked "no (앱이 실행되어 설정 폴더를 만듦)"
+else
+  fact gatekeeper_blocked "yes (앱이 실행되지 못함: 설정 폴더가 생기지 않음)"
+fi
+with_timeout 20 screencapture -x "$OUT/01-gatekeeper.png" 2> "$OUT/screencapture.err" || true
 # 경고 창의 글자(읽을 수 있으면).
-osascript > "$OUT/gatekeeper-dialog.txt" 2>&1 <<'EOF' || true
+cat > "$OUT/gatekeeper-dialog.applescript" <<'EOF'
 set AppleScript's text item delimiters to " / "
 set found to ""
 tell application "System Events"
@@ -114,12 +145,14 @@ tell application "System Events"
 end tell
 return found
 EOF
+with_timeout 40 osascript "$OUT/gatekeeper-dialog.applescript" > "$OUT/gatekeeper-dialog.txt" 2>&1 || true
 fact gatekeeper_dialog "$(tr '\n' ' ' < "$OUT/gatekeeper-dialog.txt" | cut -c1-600)"
 
 # 다음 단계가 처음 실행부터 보도록 치운다.
-pkill -x Corral 2>/dev/null || true
-killall CoreServicesUIAgent 2>/dev/null || true
-sleep 2
+kill -9 "$OPEN_PID" 2> /dev/null || true
+pkill -9 -x Corral 2> /dev/null || true
+killall CoreServicesUIAgent 2> /dev/null || true
+sleep 3
 rm -rf "$HOME/Library/Application Support/pitwall" "$HOME/Library/Application Support/Corral"
 
 echo "== README 의 명령으로 격리 풀기"

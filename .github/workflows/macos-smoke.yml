@@ -21,6 +21,7 @@ env:
 jobs:
   collect:
     name: collect (${{ matrix.os }})
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -31,6 +32,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          # 러너마다 깔려 있는 22.x 가 달라 결과가 갈리지 않게 최신 22.x 로 맞춘다.
+          check-latest: true
           cache: npm
       - run: npm ci
       - name: 실제 명령 출력(형식 확인용)
@@ -52,6 +55,7 @@ jobs:
 
   app:
     name: app (${{ matrix.os }})
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:

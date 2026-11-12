@@ -296,10 +296,20 @@ await check('앱이 뜬다(Finder 로 연 것처럼 open)', 'required', async ()
   const args = ['--args', `--remote-debugging-port=${PORT}`, '--remote-allow-origins=*']
   const logs = ['--stdout', join(OUT, 'app-stdout.log'), '--stderr', join(OUT, 'app-stderr.log')]
   const startedAt = Date.now()
-  let opened = sh('open', [APP, ...logs, ...args])
-  if (opened.status !== 0) opened = sh('open', [APP, ...args])
-  assert(opened.status === 0, `open 실패: ${opened.stderr.trim()}`)
+  // 경고 창이 뜨면 open 은 끝나지 않는다. 30초만 기다린다.
+  let opened = sh('open', [APP, ...logs, ...args], { timeout: 30_000 })
+  if (opened.status !== 0 && opened.signal == null)
+    opened = sh('open', [APP, ...args], { timeout: 30_000 })
+  if (opened.status !== 0) {
+    screenShot('screen-open-failed')
+    throw new Error(
+      opened.signal
+        ? 'open 이 30초 안에 끝나지 않았다(경고 창이 답을 기다리는 것으로 보인다)'
+        : `open 실패: ${opened.stderr.trim()}`
+    )
+  }
   const version = await waitFor(async () => (await fetch(`${CDP}/json/version`)).json(), 60_000)
+  if (!version) screenShot('screen-no-debug-port')
   assert(
     version,
     `60초 안에 디버깅 포트가 열리지 않았다(프로세스 ${appRunning() ? '있음' : '없음'})`
@@ -490,6 +500,15 @@ await check('화면에 오류 문구가 없고 내용이 보인다', 'required',
   assert(body.length > 200, `화면 글자가 ${body.length}자뿐이다`)
   assert(!/가져오지 못했어요|exited with/.test(body), '수집 오류 문구가 보인다')
   return `${body.length}자`
+})
+
+await check('시각이 한국어(오전·오후)로 나온다', 'required', async () => {
+  // src/shared/format.ts 와 같은 호출. 앱 화면은 Electron(Chromium)의 로케일 자료를 쓴다.
+  const formatted = await page.eval(
+    `new Date(2026, 10, 10, 15, 4, 5).toLocaleTimeString('ko-KR', { hour: 'numeric', minute: '2-digit', second: '2-digit' })`
+  )
+  assert(formatted === '오후 3:04:05', `'${formatted}'`)
+  return formatted
 })
 
 // ── 탭마다 스크린샷 ──
