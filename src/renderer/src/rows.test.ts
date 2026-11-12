@@ -579,6 +579,47 @@ describe('남은 프로세스·무거운 작업·디스크·다른 앱 표', () 
     expect(filterRows(t.rows, 'cursor')).toEqual([cursor])
   })
 
+  test('macOS 시스템 프로세스를 접은 줄은 "macOS 시스템"으로 보이고 그 이름으로 찾을 수 있다', () => {
+    const t = tableFor(
+      'apps',
+      snapshot({
+        platform: 'darwin',
+        apps: [
+          {
+            name: 'macOS',
+            owner: null,
+            memoryBytes: 3 * GB,
+            commitBytes: null,
+            processCount: 412,
+            exePath: null,
+            system: true
+          },
+          {
+            name: 'Google Chrome',
+            owner: null,
+            memoryBytes: 2 * GB,
+            commitBytes: null,
+            processCount: 24,
+            exePath: '/Applications/Google Chrome.app'
+          }
+        ]
+      })
+    )
+    const [system, chrome] = t.rows
+    expect(system.cells.name).toMatchObject({
+      text: 'macOS 시스템',
+      title: 'macOS 가 기본으로 띄우는 백그라운드 프로세스'
+    })
+    expect(system.cells.processes.text).toBe('412개')
+    expect(system.search).toContain('macos 시스템')
+    // 앱으로 합친 줄은 앱 이름 그대로, 아이콘은 앱 묶음의 것.
+    expect(chrome.cells.name).toMatchObject({ text: 'Google Chrome', title: 'Google Chrome' })
+    expect(chrome.cells.name.icon).toMatchObject({
+      exePath: '/Applications/Google Chrome.app',
+      prefer: 'native'
+    })
+  })
+
   test('다른 앱: 상위 몇 개로 자르지 않고 전부 보인다', () => {
     const apps = Array.from({ length: 7 }, (_, i) => ({
       name: `app${i}.exe`,

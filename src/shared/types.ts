@@ -18,6 +18,11 @@ export interface ProcessInfo {
    * 메모리가 부족해 RAM 에서 밀려나도 줄지 않는다. 모르면 null·없음(macOS·보조 코드가 막힌 PC·열 수 없는 프로세스).
    */
   commitBytes?: number | null
+  /**
+   * 실행 파일 경로(macOS `ps` 의 comm). 어느 앱(.app 묶음)의 프로세스인지, macOS 시스템 프로세스인지 가리는 데 쓴다.
+   * 경로가 아니거나(`-zsh`) 모르면 null·없음(Windows 는 명령줄에서 찾는다).
+   */
+  exePath?: string | null
 }
 
 /** TimeWait: 최근 닫힌 연결(사용 흔적). Windows 는 소유 pid 가 0 이다. */
@@ -276,6 +281,11 @@ export interface AppUsage {
    * 그 경로(node (Cursor) 에 Cursor 아이콘). 모르면 null.
    */
   exePath: string | null
+  /**
+   * macOS 가 기본으로 띄우는 백그라운드 프로세스를 한 줄로 접은 것(이 줄 하나뿐, 화면이 "macOS 시스템"으로 보인다).
+   * 그 밖의 줄에는 없다.
+   */
+  system?: true
 }
 
 /**

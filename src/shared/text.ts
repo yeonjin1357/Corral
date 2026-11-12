@@ -1137,6 +1137,9 @@ export const text = {
       /** 런타임을 띄운 앱까지 적은 다른 앱 이름(G5b, "node (Cursor)")과 그 title("node.exe — Cursor.exe"). */
       withOwner: (name: string, owner: string): string => `${name} (${owner})`,
       withOwnerTitle: (name: string, owner: string): string => `${name} — ${owner}`,
+      /** 다른 앱에서 macOS 가 기본으로 띄우는 백그라운드 프로세스를 접은 한 줄의 이름과 title. */
+      macSystem: 'macOS 시스템',
+      macSystemTitle: 'macOS 가 기본으로 띄우는 백그라운드 프로세스',
       /** 묶음의 행 수(탭 숫자와 같은 단위). 숨긴 서버가 있으면 함께 적는다. */
       count: (n: number, hidden = 0): string =>
         hidden ? `${n}개(숨김 ${hidden}개 포함)` : `${n}개`,

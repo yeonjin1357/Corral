@@ -565,6 +565,25 @@ await check('다른 앱 목록과 앱 아이콘(OS 아이콘)', 'required', asyn
   return `앱 ${snap.apps.length}개(경로 아는 것 ${withPath.length}), 아이콘 ${from} ${icon.length}자`
 })
 
+await check('다른 앱: 앱 단위로 합치고 시스템 프로세스는 한 줄로 접는다', 'required', async () => {
+  const label = (a) =>
+    `${a.system ? 'macOS 시스템' : a.name}${a.owner ? ` (${a.owner})` : ''} ${a.processCount}개`
+  const system = snap.apps.filter((a) => a.system)
+  assert(system.length === 1, `시스템 줄이 ${system.length}개`)
+  assert(system[0].processCount > 50, `시스템 줄의 프로세스가 ${system[0].processCount}개뿐`)
+  // Corral 자신: 주 프로세스와 보조 프로세스(Helper)가 한 줄.
+  const corral = snap.apps.filter((a) => /corral/i.test(a.name))
+  assert(
+    corral.length === 1 && corral[0].name === 'Corral' && corral[0].processCount >= 3,
+    `Corral 줄: ${corral.map(label).join(' / ') || '없음'}`
+  )
+  assert(corral[0].exePath === APP, `Corral 줄의 아이콘 경로 ${corral[0].exePath}`)
+  const total = snap.apps.reduce((n, a) => n + a.processCount, 0)
+  assert(snap.apps.length < 150, `다른 앱이 ${snap.apps.length}줄(프로세스 ${total}개)`)
+  writeFileSync(join(OUT, 'apps.txt'), snap.apps.map(label).join('\n'))
+  return `프로세스 ${total}개 → ${snap.apps.length}줄. 위에서 6줄: ${snap.apps.slice(0, 6).map(label).join(' · ')}`
+})
+
 await check('화면에 오류 문구가 없고 내용이 보인다', 'required', async () => {
   const body = await page.eval('document.body.innerText')
   writeFileSync(join(OUT, 'ui-text.txt'), body)

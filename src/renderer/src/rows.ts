@@ -313,13 +313,18 @@ export function diskEvidenceText(r: DiskRow): string {
     : text.ui.disk.evidence[r.evidence]
 }
 const withoutExe = (name: string): string => name.replace(/\.exe$/i, '')
-/** 다른 앱 이름: `.exe` 를 떼고, 런타임은 띄운 앱까지("node (Cursor)", G5b). 다른 앱 탭·메모리 상세가 같이 쓴다. */
+/**
+ * 다른 앱 이름: `.exe` 를 떼고, 런타임은 띄운 앱까지("node (Cursor)", G5b). macOS 시스템 프로세스를 접은 줄은
+ * "macOS 시스템". 다른 앱 탭·메모리 상세·메모리 지도가 같이 쓴다.
+ */
 export function appName(app: AppUsage): string {
+  if (app.system) return text.ui.groups.macSystem
   const name = withoutExe(app.name)
   return app.owner ? text.ui.groups.withOwner(name, withoutExe(app.owner)) : name
 }
-/** 다른 앱 이름의 title: 프로세스 이름 그대로("node.exe — Cursor.exe"). */
+/** 다른 앱 이름의 title: 프로세스 이름 그대로("node.exe — Cursor.exe"). 접은 줄은 무엇을 접었는지. */
 export function appTitle(app: AppUsage): string {
+  if (app.system) return text.ui.groups.macSystemTitle
   return app.owner ? text.ui.groups.withOwnerTitle(app.name, app.owner) : app.name
 }
 /** 다른 앱 행 키: 이름이 같아도 띄운 앱이 다르면 다른 행. */
@@ -728,7 +733,7 @@ function buildTable(tab: SnapshotTab, s: DashboardSnapshot): Table {
             }
           },
           actions: [],
-          search: searchOf(a.name, a.owner)
+          search: searchOf(a.system ? appName(a) : a.name, a.owner)
         }))
       }
   }

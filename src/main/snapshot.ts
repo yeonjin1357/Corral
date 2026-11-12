@@ -18,6 +18,7 @@ import { exePathOf } from '../shared/exePath'
 import { commitSum, worktreeKey } from '../shared/format'
 import { findLeftovers } from './leftovers'
 import { findHeavyJobs } from './heavy'
+import { classifyMacProcess, type MacProcessClass } from './macApps'
 import { summarizeProcesses } from './processSummary'
 import { localEndpoints, peerPid } from './tcpPeers'
 import { buildTree, classifyAgent, topLevelAgentPids, type ProcessTree } from './processTree'
@@ -174,37 +175,63 @@ function ownerOf(p: ProcessInfo, tree: ProcessTree): ProcessInfo | null {
   return null
 }
 
+/** macOS 프로세스의 실행 파일 경로: ps 가 준 것, 없으면 명령줄에서 찾은 것. */
+const macPathOf = (p: ProcessInfo): string | null => p.exePath ?? exePathOf(p.commandLine, 'darwin')
+
 /**
  * 프로세스 이름(런타임은 띄운 앱까지)별로 묶어 메모리 큰 순(같으면 이름 순). 대소문자를 무시하고 묶는다.
  * 띄운 앱이 있는 묶음의 아이콘 경로는 띄운 앱의 실행 파일(모르면 지금처럼 자기 것).
+ *
+ * macOS 는 한 앱의 프로세스 이름이 제각각이고 시스템 프로세스만 수백 개라, 이름 대신 실행 파일 경로로 묶는다(macApps.ts):
+ * 앱 묶음(.app) 안의 프로세스는 그 앱 한 줄로, macOS 가 기본으로 띄우는 프로세스는 `system` 한 줄로. 런타임을 띄운 앱의
+ * 이름도 앱 묶음 이름으로 쓴다("node (Visual Studio Code)"). 앱도 시스템도 아닌 것은 지금처럼 이름별.
  */
 function appsOf(
   processes: ProcessInfo[],
   platform: Platform | null,
   tree: ProcessTree
 ): AppUsage[] {
+  const mac = platform === 'darwin'
+  const classOf = (p: ProcessInfo): MacProcessClass | null =>
+    mac ? classifyMacProcess(macPathOf(p)) : null
+  const pathOf = (p: ProcessInfo): string | null =>
+    mac ? macPathOf(p) : exePathOf(p.commandLine, platform)
   const byKey = new Map<string, AppUsage>()
   const ownerExe = new Map<string, string>()
   for (const p of processes) {
     const owner = ownerOf(p, tree)
-    const key = `${p.name.toLowerCase()}\0${owner?.name.toLowerCase() ?? ''}`
-    const ownerPath = owner ? exePathOf(owner.commandLine, platform) : null
-    if (ownerPath && !ownerExe.has(key)) ownerExe.set(key, ownerPath)
-    const app = byKey.get(key)
+    // 런타임은 띄운 앱별로(G5b), 그 밖의 프로세스만 앱 묶음·시스템으로 가린다.
+    const own = owner ? null : classOf(p)
+    const ownerApp = owner ? classOf(owner) : null
+    const ownerName = ownerApp?.kind === 'app' ? ownerApp.name : (owner?.name ?? null)
+    const row: Pick<AppUsage, 'name' | 'exePath' | 'system'> & { key: string } =
+      own?.kind === 'system'
+        ? { key: 'system', name: 'macOS', exePath: null, system: true }
+        : own?.kind === 'app'
+          ? { key: `app\0${own.bundle.toLowerCase()}`, name: own.name, exePath: own.bundle }
+          : {
+              key: `name\0${p.name.toLowerCase()}\0${ownerName?.toLowerCase() ?? ''}`,
+              name: p.name,
+              exePath: pathOf(p)
+            }
+    const ownerPath = owner ? (ownerApp?.kind === 'app' ? ownerApp.bundle : pathOf(owner)) : null
+    if (ownerPath && !ownerExe.has(row.key)) ownerExe.set(row.key, ownerPath)
+    const app = byKey.get(row.key)
     if (app) {
       app.memoryBytes += p.memoryBytes
       // 커밋은 아는 것만 더한다(하나도 모르면 null 그대로).
       if (p.commitBytes != null) app.commitBytes = (app.commitBytes ?? 0) + p.commitBytes
       app.processCount++
-      app.exePath ??= exePathOf(p.commandLine, platform)
+      app.exePath ??= row.exePath
     } else
-      byKey.set(key, {
-        name: p.name,
-        owner: owner?.name ?? null,
+      byKey.set(row.key, {
+        name: row.name,
+        owner: ownerName,
         memoryBytes: p.memoryBytes,
         commitBytes: p.commitBytes ?? null,
         processCount: 1,
-        exePath: exePathOf(p.commandLine, platform)
+        exePath: row.exePath,
+        ...(row.system ? { system: true as const } : {})
       })
   }
   return [...byKey]

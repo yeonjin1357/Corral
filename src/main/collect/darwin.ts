@@ -76,7 +76,8 @@ export function parsePsOutput(statsOut: string, argsOut: string): ProcessInfo[] 
       memoryBytes: Number(m[3]) * 1024,
       commandLine: argsByPid.get(pid) ?? comm,
       startedAt: parseLstart(m),
-      cpuMs: m[4] ? parseCpuTime(m[4]) : null
+      cpuMs: m[4] ? parseCpuTime(m[4]) : null,
+      exePath: comm.startsWith('/') ? comm : null
     })
   }
   return result

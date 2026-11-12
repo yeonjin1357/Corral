@@ -4,6 +4,7 @@ import { connect, type Socket } from 'net'
 import { tmpdir, totalmem } from 'os'
 import { join } from 'path'
 import type { ProcessInfo, RawSample } from '../../shared/types'
+import { classifyMacProcess } from '../macApps'
 import { allCwdsDarwin, sampleDarwin } from './darwin'
 import { parseVmStat, readMemory, VM_STAT_ARGV } from './memory'
 import { runCommand } from './runCommand'
@@ -187,6 +188,25 @@ describe.skipIf(!onMac)('실제 macOS 명령으로 수집(ps·lsof·vm_stat)', (
 
   test('작업 폴더를 읽는다(공백·한글 경로)', () => {
     expect(nfc(sample.cwds?.[child!.pid!] ?? '')).toBe(nfc(workDir))
+  })
+
+  test('실행 파일 경로를 담고, 그 경로로 앱·시스템을 가린다', () => {
+    expect(fixture()?.exePath, rawLine).toBe(linkPath)
+    const total = sample.processes.length
+    const withPath = sample.processes.filter((p) => p.exePath).length
+    const kinds = sample.processes.map(
+      (p) => classifyMacProcess(p.exePath ?? null)?.kind ?? 'other'
+    )
+    const count = (kind: string): number => kinds.filter((k) => k === kind).length
+    console.log(
+      `경로 ${withPath}/${total}, 앱 ${count('app')}, 시스템 ${count('system')}, 그 밖 ${count('other')}`
+    )
+    expect(withPath / total).toBeGreaterThan(0.9)
+    // 실제 Mac 은 시스템 프로세스가 대부분이다(이것들을 한 줄로 접는다).
+    expect(count('system')).toBeGreaterThan(50)
+    expect(classifyMacProcess(sample.processes.find((p) => p.pid === 1)?.exePath ?? null)).toEqual({
+      kind: 'system'
+    })
   })
 
   test('이 사용자의 모든 작업 폴더를 한 번에 읽는다', async () => {

@@ -487,7 +487,8 @@ describe('묶음과 에이전트', () => {
         owner: 'Terminal',
         exePath: TERMINAL_APP
       })
-      expect(apps.find((a) => a.name === 'python3')?.owner).toBe('iTerm2')
+      // 띄운 앱의 이름은 실행 파일 이름(iTerm2)이 아니라 앱 묶음 이름(iTerm.app).
+      expect(apps.find((a) => a.name === 'python3')?.owner).toBe('iTerm')
     })
 
     test('런타임을 띄운 앱별로 나눠도 메모리 묶음 합은 그대로다', () => {
@@ -525,6 +526,175 @@ describe('묶음과 에이전트', () => {
         )
       )
       expect(other.commitBytes).not.toBeNull()
+    })
+  })
+
+  describe('macOS 의 다른 앱: 앱 단위로 합치고 시스템 프로세스는 한 줄로 접는다', () => {
+    const CHROME = '/Applications/Google Chrome.app'
+    const CHROME_HELPERS = `${CHROME}/Contents/Frameworks/Google Chrome Framework.framework/Helpers`
+    const VSCODE = '/Applications/Visual Studio Code.app'
+    /** macOS 프로세스: 이름은 실행 파일 경로의 마지막 조각. */
+    const mac = (pid: number, ppid: number, exePath: string, mb: number): ProcessInfo => ({
+      pid,
+      ppid,
+      name: exePath.slice(exePath.lastIndexOf('/') + 1),
+      memoryBytes: mb * MB,
+      startedAt: 100 + pid,
+      commandLine: exePath,
+      exePath
+    })
+    const appsOn = (platform: 'darwin' | 'win32', procs: ProcessInfo[]): AppUsage[] =>
+      buildSnapshot({
+        ...input,
+        platform,
+        sample: { processes: procs, tcp: [] },
+        worktrees: new Map()
+      }).apps
+    const chrome = [
+      mac(100, 1, `${CHROME}/Contents/MacOS/Google Chrome`, 500),
+      mac(
+        101,
+        100,
+        `${CHROME_HELPERS}/Google Chrome Helper (Renderer).app/Contents/MacOS/Google Chrome Helper (Renderer)`,
+        300
+      ),
+      mac(
+        102,
+        100,
+        `${CHROME_HELPERS}/Google Chrome Helper (Renderer).app/Contents/MacOS/Google Chrome Helper (Renderer)`,
+        200
+      ),
+      mac(
+        103,
+        100,
+        `${CHROME_HELPERS}/Google Chrome Helper (GPU).app/Contents/MacOS/Google Chrome Helper (GPU)`,
+        100
+      )
+    ]
+    const system = [
+      mac(1, 0, '/sbin/launchd', 10),
+      mac(200, 1, '/usr/libexec/trustd', 20),
+      mac(
+        201,
+        1,
+        '/System/Library/Frameworks/CoreServices.framework/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared',
+        30
+      ),
+      mac(
+        202,
+        1,
+        '/System/Library/Frameworks/CoreServices.framework/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared',
+        30
+      ),
+      mac(203, 1, '/System/Library/CoreServices/Finder.app/Contents/MacOS/Finder', 100)
+    ]
+
+    test('한 앱의 프로세스는 이름이 달라도 그 앱 한 줄로 합친다', () => {
+      const apps = appsOn('darwin', [...system, ...chrome])
+      expect(apps.find((a) => a.name === 'Google Chrome')).toEqual({
+        name: 'Google Chrome',
+        owner: null,
+        memoryBytes: 1100 * MB,
+        commitBytes: null,
+        processCount: 4,
+        // 아이콘은 앱 묶음의 것.
+        exePath: CHROME
+      })
+      expect(apps.some((a) => a.name.includes('Helper'))).toBe(false)
+    })
+
+    test('macOS 가 기본으로 띄우는 프로세스는 한 줄로 접는다', () => {
+      const apps = appsOn('darwin', [...system, ...chrome])
+      expect(apps.filter((a) => a.system)).toEqual([
+        {
+          name: 'macOS',
+          owner: null,
+          memoryBytes: 190 * MB,
+          commitBytes: null,
+          processCount: 5,
+          exePath: null,
+          system: true
+        }
+      ])
+      for (const folded of ['launchd', 'trustd', 'mdworker_shared', 'Finder'])
+        expect(apps.some((a) => a.name === folded)).toBe(false)
+      // 앱 하나 + 시스템 한 줄.
+      expect(apps).toHaveLength(2)
+    })
+
+    test('Terminal 같은 기본 앱과 직접 깐 프로그램은 접지 않는다', () => {
+      const apps = appsOn('darwin', [
+        ...system,
+        mac(300, 1, '/System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal', 80),
+        mac(301, 1, '/opt/homebrew/bin/postgres', 40),
+        mac(302, 301, '/opt/homebrew/bin/postgres', 20),
+        { ...mac(303, 300, '/bin/zsh', 5), name: '-zsh', commandLine: '-zsh', exePath: null }
+      ])
+      expect(apps.find((a) => a.name === 'Terminal')).toMatchObject({
+        processCount: 1,
+        exePath: '/System/Applications/Utilities/Terminal.app'
+      })
+      expect(apps.find((a) => a.name === 'postgres')).toMatchObject({
+        processCount: 2,
+        memoryBytes: 60 * MB,
+        exePath: '/opt/homebrew/bin/postgres'
+      })
+      expect(apps.find((a) => a.name === '-zsh')?.processCount).toBe(1)
+      expect(apps.filter((a) => a.system).map((a) => a.processCount)).toEqual([5])
+    })
+
+    test('런타임은 띄운 앱의 이름으로 묶는다: 보조 프로세스가 달라도 node (Visual Studio Code) 한 줄', () => {
+      const helpers = `${VSCODE}/Contents/Frameworks`
+      const apps = appsOn('darwin', [
+        ...system,
+        mac(400, 1, `${VSCODE}/Contents/MacOS/Electron`, 300),
+        mac(
+          401,
+          400,
+          `${helpers}/Code Helper (Plugin).app/Contents/MacOS/Code Helper (Plugin)`,
+          200
+        ),
+        mac(402, 400, `${helpers}/Code Helper.app/Contents/MacOS/Code Helper`, 100),
+        // 확장 호스트가 띄운 언어 서버와, 다른 보조 프로세스가 띄운 node.
+        { ...mac(410, 401, '/usr/local/bin/node', 150), commandLine: 'node tsserver.js' },
+        { ...mac(411, 402, '/usr/local/bin/node', 50), commandLine: 'node watcher.js' }
+      ])
+      expect(apps.find((a) => a.name === 'node')).toEqual({
+        name: 'node',
+        owner: 'Visual Studio Code',
+        memoryBytes: 200 * MB,
+        commitBytes: null,
+        processCount: 2,
+        exePath: VSCODE
+      })
+      // 실행 파일 이름(Electron)이 아니라 앱 이름으로.
+      expect(apps.find((a) => a.name === 'Visual Studio Code')).toMatchObject({
+        owner: null,
+        processCount: 3,
+        memoryBytes: 600 * MB
+      })
+      expect(apps.some((a) => a.name === 'Electron')).toBe(false)
+    })
+
+    test('묶는 방식만 바뀐다: 프로세스 수와 메모리 합은 그대로', () => {
+      const procs = [...system, ...chrome, mac(301, 1, '/opt/homebrew/bin/postgres', 40)]
+      const apps = appsOn('darwin', procs)
+      expect(apps.reduce((n, a) => n + a.processCount, 0)).toBe(procs.length)
+      expect(apps.reduce((n, a) => n + a.memoryBytes, 0)).toBe((190 + 1100 + 40) * MB)
+    })
+
+    test('Windows 는 지금처럼 이름별로 묶는다(앱으로 합치거나 시스템으로 접지 않는다)', () => {
+      const apps = appsOn('win32', [...system, ...chrome])
+      expect(apps.some((a) => a.system)).toBe(false)
+      expect(apps.map((a) => a.name)).toEqual([
+        'Google Chrome',
+        'Google Chrome Helper (Renderer)',
+        'Finder',
+        'Google Chrome Helper (GPU)',
+        'mdworker_shared',
+        'trustd',
+        'launchd'
+      ])
     })
   })
 

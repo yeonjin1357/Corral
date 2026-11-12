@@ -127,6 +127,22 @@ describe('parsePsOutput', () => {
     expect(p.startedAt).toBe(new Date(2026, 0, 12, 9, 5, 0).getTime())
   })
 
+  test('실행 파일 경로를 그대로 담는다(어느 앱의 프로세스인지 가리는 데 쓴다), 경로가 아니면 null', () => {
+    const helper =
+      '/Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Helpers/Google Chrome Helper (Renderer).app/Contents/MacOS/Google Chrome Helper (Renderer)'
+    const [chrome, shell] = parsePsOutput(
+      [
+        `  700     1   51200 Mon Jan 12 09:05:00 2026 ${helper}`,
+        '  701   700     900 Mon Jan 12 09:05:01 2026 -zsh',
+        ''
+      ].join('\n'),
+      [`  700 ${helper} --type=renderer`, '  701 -zsh', ''].join('\n')
+    )
+    expect(chrome.exePath).toBe(helper)
+    expect(chrome.name).toBe('Google Chrome Helper (Renderer)')
+    expect(shell.exePath).toBeNull()
+  })
+
   test('ps 가 CPU 시간(time)과 lstart 를 요청받는다', () => {
     expect(PS_STATS_ARGV).toEqual(['/bin/ps', '-axww', '-o', 'pid=,ppid=,rss=,time=,lstart=,comm='])
   })
@@ -170,7 +186,8 @@ describe('parsePsOutput', () => {
         commandLine:
           '/usr/local/bin/node /Users/dev/work/shop-web/node_modules/.bin/vite --port 3000',
         startedAt: null,
-        cpuMs: null
+        cpuMs: null,
+        exePath: '/usr/local/bin/node'
       }
     ])
   })
