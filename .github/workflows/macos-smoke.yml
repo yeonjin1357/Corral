@@ -1,0 +1,106 @@
+name: macOS smoke
+
+# 실제 Mac(GitHub 의 macOS 러너)에서 확인한다.
+# - collect: 진짜 ps·lsof·vm_stat 으로 수집(src/main/collect/darwin.real.test.ts)과 전체 단위 테스트
+# - app: dmg 를 팀원이 받는 것처럼 설치하고, 앱을 띄워 수집·끄기·연동·디스크 정리를 해 본다(scripts/macos-smoke)
+# 결과 표는 실행 요약에, 스크린샷·스냅샷은 아티팩트에 남는다.
+on:
+  workflow_dispatch:
+  push:
+    branches: ['test/macos-smoke']
+
+permissions:
+  contents: read
+
+env:
+  # release: 아래 태그의 릴리스 dmg(팀원이 받을 바로 그 파일), build: 이 커밋으로 새로 만든 dmg
+  DMG_FROM: release
+  RELEASE_TAG: v0.2.0
+  TZ: Asia/Seoul
+
+jobs:
+  collect:
+    name: collect (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-26, macos-15, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: 실제 명령 출력(형식 확인용)
+        run: |
+          sw_vers
+          uname -m
+          echo "--- ps (stats)"
+          LC_ALL=en_US.UTF-8 /bin/ps -axww -o pid=,ppid=,rss=,time=,lstart=,comm= | head -12
+          echo "--- ps (args)"
+          /bin/ps -axww -o pid=,args= | head -6
+          echo "--- lsof"
+          /usr/sbin/lsof -nP -iTCP -FpnT -w | head -20
+          echo "--- vm_stat"
+          /usr/bin/vm_stat
+      - name: 진짜 명령으로 수집 확인
+        run: npx vitest run src/main/collect/darwin.real.test.ts --reporter=verbose
+      - name: 전체 단위 테스트
+        run: npm test
+
+  app:
+    name: app (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-26, macos-15, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: 경로 정하기
+        run: |
+          echo "SMOKE_OUT=$RUNNER_TEMP/smoke-out" >> "$GITHUB_ENV"
+          echo "SMOKE_DMG_DIR=$RUNNER_TEMP/dmg" >> "$GITHUB_ENV"
+          echo "SMOKE_ROOT=$RUNNER_TEMP/작업 공간" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/smoke-out" "$RUNNER_TEMP/dmg"
+      - name: 릴리스에서 dmg 받기
+        if: env.DMG_FROM == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ARCH=$(uname -m); [ "$ARCH" = x86_64 ] && ARCH=x64
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern "corral-*-$ARCH.dmg" --dir "$SMOKE_DMG_DIR"
+          ls -la "$SMOKE_DMG_DIR"
+      - name: 이 커밋으로 dmg 만들기
+        if: env.DMG_FROM == 'build'
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: |
+          ARCH=$(uname -m); [ "$ARCH" = x86_64 ] && ARCH=x64
+          npm ci
+          npx electron-vite build
+          npx electron-builder --mac dmg "--$ARCH" --publish never
+          cp dist/corral-*-"$ARCH".dmg "$SMOKE_DMG_DIR/"
+      - name: 설치(격리 속성 → Gatekeeper → README 의 xattr)
+        run: bash scripts/macos-smoke/install.sh
+      - name: 보여 줄 것 만들기(저장소·서버·에이전트)
+        run: bash scripts/macos-smoke/fixtures.sh
+      - name: 앱 띄워 확인
+        run: node scripts/macos-smoke/drive.mjs
+      - name: 요약
+        if: always()
+        run: |
+          if [ -f "$SMOKE_OUT/summary.md" ]; then cat "$SMOKE_OUT/summary.md" >> "$GITHUB_STEP_SUMMARY"; fi
+          ls -la "$SMOKE_OUT" || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: macos-smoke-${{ matrix.os }}
+          path: ${{ runner.temp }}/smoke-out
+          if-no-files-found: warn
