@@ -488,7 +488,7 @@ const status = computed(() => {
                   <p
                     v-if="guardNeedsHook"
                     class="heavy-guard-hint mt-1 text-xs leading-relaxed"
-                    :style="{ color: 'var(--peach)' }"
+                    :style="{ color: 'var(--status-waiting)' }"
                   >
                     {{ S.heavyGuardNeedsHook }}
                   </p>
@@ -695,7 +695,7 @@ const status = computed(() => {
               <p
                 v-if="hook?.allHooksDisabled"
                 class="text-xs leading-relaxed"
-                :style="{ color: 'var(--peach)' }"
+                :style="{ color: 'var(--status-waiting)' }"
               >
                 {{ text.ui.hook.allHooksDisabled }}
               </p>

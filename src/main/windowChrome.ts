@@ -7,10 +7,10 @@
 /** 화면 제목줄 높이(px, 아래 테두리 1px 포함). 창 단추는 테두리를 덮지 않게 1px 덜 그린다. */
 export const TITLE_BAR_HEIGHT = 48
 
-/** NeoHtop GitHub Light / Catppuccin 의 card(제목줄 바탕)·foreground·background 색. */
+/** app.css 밝게·어둡게 토큰의 card(제목줄 바탕)·foreground·background 색. */
 const COLORS = {
-  light: { bar: '#f6f8fa', symbol: '#24292f', background: '#ffffff' },
-  dark: { bar: '#181825', symbol: '#cdd6f4', background: '#1e1e2e' }
+  light: { bar: '#ffffff', symbol: '#1d1f1c', background: '#f6f6f3' },
+  dark: { bar: '#17181a', symbol: '#e6e8e3', background: '#111213' }
 } as const
 
 export function overlayFor(dark: boolean): { color: string; symbolColor: string; height: number } {

@@ -128,7 +128,7 @@ describe('TrayView', () => {
       expect.stringMatching(/busy.*작업 중 · 5분/)
     ])
     const peach = rows.map((r) =>
-      r.findAll('span').some((x) => x.classes().includes('text-[color:var(--peach)]'))
+      r.findAll('span').some((x) => x.classes().includes('text-[color:var(--status-waiting)]'))
     )
     expect(peach).toEqual([true, true, false, false])
     // 오래 쉬는 세션도 표와 같은 글자("오래 쉼 · 기간").

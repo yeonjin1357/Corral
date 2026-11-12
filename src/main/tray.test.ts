@@ -276,9 +276,9 @@ test('풍선말에 응답 대기 수', () => {
 })
 
 describe('아이콘', () => {
-  test('상태 색은 화면과 같은 Catppuccin(정상 초록·경고 노랑·위험 분홍), 점은 주황', () => {
-    expect(LEVEL_COLORS).toEqual({ normal: '#a6e3a1', warn: '#f9e2af', danger: '#f38ba8' })
-    expect(BADGE_COLOR).toBe('#fab387')
+  test('상태 색은 어두운 테마 값(정상 민트·경고 노랑·위험 빨강), 점은 주황', () => {
+    expect(LEVEL_COLORS).toEqual({ normal: '#8fdcaa', warn: '#f0b45c', danger: '#f07a6e' })
+    expect(BADGE_COLOR).toBe('#f2925a')
   })
 
   test('권한 대기나 조용한 에이전트가 있으면 점', () => {

@@ -465,7 +465,7 @@ const G = text.ui.group
                     <Badge
                       v-if="row.cells[col.id].badge"
                       variant="outline"
-                      class="shrink-0 border-[color:var(--peach)] px-1.5 text-[10px] font-normal text-[color:var(--peach)]"
+                      class="shrink-0 border-[color:var(--status-waiting)] px-1.5 text-[10px] font-normal text-[color:var(--status-waiting)]"
                       >{{ row.cells[col.id].badge }}</Badge
                     >
                   </span>

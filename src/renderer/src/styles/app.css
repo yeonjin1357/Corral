@@ -1,7 +1,7 @@
 /*
   화면 스타일은 NeoHtop (MIT, https://github.com/Abdenasser/neohtop, dab34f5) 의 src/app.css 와
   shadcn-svelte (MIT) 의 tailwind.css(사용자 정의 variant) 를 가져왔다.
-  색: 밝게 = NeoHtop "GitHub Light", 어둡게 = NeoHtop "Catppuccin"(기본) — NeoHtop theme-tokens.js 로 계산한 값 그대로.
+  색은 Corral 고유(흑회색 + 민트), 표·카드 규칙은 NeoHtop app.css 에서 가져옴.
   바꾼 점(한국어 앱): 글꼴을 Pretendard 로(Windows·macOS 같게), 한글 줄바꿈 keep-all, 숫자 tabular-nums,
   Tauri 창 테두리 대신 Electron 창 제목줄 영역, NeoHtop 이 쓰지 않는 테마·표 규칙은 뺐다.
 */
@@ -82,114 +82,86 @@
   --radius-xl: calc(var(--radius) + 4px);
 }
 
-/* 밝게: NeoHtop GitHub Light */
+/* 밝게 */
 :root {
-  --base: #ffffff;
-  --mantle: #f6f8fa;
-  --crust: #eaeef2;
-  --text: #24292f;
-  --subtext0: #57606a;
-  --subtext1: #6e7781;
-  --surface0: #f3f6fa;
-  --surface1: #eaeef2;
-  --surface2: #d0d7de;
-  --overlay0: #8c959f;
-  --overlay1: #6e7781;
-  --blue: #0969da;
-  --lavender: #8250df;
-  --sapphire: #0550ae;
-  --sky: #218bff;
-  --red: #cf222e;
-  --maroon: #a40e26;
-  --peach: #bc4c00;
-  --yellow: #9a6700;
-  --green: #1a7f37;
-  --teal: #0969da;
-  --background: #ffffff;
-  --foreground: #24292f;
-  --card: #f6f8fa;
-  --card-foreground: #24292f;
+  --background: #f6f6f3;
+  --foreground: #1d1f1c;
+  --card: #ffffff;
+  --card-foreground: #1d1f1c;
   --popover: #ffffff;
-  --popover-foreground: #24292f;
-  --primary: #0755b1;
+  --popover-foreground: #1d1f1c;
+  --primary: #16774a;
   --primary-foreground: #ffffff;
-  --secondary: #e7eaee;
-  --secondary-foreground: #24292f;
-  --muted: #eceef2;
-  --muted-foreground: #545d67;
-  --accent: #d5e0ec;
-  --accent-foreground: #24292f;
-  --destructive: #951821;
+  --secondary: #ebece7;
+  --secondary-foreground: #1d1f1c;
+  --muted: #efefea;
+  --muted-foreground: #5d6059;
+  --accent: #ebece7;
+  --accent-foreground: #1d1f1c;
+  --destructive: #a3322a;
   --destructive-foreground: #ffffff;
-  --border: #bec0c3;
-  --input: #8c8f91;
-  --ring: #031e3f;
-  --chart-1: #0969da;
-  --chart-2: #1a7f37;
-  --chart-3: #bc4c00;
-  --chart-4: #8250df;
-  --chart-5: #0969da;
-  --status-running: #1a7f37;
-  --status-stopped: #cf222e;
-  --status-idle: #57606a;
-  --scrollbar-thumb: #797d81;
-  --scrollbar-thumb-hover: #5e6164;
+  --border: #dcdcd6;
+  --input: #a9aca5;
+  --ring: var(--primary);
+  --chart-1: #25679e;
+  --chart-2: #16774a;
+  --chart-3: #6c62a8;
+  --chart-4: #77705a;
+  --chart-5: #4f6f94;
+  --status-running: var(--primary);
+  --status-waiting: #93590a;
+  --status-stopped: #b13a2e;
+  --status-idle: #646760;
+  --info: #25679e;
+  --group-dev: var(--info);
+  --group-agent: #16774a;
+  --group-heavy: var(--status-waiting);
+  --group-apps: #6c62a8;
+  --group-system: #a5a8a1;
+  --scrollbar-thumb: #b7b9b2;
+  --scrollbar-thumb-hover: #9a9d96;
   --radius: 0.625rem;
   color-scheme: light;
 }
 
-/* 어둡게: NeoHtop Catppuccin(기본 테마) */
+/* 어둡게 */
 .dark {
-  --base: #1e1e2e;
-  --mantle: #181825;
-  --crust: #11111b;
-  --text: #cdd6f4;
-  --subtext0: #a6adc8;
-  --subtext1: #bac2de;
-  --surface0: #313244;
-  --surface1: #45475a;
-  --surface2: #585b70;
-  --overlay0: #6c7086;
-  --overlay1: #7f849c;
-  --blue: #89b4fa;
-  --lavender: #b4befe;
-  --sapphire: #74c7ec;
-  --sky: #89dceb;
-  --red: #f38ba8;
-  --maroon: #eba0ac;
-  --peach: #fab387;
-  --yellow: #f9e2af;
-  --green: #a6e3a1;
-  --teal: #94e2d5;
-  --background: #1e1e2e;
-  --foreground: #cdd6f4;
-  --card: #181825;
-  --card-foreground: #cdd6f4;
-  --popover: #1f202d;
-  --popover-foreground: #cdd6f4;
-  --primary: #94bbfa;
-  --primary-foreground: #11111b;
-  --secondary: #313244;
-  --secondary-foreground: #cdd6f4;
-  --muted: #2a2a3b;
-  --muted-foreground: #abb2cb;
-  --accent: #383c53;
-  --accent-foreground: #cdd6f4;
-  --destructive: #f9c7d5;
-  --destructive-foreground: #11111b;
-  --border: #505160;
-  --input: #6a6c7b;
-  --ring: #bdd5fc;
-  --chart-1: #89b4fa;
-  --chart-2: #a6e3a1;
-  --chart-3: #fab387;
-  --chart-4: #b4befe;
-  --chart-5: #94e2d5;
-  --status-running: #a6e3a1;
-  --status-stopped: #f38ba8;
-  --status-idle: #a6adc8;
-  --scrollbar-thumb: #878998;
-  --scrollbar-thumb-hover: #a6a8b3;
+  --background: #111213;
+  --foreground: #e6e8e3;
+  --card: #17181a;
+  --card-foreground: #e6e8e3;
+  --popover: #1c1d20;
+  --popover-foreground: #e6e8e3;
+  --primary: #8fdcaa;
+  --primary-foreground: #0d1a12;
+  --secondary: #24262a;
+  --secondary-foreground: #e6e8e3;
+  --muted: #1d1f22;
+  --muted-foreground: #a3a69f;
+  --accent: #24262a;
+  --accent-foreground: #e6e8e3;
+  --destructive: #f07a6e;
+  --destructive-foreground: #160b09;
+  --border: #2b2d30;
+  --input: #3a3d41;
+  --ring: var(--primary);
+  --chart-1: #7fbfe6;
+  --chart-2: #8fdcaa;
+  --chart-3: #a7a3c9;
+  --chart-4: #b9b39a;
+  --chart-5: #93b4d8;
+  --status-running: var(--primary);
+  --status-waiting: #f0b45c;
+  --status-stopped: #f07a6e;
+  --status-idle: #969993;
+  --info: #7fbfe6;
+  --group-dev: var(--info);
+  --group-agent: #8fdcaa;
+  --group-heavy: var(--status-waiting);
+  --group-apps: #a7a3c9;
+  --group-system: #5e6267;
+  --scrollbar-thumb: #4a4d52;
+  --scrollbar-thumb-hover: #5d6066;
   color-scheme: dark;
 }
 

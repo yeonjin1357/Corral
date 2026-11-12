@@ -51,7 +51,7 @@ const lines = computed(() =>
     }))
 )
 const first = computed(() => lines.value[0] ?? null)
-const color = computed(() => (waiting.value.length ? 'var(--peach)' : null))
+const color = computed(() => (waiting.value.length ? 'var(--status-waiting)' : null))
 
 function selectFirst(): void {
   if (first.value) emit('select', first.value.key)

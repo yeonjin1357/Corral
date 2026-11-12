@@ -51,14 +51,14 @@ export const TABS: TabKey[] = [
 /** 스냅샷으로 표를 만드는 탭(기록은 따로 `eventsTable`). */
 export type SnapshotTab = Exclude<TabKey, 'events'>
 
-/** 상태 점 색: running 초록 · idle 회색 · stopped 빨강 · warn 주황(NeoHtop status-* 와 peach). */
+/** 상태 점 색: running 민트 · idle 회색 · stopped 빨강 · warn 노랑(응답 대기·주의). */
 export type Tone = 'running' | 'idle' | 'stopped' | 'warn'
 /** 상태 점의 색(표·연동 상태가 같이 쓴다). */
 export const TONE_COLOR: Record<Tone, string> = {
   running: 'var(--status-running)',
   idle: 'var(--status-idle)',
   stopped: 'var(--status-stopped)',
-  warn: 'var(--peach)'
+  warn: 'var(--status-waiting)'
 }
 
 /**

@@ -64,7 +64,11 @@ onUnmounted(() => {
 })
 
 const s = computed(() => snapshot.value)
-const LEVEL_COLOR = { normal: 'var(--chart-2)', warn: 'var(--peach)', danger: 'var(--destructive)' }
+const LEVEL_COLOR = {
+  normal: 'var(--chart-2)',
+  warn: 'var(--status-waiting)',
+  danger: 'var(--destructive)'
+}
 const ram = computed(() => {
   const m = s.value?.memory
   if (!m || m.totalBytes <= 0) return null
@@ -162,7 +166,9 @@ const subtitle = computed(() => (!s.value ? T.reading : s.value.stale ? T.stale 
             </p>
             <p
               class="truncate text-[10px]"
-              :class="agentCounts.waiting ? 'text-[color:var(--peach)]' : 'text-muted-foreground'"
+              :class="
+                agentCounts.waiting ? 'text-[color:var(--status-waiting)]' : 'text-muted-foreground'
+              "
             >
               {{ T.agentStates(agentCounts.working, agentCounts.waiting) }}
             </p>
@@ -239,7 +245,9 @@ const subtitle = computed(() => (!s.value ? T.reading : s.value.stale ? T.stale 
               }}</span>
               <span
                 class="shrink-0 text-xs tabular-nums"
-                :class="needsAttention(a) ? 'text-[color:var(--peach)]' : 'text-muted-foreground'"
+                :class="
+                  needsAttention(a) ? 'text-[color:var(--status-waiting)]' : 'text-muted-foreground'
+                "
                 >{{ agentState(a) }}</span
               >
             </Button>

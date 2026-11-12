@@ -40,8 +40,8 @@ const emit = defineEmits<{
 }>()
 
 const THEMES: { key: ThemeChoice; icon: unknown; colors: string[] }[] = [
-  { key: 'light', icon: Sun, colors: ['#0969da', '#cf222e', '#1a7f37'] },
-  { key: 'dark', icon: Moon, colors: ['#89b4fa', '#f38ba8', '#a6e3a1'] },
+  { key: 'light', icon: Sun, colors: ['#16774a', '#93590a', '#b13a2e'] },
+  { key: 'dark', icon: Moon, colors: ['#8fdcaa', '#f0b45c', '#f07a6e'] },
   { key: 'auto', icon: Monitor, colors: [] }
 ]
 const shortcut = navigator.userAgent.includes('Mac') ? '⌘,' : 'Ctrl+,'
@@ -65,7 +65,7 @@ const shortcut = navigator.userAgent.includes('Mac') ? '⌘,' : 'Ctrl+,'
       <span class="mr-2 flex items-center gap-1.5 text-xs text-muted-foreground" role="status">
         <span
           class="size-1.5 rounded-full"
-          :style="{ background: stale ? 'var(--peach)' : 'var(--status-running)' }"
+          :style="{ background: stale ? 'var(--status-waiting)' : 'var(--status-running)' }"
         ></span
         >{{ stale ? text.ui.stale : text.ui.bar.live(liveSec) }}
       </span>

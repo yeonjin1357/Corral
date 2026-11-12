@@ -204,7 +204,7 @@ const memoryBadges = computed(() => {
   return badges
 })
 const commit = computed(() => s.value.memory.commit)
-const COMMIT_COLOR = { warn: 'var(--peach)', danger: 'var(--destructive)' } as const
+const COMMIT_COLOR = { warn: 'var(--status-waiting)', danger: 'var(--destructive)' } as const
 /** "104.8 / 127.7 GB (82%)": 두 값의 단위가 같으면 앞 값의 단위는 뺀다. */
 const commitLine = computed(() => {
   const c = commit.value
@@ -685,7 +685,7 @@ const diskSub = computed(() => {
             <!-- 좁은 카드에 들어가게 사람이 볼 일(응답 대기)과 정리할 거리(오래 쉼)만. -->
             <span
               class="min-w-0 truncate tabular-nums"
-              :style="agentCounts.waiting > 0 ? { color: 'var(--peach)' } : undefined"
+              :style="agentCounts.waiting > 0 ? { color: 'var(--status-waiting)' } : undefined"
               >{{ text.ui.agent.states.waiting }} {{ agentCounts.waiting }}</span
             >
             <span v-if="agentCounts.parked > 0" class="shrink-0 tabular-nums">{{
@@ -759,7 +759,9 @@ const diskSub = computed(() => {
                     </dt>
                     <dd
                       class="mt-0.5 text-sm font-medium tabular-nums"
-                      :style="agentCounts.waiting > 0 ? { color: 'var(--peach)' } : undefined"
+                      :style="
+                        agentCounts.waiting > 0 ? { color: 'var(--status-waiting)' } : undefined
+                      "
                     >
                       {{ agentCounts.waiting }}
                     </dd>
@@ -783,16 +785,19 @@ const diskSub = computed(() => {
             :icon="Hammer"
             :title="text.ui.cards.heavy"
             :hint="text.ui.cards.heavyHelp"
-            :color="s.heavyOverlap ? 'var(--destructive)' : null"
+            :color="s.heavyOverlap ? 'var(--status-waiting)' : null"
             :action-label="text.ui.cards.showList"
             :value="String(s.heavyJobs.length)"
             :unit="text.ui.cards.count"
             @action="emit('tab', 'heavy')"
           >
             <template #badge>
-              <Badge v-if="s.heavyOverlap" variant="destructive" class="text-[10px] font-normal">{{
-                text.ui.cards.overlap
-              }}</Badge>
+              <Badge
+                v-if="s.heavyOverlap"
+                variant="outline"
+                class="border-[color:var(--status-waiting)] text-[10px] font-normal text-[color:var(--status-waiting)]"
+                >{{ text.ui.cards.overlap }}</Badge
+              >
             </template>
             <span class="min-w-0 truncate">{{ text.ui.cards.heavyRunning }}</span>
             <span class="shrink-0 tabular-nums" :title="text.ui.cards.memorySum">{{
@@ -804,15 +809,15 @@ const diskSub = computed(() => {
               :icon="Hammer"
               :title="text.ui.cards.heavy"
               :hint="text.ui.cards.heavyHelp"
-              :color="s.heavyOverlap ? 'var(--destructive)' : null"
+              :color="s.heavyOverlap ? 'var(--status-waiting)' : null"
               :action-label="text.ui.cards.showList"
               @action="emit('tab', 'heavy')"
             >
               <template #badge>
                 <Badge
                   v-if="s.heavyOverlap"
-                  variant="destructive"
-                  class="text-[10px] font-normal"
+                  variant="outline"
+                  class="border-[color:var(--status-waiting)] text-[10px] font-normal text-[color:var(--status-waiting)]"
                   >{{ text.ui.cards.overlap }}</Badge
                 >
               </template>
@@ -867,7 +872,7 @@ const diskSub = computed(() => {
             :icon="Unplug"
             :title="text.ui.cards.leftovers"
             :hint="text.ui.cards.leftoversHelp"
-            :color="freeLeftovers.length ? 'var(--peach)' : null"
+            :color="freeLeftovers.length ? 'var(--status-waiting)' : null"
             :action-label="text.ui.cards.showList"
             :value="String(freeLeftovers.length)"
             :unit="text.ui.cards.count"
@@ -883,7 +888,7 @@ const diskSub = computed(() => {
               :icon="Unplug"
               :title="text.ui.cards.leftovers"
               :hint="text.ui.cards.leftoversHelp"
-              :color="freeLeftovers.length ? 'var(--peach)' : null"
+              :color="freeLeftovers.length ? 'var(--status-waiting)' : null"
               :action-label="text.ui.cards.showList"
               @action="emit('tab', 'leftovers')"
             />

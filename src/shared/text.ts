@@ -331,7 +331,7 @@ export const text = {
       themeTitle: '화면 테마 고르기',
       themes: {
         light: { label: '밝게', sub: '흰 바탕' },
-        dark: { label: '어둡게', sub: 'Catppuccin' },
+        dark: { label: '어둡게', sub: '흑회색' },
         auto: { label: 'OS 따라', sub: '밝게·어둡게 자동' }
       },
       menu: 'Corral 메뉴',

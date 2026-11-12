@@ -10,11 +10,11 @@ export const GROUP_ORDER: ProcessGroup[] = ['devServer', 'agent', 'heavy', 'othe
 
 /** 묶음 색(메모리 카드와 메모리 상세가 같은 색). */
 export const GROUP_COLOR: Record<ProcessGroup, string> = {
-  devServer: 'var(--chart-1)',
-  agent: 'var(--chart-2)',
-  heavy: 'var(--chart-3)',
-  otherApps: 'var(--chart-4)',
-  system: 'var(--status-idle)'
+  devServer: 'var(--group-dev)',
+  agent: 'var(--group-agent)',
+  heavy: 'var(--group-heavy)',
+  otherApps: 'var(--group-apps)',
+  system: 'var(--group-system)'
 }
 
 export interface CompositionPart {

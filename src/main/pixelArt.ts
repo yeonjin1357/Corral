@@ -9,8 +9,8 @@ import { deflateSync } from 'node:zlib'
 
 /** 판 색(NeoHtop 앱 아이콘의 검정). */
 export const APP_TILE = '#0b0a09'
-/** 큰 아이콘의 그래프 선 색(Catppuccin green, 화면의 정상 색과 같다). */
-export const APP_LINE = '#a6e3a1'
+/** 큰 아이콘의 그래프 선 색(민트, 화면의 강조색과 같다). */
+export const APP_LINE = '#8fdcaa'
 
 /** 큰 아이콘 그림(16×16). W 흰색, G 그늘, N 그래프 선, . 빈칸(판 색). */
 export const APP_GRID = [

@@ -3,15 +3,15 @@ import type { DashboardSnapshot, MemoryLevel, Platform, UpdateStatus } from '../
 import { formatBytes, pressureText } from '../shared/format'
 import { text } from '../shared/text'
 
-/** 트레이 아이콘(작은 모니터) 그래프 선 색: 화면 어두운 테마(NeoHtop Catppuccin)의 초록·노랑·분홍. */
+/** 트레이 아이콘(작은 모니터) 그래프 선 색: 화면 어두운 테마의 민트·노랑·빨강(바탕 테마와 상관없이 어두운 값). */
 export const LEVEL_COLORS: Record<MemoryLevel, string> = {
-  normal: '#a6e3a1',
-  warn: '#f9e2af',
-  danger: '#f38ba8'
+  normal: '#8fdcaa',
+  warn: '#f0b45c',
+  danger: '#f07a6e'
 }
 
-/** 트레이 아이콘 오른쪽 위 점 색(Catppuccin peach, 화면의 응답 대기·조용함 색과 같다). */
-export const BADGE_COLOR = '#fab387'
+/** 트레이 아이콘 오른쪽 위 점 색(경고 노랑과 구분되는 주황). */
+export const BADGE_COLOR = '#f2925a'
 
 const hasMemory = (s: DashboardSnapshot | null): s is DashboardSnapshot =>
   !!s && s.memory.totalBytes > 0

@@ -268,10 +268,10 @@ describe('메모리 카드: 전체 RAM 을 묶음별로 쌓은 막대(G4)', () =
     const widths = parts(w).map((p) => parseFloat((p.element as HTMLElement).style.width))
     ;[12, 0.4, 29.6, 18].forEach((share, i) => expect(widths[i]).toBeCloseTo(share))
     expect(parts(w).map((p) => (p.element as HTMLElement).style.backgroundColor)).toEqual([
-      'var(--chart-1)',
-      'var(--chart-2)',
-      'var(--chart-4)',
-      'var(--status-idle)'
+      'var(--group-dev)',
+      'var(--group-agent)',
+      'var(--group-apps)',
+      'var(--group-system)'
     ])
     expect(parts(w).map((p) => p.attributes('title'))).toEqual([
       '개발 서버 12.0 GB · 전체 RAM 의 12%',
