@@ -287,7 +287,8 @@
   box-shadow: inset 0 -1px var(--border);
 }
 .process-table-region [data-slot='table-cell'] {
-  padding-block: 8px;
+  --cell-pad-y: 8px;
+  padding-block: var(--cell-pad-y);
   white-space: nowrap;
 }
 .process-table-region .actions-cell {
@@ -356,10 +357,10 @@
 }
 [data-tree] {
   position: absolute;
-  left: -20px;
-  top: -1rem;
-  width: 10px;
-  height: calc(50% + 1rem);
+  left: 8px;
+  top: calc(-1 * var(--cell-pad-y, 8px));
+  width: 14px;
+  height: calc(50% + var(--cell-pad-y, 8px));
   border-left: 1px solid color-mix(in srgb, var(--border), var(--foreground) 15%);
   border-bottom: 1px solid color-mix(in srgb, var(--border), var(--foreground) 15%);
   border-bottom-left-radius: 4px;
