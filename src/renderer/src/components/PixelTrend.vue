@@ -22,8 +22,10 @@ const props = defineProps<{
   range: string
   /** 이 값 이상이면 노랑. */
   warn: number
-  /** 이 값 이상이면 빨강. */
+  /** 이 값 이상면 빨강. */
   danger: number
+  /** 이보다 길게 끊긴 구간은 잇지 않는다(없으면 앞뒤에 점이 있는 빈 칸은 모두 잇는다). */
+  gapMs?: number | null
 }>()
 
 const BAR_COUNT = 24
@@ -44,7 +46,9 @@ const box = ref<HTMLElement | null>(null)
 const end = computed(() => props.points.at(-1)?.t ?? 0)
 const start = computed(() => end.value - props.windowMs)
 const visible = computed(() => props.points.filter((p) => p.t >= start.value))
-const buckets = computed(() => pixelBuckets(props.points, end.value, props.windowMs, BAR_COUNT))
+const buckets = computed(() =>
+  pixelBuckets(props.points, end.value, props.windowMs, BAR_COUNT, props.gapMs)
+)
 const barHeight = (v: number): number =>
   Math.max(STEP, Math.round((Math.max(0, Math.min(100, v)) / 100) * (HEIGHT / STEP)) * STEP)
 /** 칸의 시작 시각(풍선말에 보이는 시각). */
