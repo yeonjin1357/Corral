@@ -49,7 +49,7 @@ xattr -dr com.apple.quarantine /Applications/Corral.app
 
 ## 에이전트 연동 (선택)
 
-연동하지 않아도 Claude Code와 Codex가 남기는 세션 파일로 기본 상태는 알 수 있어요. **설정 → 에이전트 연동**에서 연동을 켜면 어떤 도구가 권한을 기다리는지, 지금 무엇을 하는지까지 보여요.
+연동하지 않아도 Claude Code와 Codex가 남기는 세션 파일로 기본 상태는 알 수 있어요. **설정 → 에이전트 연동**에서 연동을 켜면 어떤 도구가 권한을 기다리는지, 지금 무엇을 하는지까지 보여요. 에이전트를 돌리는데 연동이 꺼져 있으면 첫 화면에 안내 카드가 뜨고, 거기서 바로 켤 수도 있어요.
 
 - **Claude Code**: `~/.claude/settings.json`에 훅을 추가해요. 바꾸기 전에 백업을 남기고, 끄면 Corral이 넣은 훅만 빼요.
 - **Codex**: `~/.codex/hooks.json`에 훅을 추가해요. 켠 뒤 Codex에서 `/hooks`를 열어 한 번 승인해야 해요.

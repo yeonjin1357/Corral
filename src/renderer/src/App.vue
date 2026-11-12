@@ -8,6 +8,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RefreshCw, Trash2 } from '@lucide/vue'
 import type {
+  AgentTool,
   ConfirmRequest,
   DashboardSnapshot,
   KillResult,
@@ -59,6 +60,7 @@ import {
   type TabKey
 } from './rows'
 import { readServerView, writeServerView, type ServerView } from './viewState'
+import { hintTools, readHintDismissed, writeHintDismissed } from './integrationHint'
 import {
   DEFAULT_CARDS,
   EXTRA_CARDS,
@@ -756,6 +758,31 @@ const compactCards = computed(() =>
 /** 카드 배치(G3): 순서·숨김·더한 새 카드. 다시 켜도 기억한다. */
 const cardLayout = ref<CardLayout>(readCardLayout(storage))
 watch(cardLayout, (l) => writeCardLayout(storage, l))
+
+// ── 연동 안내 카드: 에이전트를 돌리는데 그 도구의 연동이 꺼져 있으면 권한다. 닫으면 다시 켜도 권하지 않는다 ──
+const hintDismissed = ref<AgentTool[]>(readHintDismissed(storage))
+const hints = computed(() => hintTools(snapshot.value, hintDismissed.value))
+const hintTitle = computed(() =>
+  text.ui.integrationHint.title(hints.value.map((tool) => text.ui.agent.toolNames[tool]))
+)
+const hintLines = computed(() => {
+  const H = text.ui.integrationHint
+  const lines: string[] = [hints.value.includes('claude') ? H.claude : H.codex]
+  if (hints.value.includes('codex')) lines.push(H.codexApprove)
+  return lines
+})
+const hintButton = (tool: AgentTool): string =>
+  hints.value.length > 1
+    ? text.ui.integrationHint.enableTool(text.ui.agent.toolNames[tool])
+    : text.ui.integrationHint.enable
+function dismissHint(): void {
+  hintDismissed.value = [...new Set([...hintDismissed.value, ...hints.value])]
+  writeHintDismissed(storage, hintDismissed.value)
+}
+/** 설정 화면으로 보내지 않고 바로 켠다(메인이 확인 창을 띄우고, 결과는 알림 줄에 나온다). */
+function enableFromHint(tool: AgentTool): void {
+  void (tool === 'claude' ? hookAction('enable') : codexHookAction('enable'))
+}
 /** 카드 편집 중. 편집 막대(더할 카드·기본값으로·완료)는 손잡이 줄에 있다. */
 const editingCards = ref(false)
 /** 편집 막대의 칩: 카드 줄에 아직 없는 새 카드. */
@@ -1040,6 +1067,29 @@ const takenAt = computed(() => (snapshot.value ? formatTimeOfDay(snapshot.value.
           <template #actions>
             <Button variant="outline" size="sm" @click="showEvents">
               {{ text.ui.away.show }}
+            </Button>
+          </template>
+        </NoticeCard>
+
+        <NoticeCard
+          v-if="hints.length"
+          data-integration-hint
+          dismissible
+          :title="hintTitle"
+          @dismiss="dismissHint"
+        >
+          <p v-for="line in hintLines" :key="line">{{ line }}</p>
+          <template #actions>
+            <Button
+              v-for="tool in hints"
+              :key="tool"
+              variant="outline"
+              size="sm"
+              :data-hint-enable="tool"
+              :disabled="tool === 'claude' ? hookBusy : codexHookBusy"
+              @click="enableFromHint(tool)"
+            >
+              {{ hintButton(tool) }}
             </Button>
           </template>
         </NoticeCard>

@@ -1067,6 +1067,23 @@ export const text = {
       /** 풍선말 한 줄: "Claude Code 연동: 켜짐". */
       stateLine: (tool: string, state: string): string => `${tool} 연동: ${state}`
     },
+    /**
+     * 연동 안내 카드(대시보드): 에이전트를 돌리는데 그 도구의 연동이 꺼져 있을 때 권한다. 버튼은 설정으로 보내지 않고
+     * 바로 켠다(확인 창·백업은 켜기와 같다).
+     */
+    integrationHint: {
+      /** "Claude Code 연동을 켜 보세요", 둘이면 "Claude Code·Codex 연동을 켜 보세요". */
+      title: (tools: string[]): string => `${tools.join('·')} 연동을 켜 보세요`,
+      claude:
+        '켜면 어떤 도구가 권한을 기다리는지, 지금 무슨 일을 하는지까지 보여요. 에이전트 알림도 연동을 켜야 제대로 와요.',
+      /** Codex 만 권할 때의 까닭. */
+      codex: '켜면 Codex 가 응답을 기다리는 것까지 알 수 있어요.',
+      /** Codex 를 권할 때 늘 덧붙인다. */
+      codexApprove: 'Codex 는 켠 뒤 Codex 에서 /hooks 를 열어 한 번 승인해야 해요.',
+      enable: '연동 켜기',
+      /** 두 도구를 같이 권할 때의 버튼: "Codex 연동 켜기". */
+      enableTool: (tool: string): string => `${tool} 연동 켜기`
+    },
     home: {
       title: '한눈에 보기',
       ram: 'RAM',

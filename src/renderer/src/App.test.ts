@@ -1588,3 +1588,171 @@ describe('할 일 띠', () => {
     w.unmount()
   })
 })
+
+describe('연동 안내 카드', () => {
+  const HOOK_OFF = {
+    state: 'off',
+    problem: null,
+    allHooksDisabled: false,
+    settingsPath: ''
+  } as const
+  const HOOK_ON = { ...HOOK_OFF, state: 'on' } as const
+  const CODEX_OFF = { state: 'off', problem: null, path: '' } as const
+  const codexAgent = agentRow({ pid: 6000, tool: 'codex', stateSource: 'rollout' })
+
+  /** 켜기가 성공하는 가짜 연동. */
+  const enabling = (message: string): PitwallApi['claudeHook'] =>
+    ({
+      status: async () => null,
+      enable: vi.fn(async () => ({ status: 'done' as const, message })),
+      disable: vi.fn()
+    }) as unknown as PitwallApi['claudeHook']
+
+  /** 스냅샷을 밀어 줄 수 있는 앱. */
+  async function startWith(
+    first: DashboardSnapshot,
+    over: Partial<PitwallApi> = {}
+  ): Promise<{ f: Fake; w: VueWrapper; push: (s: DashboardSnapshot) => Promise<void> }> {
+    let cb: (s: DashboardSnapshot) => void = () => {}
+    const f = fake({
+      getLatest: async () => first,
+      onSnapshot: (c: (s: DashboardSnapshot) => void) => {
+        cb = c
+        return () => {}
+      },
+      ...over
+    } as Partial<PitwallApi>)
+    const w = await start(f)
+    return {
+      f,
+      w,
+      push: async (s) => {
+        cb(s)
+        await flushPromises()
+      }
+    }
+  }
+
+  const card = (w: VueWrapper): ReturnType<VueWrapper['find']> => w.find('[data-integration-hint]')
+
+  test('Claude Code 가 도는데 연동이 꺼져 있으면 카드로 권한다', async () => {
+    const { w } = await startWith({ ...snap(), hook: HOOK_OFF, codexHook: CODEX_OFF })
+    expect(card(w).exists()).toBe(true)
+    expect(card(w).text()).toContain('Claude Code 연동을 켜 보세요')
+    expect(card(w).text()).toContain('어떤 도구가 권한을 기다리는지')
+    expect(
+      card(w)
+        .findAll('[data-hint-enable]')
+        .map((b) => b.text())
+    ).toEqual(['연동 켜기'])
+    w.unmount()
+  })
+
+  test('연동이 켜져 있으면 카드가 없다', async () => {
+    const { w } = await startWith({ ...snap(), hook: HOOK_ON, codexHook: CODEX_OFF })
+    expect(card(w).exists()).toBe(false)
+    w.unmount()
+  })
+
+  test('연동 켜기를 누르면 설정 화면으로 가지 않고 바로 켜기를 부르고 결과를 알린다', async () => {
+    const claudeHook = enabling('Claude 연동을 켰어요.')
+    const { f, w } = await startWith(
+      { ...snap(), hook: HOOK_OFF, codexHook: CODEX_OFF },
+      { claudeHook }
+    )
+    await card(w).find('[data-hint-enable="claude"]').trigger('click')
+    await flushPromises()
+    expect(claudeHook.enable).toHaveBeenCalledTimes(1)
+    expect(f.api.codexHook.enable).not.toHaveBeenCalled()
+    expect(w.findAll('h1').map((h) => h.text())).not.toContain('에이전트 연동')
+    expect(notice(w, 'hook')).toContain('Claude 연동을 켰어요.')
+    w.unmount()
+  })
+
+  test('확인 창에 답하기 전에는 버튼을 다시 누를 수 없다', async () => {
+    let answer: (r: { status: 'cancelled' }) => void = () => {}
+    const claudeHook = {
+      status: async () => null,
+      enable: vi.fn(() => new Promise((resolve) => (answer = resolve))),
+      disable: vi.fn()
+    } as unknown as PitwallApi['claudeHook']
+    const { w } = await startWith(
+      { ...snap(), hook: HOOK_OFF, codexHook: CODEX_OFF },
+      { claudeHook }
+    )
+    const button = (): ReturnType<VueWrapper['find']> => card(w).find('[data-hint-enable="claude"]')
+    expect(button().attributes('disabled')).toBeUndefined()
+    await button().trigger('click')
+    expect(button().attributes('disabled')).toBeDefined()
+    // 취소하면 카드는 그대로 있고 다시 누를 수 있다.
+    answer({ status: 'cancelled' })
+    await flushPromises()
+    expect(button().attributes('disabled')).toBeUndefined()
+    expect(notice(w, 'hook')).toBe('')
+    w.unmount()
+  })
+
+  test('연동이 켜진 스냅샷이 오면 카드가 사라진다', async () => {
+    const { w, push } = await startWith({ ...snap(), hook: HOOK_OFF, codexHook: CODEX_OFF })
+    expect(card(w).exists()).toBe(true)
+    await push({ ...snap(), hook: HOOK_ON, codexHook: CODEX_OFF })
+    expect(card(w).exists()).toBe(false)
+    w.unmount()
+  })
+
+  test('닫으면 앱을 다시 켜도 나오지 않는다', async () => {
+    const first = { ...snap(), hook: HOOK_OFF, codexHook: CODEX_OFF }
+    const { w } = await startWith(first)
+    await card(w).find('[data-action="dismiss"]').trigger('click')
+    expect(card(w).exists()).toBe(false)
+    w.unmount()
+
+    // 다시 켠 앱(저장소는 그대로).
+    window.pitwall = fake({ getLatest: async () => first }).api
+    const again = mount(App, { attachTo: document.body })
+    await flushPromises()
+    expect(again.find('[data-integration-hint]').exists()).toBe(false)
+    again.unmount()
+  })
+
+  test('Codex 는 켠 뒤 /hooks 승인이 필요하다고 알리고, 누르면 Codex 연동 켜기를 부른다', async () => {
+    const codexHook = enabling('Codex 연동을 켰어요.') as unknown as PitwallApi['codexHook']
+    const { f, w } = await startWith(
+      { ...snap(), agents: [codexAgent], hook: HOOK_OFF, codexHook: CODEX_OFF },
+      { codexHook }
+    )
+    expect(card(w).text()).toContain('Codex 연동을 켜 보세요')
+    expect(card(w).text()).not.toContain('Claude Code')
+    expect(card(w).text()).toContain('/hooks')
+    await card(w).find('[data-hint-enable="codex"]').trigger('click')
+    await flushPromises()
+    expect(codexHook.enable).toHaveBeenCalledTimes(1)
+    expect(f.api.claudeHook.enable).not.toHaveBeenCalled()
+    w.unmount()
+  })
+
+  test('두 도구 모두면 카드 한 장에 도구별 버튼', async () => {
+    const { w, push } = await startWith({
+      ...snap(),
+      agents: [agent, codexAgent],
+      hook: HOOK_OFF,
+      codexHook: CODEX_OFF
+    })
+    expect(w.findAll('[data-integration-hint]').length).toBe(1)
+    expect(card(w).text()).toContain('Claude Code·Codex 연동을 켜 보세요')
+    expect(
+      card(w)
+        .findAll('[data-hint-enable]')
+        .map((b) => b.text())
+    ).toEqual(['Claude Code 연동 켜기', 'Codex 연동 켜기'])
+    // 하나를 켜면 남은 도구만 권한다.
+    await push({ ...snap(), agents: [agent, codexAgent], hook: HOOK_ON, codexHook: CODEX_OFF })
+    expect(card(w).text()).toContain('Codex 연동을 켜 보세요')
+    expect(
+      card(w)
+        .findAll('[data-hint-enable]')
+        .map((b) => b.text())
+    ).toEqual(['연동 켜기'])
+    w.unmount()
+  })
+})
