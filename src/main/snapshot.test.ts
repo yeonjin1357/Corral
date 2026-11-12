@@ -683,6 +683,44 @@ describe('묶음과 에이전트', () => {
       expect(apps.reduce((n, a) => n + a.memoryBytes, 0)).toBe((190 + 1100 + 40) * MB)
     })
 
+    test('시스템 줄의 메모리는 다른 앱 사용량에서 앱들을 뺀 나머지다(프로세스별 값을 더해 전체 RAM 을 넘기지 않는다)', () => {
+      // 8 GB 가운데 4 GB 를 쓰는 Mac. 시스템 프로세스 500개의 값을 더하면 10 GB(공유 메모리를 겹쳐 센다).
+      const daemons = Array.from({ length: 500 }, (_, i) =>
+        mac(1000 + i, 1, `/usr/libexec/daemon${i}`, 20)
+      )
+      const s = buildSnapshot({
+        ...input,
+        platform: 'darwin',
+        totalBytes: 8 * GB,
+        freeBytes: 4 * GB,
+        sample: { processes: [...daemons, ...chrome], tcp: [] },
+        worktrees: new Map()
+      })
+      const row = s.apps.find((a) => a.system)!
+      expect(row.processCount).toBe(500)
+      // 다른 앱 사용량 4 GB − Chrome 1100 MB.
+      expect(row.memoryBytes).toBe(4 * GB - 1100 * MB)
+      // 앱 줄은 그대로.
+      expect(s.apps.find((a) => a.name === 'Google Chrome')?.memoryBytes).toBe(1100 * MB)
+      // 줄들의 합이 메모리 카드의 다른 앱과 같다.
+      const other = s.groups.find((g) => g.group === 'otherApps')!
+      expect(s.apps.reduce((n, a) => n + a.memoryBytes, 0)).toBe(other.memoryBytes)
+      expect(other.memoryBytes).toBe(4 * GB)
+    })
+
+    test('앱들의 합이 이미 다른 앱 사용량을 넘으면 시스템 줄은 0', () => {
+      const s = buildSnapshot({
+        ...input,
+        platform: 'darwin',
+        totalBytes: 8 * GB,
+        freeBytes: 7 * GB,
+        sample: { processes: [...system, ...chrome], tcp: [] },
+        worktrees: new Map()
+      })
+      expect(s.apps.find((a) => a.system)).toMatchObject({ memoryBytes: 0, processCount: 5 })
+      expect(s.apps.find((a) => a.name === 'Google Chrome')?.memoryBytes).toBe(1100 * MB)
+    })
+
     test('Windows 는 지금처럼 이름별로 묶는다(앱으로 합치거나 시스템으로 접지 않는다)', () => {
       const apps = appsOn('win32', [...system, ...chrome])
       expect(apps.some((a) => a.system)).toBe(false)

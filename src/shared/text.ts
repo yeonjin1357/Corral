@@ -1139,7 +1139,8 @@ export const text = {
       withOwnerTitle: (name: string, owner: string): string => `${name} — ${owner}`,
       /** 다른 앱에서 macOS 가 기본으로 띄우는 백그라운드 프로세스를 접은 한 줄의 이름과 title. */
       macSystem: 'macOS 시스템',
-      macSystemTitle: 'macOS 가 기본으로 띄우는 백그라운드 프로세스',
+      macSystemTitle:
+        'macOS 가 기본으로 띄우는 백그라운드 프로세스예요. 메모리는 다른 앱이 쓰는 양에서 위 앱들을 뺀 나머지예요(프로세스마다 공유 메모리를 겹쳐 세어, 더하면 실제보다 훨씬 커져요).',
       /** 묶음의 행 수(탭 숫자와 같은 단위). 숨긴 서버가 있으면 함께 적는다. */
       count: (n: number, hidden = 0): string =>
         hidden ? `${n}개(숨김 ${hidden}개 포함)` : `${n}개`,

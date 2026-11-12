@@ -185,11 +185,16 @@ const macPathOf = (p: ProcessInfo): string | null => p.exePath ?? exePathOf(p.co
  * macOS 는 한 앱의 프로세스 이름이 제각각이고 시스템 프로세스만 수백 개라, 이름 대신 실행 파일 경로로 묶는다(macApps.ts):
  * 앱 묶음(.app) 안의 프로세스는 그 앱 한 줄로, macOS 가 기본으로 띄우는 프로세스는 `system` 한 줄로. 런타임을 띄운 앱의
  * 이름도 앱 묶음 이름으로 쓴다("node (Visual Studio Code)"). 앱도 시스템도 아닌 것은 지금처럼 이름별.
+ *
+ * 시스템 줄의 메모리는 프로세스별 값을 더하지 않는다: macOS 의 프로세스 메모리(rss)는 공유 메모리를 겹쳐 세어, 수백 개를
+ * 더하면 전체 RAM 보다 커진다. 대신 "다른 앱" 사용량(otherBytes — 사용량 안으로 줄인 값)에서 앱 줄들을 뺀 나머지를
+ * 쓴다. 그래서 줄들의 합이 메모리 카드의 다른 앱과 같다(앱들의 합이 이미 넘으면 0).
  */
 function appsOf(
   processes: ProcessInfo[],
   platform: Platform | null,
-  tree: ProcessTree
+  tree: ProcessTree,
+  otherBytes: number
 ): AppUsage[] {
   const mac = platform === 'darwin'
   const classOf = (p: ProcessInfo): MacProcessClass | null =>
@@ -233,6 +238,12 @@ function appsOf(
         exePath: row.exePath,
         ...(row.system ? { system: true as const } : {})
       })
+  }
+  const system = byKey.get('system')
+  if (system) {
+    let apps = 0
+    for (const app of byKey.values()) if (app !== system) apps += app.memoryBytes
+    system.memoryBytes = Math.max(0, Math.min(system.memoryBytes, otherBytes - apps))
   }
   return [...byKey]
     .map(([key, app]) => ({ ...app, exePath: ownerExe.get(key) ?? app.exePath }))
@@ -547,7 +558,7 @@ export function buildSnapshot(input: {
     codexLimits: null,
     disk: null,
     groups,
-    apps: appsOf(rest, input.platform ?? null, tree),
+    apps: appsOf(rest, input.platform ?? null, tree, otherBytes),
     otherPorts: otherPorts
       .sort((a, b) => a.port - b.port || a.pid - b.pid)
       .slice(0, OTHER_PORT_LIMIT),

@@ -608,7 +608,8 @@ describe('남은 프로세스·무거운 작업·디스크·다른 앱 표', () 
     const [system, chrome] = t.rows
     expect(system.cells.name).toMatchObject({
       text: 'macOS 시스템',
-      title: 'macOS 가 기본으로 띄우는 백그라운드 프로세스'
+      title:
+        'macOS 가 기본으로 띄우는 백그라운드 프로세스예요. 메모리는 다른 앱이 쓰는 양에서 위 앱들을 뺀 나머지예요(프로세스마다 공유 메모리를 겹쳐 세어, 더하면 실제보다 훨씬 커져요).'
     })
     expect(system.cells.processes.text).toBe('412개')
     expect(system.search).toContain('macos 시스템')

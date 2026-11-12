@@ -580,8 +580,20 @@ await check('다른 앱: 앱 단위로 합치고 시스템 프로세스는 한 �
   assert(corral[0].exePath === APP, `Corral 줄의 아이콘 경로 ${corral[0].exePath}`)
   const total = snap.apps.reduce((n, a) => n + a.processCount, 0)
   assert(snap.apps.length < 150, `다른 앱이 ${snap.apps.length}줄(프로세스 ${total}개)`)
+  // 시스템 줄의 메모리: 프로세스별 값을 더한 것(전체 RAM 보다 커진다)이 아니라 다른 앱 사용량의 나머지.
+  const gb = (bytes) => `${(bytes / 2 ** 30).toFixed(2)}GB`
+  const other = snap.groups.find((g) => g.group === 'otherApps').memoryBytes
+  const rows = snap.apps.reduce((n, a) => n + a.memoryBytes, 0)
+  assert(
+    system[0].memoryBytes <= snap.memory.usedBytes,
+    `시스템 줄 ${gb(system[0].memoryBytes)} 이 사용 중 ${gb(snap.memory.usedBytes)} 보다 크다`
+  )
+  assert(
+    system[0].memoryBytes === 0 || Math.abs(rows - other) < 0.01 * other,
+    `줄들의 합 ${gb(rows)} ≠ 메모리 카드의 다른 앱 ${gb(other)}`
+  )
   writeFileSync(join(OUT, 'apps.txt'), snap.apps.map(label).join('\n'))
-  return `프로세스 ${total}개 → ${snap.apps.length}줄. 위에서 6줄: ${snap.apps.slice(0, 6).map(label).join(' · ')}`
+  return `프로세스 ${total}개 → ${snap.apps.length}줄. 시스템 줄 ${gb(system[0].memoryBytes)}(전체 ${gb(snap.memory.totalBytes)}, 사용 중 ${gb(snap.memory.usedBytes)}). 위에서 6줄: ${snap.apps.slice(0, 6).map(label).join(' · ')}`
 })
 
 await check('화면에 오류 문구가 없고 내용이 보인다', 'required', async () => {
