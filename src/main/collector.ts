@@ -157,6 +157,16 @@ export interface CollectorDeps {
     cwds: Record<number, string>,
     cwdFirst: Set<number>
   ) => Promise<Map<number, WorktreeInfo>>
+  /**
+   * 명령줄·작업 폴더로는 워크트리를 알 수 없는 남은 프로세스 후보의 워크트리(쉬는 Gradle 데몬: 데몬 로그의 마지막
+   * 빌드 폴더). known 은 resolveProcessWorktrees 가 찾은 것. 남은 프로세스의 프로젝트에만 쓴다(개발 서버 판별에는
+   * 쓰지 않는다). 없으면 쓰지 않는다.
+   */
+  leftoverWorktrees?: (
+    processes: ProcessInfo[],
+    cwds: Record<number, string>,
+    known: Map<number, WorktreeInfo>
+  ) => Promise<Map<number, WorktreeInfo>>
   /** Claude 세션 작업 폴더의 워크트리. */
   resolveWorktree: (path: string) => Promise<WorktreeInfo | null>
   /** 워크트리를 감싸는 작업 공간(바깥 저장소). */
@@ -571,6 +581,20 @@ export function createCollector(deps: CollectorDeps): {
     }
   }
 
+  /** 남은 프로세스에만 쓰는 워크트리. 읽기가 없거나 실패하면 빈 결과(지금처럼 프로젝트를 모르는 채로). */
+  async function readLeftoverWorktrees(
+    processes: ProcessInfo[],
+    cwds: Record<number, string>,
+    known: Map<number, WorktreeInfo>
+  ): Promise<Map<number, WorktreeInfo>> {
+    if (!deps.leftoverWorktrees) return new Map()
+    try {
+      return await deps.leftoverWorktrees(processes, cwds, known)
+    } catch {
+      return new Map()
+    }
+  }
+
   async function readHookStatus(): Promise<ClaudeHookStatus> {
     try {
       return await deps.hookStatus()
@@ -585,15 +609,18 @@ export function createCollector(deps: CollectorDeps): {
     const [raw, memory] = await Promise.all([deps.sample(), deps.readMemory()])
     const needed = pidsForWorktreeLookup(raw, deps.platform, options.heavyPatterns)
     const agentPids = topLevelAgentPids(raw.processes)
+    const lookedUp = raw.processes.filter((p) => needed.has(p.pid))
     const worktrees = await deps.resolveProcessWorktrees(
-      raw.processes.filter((p) => needed.has(p.pid)),
+      lookedUp,
       raw.cwds ?? {},
       new Set(agentPids)
     )
+    const leftoverWorktrees = await readLeftoverWorktrees(lookedUp, raw.cwds ?? {}, worktrees)
     const now = deps.now()
     const snapshot = buildSnapshot({
       sample: raw,
       worktrees,
+      leftoverWorktrees,
       totalBytes: memory.totalBytes,
       freeBytes: memory.freeBytes,
       thresholds: options.thresholds,

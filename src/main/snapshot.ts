@@ -356,6 +356,11 @@ function serversOf(ports: PortEntry[], tree: ProcessTree): ServerRow[] {
 export function buildSnapshot(input: {
   sample: RawSample
   worktrees: Map<number, WorktreeInfo>
+  /**
+   * 남은 프로세스의 프로젝트에만 쓰는 워크트리(쉬는 Gradle 데몬의 로그에서 안 것). 개발 서버 판별에는 쓰지 않는다:
+   * 데몬이 빌드 요청을 받으려고 열어 둔 포트 때문에 쉬는 데몬이 개발 서버로 잡힌다.
+   */
+  leftoverWorktrees?: Map<number, WorktreeInfo>
   totalBytes: number
   freeBytes: number
   thresholds: { ramWarnPercent: number; ramDangerPercent: number }
@@ -483,7 +488,10 @@ export function buildSnapshot(input: {
       return w ? [worktreeKey(w.root)] : []
     })
   )
-  const leftovers = findLeftovers(sample, worktrees, {
+  const leftoverWorktrees = input.leftoverWorktrees?.size
+    ? new Map([...input.leftoverWorktrees, ...worktrees])
+    : worktrees
+  const leftovers = findLeftovers(sample, leftoverWorktrees, {
     // 무거운 작업은 끄지 않으므로 남은 프로세스(끌 수 있는 것)로도 세지 않는다.
     exclude: new Set([...self, ...devServer, ...agentTree, ...heavy]),
     agentRoots,

@@ -1812,6 +1812,66 @@ test('서버·남은 프로세스·무거운 작업·에이전트에 작업 공�
   expect(resolveWorkspace).toHaveBeenCalledTimes(2)
 })
 
+describe('남은 프로세스에만 쓰는 워크트리(쉬는 Gradle 데몬)', () => {
+  const GRADLE = 'java org.gradle.launcher.daemon.bootstrap.GradleDaemon 7.6.4'
+  const DAEMON_DIR = 'C:\\g\\daemon\\7.6.4\\'
+  // 데몬(7100)은 자기 폴더에 서 있고, 빌드 요청을 받는 포트를 하나 열어 둔다.
+  const sample: RawSample = {
+    ...sampleAt(0),
+    processes: [...sampleAt(0).processes, proc(7100, 1, 'java.exe', 0, GRADLE)],
+    tcp: [
+      ...sampleAt(0).tcp,
+      {
+        pid: 7100,
+        localAddress: '127.0.0.1',
+        localPort: 51234,
+        remoteAddress: '0.0.0.0',
+        remotePort: 0,
+        state: 'Listen'
+      }
+    ],
+    cwds: { ...sampleAt(0).cwds, 7100: DAEMON_DIR }
+  }
+
+  test('leftoverWorktrees 가 준 워크트리로 프로젝트·작업 공간·에이전트 표시를 정하고, 개발 서버로는 보지 않는다', async () => {
+    const leftoverWorktrees = vi.fn<NonNullable<CollectorDeps['leftoverWorktrees']>>(
+      async (processes, _cwds, known) =>
+        new Map(
+          processes.filter((p) => p.pid === 7100 && !known.has(p.pid)).map((p) => [p.pid, W1])
+        )
+    )
+    const { deps, clock } = setup({ leftoverWorktrees })
+    clock.now = 60 * MIN
+    const s = await createCollector({ ...deps, sample: async () => sample }).collect()
+    // Claude(5000)가 같은 워크트리(shop-web)에서 일한다.
+    expect(
+      s.leftovers.map((r) => [r.pid, r.worktree?.root, r.workspace?.root, r.agentInWorktree])
+    ).toEqual([[7100, W1.root, W1.root, true]])
+    expect(s.servers.map((r) => r.ports)).toEqual([[3000]])
+    const [processes, cwds, known] = leftoverWorktrees.mock.calls[0]
+    expect(processes.map((p) => p.pid)).toContain(7100)
+    expect(cwds[7100]).toBe(DAEMON_DIR)
+    expect([...known.keys()].sort()).toEqual([4100, 5000, 6000])
+  })
+
+  test('leftoverWorktrees 가 없거나 실패하면 지금처럼 프로젝트를 모르는 채로 수집한다', async () => {
+    const without = setup()
+    without.clock.now = 60 * MIN
+    const a = await createCollector({ ...without.deps, sample: async () => sample }).collect()
+    expect(a.leftovers.map((r) => [r.pid, r.worktree])).toEqual([[7100, null]])
+
+    const failing = setup({
+      leftoverWorktrees: async () => {
+        throw new Error('EBUSY')
+      }
+    })
+    failing.clock.now = 60 * MIN
+    const b = await createCollector({ ...failing.deps, sample: async () => sample }).collect()
+    expect(b.leftovers.map((r) => [r.pid, r.worktree])).toEqual([[7100, null]])
+    expect(b.servers.map((r) => r.ports)).toEqual([[3000]])
+  })
+})
+
 test('작업 공간 판별이 실패하면 그 워크트리 자체를 작업 공간으로 본다', async () => {
   const { deps } = setup({
     resolveWorkspace: async () => {

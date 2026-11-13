@@ -1186,6 +1186,49 @@ describe('남은 프로세스', () => {
     expect(buildSnapshot(input).leftovers).toEqual([])
   })
 
+  describe('남은 프로세스에만 쓰는 워크트리(쉬는 Gradle 데몬의 로그에서 안 프로젝트)', () => {
+    const GRADLE =
+      'java.exe -cp C:\\g\\wrapper\\dists\\gradle-7.6.4-bin\\x\\gradle-7.6.4\\lib\\gradle-launcher-7.6.4.jar ' +
+      'org.gradle.launcher.daemon.bootstrap.GradleDaemon 7.6.4'
+    // 데몬은 빌드 요청을 받으려고 포트를 하나 열어 둔다(개발 서버가 아니다).
+    const sample = {
+      processes: [...processes, proc(9800, 9799, 'java.exe', 3500, 100, GRADLE)],
+      tcp: [...tcp, listen(9800, 51234, '127.0.0.1')]
+    }
+    const serverPids = (s: ReturnType<typeof buildSnapshot>): number[] =>
+      s.servers.flatMap((r) => [r.pid, ...r.descendantPids])
+
+    test('남은 프로세스의 프로젝트가 되고, 그 프로세스가 연 포트는 개발 서버가 되지 않는다', () => {
+      const s = buildSnapshot({
+        ...input,
+        sample,
+        leftoverWorktrees: new Map([[9800, W3]]),
+        now: 60 * 60 * 1000
+      })
+      expect(s.leftovers.map((r) => [r.pid, r.label, r.worktree?.root])).toEqual([
+        [9800, 'Gradle 데몬', W3.root]
+      ])
+      expect(serverPids(s)).not.toContain(9800)
+      expect(s.otherPorts.map((o) => [o.port, o.pid])).toContainEqual([51234, 9800])
+    })
+
+    test('주지 않으면 지금처럼 프로젝트를 모르는 남은 프로세스다', () => {
+      const s = buildSnapshot({ ...input, sample, now: 60 * 60 * 1000 })
+      expect(s.leftovers.map((r) => [r.pid, r.worktree])).toEqual([[9800, null]])
+    })
+
+    test('그 워크트리에서 에이전트가 일하면 표시한다', () => {
+      const s = buildSnapshot({
+        ...input,
+        sample,
+        worktrees: new Map([...worktrees, [5000, W3]]),
+        leftoverWorktrees: new Map([[9800, W3]]),
+        now: 60 * 60 * 1000
+      })
+      expect(s.leftovers.map((r) => [r.pid, r.agentInWorktree])).toEqual([[9800, true]])
+    })
+  })
+
   test('워크트리 판별 대상에 남은 프로세스와 그 자손을 더한다', () => {
     const pids = pidsForWorktreeLookup({
       processes: [...processes, ...extra, proc(9601, 9600, 'node.exe', 1, 200, 'worker')],

@@ -73,6 +73,7 @@ import { createIconSource } from './icons'
 import { createGroupHistory, createRamHistory, loadHistory, saveHistory } from './historyStore'
 import { cleanupEvent, createEventLog, diffEvents, diskRemoveEvent } from './events'
 import { codexHome, createCodexReader } from './codexRollout'
+import { createGradleDaemonReader, gradleDaemonWorktrees } from './gradleDaemon'
 import { BADGE_COLOR, createTrayController, LEVEL_COLORS } from './tray'
 import {
   createIdleCloser,
@@ -150,12 +151,19 @@ const claudeUsage = createUsageCache({
 /** 워크트리마다 커밋 안 한 변경 수(G4, 5분에 한 번 뒤에서 센다). */
 const changeCounter = createChangeCounter({ run: countChanges, now: Date.now })
 
+/**
+ * 쉬는 Gradle 데몬의 프로젝트: 데몬 로그(`<Gradle 폴더>/daemon/<버전>/daemon-<pid>.out.log`)에서 마지막 빌드
+ * 폴더만 읽는다(쉬는 데몬은 자기 폴더에 서 있어 명령줄·작업 폴더로는 프로젝트를 알 수 없다).
+ */
+const gradleDaemonReader = createGradleDaemonReader({ homeDir: homedir() })
+
 const collector = platform
   ? createCollector({
       platform,
       sample: () => sample(platform),
       readMemory: () => readMemory(platform),
       resolveProcessWorktrees,
+      leftoverWorktrees: gradleDaemonWorktrees({ reader: gradleDaemonReader, resolveWorktree }),
       resolveWorktree,
       resolveWorkspace,
       codexInfo: (agent, now) => codexReader.infoFor(agent, now),
