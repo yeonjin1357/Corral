@@ -102,14 +102,28 @@ limited() {
   perl -e 'alarm shift; exec @ARGV' "$secs" "$@"
 }
 
+# macOS 의 자동화 허락 창("… wants access to control …")이 뜨면 Allow 를 누른다(러너에는 눌러 줄 사람이 없다).
+allow_automation() {
+  local tries=${1:-10}
+  for _ in $(seq 1 "$tries"); do
+    if limited 10 osascript -e 'tell application "System Events" to tell process "UserNotificationCenter" to click button "Allow" of window 1' > /dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
 # 탭까지 고르는지 보려고: 에이전트가 있는 창에 탭을 하나 더 열고(에이전트 탭이 뒤로 간다), 다른 창도 하나 띄운다.
+# Terminal 에 직접 묻지 않고(물으면 허락 창이 뜬다) 키 입력과 open 만 쓴다.
 limited 20 osascript -e 'tell application "Terminal" to activate' > /dev/null 2>&1 || true
 sleep 1
 limited 20 osascript -e 'tell application "System Events" to keystroke "t" using command down' > /dev/null 2>&1 || true
 sleep 1
 open -a Terminal "$ROOT" || true
-sleep 1
-limited 20 osascript -e 'tell application "Terminal" to get {count of windows, count of tabs of window 1}' || true
+sleep 2
+echo "Terminal 창들:"
+limited 20 osascript -e 'tell application "System Events" to tell process "Terminal" to get title of every window' || true
 
 echo "== iTerm2 안에서 띄운 가짜 에이전트(탭 고르기 확인용, 되는 만큼)"
 ITERM_AGENT_PID=
@@ -120,6 +134,8 @@ if [ "${SMOKE_ITERM:-1}" = 1 ]; then
   if [ -d /Applications/iTerm.app ]; then
     # 내려받은 앱을 처음 열 때 묻는 창이 뜨지 않게.
     xattr -dr com.apple.quarantine /Applications/iTerm.app
+    open -a /Applications/iTerm.app
+    sleep 6
     # iTerm2 에 넘기는 명령은 공백이 없는 경로로.
     LAUNCHER="$RUNNER_TEMP/agent-in-iterm.sh"
     cat > "$LAUNCHER" <<EOF
@@ -128,14 +144,18 @@ cd "$ROOT/shop-web"
 exec "$ROOT/bin/claude" -e 'setInterval(()=>{},1000)' corral-iterm-agent
 EOF
     chmod +x "$LAUNCHER"
-    limited 90 osascript -e "tell application \"iTerm2\" to create window with default profile command \"$LAUNCHER\"" > "$OUT/iterm-launch.log" 2>&1
+    # 이 스크립트가 iTerm2 를 제어하는 것도 허락이 필요하다: 뒤에서 띄우고 허락 창을 누른다.
+    limited 90 osascript -e "tell application id \"com.googlecode.iterm2\" to create window with default profile command \"$LAUNCHER\"" > "$OUT/iterm-launch.log" 2>&1 &
+    ITERM_SCRIPT=$!
+    allow_automation 15
+    wait "$ITERM_SCRIPT"
     for _ in $(seq 1 40); do
       ITERM_AGENT_PID=$(pgrep -f corral-iterm-agent | head -1 || true)
       [ -n "$ITERM_AGENT_PID" ] && break
       sleep 0.5
     done
     # 에이전트 창이 뒤로 가게 창을 하나 더 띄운다.
-    limited 30 osascript -e 'tell application "iTerm2" to create window with default profile' >> "$OUT/iterm-launch.log" 2>&1
+    limited 30 osascript -e 'tell application id "com.googlecode.iterm2" to create window with default profile' >> "$OUT/iterm-launch.log" 2>&1
     cat "$OUT/iterm-launch.log"
   fi
   set -e

@@ -495,33 +495,80 @@ const ttyOf = (pid) => {
 }
 const agentKeyOf = (row) => `agent:${row.pid}:${row.startedAt ?? ''}`
 
+/** macOS 의 자동화 허락 창("… wants access to control …")이 떠 있으면 그 글자. 없으면 ''. */
+const automationPrompt = () =>
+  osa(
+    'tell application "System Events" to tell process "UserNotificationCenter" to get value of every static text of window 1',
+    10_000
+  ).stdout.trim()
+/** 그 창의 Allow 를 누른다(러너에는 눌러 줄 사람이 없다). */
+const allowAutomation = () =>
+  osa(
+    'tell application "System Events" to tell process "UserNotificationCenter" to click button "Allow" of window 1',
+    10_000
+  ).status === 0
+
+/**
+ * 창으로 가기를 누른다. 처음에는 macOS 가 Corral 이 그 터미널 앱을 제어해도 되는지 묻는다. 그 창이 뜨면 스크린샷을 찍고
+ * 사람 대신 Allow 를 누른다. { ok: 창으로 가기의 결과, prompt: 본 허락 창의 글자(없었으면 '') }.
+ */
+async function focusAgentAllowing(row, shotName) {
+  let settled = false
+  let prompt = ''
+  const pending = page
+    .eval(`window.pitwall.focusAgent(${JSON.stringify(agentKeyOf(row))})`, 60_000)
+    .finally(() => {
+      settled = true
+    })
+  for (let i = 0; i < 20 && !settled; i++) {
+    await sleep(700)
+    const seen = automationPrompt()
+    if (seen && /control/i.test(seen)) {
+      prompt = seen
+      screenShot(shotName)
+      allowAutomation()
+    }
+  }
+  return { ok: await pending, prompt }
+}
+
 await check('창으로 가기: Terminal 에서 에이전트가 떠 있는 탭까지 고른다', 'required', async () => {
   assert(fixtures.terminalAgent?.pid, '터미널에서 띄우지 못했다')
   const row = snap.agents.find((a) => a.pid === fixtures.terminalAgent.pid)
   assert(row, '에이전트가 없다')
-  const tty = ttyOf(row.pid)
-  assert(tty, '에이전트의 tty 를 모른다')
-  const frontTab = () =>
-    osa('tell application "Terminal" to get tty of selected tab of front window').stdout.trim()
-  const layout = osa(
-    'tell application "Terminal" to get {count of windows, count of tabs of (first window whose tty of tabs contains "' +
-      tty +
-      '")}'
-  ).stdout.trim()
-  const before = frontTab()
+  assert(ttyOf(row.pid), '에이전트가 터미널에 붙어 있지 않다')
+  // Terminal 의 창 제목에는 고른 탭에서 도는 명령이 나온다(에이전트 탭이면 이 낱말이 들어 있다).
+  const MARK = 'corral-terminal-agent'
+  const terminal = (what) =>
+    osa(`tell application "System Events" to tell process "Terminal" to get ${what}`).stdout.trim()
+  const frontTitle = () => terminal('title of front window')
+  const atAgentTab = () => frontmost() === 'Terminal' && frontTitle().includes(MARK)
+  const windows = terminal('title of every window')
+  const before = frontTitle()
   sh('open', [APP])
   await sleep(1500)
-  const ok = await page.eval(`window.pitwall.focusAgent(${JSON.stringify(agentKeyOf(row))})`)
+  const { ok, prompt } = await focusAgentAllowing(row, 'screen-automation-prompt-terminal')
   assert(ok === true, `focusAgent 가 ${ok}`)
-  const moved = await waitFor(() => frontmost() === 'Terminal' && frontTab() === tty, 15_000)
+  let presses = 1
+  let moved = await waitFor(atAgentTab, 8000)
+  if (!moved) {
+    // 허락 창에 답하는 사이 시간 제한을 넘겼으면 앱만 앞으로 온다. 사용자가 하듯 한 번 더 누른다.
+    sh('open', [APP])
+    await sleep(1500)
+    await focusAgentAllowing(row, 'screen-automation-prompt-terminal-2')
+    presses = 2
+    moved = await waitFor(atAgentTab, 8000)
+  }
   screenShot('screen-focus-terminal')
+  const after = frontTitle()
   assert(
     moved,
-    `맨 앞 앱 ${frontmost()}, 맨 앞 탭 ${frontTab()}, 에이전트 ${tty}(누르기 전 ${before})`
+    `맨 앞 앱 ${frontmost()}, 맨 앞 창 "${after}"(누르기 전 "${before}", 창들: ${windows})`
   )
+  assert(!before.includes(MARK), `누르기 전에도 에이전트 탭이 앞이었다("${before}") — 가릴 수 없다`)
   sh('open', [APP])
   await sleep(1000)
-  return `맨 앞 탭 ${before} → ${tty}(창 수, 그 창의 탭 수: ${layout || '모름'})${before === tty ? ' — 누르기 전에도 그 탭이 앞이었다' : ''}`
+  return `맨 앞 창 "${before}" → "${after}" (${presses}번 누름. 허락 창: ${prompt || '뜨지 않음'}. 창들: ${windows})`
 })
 
 await check('창으로 가기: iTerm2 에서도 에이전트가 떠 있는 탭을 고른다', 'info', async () => {
@@ -530,23 +577,36 @@ await check('창으로 가기: iTerm2 에서도 에이전트가 떠 있는 탭�
   assert(row, `에이전트가 없다: ${JSON.stringify(snap.agents.map((a) => a.pid))}`)
   assert(/iTerm\.app$/.test(row.host?.app ?? ''), `띄운 앱: ${JSON.stringify(row.host)}`)
   const tty = ttyOf(row.pid)
-  assert(tty, '에이전트의 tty 를 모른다')
+  assert(tty, '에이전트가 터미널에 붙어 있지 않다')
   const current = () =>
-    osa('tell application "iTerm2" to get tty of current session of current window').stdout.trim()
+    osa(
+      'tell application id "com.googlecode.iterm2" to get tty of current session of current window',
+      15_000
+    ).stdout.trim()
+  const atAgentTab = () => frontmost() === 'iTerm2' && current() === tty
   const before = current()
   sh('open', [APP])
   await sleep(1500)
-  const ok = await page.eval(`window.pitwall.focusAgent(${JSON.stringify(agentKeyOf(row))})`)
+  const { ok, prompt } = await focusAgentAllowing(row, 'screen-automation-prompt-iterm')
   assert(ok === true, `focusAgent 가 ${ok}`)
-  const moved = await waitFor(() => frontmost() === 'iTerm2' && current() === tty, 15_000)
+  let presses = 1
+  let moved = await waitFor(atAgentTab, 8000)
+  if (!moved) {
+    sh('open', [APP])
+    await sleep(1500)
+    await focusAgentAllowing(row, 'screen-automation-prompt-iterm-2')
+    presses = 2
+    moved = await waitFor(atAgentTab, 8000)
+  }
   screenShot('screen-focus-iterm')
   assert(
     moved,
     `맨 앞 앱 ${frontmost()}, 고른 세션 ${current()}, 에이전트 ${tty}(누르기 전 ${before})`
   )
+  assert(before !== tty, `누르기 전에도 에이전트 세션이 앞이었다(${before}) — 가릴 수 없다`)
   sh('open', [APP])
   await sleep(1000)
-  return `고른 세션 ${before} → ${tty}${before === tty ? ' — 누르기 전에도 그 세션이 앞이었다' : ''}`
+  return `고른 세션 ${before || '모름'} → ${tty} (${presses}번 누름. 허락 창: ${prompt || '뜨지 않음'})`
 })
 
 for (const [tool, started] of [
