@@ -112,4 +112,52 @@ describe('설정 > 정보', () => {
     await w.find('[data-action="update-install"]').trigger('click')
     expect(w.emitted('updateInstall')).toHaveLength(1)
   })
+
+  describe('macOS 설치본', () => {
+    const PAGE = 'https://github.com/yeonjin1357/Corral/releases/latest'
+    const COMMAND =
+      'curl -fsSL https://raw.githubusercontent.com/yeonjin1357/Corral/main/scripts/install-mac.sh | bash'
+    const available = (next: Partial<UpdateStatus>): UpdateStatus =>
+      status({ state: 'available', version: '0.4.0', url: PAGE, installCommand: COMMAND, ...next })
+
+    test('앱 안에서 바꿔 넣을 수 있으면 업데이트 버튼(누르면 설치를 요청한다), 설치 한 줄은 보이지 않는다', async () => {
+      const w = about({ update: available({ selfInstall: true }) })
+      expect(w.find('.update-state').text()).toBe('새 버전 0.4.0 이 있어요.')
+      const button = w.find('[data-action="update-self-install"]')
+      expect(button.text()).toBe('업데이트')
+      expect(w.text()).toContain('누르면 새 버전을 내려받아 앱을 바꿔 넣고 다시 켜요.')
+      expect(w.find('[data-update-command]').exists()).toBe(false)
+      await button.trigger('click')
+      expect(w.emitted('updateInstall')).toHaveLength(1)
+    })
+
+    test('내려받는 중에는 업데이트 버튼이 없다', () => {
+      const w = about({
+        update: status({ state: 'downloading', version: '0.4.0', selfInstall: true })
+      })
+      expect(w.find('[data-action="update-self-install"]').exists()).toBe(false)
+      expect(w.find('.update-state').text()).toBe('새 버전 0.4.0 을 내려받는 중이에요.')
+    })
+
+    test('바꿔 넣지 못했으면 까닭과 설치 한 줄을 보이고, 복사할 수 있다', async () => {
+      const w = about({
+        update: available({ selfInstall: false, error: '응용 프로그램 폴더에 쓸 수 없어요.' })
+      })
+      expect(w.find('[data-action="update-self-install"]').exists()).toBe(false)
+      expect(w.find('.update-problem').text()).toBe('응용 프로그램 폴더에 쓸 수 없어요.')
+      expect(w.text()).toContain('터미널에 아래 한 줄을 붙여 넣으면 새 버전으로 바뀌어요.')
+      expect(w.find('[data-update-command]').text()).toBe(COMMAND)
+      await w.find('[data-action="update-copy-command"]').trigger('click')
+      expect(w.emitted('updateCopyCommand')).toHaveLength(1)
+      // 내려받기 페이지도 남겨 둔다.
+      expect(w.find(`a[href="${PAGE}"]`).exists()).toBe(true)
+    })
+
+    test('Windows(설치 한 줄이 없음)의 새 버전 알림은 지금처럼 내려받기 페이지뿐', () => {
+      const w = about({ update: status({ state: 'available', version: '0.4.0', url: PAGE }) })
+      expect(w.find('[data-action="update-self-install"]').exists()).toBe(false)
+      expect(w.find('[data-update-command]').exists()).toBe(false)
+      expect(w.find(`a[href="${PAGE}"]`).exists()).toBe(true)
+    })
+  })
 })

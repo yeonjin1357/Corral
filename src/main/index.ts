@@ -18,7 +18,7 @@ import {
 import { autoUpdater } from 'electron-updater'
 import { spawn } from 'child_process'
 import { join } from 'path'
-import { cpus, homedir } from 'os'
+import { cpus, homedir, tmpdir } from 'os'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import type { ConfirmOptions, DashboardSnapshot, KillResult } from '../shared/types'
@@ -31,8 +31,8 @@ import {
 import { IPC, type NavigateTarget } from '../shared/ipc'
 import { text } from '../shared/text'
 import { fitGroups } from '../shared/memoryGroups'
-import { mkdirSync, readdirSync, rmSync } from 'fs'
-import { access, stat } from 'fs/promises'
+import { existsSync, mkdirSync, readdirSync, rmSync } from 'fs'
+import { access, mkdtemp, rm, stat } from 'fs/promises'
 import { sample, toPlatform } from './collect/sample'
 import {
   configureWindowsSampler,
@@ -61,7 +61,9 @@ import { confirmIpcHandlers, confirmed, createConfirmBroker } from './confirmBro
 import { createDiskManager, createRepoMemory, pathExists, snapshotWorktrees } from './disk'
 import { createNotifier, type Notice } from './notifier'
 import { loginItemOptions, shouldStartHidden } from './startup'
-import { createUpdater } from './updates'
+import { createUpdater, type MacUpdateDeps } from './updates'
+import { createMacInstaller, feedBase } from './macUpdate'
+import { downloadSha512 } from './download'
 import { localUrlFor } from './open'
 import { createQuickActions, isQuickKind } from './quickActions'
 import { createFocuser, openNoticeTarget } from './focusWindow'
@@ -455,10 +457,7 @@ function createTray(): void {
       open: showWindow,
       settings: () => navigate({ page: 'settings' }),
       quit: () => app.quit(),
-      installUpdate: () => {
-        quitting = true
-        updater.install()
-      },
+      installUpdate: installUpdate,
       openRelease: (url) => void shell.openExternal(url)
     },
     platform: platform ?? 'win32'
@@ -609,6 +608,51 @@ const codex = createCodexIntegration({
   confirm: confirmDialog
 })
 
+/** macOS 설치본의 앱 안 업데이트에 필요한 것(내려받기·명령 실행·도우미 띄우기). */
+function macUpdateDeps(): MacUpdateDeps {
+  // 검증할 때만 `--update-feed=http://127.0.0.1:<포트>` 로 이 PC 안의 주소를 준다(밖의 주소는 무시한다).
+  const base = feedBase(app.commandLine.getSwitchValue('update-feed'))
+  const failedMarker = join(app.getPath('userData'), 'update-failed')
+  // 사용자 정보는 보내지 않는다(일반 이름의 User-Agent 만).
+  const fetchRelease = (url: string): Promise<Response> =>
+    net.fetch(url, { headers: { 'User-Agent': 'Corral' } })
+  const installer = createMacInstaller({
+    base,
+    execPath: process.execPath,
+    pid: process.pid,
+    failedMarker,
+    tmpDir: () => mkdtemp(join(tmpdir(), 'corral-update-')),
+    download: (url, file) => downloadSha512(fetchRelease, url, file),
+    run: runCommand,
+    // 앱이 끝나도 계속 돌아야 한다(앱이 끝난 뒤 바꿔 넣는다).
+    spawnDetached: ([command, ...args]) =>
+      spawn(command, args, {
+        detached: true,
+        stdio: 'ignore',
+        env: { PATH: '/usr/bin:/bin:/usr/sbin:/sbin' }
+      }).unref(),
+    remove: (path) => rm(path, { recursive: true, force: true })
+  })
+  return {
+    arch: process.arch === 'arm64' ? 'arm64' : 'x64',
+    fetchFeed: async () => {
+      const response = await fetchRelease(`${base}/latest-mac.yml`)
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      return response.text()
+    },
+    install: (release) => installer.install(release),
+    quit: () => {
+      quitting = true
+      app.quit()
+    },
+    failedBefore: () => {
+      if (!existsSync(failedMarker)) return false
+      rmSync(failedMarker, { force: true })
+      return true
+    }
+  }
+}
+
 /** 새 버전 확인: 시작 10초 뒤, 6시간마다, 설정에서 켤 때. */
 const UPDATE_FIRST_CHECK_MS = 10 * 1000
 const UPDATE_CHECK_EVERY_MS = 6 * 60 * 60 * 1000
@@ -625,8 +669,10 @@ const updater = createUpdater({
     if (!response.ok) throw new Error(`HTTP ${response.status}`)
     return response.json()
   },
-  // 설치한 Windows 앱만 자동 업데이트(macOS 는 서명이 없어 설치할 수 없다).
+  // 설치한 Windows 앱은 electron-updater 로 자동 업데이트한다. macOS 는 서명이 없어 그렇게 못 하고,
+  // 사용자가 누르면 직접 내려받아 앱을 바꿔 넣는다(macUpdate.ts).
   autoUpdater: process.platform === 'win32' && app.isPackaged ? autoUpdater : null,
+  mac: process.platform === 'darwin' && app.isPackaged ? macUpdateDeps() : null,
   now: Date.now,
   onChange: (status) => {
     if (mainWindow && !mainWindow.isDestroyed())
@@ -634,6 +680,15 @@ const updater = createUpdater({
     trayController?.setUpdate(status)
   }
 })
+
+/**
+ * 새 버전 설치를 시작한다. Windows 는 받아 둔 설치 파일로 바로 다시 시작한다(창을 닫는 것이 종료가 되게 한다).
+ * macOS 는 내려받아 준비한 뒤에야 끝내므로(실패하면 끝내지 않는다) 끝내는 것은 준비가 끝난 쪽(macUpdateDeps 의 quit)이 한다.
+ */
+function installUpdate(): void {
+  if (process.platform !== 'darwin') quitting = true
+  updater.install()
+}
 
 /** Windows 수집 보조 코드(C#)를 앱 데이터 폴더에 한 번만 컴파일해 두고, 예전 버전 DLL 은 지운다. */
 function prepareWindowsHelper(): void {
@@ -841,9 +896,14 @@ function registerIpc(): void {
     fromMainWindow(event.sender) ? updater.check() : null
   )
   ipcMain.handle(IPC.updateInstall, (event) => {
-    if (!fromMainWindow(event.sender)) return
-    quitting = true
-    updater.install()
+    if (fromMainWindow(event.sender)) installUpdate()
+  })
+  // macOS: 앱 안에서 바꿔 넣지 못했을 때 안내하는 설치 한 줄을 복사한다.
+  ipcMain.handle(IPC.updateCopyCommand, (event) => {
+    const command = fromMainWindow(event.sender) ? updater.status().installCommand : undefined
+    if (!command) return false
+    clipboard.writeText(command)
+    return true
   })
   ipcMain.handle(IPC.settingsGet, (event) =>
     fromMainWindow(event.sender) ? settings : DEFAULT_SETTINGS

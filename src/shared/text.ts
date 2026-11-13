@@ -291,6 +291,20 @@ export const text = {
   },
   actionError: (detail: string): string => `요청을 처리하지 못했어요: ${detail}`,
   openFailed: '브라우저로 열지 못했어요. 포트가 이미 닫혔을 수 있어요.',
+  /** 새 버전 확인·macOS 의 앱 안 업데이트(메인이 상태의 error 에 담는다). */
+  update: {
+    feedUnreadable: '릴리스 정보를 읽지 못했어요.',
+    /** 앱 안에서 바꿔 넣지 못한 까닭(MacUpdateError 의 code, swap 은 앱을 끝낸 뒤 도우미가 실패한 것). */
+    macFailed: {
+      location: 'Corral 이 응용 프로그램 폴더 밖에서 실행 중이라 바꿔 넣을 수 없어요.',
+      download: '새 버전을 내려받지 못했어요.',
+      checksum: '내려받은 파일이 릴리스의 확인 값과 달라요.',
+      open: '내려받은 설치 파일을 열지 못했어요.',
+      write: '응용 프로그램 폴더에 쓸 수 없어요.',
+      verify: '내려받은 앱이 기대한 것과 달라요.',
+      swap: '지난번에 앱을 바꿔 넣지 못했어요.'
+    }
+  },
   tray: {
     checking: 'RAM 확인 중…',
     failed: 'RAM 정보를 가져오지 못했어요',
@@ -307,6 +321,8 @@ export const text = {
     disk: (size: string): string => `디스크 정리 가능 ${size}`,
     updateReady: (v: string): string => `새 버전 ${v} — 다시 시작해 설치`,
     updateAvailable: (v: string): string => `새 버전 ${v} 내려받기`,
+    /** macOS 설치본: 누르면 앱 안에서 내려받아 바꿔 넣고 다시 켠다. */
+    updateInstall: (v: string): string => `새 버전 ${v} 으로 업데이트`,
     open: '앱 열기',
     settings: '설정',
     quit: '종료',
@@ -883,7 +899,14 @@ export const text = {
         error: (e: string): string => `새 버전을 확인하지 못했어요: ${e}`,
         check: '업데이트 확인',
         install: '다시 시작해 설치',
-        download: '내려받기 페이지'
+        download: '내려받기 페이지',
+        /** macOS 설치본: 앱 안에서 내려받아 바꿔 넣고 다시 켠다. */
+        selfInstall: '업데이트',
+        selfInstallHelp: '누르면 새 버전을 내려받아 앱을 바꿔 넣고 다시 켜요.',
+        /** 앱 안에서 바꿔 넣지 못했을 때: 까닭 뒤에 붙는 안내와 설치 한 줄. */
+        manual: '터미널에 아래 한 줄을 붙여 넣으면 새 버전으로 바뀌어요.',
+        copyCommand: '한 줄 복사',
+        copied: '복사했어요.'
       }
     },
     refresh: '지금 새로고침',

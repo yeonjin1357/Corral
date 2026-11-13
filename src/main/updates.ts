@@ -1,4 +1,13 @@
 import type { Platform, UpdateStatus } from '../shared/types'
+import { text } from '../shared/text'
+import {
+  MAC_INSTALL_COMMAND,
+  MAC_RELEASE_PAGE,
+  MacUpdateError,
+  parseLatestMac,
+  type MacArch,
+  type MacRelease
+} from './macUpdate'
 
 /** 새 버전 확인. pitwall 이 하는 유일한 인터넷 접속이고, 설정에서 끈다. */
 
@@ -18,6 +27,19 @@ export interface AutoUpdaterLike {
   checkForUpdates(): Promise<unknown>
   quitAndInstall(): void
   on(event: string, listener: (...args: unknown[]) => void): unknown
+}
+
+/** macOS 설치본의 앱 안 업데이트(macUpdate.ts)에 필요한 것. */
+export interface MacUpdateDeps {
+  arch: MacArch
+  /** 릴리스 정보(latest-mac.yml)의 글자. */
+  fetchFeed: () => Promise<string>
+  /** 내려받아 새 앱을 풀어 두고 바꿔 넣을 도우미를 띄운다. 실패하면 MacUpdateError. */
+  install: (release: MacRelease) => Promise<void>
+  /** 앱을 끝낸다(도우미가 그 뒤에 바꿔 넣고 다시 연다). */
+  quit: () => void
+  /** 지난번에 도우미가 바꿔 넣지 못했는지(남긴 표시를 읽고 지운다). */
+  failedBefore: () => boolean
 }
 
 function parts(v: string): { nums: number[]; pre: boolean } {
@@ -53,7 +75,9 @@ function message(e: unknown): string {
 
 /**
  * Windows 는 electron-updater 로 GitHub 게시본을 내려받아 종료할 때(또는 "다시 시작해 설치") 설치한다.
- * macOS 는 서명이 없어 자동 설치가 안 되므로 최신 릴리스만 확인해 페이지를 알려 준다.
+ * macOS 설치본은 서명이 없어 electron-updater 를 쓸 수 없다. 릴리스 정보 파일로 새 버전을 확인하고, 사용자가 누르면
+ * 직접 내려받아 앱을 바꿔 넣는다(mac). 바꿔 넣지 못하면 앱은 그대로 두고 설치 한 줄을 알린다.
+ * mac 이 없는 macOS(예전 방식)는 최신 릴리스만 확인해 페이지를 알려 준다.
  * 개발 실행이거나 설정에서 끄면 확인하지 않는다.
  */
 export function createUpdater(deps: {
@@ -64,6 +88,8 @@ export function createUpdater(deps: {
   fetchJson: (url: string) => Promise<unknown>
   /** Windows 설치본에서만 넘긴다. */
   autoUpdater: AutoUpdaterLike | null
+  /** macOS 설치본에서만 넘긴다. */
+  mac?: MacUpdateDeps | null
   now: () => number
   onChange: (s: UpdateStatus) => void
 }): { status(): UpdateStatus; check(): Promise<UpdateStatus>; install(): void } {
@@ -80,6 +106,11 @@ export function createUpdater(deps: {
     return current
   }
   const auto = deps.platform === 'win32' ? deps.autoUpdater : null
+  const mac = deps.platform === 'darwin' ? (deps.mac ?? null) : null
+  /** 앱 안에서 바꿔 넣지 못한 까닭. 있으면 다시 시도하지 않고 설치 한 줄을 알린다. */
+  let macBroken: string | null = mac?.failedBefore() ? text.update.macFailed.swap : null
+  /** 확인해 둔 새 버전(업데이트를 누르면 이것을 받는다). */
+  let macRelease: MacRelease | null = null
 
   if (auto) {
     auto.autoDownload = true
@@ -97,6 +128,34 @@ export function createUpdater(deps: {
     )
     auto.on('update-downloaded', (info) => set({ state: 'ready', version: versionOf(info) }))
     auto.on('error', (e) => set({ state: 'error', error: message(e), checkedAt: deps.now() }))
+  }
+
+  /** macOS 설치본: 새 버전이 있음을 알린다(앱 안에서 바꿔 넣을 수 있는지와, 안 될 때 쓸 설치 한 줄까지). */
+  const macAvailable = (release: MacRelease): UpdateStatus =>
+    set({
+      state: 'available',
+      version: release.version,
+      url: MAC_RELEASE_PAGE,
+      error: macBroken,
+      checkedAt: deps.now(),
+      selfInstall: macBroken == null,
+      installCommand: MAC_INSTALL_COMMAND
+    })
+
+  async function checkMac(feed: MacUpdateDeps): Promise<UpdateStatus> {
+    try {
+      const release = parseLatestMac(await feed.fetchFeed(), feed.arch)
+      if (!release)
+        return set({ state: 'error', error: text.update.feedUnreadable, checkedAt: deps.now() })
+      if (compareVersions(release.version, deps.currentVersion) <= 0) {
+        macRelease = null
+        return set({ state: 'none', version: null, url: null, checkedAt: deps.now() })
+      }
+      macRelease = release
+      return macAvailable(release)
+    } catch (e) {
+      return set({ state: 'error', error: message(e), checkedAt: deps.now() })
+    }
   }
 
   async function check(): Promise<UpdateStatus> {
@@ -117,6 +176,7 @@ export function createUpdater(deps: {
       }
       return current
     }
+    if (mac) return checkMac(mac)
     try {
       const latest = await latestRelease(deps.fetchJson)
       const newer = latest && compareVersions(latest.version, deps.currentVersion) > 0
@@ -130,11 +190,26 @@ export function createUpdater(deps: {
     }
   }
 
+  /** macOS 설치본: 내려받아 바꿔 넣을 준비를 하고 앱을 끝낸다. 실패하면 앱은 그대로, 까닭을 알린다. */
+  function installMac(feed: MacUpdateDeps, release: MacRelease): void {
+    set({ state: 'downloading', error: null, checkedAt: deps.now() })
+    feed.install(release).then(
+      () => feed.quit(),
+      (e: unknown) => {
+        macBroken =
+          e instanceof MacUpdateError ? text.update.macFailed[e.code] : text.update.macFailed.swap
+        macAvailable(release)
+      }
+    )
+  }
+
   return {
     status: () => current,
     check,
     install() {
       if (auto && current.state === 'ready') auto.quitAndInstall()
+      if (mac && current.state === 'available' && current.selfInstall && macRelease)
+        installMac(mac, macRelease)
     }
   }
 }

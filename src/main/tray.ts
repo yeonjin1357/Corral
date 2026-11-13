@@ -72,7 +72,13 @@ export function buildTrayMenu(
       label: text.tray.updateReady(update.version),
       click: () => actions.installUpdate?.()
     })
-  if (update?.state === 'available' && update.version && update.url) {
+  // macOS 설치본은 앱 안에서 내려받아 바꿔 넣는다. 그렇게 못 하면(다른 OS, 바꿔 넣기 실패) 내려받기 페이지를 연다.
+  if (update?.state === 'available' && update.version && update.selfInstall)
+    items.push({
+      label: text.tray.updateInstall(update.version),
+      click: () => actions.installUpdate?.()
+    })
+  else if (update?.state === 'available' && update.version && update.url) {
     const url = update.url
     items.push({
       label: text.tray.updateAvailable(update.version),

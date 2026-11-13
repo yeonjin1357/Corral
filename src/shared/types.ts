@@ -540,6 +540,13 @@ export interface UpdateStatus {
   url: string | null
   error: string | null
   checkedAt: number | null
+  /**
+   * macOS 설치본에서 available 일 때: 앱 안에서 내려받아 바꿔 넣을 수 있다(화면이 "업데이트" 버튼을 보인다).
+   * 바꿔 넣지 못했으면 false 가 되고 error 에 까닭이 담긴다 — 화면은 installCommand 를 안내한다.
+   */
+  selfInstall?: boolean
+  /** macOS 설치본: 터미널에 붙여 넣으면 새 버전으로 바뀌는 설치 한 줄. */
+  installCommand?: string
 }
 
 /** 끝난 워크트리의 의존성 폴더 하나. */

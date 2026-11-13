@@ -46,6 +46,7 @@ export const IPC = {
   updateGet: 'pitwall:update-get',
   updateCheck: 'pitwall:update-check',
   updateInstall: 'pitwall:update-install',
+  updateCopyCommand: 'pitwall:update-copy-command',
   updateChanged: 'pitwall:update-changed',
   eventsGet: 'pitwall:events-get',
   eventsAdded: 'pitwall:events-added',
@@ -137,8 +138,13 @@ export interface PitwallApi {
   update: {
     get(): Promise<UpdateStatus | null>
     check(): Promise<UpdateStatus | null>
-    /** Windows: 받아 둔 새 버전을 설치하려고 다시 시작한다. */
+    /**
+     * Windows: 받아 둔 새 버전을 설치하려고 다시 시작한다. macOS 설치본: 새 버전을 내려받아 앱을 바꿔 넣고 다시 켠다
+     * (실패하면 상태의 error 에 까닭이 담기고 앱은 그대로다).
+     */
     install(): Promise<void>
+    /** macOS 설치본: 설치 한 줄을 클립보드에 복사한다. 복사했으면 true. */
+    copyCommand(): Promise<boolean>
     onChange(callback: (status: UpdateStatus) => void): () => void
   }
   /** 기록(G3g): 메인이 기억한 일어난 일(최근 300개·24시간, 다시 켜도 이어짐). */

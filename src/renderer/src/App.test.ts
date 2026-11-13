@@ -120,6 +120,7 @@ function fake(over: Partial<PitwallApi> = {}): Fake {
       get: async () => null,
       check: async () => null,
       install: async () => {},
+      copyCommand: vi.fn(async () => true),
       onChange: off
     },
     onNavigate: (cb: (t: NavigateTarget) => void) => {
@@ -1753,6 +1754,65 @@ describe('연동 안내 카드', () => {
         .findAll('[data-hint-enable]')
         .map((b) => b.text())
     ).toEqual(['연동 켜기'])
+    w.unmount()
+  })
+})
+
+describe('macOS 설치본의 업데이트(설정 > 정보)', () => {
+  const available = {
+    state: 'available',
+    version: '0.4.0',
+    url: 'https://github.com/yeonjin1357/Corral/releases/latest',
+    error: null,
+    checkedAt: 1,
+    installCommand:
+      'curl -fsSL https://raw.githubusercontent.com/yeonjin1357/Corral/main/scripts/install-mac.sh | bash'
+  } as const
+  /** 설정 > 정보를 연 앱. */
+  async function openAbout(update: PitwallApi['update']): Promise<VueWrapper> {
+    const f = fake({ update })
+    const w = await start(f)
+    f.navigate({ page: 'settings' })
+    await flushPromises()
+    await w
+      .findAll('[role="tab"]')
+      .find((t) => t.text().includes('정보'))!
+      .trigger('click')
+    await flushPromises()
+    return w
+  }
+
+  test('업데이트를 누르면 메인에 설치를 요청한다', async () => {
+    const install = vi.fn(async () => {})
+    const w = await openAbout({
+      get: async () => ({ ...available, selfInstall: true }),
+      check: async () => null,
+      install,
+      copyCommand: vi.fn(async () => true),
+      onChange: () => () => {}
+    })
+    await w.find('[data-action="update-self-install"]').trigger('click')
+    expect(install).toHaveBeenCalledTimes(1)
+    w.unmount()
+  })
+
+  test('바꿔 넣지 못했을 때 한 줄 복사를 누르면 메인이 복사하고, 복사했다고 알린다', async () => {
+    const copyCommand = vi.fn(async () => true)
+    const w = await openAbout({
+      get: async () => ({
+        ...available,
+        selfInstall: false,
+        error: '응용 프로그램 폴더에 쓸 수 없어요.'
+      }),
+      check: async () => null,
+      install: async () => {},
+      copyCommand,
+      onChange: () => () => {}
+    })
+    await w.find('[data-action="update-copy-command"]').trigger('click')
+    await flushPromises()
+    expect(copyCommand).toHaveBeenCalledTimes(1)
+    expect(notice(w)).toContain('복사했어요.')
     w.unmount()
   })
 })

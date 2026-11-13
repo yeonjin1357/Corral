@@ -63,6 +63,8 @@ const emit = defineEmits<{
   codexHook: [action: 'enable' | 'disable']
   updateCheck: []
   updateInstall: []
+  /** macOS: 설치 한 줄을 클립보드에 복사한다. */
+  updateCopyCommand: []
   back: []
 }>()
 
@@ -822,9 +824,19 @@ const status = computed(() => {
                 >
                   {{ S.updates.install }}
                 </Button>
+                <!-- macOS 설치본: 앱 안에서 내려받아 바꿔 넣는다. 못 하면 아래에 설치 한 줄과 내려받기 페이지. -->
                 <Button
-                  v-if="update?.state === 'available' && update.url"
+                  v-if="update?.state === 'available' && update.selfInstall"
                   size="sm"
+                  data-action="update-self-install"
+                  @click="emit('updateInstall')"
+                >
+                  {{ S.updates.selfInstall }}
+                </Button>
+                <Button
+                  v-else-if="update?.state === 'available' && update.url"
+                  size="sm"
+                  :variant="update.installCommand ? 'outline' : 'default'"
                   :href="update.url"
                 >
                   {{ S.updates.download }}
@@ -837,6 +849,37 @@ const status = computed(() => {
               >
                 {{ updateText }}
               </p>
+              <p
+                v-if="update?.state === 'available' && update.selfInstall"
+                class="text-xs text-muted-foreground"
+              >
+                {{ S.updates.selfInstallHelp }}
+              </p>
+              <template
+                v-if="update?.state === 'available' && !update.selfInstall && update.installCommand"
+              >
+                <p v-if="update.error" class="update-problem text-sm text-destructive">
+                  {{ update.error }}
+                </p>
+                <p class="text-xs text-muted-foreground">{{ S.updates.manual }}</p>
+                <div class="flex items-center gap-2">
+                  <code
+                    data-update-command
+                    data-selectable
+                    class="min-w-0 flex-1 overflow-x-auto rounded-md border border-border bg-muted px-2 py-1.5 font-mono text-xs whitespace-nowrap"
+                    >{{ update.installCommand }}</code
+                  >
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    class="shrink-0"
+                    data-action="update-copy-command"
+                    @click="emit('updateCopyCommand')"
+                  >
+                    {{ S.updates.copyCommand }}
+                  </Button>
+                </div>
+              </template>
               <p v-if="autoChecks" class="update-auto text-xs text-muted-foreground">
                 {{ S.updates.auto }}
               </p>

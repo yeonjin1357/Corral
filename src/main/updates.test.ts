@@ -4,8 +4,10 @@ import {
   createUpdater,
   latestRelease,
   RELEASES_API,
-  type AutoUpdaterLike
+  type AutoUpdaterLike,
+  type MacUpdateDeps
 } from './updates'
+import { MacUpdateError, type MacRelease } from './macUpdate'
 
 describe('compareVersions', () => {
   test.each([
@@ -176,5 +178,156 @@ describe('createUpdater', () => {
       })
     )
     expect(await failing.check()).toMatchObject({ state: 'error', error: 'offline' })
+  })
+})
+
+describe('macOS: 앱 안에서 내려받아 바꿔 넣는다', () => {
+  const SHA =
+    'kdUvtiB20qgTtljEmBEZ87y5MOvcPQztLuay9SiD+rdbSaSU0e8+Nle4QcWx/mgnVxd9LHdRpI7AG855SX0VJQ=='
+  const feed = (version: string): string =>
+    [
+      `version: ${version}`,
+      'files:',
+      `  - url: corral-${version}-x64.dmg`,
+      '    sha512: AAAA',
+      '    size: 1',
+      `  - url: corral-${version}-arm64.dmg`,
+      `    sha512: ${SHA}`,
+      '    size: 2',
+      `path: corral-${version}-x64.dmg`,
+      ''
+    ].join('\n')
+  const RELEASE: MacRelease = { version: '0.3.0', file: 'corral-0.3.0-arm64.dmg', sha512: SHA }
+  const PAGE = 'https://github.com/yeonjin1357/Corral/releases/latest'
+  const COMMAND =
+    'curl -fsSL https://raw.githubusercontent.com/yeonjin1357/Corral/main/scripts/install-mac.sh | bash'
+
+  function mac(over: Partial<MacUpdateDeps> = {}): MacUpdateDeps & {
+    install: ReturnType<typeof vi.fn>
+    quit: ReturnType<typeof vi.fn>
+  } {
+    return {
+      arch: 'arm64',
+      fetchFeed: async () => feed('0.3.0'),
+      install: vi.fn(async () => {}),
+      quit: vi.fn(),
+      failedBefore: () => false,
+      ...over
+    } as MacUpdateDeps & { install: ReturnType<typeof vi.fn>; quit: ReturnType<typeof vi.fn> }
+  }
+  const updaterWith = (
+    m: MacUpdateDeps,
+    over: Partial<Parameters<typeof createUpdater>[0]> = {}
+  ): ReturnType<typeof createUpdater> =>
+    createUpdater(deps({ platform: 'darwin', currentVersion: '0.2.0', mac: m, ...over }))
+
+  test('릴리스 정보 파일로 새 버전을 확인하고, 앱 안에서 업데이트할 수 있다고 알린다(GitHub API 는 쓰지 않는다)', async () => {
+    const fetchJson = vi.fn()
+    const updater = updaterWith(mac(), { fetchJson })
+    expect(await updater.check()).toEqual({
+      state: 'available',
+      version: '0.3.0',
+      url: PAGE,
+      error: null,
+      checkedAt: 1000,
+      selfInstall: true,
+      installCommand: COMMAND
+    })
+    expect(fetchJson).not.toHaveBeenCalled()
+  })
+
+  test('같거나 낮은 버전이면 새 버전이 없다', async () => {
+    expect((await updaterWith(mac({ fetchFeed: async () => feed('0.2.0') })).check()).state).toBe(
+      'none'
+    )
+    expect((await updaterWith(mac({ fetchFeed: async () => feed('0.1.9') })).check()).state).toBe(
+      'none'
+    )
+  })
+
+  test('릴리스 정보를 받지 못하거나 읽을 수 없으면 오류', async () => {
+    const offline = updaterWith(
+      mac({
+        fetchFeed: async () => {
+          throw new Error('offline')
+        }
+      })
+    )
+    expect(await offline.check()).toMatchObject({ state: 'error', error: 'offline' })
+    const garbage = updaterWith(mac({ fetchFeed: async () => '<html>Not Found</html>' }))
+    expect(await garbage.check()).toMatchObject({
+      state: 'error',
+      error: '릴리스 정보를 읽지 못했어요.'
+    })
+  })
+
+  test('업데이트를 누르면 내려받는 중이 되고, 준비가 끝나면 앱을 끝낸다(도우미가 바꿔 넣는다)', async () => {
+    const m = mac()
+    const states: string[] = []
+    const updater = updaterWith(m, { onChange: (s) => states.push(s.state) })
+    await updater.check()
+    updater.install()
+    expect(updater.status()).toMatchObject({ state: 'downloading', version: '0.3.0' })
+    await vi.waitFor(() => expect(m.quit).toHaveBeenCalledTimes(1))
+    expect(m.install).toHaveBeenCalledWith(RELEASE)
+    expect(states).toEqual(['checking', 'available', 'downloading'])
+  })
+
+  test('내려받는 중에 또 눌러도 한 번만 한다', async () => {
+    let finish: () => void = () => {}
+    const m = mac({ install: vi.fn(() => new Promise<void>((resolve) => (finish = resolve))) })
+    const updater = updaterWith(m)
+    await updater.check()
+    updater.install()
+    updater.install()
+    expect(m.install).toHaveBeenCalledTimes(1)
+    finish()
+    await vi.waitFor(() => expect(m.quit).toHaveBeenCalledTimes(1))
+  })
+
+  test('바꿔 넣을 준비에 실패하면 앱을 끝내지 않고, 까닭과 설치 한 줄을 알린다', async () => {
+    const m = mac({
+      install: vi.fn(async () => {
+        throw new MacUpdateError('write', 'ditto: Operation not permitted')
+      })
+    })
+    const updater = updaterWith(m)
+    await updater.check()
+    updater.install()
+    await vi.waitFor(() => expect(updater.status().state).toBe('available'))
+    expect(updater.status()).toMatchObject({
+      version: '0.3.0',
+      url: PAGE,
+      selfInstall: false,
+      installCommand: COMMAND,
+      error: '응용 프로그램 폴더에 쓸 수 없어요.'
+    })
+    expect(m.quit).not.toHaveBeenCalled()
+    // 다시 눌러도 같은 일을 되풀이하지 않는다(화면은 설치 한 줄을 안내한다).
+    updater.install()
+    expect(m.install).toHaveBeenCalledTimes(1)
+    // 다시 확인해도 앱 안 업데이트는 권하지 않는다.
+    expect(await updater.check()).toMatchObject({ state: 'available', selfInstall: false })
+  })
+
+  test('지난번에 바꿔 넣지 못했으면(도우미가 남긴 표시) 앱 안 업데이트 대신 설치 한 줄을 알린다', async () => {
+    const m = mac({ failedBefore: () => true })
+    const updater = updaterWith(m)
+    expect(await updater.check()).toMatchObject({
+      state: 'available',
+      selfInstall: false,
+      installCommand: COMMAND,
+      error: '지난번에 앱을 바꿔 넣지 못했어요.'
+    })
+    updater.install()
+    expect(m.install).not.toHaveBeenCalled()
+  })
+
+  test('새 버전이 없을 때는 눌러도 아무 일도 없다', async () => {
+    const m = mac({ fetchFeed: async () => feed('0.2.0') })
+    const updater = updaterWith(m)
+    await updater.check()
+    updater.install()
+    expect(m.install).not.toHaveBeenCalled()
   })
 })

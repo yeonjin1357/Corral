@@ -26,6 +26,7 @@ const api: PitwallApi = {
     get: () => ipcRenderer.invoke(IPC.updateGet),
     check: () => ipcRenderer.invoke(IPC.updateCheck),
     install: () => ipcRenderer.invoke(IPC.updateInstall),
+    copyCommand: () => ipcRenderer.invoke(IPC.updateCopyCommand),
     onChange(callback) {
       const handler = (_event: IpcRendererEvent, status: UpdateStatus): void => callback(status)
       ipcRenderer.on(IPC.updateChanged, handler)

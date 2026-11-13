@@ -3,6 +3,7 @@ name: macOS smoke
 # 실제 Mac(GitHub 의 macOS 러너)에서 확인한다.
 # - collect: 진짜 ps·lsof·vm_stat 으로 수집(src/main/collect/darwin.real.test.ts)과 전체 단위 테스트
 # - install: README 의 설치 한 줄(scripts/install-mac.sh)로 최신 릴리스를 깔아, 경고 창 없이 열리고 다시 실행하면 바꿔 넣는지
+# - update: 지금 버전을 깔고 앱 안의 업데이트 버튼으로 새 버전이 되는지, 확인 값이 틀리면 앱이 그대로인지
 # - app: dmg 를 팀원이 받는 것처럼 설치하고, 앱을 띄워 수집·끄기·연동·디스크 정리를 해 본다(scripts/macos-smoke)
 # 결과 표는 실행 요약에, 스크린샷·스냅샷은 아티팩트에 남는다.
 # 직접 돌린다(Actions > macOS smoke > Run workflow, 또는 `gh workflow run macos-smoke.yml`). 릴리스 전에 한 번 돌려 본다.
@@ -81,6 +82,40 @@ jobs:
         with:
           name: macos-install-${{ matrix.os }}
           path: ${{ runner.temp }}/install-out
+          if-no-files-found: warn
+
+  # 앱 안 업데이트: 지금 버전을 깔고 업데이트 버튼으로 새 버전(이 커밋으로 만든 99.0.0)이 되는지,
+  # 확인 값이 틀리면 앱이 그대로 남는지 본다(scripts/macos-smoke/check-update.sh).
+  update:
+    name: in-app update (${{ matrix.os }})
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-26, macos-15, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: 앱 안 업데이트 확인
+        run: |
+          export SMOKE_OUT="$RUNNER_TEMP/update-out"
+          bash scripts/macos-smoke/check-update.sh
+      - name: 요약
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/update-out/update-summary.md" ]; then
+            cat "$RUNNER_TEMP/update-out/update-summary.md" >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: macos-update-${{ matrix.os }}
+          path: ${{ runner.temp }}/update-out
           if-no-files-found: warn
 
   app:

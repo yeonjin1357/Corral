@@ -423,6 +423,15 @@ async function chooseTheme(theme: ThemeChoice): Promise<void> {
 const pickFolder = (): Promise<string | null> => window.pitwall.settings.pickFolder()
 const checkUpdate = (): void => void window.pitwall.update.check()
 const installUpdate = (): void => void window.pitwall.update.install()
+/** macOS: 설치 한 줄을 클립보드에 복사한다(메인이 복사한다). */
+async function copyInstallCommand(): Promise<void> {
+  try {
+    if (await window.pitwall.update.copyCommand())
+      say('action', { text: text.ui.settings.updates.copied, tone: 'success' })
+  } catch (e) {
+    say('action', { text: failureText(e), tone: 'error' })
+  }
+}
 
 function failureText(e: unknown): string {
   return text.actionError(e instanceof Error ? e.message : String(e))
@@ -998,6 +1007,7 @@ const takenAt = computed(() => (snapshot.value ? formatTimeOfDay(snapshot.value.
         @codex-hook="codexHookAction"
         @update-check="checkUpdate"
         @update-install="installUpdate"
+        @update-copy-command="copyInstallCommand"
         @back="goHome"
       />
     </KeepAlive>

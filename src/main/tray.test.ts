@@ -444,6 +444,26 @@ describe('새 버전', () => {
     for (const state of ['none', 'checking', 'downloading', 'error', 'disabled'] as const)
       expect(labels(buildTrayMenu(snap(), acts, status(state))).join()).not.toContain('새 버전')
   })
+
+  test('macOS 설치본: 앱 안에서 바꿔 넣을 수 있으면 업데이트 줄(누르면 내려받아 바꿔 넣는다), 못 하면 내려받기 줄', () => {
+    const install = vi.fn()
+    const openRelease = vi.fn()
+    const acts = { ...actions, installUpdate: install, openRelease }
+    const click = (items: ReturnType<typeof buildTrayMenu>, label: string): void =>
+      items.find((i) => i.label === label)!.click!({} as never, undefined, {} as never)
+
+    const can = buildTrayMenu(snap(), acts, { ...status('available'), selfInstall: true })
+    expect(labels(can)).not.toContain('새 버전 0.2.0 내려받기')
+    click(can, '새 버전 0.2.0 으로 업데이트')
+    expect(install).toHaveBeenCalledTimes(1)
+    expect(openRelease).not.toHaveBeenCalled()
+
+    const cannot = buildTrayMenu(snap(), acts, { ...status('available'), selfInstall: false })
+    expect(labels(cannot)).not.toContain('새 버전 0.2.0 으로 업데이트')
+    click(cannot, '새 버전 0.2.0 내려받기')
+    expect(openRelease).toHaveBeenCalledTimes(1)
+    expect(install).toHaveBeenCalledTimes(1)
+  })
 })
 
 test('남은 프로세스 줄은 에이전트 워크트리의 것을 빼고 센다', () => {
