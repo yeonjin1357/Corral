@@ -91,11 +91,14 @@ describe.skipIf(!enabled)('진짜 Gradle 데몬: 쉬는 데몬의 프로젝트',
 
     // 띄운 데몬: 임시 Gradle 폴더의 daemon/<버전>/daemon-<pid>.out.log.
     const daemonRoot = join(gradleHome, 'daemon')
-    const logs = readdirSync(daemonRoot).flatMap((ver) =>
-      readdirSync(join(daemonRoot, ver))
-        .filter((name) => /^daemon-\d+\.out\.log$/.test(name))
-        .map((name) => join(daemonRoot, ver, name))
-    )
+    // daemon 폴더에는 버전 폴더 말고 파일(CACHEDIR.TAG, Gradle 9)도 있다.
+    const logs = readdirSync(daemonRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .flatMap((entry) =>
+        readdirSync(join(daemonRoot, entry.name))
+          .filter((name) => /^daemon-\d+\.out\.log$/.test(name))
+          .map((name) => join(daemonRoot, entry.name, name))
+      )
     console.log(`데몬 로그: ${JSON.stringify(logs)}`)
     expect(logs.length).toBe(1)
     daemonPid = Number(/daemon-(\d+)\.out\.log$/.exec(logs[0])![1])
