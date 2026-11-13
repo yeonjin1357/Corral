@@ -58,6 +58,8 @@ function fakes(
     platform?: Platform
     latest?: DashboardSnapshot | null
     reply?: CommandResult | (() => Promise<CommandResult>)
+    /** 명령마다 다른 답(던지면 실행 실패·시간 초과). 있으면 reply 대신 쓴다. */
+    replies?: (argv: string[]) => CommandResult
     notDirs?: string[]
   } = {}
 ): {
@@ -73,6 +75,7 @@ function fakes(
     latest: () => latest,
     run: async (argv, opts) => {
       calls.push({ argv, opts })
+      if (over.replies) return over.replies(argv)
       const reply = over.reply ?? { stdout: 'null', stderr: '', exitCode: 0 }
       return typeof reply === 'function' ? reply() : reply
     },
@@ -230,22 +233,23 @@ describe('창으로 가기', () => {
     }
   })
 
-  test('macOS 는 host.app 을 open 으로, 없으면 false', async () => {
+  test('macOS: 탭을 고를 수 없는 앱은 host.app 을 open 으로, 없으면 false', async () => {
+    const VSCODE = '/Applications/Visual Studio Code.app'
     const withApp = (app: string | null): DashboardSnapshot =>
       snap({
         platform: 'darwin',
         collectMode: 'darwin',
         agents: [agent({ host: { pids: [300], app } })]
       })
-    const ok = fakes({ platform: 'darwin', latest: withApp(TERMINAL) })
+    const ok = fakes({ platform: 'darwin', latest: withApp(VSCODE) })
     expect(await ok.focuser.focusAgent(KEY)).toBe(true)
-    expect(ok.calls.map((c) => c.argv)).toEqual([['/usr/bin/open', TERMINAL]])
+    expect(ok.calls.map((c) => c.argv)).toEqual([['/usr/bin/open', VSCODE]])
     expect(ok.calls[0].opts).not.toHaveProperty('cwd')
-    expect(ok.checked).toEqual([TERMINAL])
+    expect(ok.checked).toEqual([VSCODE])
 
     const failed = fakes({
       platform: 'darwin',
-      latest: withApp(TERMINAL),
+      latest: withApp(VSCODE),
       reply: { stdout: '', stderr: 'Unable to find application', exitCode: 1 }
     })
     expect(await failed.focuser.focusAgent(KEY)).toBe(false)
@@ -262,6 +266,110 @@ describe('창으로 가기', () => {
       expect(await f.focuser.focusAgent(KEY)).toBe(false)
       expect(f.calls).toEqual([])
     }
+  })
+})
+
+describe('macOS: Terminal·iTerm2 는 탭까지 고른다', () => {
+  const ITERM = '/Applications/iTerm.app'
+  const mac = (app: string | null): DashboardSnapshot =>
+    snap({
+      platform: 'darwin',
+      collectMode: 'darwin',
+      agents: [agent({ host: { pids: [300], app } })]
+    })
+  const ok = (stdout = ''): CommandResult => ({ stdout, stderr: '', exitCode: 0 })
+  /** ps 는 tty 를, osascript 는 탭 고르기 결과를, open 은 성공을 답한다. */
+  const replying =
+    (tty: string, script: CommandResult | Error) =>
+    (argv: string[]): CommandResult => {
+      if (argv[0] === '/bin/ps') return ok(tty)
+      if (argv[0] !== '/usr/bin/osascript') return ok()
+      if (script instanceof Error) throw script
+      return script
+    }
+  const commands = (f: ReturnType<typeof fakes>): string[] => f.calls.map((c) => c.argv[0])
+
+  test('Terminal 에 떠 있으면 그 에이전트의 tty 로 탭을 고르고, 앱을 따로 열지 않는다', async () => {
+    const f = fakes({
+      platform: 'darwin',
+      latest: mac(TERMINAL),
+      replies: replying('ttys003\n', ok('found\n'))
+    })
+    expect(await f.focuser.focusAgent(KEY)).toBe(true)
+    expect(commands(f)).toEqual(['/bin/ps', '/usr/bin/osascript'])
+    expect(f.calls[0].argv).toEqual(['/bin/ps', '-o', 'tty=', '-p', '5000'])
+    expect(f.calls[1].argv[f.calls[1].argv.length - 1]).toBe('/dev/ttys003')
+    expect(f.calls[1].argv.join('\n')).toContain('com.apple.Terminal')
+    // .app 이 지금도 있는지는 먼저 확인한다.
+    expect(f.checked).toEqual([TERMINAL])
+  })
+
+  test('iTerm2 에 떠 있으면 iTerm2 에게 묻는다', async () => {
+    const f = fakes({
+      platform: 'darwin',
+      latest: mac(ITERM),
+      replies: replying('ttys007\n', ok('found\n'))
+    })
+    expect(await f.focuser.focusAgent(KEY)).toBe(true)
+    expect(commands(f)).toEqual(['/bin/ps', '/usr/bin/osascript'])
+    expect(f.calls[1].argv[f.calls[1].argv.length - 1]).toBe('/dev/ttys007')
+    expect(f.calls[1].argv.join('\n')).toContain('com.googlecode.iterm2')
+  })
+
+  test('그 tty 의 탭이 없으면(tmux 안 등) 지금처럼 앱을 앞으로 가져온다', async () => {
+    const f = fakes({
+      platform: 'darwin',
+      latest: mac(TERMINAL),
+      replies: replying('ttys003\n', ok('missing\n'))
+    })
+    expect(await f.focuser.focusAgent(KEY)).toBe(true)
+    expect(commands(f)).toEqual(['/bin/ps', '/usr/bin/osascript', '/usr/bin/open'])
+    expect(f.calls[2].argv).toEqual(['/usr/bin/open', TERMINAL])
+  })
+
+  test('탭 고르기를 허락받지 못했으면 앱을 앞으로 가져온다', async () => {
+    const f = fakes({
+      platform: 'darwin',
+      latest: mac(TERMINAL),
+      replies: replying('ttys003\n', {
+        stdout: '',
+        stderr: 'execution error: Not authorized to send Apple events to Terminal. (-1743)',
+        exitCode: 1
+      })
+    })
+    expect(await f.focuser.focusAgent(KEY)).toBe(true)
+    expect(commands(f)).toEqual(['/bin/ps', '/usr/bin/osascript', '/usr/bin/open'])
+  })
+
+  test('탭 고르기가 답이 없으면(권한 창에 답하지 않음) 앱을 앞으로 가져온다', async () => {
+    const f = fakes({
+      platform: 'darwin',
+      latest: mac(TERMINAL),
+      replies: replying('ttys003\n', new Error('timeout'))
+    })
+    expect(await f.focuser.focusAgent(KEY)).toBe(true)
+    expect(commands(f)).toEqual(['/bin/ps', '/usr/bin/osascript', '/usr/bin/open'])
+  })
+
+  test('터미널에 붙어 있지 않은 에이전트(tty 없음)는 탭을 묻지 않고 앱만 앞으로', async () => {
+    const f = fakes({
+      platform: 'darwin',
+      latest: mac(TERMINAL),
+      replies: replying('??\n', ok('found\n'))
+    })
+    expect(await f.focuser.focusAgent(KEY)).toBe(true)
+    expect(commands(f)).toEqual(['/bin/ps', '/usr/bin/open'])
+  })
+
+  test('.app 이 지금은 없으면 아무것도 실행하지 않는다', async () => {
+    const f = fakes({
+      platform: 'darwin',
+      latest: mac(TERMINAL),
+      notDirs: [TERMINAL],
+      replies: replying('ttys003\n', ok('found\n'))
+    })
+    expect(await f.focuser.focusAgent(KEY)).toBe(false)
+    expect(f.calls).toEqual([])
   })
 })
 

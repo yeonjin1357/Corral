@@ -488,22 +488,65 @@ await check('터미널 안에서 띄운 에이전트: 띄운 앱(Terminal)을 �
   return row.host.app
 })
 
-await check('창으로 가기: 에이전트가 떠 있는 Terminal 이 앞으로 온다', 'info', async () => {
+/** 그 프로세스가 붙어 있는 터미널 장치(/dev/ttys003). 없으면 null. */
+const ttyOf = (pid) => {
+  const name = sh('/bin/ps', ['-o', 'tty=', '-p', String(pid)]).stdout.trim()
+  return name && name !== '??' ? `/dev/${name}` : null
+}
+const agentKeyOf = (row) => `agent:${row.pid}:${row.startedAt ?? ''}`
+
+await check('창으로 가기: Terminal 에서 에이전트가 떠 있는 탭까지 고른다', 'required', async () => {
   assert(fixtures.terminalAgent?.pid, '터미널에서 띄우지 못했다')
   const row = snap.agents.find((a) => a.pid === fixtures.terminalAgent.pid)
   assert(row, '에이전트가 없다')
+  const tty = ttyOf(row.pid)
+  assert(tty, '에이전트의 tty 를 모른다')
+  const frontTab = () =>
+    osa('tell application "Terminal" to get tty of selected tab of front window').stdout.trim()
+  const layout = osa(
+    'tell application "Terminal" to get {count of windows, count of tabs of (first window whose tty of tabs contains "' +
+      tty +
+      '")}'
+  ).stdout.trim()
+  const before = frontTab()
   sh('open', [APP])
   await sleep(1500)
-  const before = frontmost()
-  const key = `agent:${row.pid}:${row.startedAt ?? ''}`
-  const ok = await page.eval(`window.pitwall.focusAgent(${JSON.stringify(key)})`)
+  const ok = await page.eval(`window.pitwall.focusAgent(${JSON.stringify(agentKeyOf(row))})`)
   assert(ok === true, `focusAgent 가 ${ok}`)
-  const moved = await waitFor(() => frontmost() === 'Terminal', 10_000)
-  assert(moved, `맨 앞 앱이 ${frontmost()}(누르기 전 ${before})`)
+  const moved = await waitFor(() => frontmost() === 'Terminal' && frontTab() === tty, 15_000)
   screenShot('screen-focus-terminal')
+  assert(
+    moved,
+    `맨 앞 앱 ${frontmost()}, 맨 앞 탭 ${frontTab()}, 에이전트 ${tty}(누르기 전 ${before})`
+  )
   sh('open', [APP])
   await sleep(1000)
-  return `${before} → Terminal`
+  return `맨 앞 탭 ${before} → ${tty}(창 수, 그 창의 탭 수: ${layout || '모름'})${before === tty ? ' — 누르기 전에도 그 탭이 앞이었다' : ''}`
+})
+
+await check('창으로 가기: iTerm2 에서도 에이전트가 떠 있는 탭을 고른다', 'info', async () => {
+  assert(fixtures.itermAgent?.pid, 'iTerm2 에서 띄우지 못했다')
+  const row = snap.agents.find((a) => a.pid === fixtures.itermAgent.pid)
+  assert(row, `에이전트가 없다: ${JSON.stringify(snap.agents.map((a) => a.pid))}`)
+  assert(/iTerm\.app$/.test(row.host?.app ?? ''), `띄운 앱: ${JSON.stringify(row.host)}`)
+  const tty = ttyOf(row.pid)
+  assert(tty, '에이전트의 tty 를 모른다')
+  const current = () =>
+    osa('tell application "iTerm2" to get tty of current session of current window').stdout.trim()
+  const before = current()
+  sh('open', [APP])
+  await sleep(1500)
+  const ok = await page.eval(`window.pitwall.focusAgent(${JSON.stringify(agentKeyOf(row))})`)
+  assert(ok === true, `focusAgent 가 ${ok}`)
+  const moved = await waitFor(() => frontmost() === 'iTerm2' && current() === tty, 15_000)
+  screenShot('screen-focus-iterm')
+  assert(
+    moved,
+    `맨 앞 앱 ${frontmost()}, 고른 세션 ${current()}, 에이전트 ${tty}(누르기 전 ${before})`
+  )
+  sh('open', [APP])
+  await sleep(1000)
+  return `고른 세션 ${before} → ${tty}${before === tty ? ' — 누르기 전에도 그 세션이 앞이었다' : ''}`
 })
 
 for (const [tool, started] of [
@@ -528,7 +571,10 @@ for (const [tool, started] of [
       )
       const rows = snap.agents.filter(
         (a) =>
-          a.tool === tool && a.pid !== fixtures.agent.pid && a.pid !== fixtures.terminalAgent?.pid
+          a.tool === tool &&
+          ![fixtures.agent.pid, fixtures.terminalAgent?.pid, fixtures.itermAgent?.pid].includes(
+            a.pid
+          )
       )
       assert(
         rows.length > 0,

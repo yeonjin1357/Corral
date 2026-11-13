@@ -10,8 +10,12 @@ import {
   powershellPath,
   WRITE_JSON_LINES
 } from './collect/windows'
+import { selectTabArgv, TAB_FOUND, tabTerminalOf, ttyArgv, ttyDeviceOf } from './macFocus'
 
-/* 창으로 가기(G3f): 에이전트가 떠 있는 터미널·에디터 창을 앞으로 가져온다. 탭까지 고르지는 못한다. */
+/*
+ * 창으로 가기(G3f): 에이전트가 떠 있는 터미널·에디터 창을 앞으로 가져온다. macOS 의 Terminal·iTerm2 는 탭까지 고르고,
+ * 그 밖에는 창(Windows)·앱(macOS)까지만 간다.
+ */
 
 /** 화면·알림이 준 선택 키의 길이 상한(실제 키는 `agent:<pid>:<시작 시각>` 으로 짧다). */
 const MAX_KEY_LENGTH = 100
@@ -81,7 +85,8 @@ function parseFocusResult(stdout: string, pids: number[]): FocusResult | null {
  * 창으로 가기. 화면·알림이 준 키는 찾는 열쇠일 뿐이고, 지금 스냅샷의 에이전트만 다룬다.
  * - Windows: 그 에이전트의 조상(host.pids) 가운데 창을 가진 첫 프로세스의 창을 보조 코드로 앞으로 가져온다.
  *   PowerShell 은 절대 경로로, 작업 폴더 없이 띄운다. 보조 코드를 못 쓰는 수집 방식(basic·safe)이면 하지 않는다.
- * - macOS: 조상의 `.app` 번들(host.app)을 `/usr/bin/open` 으로 연다(이미 떠 있으면 앞으로 온다).
+ * - macOS: 조상의 `.app` 번들(host.app)이 Terminal·iTerm2 면 에이전트의 tty 로 그 탭을 고르고(macFocus.ts), 다른 앱이거나
+ *   고르지 못하면 그 번들을 `/usr/bin/open` 으로 연다(이미 떠 있으면 앞으로 온다).
  * 실패하면 false(화면은 실패를 알리고, 알림은 pitwall 을 연다).
  */
 export function createFocuser(deps: {
@@ -113,11 +118,35 @@ export function createFocuser(deps: {
     return result.exitCode === 0 ? parseFocusResult(result.stdout, pids) : null
   }
 
-  async function openApp(app: string | null): Promise<boolean> {
-    // 스냅샷의 값도 다시 확인한다: 수집 때와 같은 규칙(절대 경로, 다른 .app 안이 아닌 .app)에 맞는 번들만.
+  /** 스냅샷의 값도 다시 확인한다: 수집 때와 같은 규칙(절대 경로, 다른 .app 안이 아닌 .app)에 맞고 지금도 있는 번들만. */
+  async function runningApp(app: string | null): Promise<string | null> {
     const isBundle = !!app && appBundleOf(`${app}/Contents/MacOS/`) === app
-    if (!app || !isBundle) return false
-    if (!(await deps.isDirectory(app))) return false
+    if (!app || !isBundle) return null
+    return (await deps.isDirectory(app)) ? app : null
+  }
+
+  /**
+   * Terminal·iTerm2 면 에이전트가 붙어 있는 tty 의 탭을 고른다. 골랐으면 true. 다른 앱이거나, tty 를 모르거나, 그 tty 의
+   * 탭이 없거나(tmux 안 등), 허락받지 못했거나, 답이 없으면 false — 부르는 쪽이 앱만 앞으로 가져온다.
+   */
+  async function selectTab(app: string, agent: AgentRow): Promise<boolean> {
+    const kind = tabTerminalOf(app)
+    if (!kind || !isScriptPid(agent.pid)) return false
+    try {
+      const ps = await deps.run(ttyArgv(agent.pid), { timeoutMs: COMMAND_TIMEOUT_MS })
+      const tty = ps.exitCode === 0 ? ttyDeviceOf(ps.stdout) : null
+      if (!tty) return false
+      const result = await deps.run(selectTabArgv(kind, tty), { timeoutMs: COMMAND_TIMEOUT_MS })
+      return result.exitCode === 0 && result.stdout.trim() === TAB_FOUND
+    } catch {
+      return false
+    }
+  }
+
+  async function focusMacHost(agent: AgentRow): Promise<boolean> {
+    const app = await runningApp(agent.host.app)
+    if (!app) return false
+    if (await selectTab(app, agent)) return true
     const result = await deps.run(['/usr/bin/open', app], { timeoutMs: COMMAND_TIMEOUT_MS })
     return result.exitCode === 0
   }
@@ -127,7 +156,7 @@ export function createFocuser(deps: {
       const agent = agentFor(key)
       if (!agent) return false
       try {
-        if (deps.platform === 'darwin') return await openApp(agent.host.app)
+        if (deps.platform === 'darwin') return await focusMacHost(agent)
         return (await focusWindowsHost(agent))?.focused === true
       } catch {
         return false

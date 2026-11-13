@@ -95,6 +95,53 @@ for _ in $(seq 1 30); do
 done
 echo "터미널 에이전트 pid: ${TERMINAL_AGENT_PID:-없음}"
 
+# osascript 가 답을 기다리며 멈추지 않게 시간 제한을 둔다(macOS 에는 timeout 명령이 없다).
+limited() {
+  local secs=$1
+  shift
+  perl -e 'alarm shift; exec @ARGV' "$secs" "$@"
+}
+
+# 탭까지 고르는지 보려고: 에이전트가 있는 창에 탭을 하나 더 열고(에이전트 탭이 뒤로 간다), 다른 창도 하나 띄운다.
+limited 20 osascript -e 'tell application "Terminal" to activate' > /dev/null 2>&1 || true
+sleep 1
+limited 20 osascript -e 'tell application "System Events" to keystroke "t" using command down' > /dev/null 2>&1 || true
+sleep 1
+open -a Terminal "$ROOT" || true
+sleep 1
+limited 20 osascript -e 'tell application "Terminal" to get {count of windows, count of tabs of window 1}' || true
+
+echo "== iTerm2 안에서 띄운 가짜 에이전트(탭 고르기 확인용, 되는 만큼)"
+ITERM_AGENT_PID=
+if [ "${SMOKE_ITERM:-1}" = 1 ]; then
+  set +e
+  brew install --cask iterm2 > "$OUT/iterm-install.log" 2>&1
+  tail -2 "$OUT/iterm-install.log"
+  if [ -d /Applications/iTerm.app ]; then
+    # 내려받은 앱을 처음 열 때 묻는 창이 뜨지 않게.
+    xattr -dr com.apple.quarantine /Applications/iTerm.app
+    # iTerm2 에 넘기는 명령은 공백이 없는 경로로.
+    LAUNCHER="$RUNNER_TEMP/agent-in-iterm.sh"
+    cat > "$LAUNCHER" <<EOF
+#!/bin/bash
+cd "$ROOT/shop-web"
+exec "$ROOT/bin/claude" -e 'setInterval(()=>{},1000)' corral-iterm-agent
+EOF
+    chmod +x "$LAUNCHER"
+    limited 90 osascript -e "tell application \"iTerm2\" to create window with default profile command \"$LAUNCHER\"" > "$OUT/iterm-launch.log" 2>&1
+    for _ in $(seq 1 40); do
+      ITERM_AGENT_PID=$(pgrep -f corral-iterm-agent | head -1 || true)
+      [ -n "$ITERM_AGENT_PID" ] && break
+      sleep 0.5
+    done
+    # 에이전트 창이 뒤로 가게 창을 하나 더 띄운다.
+    limited 30 osascript -e 'tell application "iTerm2" to create window with default profile' >> "$OUT/iterm-launch.log" 2>&1
+    cat "$OUT/iterm-launch.log"
+  fi
+  set -e
+fi
+echo "iTerm2 에이전트 pid: ${ITERM_AGENT_PID:-없음}"
+
 echo "== 한글 폴더 이름이 자소 분리형(NFD)인 저장소 — Finder 로 만든 한글 폴더가 이렇게 저장된다"
 NFD_DIR="$ROOT/$(printf '프로젝트' | iconv -f UTF-8 -t UTF-8-MAC)"
 mkdir -p "$NFD_DIR"
@@ -170,7 +217,8 @@ echo "== 에이전트 프로세스(ps 가 보는 이름·명령줄)"
 /bin/ps -axww -o pid=,ppid=,comm= | grep -iE 'claude|codex' | grep -v grep | tee "$OUT/agents-ps-comm.txt" || true
 /bin/ps -axww -o pid=,args= | grep -iE 'claude|codex' | grep -v grep | tee "$OUT/agents-ps-args.txt" || true
 
-REAL_CLAUDE=$REAL_CLAUDE REAL_CODEX=$REAL_CODEX TERMINAL_AGENT_PID=$TERMINAL_AGENT_PID NFD_DIR=$NFD_DIR \
+REAL_CLAUDE=$REAL_CLAUDE REAL_CODEX=$REAL_CODEX TERMINAL_AGENT_PID=$TERMINAL_AGENT_PID \
+  ITERM_AGENT_PID=$ITERM_AGENT_PID NFD_DIR=$NFD_DIR \
   node - "$OUT" "$ROOT" <<'EOF'
 const fs = require('fs')
 const [out, root] = process.argv.slice(2)
@@ -191,6 +239,7 @@ const fixtures = {
   serverB: { pid: pid('server-b'), port: 5174, childPid: pid('server-b-child') },
   agent: { pid: pid('agent') },
   terminalAgent: { pid: Number(process.env.TERMINAL_AGENT_PID) || null },
+  itermAgent: { pid: Number(process.env.ITERM_AGENT_PID) || null },
   // realpath 는 디스크에 저장된 이름(자소 분리형) 그대로 돌려준다.
   nfd: {
     pid: pid('server-nfd'),

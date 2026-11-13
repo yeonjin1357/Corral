@@ -465,7 +465,7 @@ test('설정 > 알림에서 "알림을 누르면 그 에이전트의 창으로"�
     '알림을 누르면 그 에이전트의 창으로'
   )
   expect(w.text()).toContain(
-    '에이전트 알림을 누르면 그 에이전트가 떠 있는 터미널·에디터 창을 앞으로 가져와요. 창을 찾지 못하면 Corral 을 열어요. 탭까지 고르지는 못해요.'
+    '에이전트 알림을 누르면 그 에이전트가 떠 있는 터미널·에디터 창을 앞으로 가져와요. 창을 찾지 못하면 Corral 을 열어요. 탭까지 고르는 것은 macOS 의 Terminal·iTerm2 뿐이에요.'
   )
   await box.trigger('click')
   await w.find('form').trigger('submit')
