@@ -31,19 +31,27 @@ Corral은 이것들을 작업 공간(저장소·워크트리)별로 묶어서 �
 
 ## 설치
 
-[Releases](https://github.com/yeonjin1357/Corral/releases)에서 최신 버전을 내려받아요.
-
 **Windows 10/11**
 
-`corral-<버전>-setup.exe`를 실행하면 관리자 권한 없이 설치돼요. 코드 서명이 없어서 "Windows의 PC 보호" 창이 뜨면 **추가 정보 → 실행**을 눌러 주세요. 그다음부터는 새 버전을 알아서 받아 두었다가 앱을 다시 시작할 때 설치해요.
+[Releases](https://github.com/yeonjin1357/Corral/releases)에서 `corral-<버전>-setup.exe`를 받아 실행하면 관리자 권한 없이 설치돼요. 코드 서명이 없어서 "Windows의 PC 보호" 창이 뜨면 **추가 정보 → 실행**을 눌러 주세요. 그다음부터는 새 버전을 알아서 받아 두었다가 앱을 다시 시작할 때 설치해요.
 
-**macOS** (아직 실제 Mac에서 확인하지 못했어요)
+**macOS 13 이상**
 
-Apple Silicon은 `arm64`, Intel은 `x64` dmg를 받아 응용 프로그램 폴더로 옮겨요. 처음 열 때 경고가 나오면 **시스템 설정 → 개인정보 보호 및 보안**에서 **그래도 열기**를 눌러 주세요. "손상되었기 때문에 열 수 없습니다"가 나오면 터미널에서 아래를 실행한 뒤 다시 열어요. 자동 업데이트는 되지 않아요.
+터미널에 아래 한 줄을 붙여 넣으면 최신 버전을 받아 응용 프로그램 폴더에 설치하고 열어요. Apple Silicon과 Intel은 알아서 골라요.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/yeonjin1357/Corral/main/scripts/install-mac.sh | bash
+```
+
+새 버전이 나오면 앱이 알려 줘요. 같은 줄을 다시 실행하면 새 버전으로 바뀌어요.
+
+[Releases](https://github.com/yeonjin1357/Corral/releases)에서 dmg를 직접 받아 설치할 수도 있어요(Apple Silicon은 `arm64`, Intel은 `x64`). 다만 Apple 서명이 없어서, 브라우저로 받은 dmg로 설치하면 처음 열 때 "열 수 없음" 경고가 나와요. 터미널에서 아래를 실행한 뒤 다시 열어 주세요.
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/Corral.app
 ```
+
+macOS는 실제 Mac을 손으로 써 본 것이 아니라 GitHub의 macOS 러너(macOS 15·26, Apple Silicon·Intel)에서 설치와 주요 동작을 자동으로 확인했어요.
 
 설치하면 트레이(메뉴 막대)에 작은 모니터 아이콘이 생겨요. 왼쪽 클릭은 요약 창, 오른쪽 클릭은 메뉴예요.
 
@@ -88,4 +96,4 @@ MIT. 화면 디자인은 [NeoHtop](https://github.com/Abdenasser/neohtop)(MIT)�
 
 ---
 
-**English** — Corral is a tray app for developers running several AI coding agents (Claude Code, Codex) across git worktrees. It groups agents, dev servers, leftover processes and memory use by workspace, and lets you clean them up after a confirmation. Everything is read locally; the only network access is the update check. The UI is in Korean. Windows is tested; the macOS build is not yet verified.
+**English** — Corral is a tray app for developers running several AI coding agents (Claude Code, Codex) across git worktrees. It groups agents, dev servers, leftover processes and memory use by workspace, and lets you clean them up after a confirmation. Everything is read locally; the only network access is the update check. The UI is in Korean. Windows is tested by hand; the macOS build is checked automatically on GitHub's macOS runners (macOS 15 and 26, Apple Silicon and Intel) but has not been used by hand on a real Mac.
