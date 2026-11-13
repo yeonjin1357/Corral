@@ -1,7 +1,7 @@
 {
   "name": "corral",
   "productName": "Corral",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Tray app to watch and tidy up local AI coding agents, dev-server ports, RAM and disk",
   "main": "./out/main/index.js",
   "author": "yeonjin1357",
