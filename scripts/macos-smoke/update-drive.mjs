@@ -178,6 +178,12 @@ await check(`지금 버전(${OLD})이 뜨고 새 버전(${NEW})이 있다고 알
   assert(status?.state === 'available', `상태 ${JSON.stringify(status)}`)
   assert(status.version === NEW, `알린 버전 ${status.version}`)
   assert(status.selfInstall === true, `앱 안 업데이트를 권하지 않는다: ${JSON.stringify(status)}`)
+  // 업데이트 뒤에도 설정이 남는지 보려고 하나 바꿔 둔다(기본은 어두운 테마).
+  const settings = await page.eval('window.pitwall.settings.get()')
+  const saved = await page.eval(
+    `window.pitwall.settings.save(${JSON.stringify({ ...settings, theme: 'light' })})`
+  )
+  assert(saved.theme === 'light', `설정 저장: ${saved.theme}`)
   return `pid ${oldPid}, 상태 ${JSON.stringify(status)}`
 })
 
@@ -238,8 +244,9 @@ await check('다시 켜진 새 버전이 정상으로 일하고, 설정은 그�
   assert(snapshot && snapshot.error == null, `수집: ${JSON.stringify(snapshot?.error)}`)
   const status = await page.eval('window.pitwall.update.check()')
   assert(status?.state === 'none', `새 버전인데도 상태가 ${JSON.stringify(status)}`)
-  assert(existsSync(join(USER_DATA, 'config.json')), '설정 파일이 없다')
-  return `버전 ${info.version}, 다른 앱 ${snapshot.apps.length}줄, 새 버전 확인 "${status.state}"`
+  const settings = await page.eval('window.pitwall.settings.get()')
+  assert(settings.theme === 'light', `업데이트 전에 바꾼 설정이 사라졌다(테마 ${settings.theme})`)
+  return `버전 ${info.version}, 다른 앱 ${snapshot.apps.length}줄, 새 버전 확인 "${status.state}", 바꿔 둔 설정(밝은 테마) 그대로`
 })
 
 // ───────────────────────── 2. 확인 값이 틀리면 앱은 그대로 ─────────────────────────

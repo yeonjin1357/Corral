@@ -866,7 +866,7 @@ const status = computed(() => {
                   <code
                     data-update-command
                     data-selectable
-                    class="min-w-0 flex-1 overflow-x-auto rounded-md border border-border bg-muted px-2 py-1.5 font-mono text-xs whitespace-nowrap"
+                    class="min-w-0 flex-1 rounded-md border border-border bg-muted px-2 py-1.5 font-mono text-xs break-all"
                     >{{ update.installCommand }}</code
                   >
                   <Button
