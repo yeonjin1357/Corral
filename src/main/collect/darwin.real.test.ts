@@ -1,13 +1,14 @@
 import { spawn, type ChildProcess } from 'child_process'
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'fs'
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'fs'
 import { connect, type Socket } from 'net'
-import { tmpdir, totalmem } from 'os'
+import { homedir, tmpdir, totalmem } from 'os'
 import { join } from 'path'
 import type { ProcessInfo, RawSample } from '../../shared/types'
 import { classifyMacProcess } from '../macApps'
 import { allCwdsDarwin, sampleDarwin } from './darwin'
 import { parseVmStat, readMemory, VM_STAT_ARGV } from './memory'
 import { runCommand } from './runCommand'
+import { createWorktreeResolver } from './worktree'
 
 /**
  * 실제 macOS 의 ps·lsof·vm_stat 으로 수집을 확인한다. macOS 에서만 돈다(GitHub Actions 의 macOS 러너).
@@ -215,6 +216,27 @@ describe.skipIf(!onMac)('실제 macOS 명령으로 수집(ps·lsof·vm_stat)', (
     expect(nfc(cwds![child!.pid!] ?? '')).toBe(nfc(workDir))
     expect(cwds![process.pid]).toBe(realpathSync(process.cwd()))
     expect(Object.keys(cwds!).length).toBeGreaterThan(10)
+  })
+
+  test('Homebrew 폴더는 git 저장소여도 프로젝트로 보지 않는다', async () => {
+    // Apple Silicon 은 /opt/homebrew, Intel 은 /usr/local/Homebrew 가 Homebrew 의 git 저장소다.
+    const resolver = createWorktreeResolver()
+    let checked = 0
+    for (const dir of ['/opt/homebrew', '/usr/local/Homebrew']) {
+      if (!existsSync(join(dir, '.git'))) continue
+      checked++
+      expect(await resolver.resolveWorktree(join(dir, 'bin')), dir).toBeNull()
+    }
+    console.log(`Homebrew 저장소 ${checked}곳을 확인했다`)
+    // 참고(기록만): 홈 폴더에 git 으로 내려받아 쓰는 다른 도구 폴더가 저장소로 잡히는지.
+    for (const name of ['.nvm', '.pyenv', '.rbenv', '.asdf', '.sdkman', '.volta', '.cargo']) {
+      const dir = join(homedir(), name)
+      if (!existsSync(dir)) continue
+      const found = await resolver.resolveWorktree(join(dir, 'bin'))
+      console.log(
+        `참고 — ~/${name}: .git ${existsSync(join(dir, '.git')) ? '있음' : '없음'}, 판별 ${JSON.stringify(found?.root ?? null)}`
+      )
+    }
   })
 
   test('vm_stat 으로 사용 가능한 메모리를 읽는다', async () => {

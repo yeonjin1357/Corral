@@ -176,6 +176,67 @@ describe('createWorktreeResolver', () => {
     expect((await resolveWorktree(nested))?.root).toBe(nested)
   })
 
+  describe('Homebrew 폴더(Apple Silicon 의 /opt/homebrew 는 Homebrew 저장소 자체다)', () => {
+    /** Homebrew 저장소 모양: git 저장소 + Library/Homebrew. 깔린 도구는 그 안의 Cellar·bin·opt 에 있다. */
+    async function makeBrew(): Promise<string> {
+      const brew = await makeRepo(join(tmp, 'opt', 'homebrew'), 'ref: refs/heads/stable\n')
+      await mkdir(join(brew, 'Library', 'Homebrew'), { recursive: true })
+      return brew
+    }
+
+    test('git 저장소여도 프로젝트로 보지 않는다(그 안에 깔린 도구를 homebrew 소속으로 잇지 않는다)', async () => {
+      const brew = await makeBrew()
+      const gradleLib = join(brew, 'Cellar', 'gradle', '9.8.2', 'libexec', 'lib')
+      await mkdir(gradleLib, { recursive: true })
+      const { resolveWorktree } = createWorktreeResolver({ homeDir: join(tmp, 'home') })
+      expect(await resolveWorktree(join(gradleLib, 'gradle-daemon-main-9.8.2.jar'))).toBeNull()
+      expect(await resolveWorktree(join(brew, 'bin', 'postgres'))).toBeNull()
+      expect(await resolveWorktree(brew)).toBeNull()
+    })
+
+    test('그 안의 다른 저장소(탭)와, Library 폴더만 있는 보통 저장소는 그대로 판별한다', async () => {
+      const brew = await makeBrew()
+      const tap = await makeRepo(join(brew, 'Library', 'Taps', 'me', 'homebrew-tools'))
+      const app = await makeRepo(join(tmp, 'mac-app'))
+      await mkdir(join(app, 'Library'), { recursive: true })
+      const r = createWorktreeResolver({ homeDir: join(tmp, 'home') })
+      expect((await r.resolveWorktree(join(tap, 'Formula')))?.root).toBe(tap)
+      expect((await r.resolveWorktree(join(app, 'src')))?.root).toBe(app)
+      // Homebrew 폴더는 작업 공간(바깥 저장소)도 되지 않는다.
+      const w = (await r.resolveWorktree(tap))!
+      expect(await r.resolveWorkspace(w)).toMatchObject({ root: tap, outer: false })
+    })
+
+    test('Homebrew 로 깐 실행 파일로 띄운 프로세스는 뒤의 경로·작업 폴더로 프로젝트를 찾는다', async () => {
+      const brew = await makeBrew()
+      const repo = await makeRepo(join(tmp, 'shop-web'))
+      const proc = (pid: number, commandLine: string): ProcessInfo => ({
+        pid,
+        ppid: 1,
+        name: 'node',
+        commandLine,
+        memoryBytes: 1,
+        startedAt: null
+      })
+      const { resolveProcessWorktrees } = createWorktreeResolver({ homeDir: join(tmp, 'home') })
+      const map = await resolveProcessWorktrees(
+        [
+          proc(1, `${join(brew, 'bin', 'node')} ${join(repo, 'server.js')}`),
+          proc(2, `${join(brew, 'opt', 'openjdk', 'bin', 'java')} -jar app.jar`),
+          proc(
+            3,
+            `${join(brew, 'opt', 'postgresql@16', 'bin', 'postgres')} -D ${join(brew, 'var', 'postgresql@16')}`
+          )
+        ],
+        { 2: repo, 3: join(brew, 'var', 'postgresql@16') }
+      )
+      expect(map.get(1)?.root).toBe(repo)
+      expect(map.get(2)?.root).toBe(repo)
+      // 프로젝트와 상관없이 도는 것(Homebrew 로 띄운 DB 등)은 어느 프로젝트 것도 아니다.
+      expect(map.has(3)).toBe(false)
+    })
+  })
+
   test('존재하지 않는 파일 경로도 상위 폴더로 올라가며 찾는다', async () => {
     const repo = await makeRepo(join(tmp, 'shop-web'))
     const { resolveWorktree } = createWorktreeResolver({ homeDir: join(tmp, 'home') })

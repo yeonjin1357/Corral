@@ -139,11 +139,6 @@ describe.skipIf(!enabled)('진짜 Gradle 데몬: 쉬는 데몬의 프로젝트',
     )
     console.log(`기본 판별이 찾은 워크트리: ${JSON.stringify(known.get(daemonPid) ?? null)}`)
     console.log(`로그로 찾은 워크트리: ${JSON.stringify(fromLog.get(daemonPid) ?? null)}`)
-    if (!onWindows)
-      for (const dir of ['/opt/homebrew/bin', '/usr/local/bin', '/usr/local/Homebrew/bin'])
-        console.log(
-          `참고 — ${dir} 의 워크트리: ${JSON.stringify(existsSync(dir) ? await resolver.resolveWorktree(dir) : '없는 폴더')}`
-        )
   }, 300_000)
 
   afterAll(() => {

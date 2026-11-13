@@ -96,6 +96,20 @@ async function readGitAt(dir: string): Promise<WorktreeInfo | null> {
   }
 }
 
+/**
+ * Homebrew 저장소인가(`Library/Homebrew` 가 있는 git 저장소). Apple Silicon 의 Homebrew 는 설치 폴더(`/opt/homebrew`)가 곧
+ * Homebrew 의 git 저장소라, 그 안에 깔린 도구(node·java·gradle·postgres…)의 경로가 모두 "homebrew 저장소 안"이 된다.
+ * 프로젝트가 아니므로 worktree 로 보지 않는다 — 보면 Homebrew 로 깐 실행 파일로 띄운 서버가 homebrew 프로젝트의 서버로
+ * 잡히고, 진짜 프로젝트(뒤의 경로·작업 폴더)는 보지도 않는다. 그 안의 다른 저장소(탭)는 그대로 판별된다.
+ */
+async function isHomebrewRepo(root: string): Promise<boolean> {
+  try {
+    return (await stat(nodePath.join(root, 'Library', 'Homebrew'))).isDirectory()
+  } catch {
+    return false
+  }
+}
+
 /** 실제 경로(정션·심볼릭 링크·subst 드라이브·8.3 이름을 푼 것). 못 풀면 null. */
 async function canonical(path: string): Promise<string | null> {
   try {
@@ -175,7 +189,9 @@ export function createWorktreeResolver(options: WorktreeResolverOptions = {}): W
     // 홈 폴더와 드라이브 루트는 worktree 로 보지 않고 더 올라가지도 않는다.
     if (keyOf(dir) === homeKey || parent === dir || depth > MAX_CLIMB) return null
     const found = await readGitAt(dir)
-    return found ?? resolveDir(parent, depth + 1)
+    if (!found) return resolveDir(parent, depth + 1)
+    // Homebrew 저장소도 홈 폴더처럼 worktree 로 보지 않고 더 올라가지도 않는다.
+    return (await isHomebrewRepo(dir)) ? null : found
   }
 
   /** 폴더마다 결과를 캐시해, 같은 상위 폴더를 공유하는 프로세스들이 같은 판별을 반복하지 않게 한다. */
