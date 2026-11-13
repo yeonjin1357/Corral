@@ -9,6 +9,7 @@ import {
   readLines,
   type LineCursor
 } from './jsonlLines'
+import { oneLine } from './sessions'
 
 /**
  * Codex 세션 기록(rollout) 읽기(F7 기본). 사용자 설정을 바꾸지 않고 `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-*.jsonl`
@@ -16,6 +17,8 @@ import {
  * - 세션 폴더 안의 파일만 연다(`auth.json` 등 다른 파일은 열지 않는다).
  * - 줄에서 type·이벤트 이름·시각·cwd·error 여부만 꺼내고 대화 내용은 버린다(결과에 남기지 않는다).
  * - 토큰 숫자를 읽을 때(G6, 설정 readUsage)는 token_count 이벤트의 숫자·사용 한도·요금제 이름도 꺼낸다.
+ * - 하는 일 보기가 켜져 있을 때(G3b, 설정 showAgentActivity)는 끝난 턴의 마지막 말(last_agent_message) 첫 줄 200자도
+ *   꺼낸다(새로 끝남). 메모리에만 두고, 다시 일하기 시작하거나 설정을 끄면 버린다.
  * - 근거가 없으면 null(지어내지 않음 — 화면은 CPU 추정을 쓴다).
  */
 
@@ -31,7 +34,15 @@ export interface CodexInfo {
   state: RolloutState | null
   usage: AgentUsage | null
   limits: CodexLimits | null
+  /**
+   * 마지막 말(새로 끝남): 지금 쉬는 중으로 끝난 턴의 last_agent_message 첫 줄. 마지막 말을 읽을 때만, 쉬는 동안만 있다
+   * (오류·중단으로 끝났거나 말이 없으면 없다).
+   */
+  reply?: string
 }
+
+/** 마지막 말의 길이(Claude 의 마지막 요청·마지막 말과 같다). */
+const REPLY_MAX = 200
 
 const NO_INFO: CodexInfo = { state: null, usage: null, limits: null }
 
@@ -198,23 +209,36 @@ export function rolloutState(
   lines: string[],
   initial: RolloutState | null = null
 ): RolloutState | null {
-  return readRollout(lines, { ...NO_INFO, state: initial }, false).state
+  return readRollout(lines, { ...NO_INFO, state: initial }, false, false).state
 }
 
 /**
  * 기록 줄을 읽어 앞서 안 것(initial)에 더한다. 상태는 rolloutState 와 같다. withUsage 면 token_count 이벤트에서
  * 토큰 숫자(마지막 이벤트의 값)와 사용 한도(이벤트 시각이 가장 늦은 값)를 꺼낸다 — 값이 빈 이벤트는 알던 값을 지우지
- * 않는다. withUsage 가 아니면 token_count 줄은 JSON 으로 읽어 보지도 않는다.
+ * 않는다. withUsage 가 아니면 token_count 줄은 JSON 으로 읽어 보지도 않는다. withReply 면 쉬는 중으로 끝난 턴의 마지막
+ * 말 첫 줄을 담고, 상태가 바뀌는 다른 이벤트(새 턴·오류·중단)에서 비운다 — withReply 가 아니면 알던 말도 버린다.
  */
-function readRollout(lines: string[], initial: CodexInfo, withUsage: boolean): CodexInfo {
+function readRollout(
+  lines: string[],
+  initial: CodexInfo,
+  withUsage: boolean,
+  withReply: boolean
+): CodexInfo {
   let { state, usage, limits } = initial
+  let reply = withReply ? (initial.reply ?? null) : null
   const hint = withUsage ? USAGE_HINT : EVENT_HINT
   for (const raw of lines) {
     if (!hint.test(raw)) continue
     let row: {
       type?: unknown
       timestamp?: unknown
-      payload?: { type?: unknown; error?: unknown; info?: unknown; rate_limits?: unknown } | null
+      payload?: {
+        type?: unknown
+        error?: unknown
+        info?: unknown
+        rate_limits?: unknown
+        last_agent_message?: unknown
+      } | null
     }
     try {
       row = JSON.parse(raw)
@@ -233,8 +257,12 @@ function readRollout(lines: string[], initial: CodexInfo, withUsage: boolean): C
     const next = eventState(row.payload)
     if (next === null) continue
     state = { state: next, since: at, lastEventAt: Math.max(state?.lastEventAt ?? at, at) }
+    reply =
+      withReply && next === 'idle' && row.payload?.type !== 'turn_aborted'
+        ? oneLine(row.payload?.last_agent_message, REPLY_MAX)
+        : null
   }
-  return { state, usage, limits }
+  return { state, usage, limits, ...(reply ? { reply } : {}) }
 }
 
 /**
@@ -282,6 +310,14 @@ function rateLimits(value: unknown, at: number): CodexLimits | null {
     planType: typeof plan === 'string' && plan && plan.length <= MAX_PLAN_LENGTH ? plan : null,
     at
   }
+}
+
+/** 마지막 말을 뺀 것(없으면 그대로). */
+function withoutReply(info: CodexInfo): CodexInfo {
+  if (info.reply === undefined) return info
+  const rest = { ...info }
+  delete rest.reply
+  return rest
 }
 
 /** 이벤트 종류가 정하는 상태. 상태와 상관없는 이벤트는 null. */
@@ -339,6 +375,8 @@ export function createCodexReader(
   home: string,
   o: {
     usage?: () => boolean
+    /** 마지막 말(새로 끝남)을 읽는지(기본 false). 꺼지면 들고 있던 말을 버린다. */
+    reply?: () => boolean
     /** 처음 읽을 때 이보다 큰 기록은 끝 이만큼만 읽는다(기본 16 MB). */
     firstReadBytes?: number
     /** 한 번에 읽을 크기(기본 1 MB, 시험용). */
@@ -353,9 +391,15 @@ export function createCodexReader(
   infoFor(agent: CodexRolloutAgent, now: number): Promise<CodexInfo>
   /** 들고 있던 토큰 숫자·한도를 지금 버린다(설정 readUsage 를 끌 때). 상태와 읽은 위치는 그대로다. */
   dropUsage(): void
+  /**
+   * 들고 있던 마지막 말을 지금 버린다(설정 showAgentActivity 를 끌 때). 상태와 읽은 위치는 그대로다 — 다시 켜도 버린 말은
+   * 돌아오지 않고 다음에 끝나는 턴부터 담는다.
+   */
+  dropReply(): void
 } {
   const sessionsDir = join(home, 'sessions')
   const usageOn = o.usage ?? ((): boolean => true)
+  const replyOn = o.reply ?? ((): boolean => false)
   const firstReadBytes = Math.max(1, o.firstReadBytes ?? FIRST_READ_BYTES)
   const progress = new Map<string, RolloutProgress>()
   /** dropUsage 를 부른 횟수. 읽기를 시작한 뒤 바뀌었으면 그 읽기가 얻은 숫자는 담지 않는다. */
@@ -385,6 +429,7 @@ export function createCodexReader(
     // 처음 보거나 파일이 줄었거나, 숫자를 건너뛰고 읽었는데 이제 숫자가 필요하면 처음부터(끝 firstReadBytes).
     const restart = !known || size < known.cursor.size || (withUsage && !known.withUsage)
     if (!restart && size === known.cursor.size) return known.info
+    const withReply = replyOn()
     let file: FileHandle
     try {
       file = await open(path, 'r')
@@ -404,9 +449,11 @@ export function createCodexReader(
           maxLineBytes: o.maxLineBytes
         },
         (line) => {
-          info = readRollout([line.toString('utf8')], info, withUsage)
+          info = readRollout([line.toString('utf8')], info, withUsage, withReply)
         }
       )
+      // 읽는 사이에 마지막 말 읽기가 꺼졌으면 이 읽기가 얻은 말도 담지 않는다.
+      if (!replyOn()) info = withoutReply(info)
       const dropped = withUsage && (!usageOn() || drops !== dropsSeen)
       const p = dropped
         ? { cursor, info: { ...info, usage: null, limits: null }, withUsage: false }
@@ -433,6 +480,12 @@ export function createCodexReader(
         })
   }
 
+  /** 들고 있던 마지막 말을 버린다. 상태와 읽은 위치는 그대로다. */
+  function dropReply(): void {
+    for (const [path, p] of progress)
+      if (p.info.reply !== undefined) progress.set(path, { ...p, info: withoutReply(p.info) })
+  }
+
   const cwdCache = new Map<string, string | null>()
   const cachedCwd = async (path: string): Promise<string | null> => {
     if (cwdCache.has(path)) return cwdCache.get(path)!
@@ -445,6 +498,7 @@ export function createCodexReader(
   async function infoFor(agent: CodexRolloutAgent, now: number): Promise<CodexInfo> {
     const withUsage = usageOn()
     if (!withUsage) dropUsage()
+    if (!replyOn()) dropReply()
     const dropsSeen = drops
     // 훅이 알려 준 기록 파일은 sessions 폴더 안의 .jsonl 일 때만 쓴다(링크를 풀어도 안이어야 한다).
     const path =
@@ -456,6 +510,7 @@ export function createCodexReader(
   return {
     infoFor,
     dropUsage,
+    dropReply,
     async stateFor(agent, now) {
       return (await infoFor(agent, now)).state
     }

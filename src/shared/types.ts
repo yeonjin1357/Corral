@@ -323,12 +323,15 @@ export type WaitReason = 'permission' | 'input' | 'sandbox' | 'worker' | 'goal' 
  * 에이전트가 하는 일(G3b). 훅이 알려 준 내용을 메모리에만 들고 pitwall 창에만 보인다(history.json·기록·로그·OS 알림에는
  * 넣지 않는다). title: 세션 제목(훅의 session_title, 없으면 Claude 세션 파일의 이름), prompt: 마지막 요청의 첫 줄,
  * tool: 지금 실행 중인 도구(이름·요약·시작 시각), waiting: 권한을 기다리는 도구(이름·요약). 모르면 null.
+ * reply: 에이전트가 멈추며 남긴 마지막 말의 첫 줄(Claude 는 훅의 Stop, Codex 는 세션 기록의 완료 이벤트). 쉬는 동안만
+ * 있고, 다시 일하기 시작하면 없어진다. 모르면 없다.
  */
 export interface AgentActivity {
   title: string | null
   prompt: string | null
   tool: { name: string; summary: string | null; since: number } | null
   waiting: { tool: string | null; summary: string | null } | null
+  reply?: string
 }
 
 /**
@@ -428,6 +431,12 @@ export interface AgentRow {
   quietSince: number | null
   /** 에이전트가 떠 있는 터미널·에디터 창을 찾을 단서(G3f 창으로 가기). */
   host: AgentHost
+  /**
+   * 새로 끝남: 작업을 끝냈는데 사용자가 아직 보지 않았으면 그 끝난 시각. 정확한 상태(CPU 추정 아님)로 2분 넘게 일하다
+   * 쉬는 중이 된 것만(작업 끝남 알림과 같은 기준). 다시 일하기 시작하거나, Corral 에서 창으로 가거나, 표시를 닫으면
+   * 없어진다. 표시가 없으면 이 값도 없다.
+   */
+  doneSince?: number
   /**
    * 토큰 숫자(G6). 설정 readUsage 가 꺼져 있거나 읽을 기록이 없으면 null. Claude 는 그 프로세스와 짝지은 세션의
    * 기록만 읽는다(짝이 없으면 null).

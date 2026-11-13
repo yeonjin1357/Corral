@@ -68,6 +68,7 @@ import {
   agentIcon,
   diskEvidenceText,
   heavyIcon,
+  isNewlyDone,
   leftoverIcon,
   serverIcon,
   type RowIcon
@@ -320,6 +321,7 @@ const view = computed<View | null>(() => {
       const activityLines: (Fact | null)[] = [
         act?.title ? { label: ag.activityFacts.title, value: act.title } : null,
         act?.prompt ? { label: ag.activityFacts.prompt, value: act.prompt } : null,
+        act?.reply ? { label: ag.activityFacts.reply, value: act.reply } : null,
         running
           ? {
               label: ag.activityFacts.tool,
@@ -336,14 +338,17 @@ const view = computed<View | null>(() => {
         icon: agentIcon(r),
         title: folder(r.worktree),
         description: `${t.agent.toolNames[r.tool]} · PID ${r.pid}`,
-        // 조용한 에이전트(G3c)는 표 상태 칸과 같이 "조용함 · 18분"(조용해진 때부터).
+        // 조용한 에이전트(G3c)는 표 상태 칸과 같이 "조용함 · 18분"(조용해진 때부터), 새로 끝난 에이전트는
+        // "새로 끝남 · 7분"(끝난 때부터).
         badge: {
           text:
             r.quietSince != null
               ? t.rowStatus.withTime(t.rowStatus.quiet, ago(r.quietSince))
-              : r.stateSince != null && r.state !== 'unknown'
-                ? t.rowStatus.withTime(state, ago(r.stateSince))
-                : state,
+              : isNewlyDone(r)
+                ? t.rowStatus.withTime(t.rowStatus.done, ago(r.doneSince))
+                : r.stateSince != null && r.state !== 'unknown'
+                  ? t.rowStatus.withTime(state, ago(r.stateSince))
+                  : state,
           variant: r.state === 'error' ? 'destructive' : 'secondary'
         },
         cards: [

@@ -927,6 +927,9 @@ watch(allAttention, (all) => {
 })
 function dismissAttention(id: string, state: string): void {
   dismissed.value = new Map(dismissed.value).set(id, state)
+  // 새로 끝남 줄을 닫은 것은 그 에이전트를 확인했다는 뜻이다: 목록의 표시도 거두게 메인에 알린다.
+  const item = allAttention.value.find((i) => i.id === id)
+  if (item?.kind === 'done' && item.key) void window.pitwall.agentSeen(item.key).catch(() => false)
 }
 const RECOMMEND_SHOWN = 4
 /** 추천 칩: 표와 같은 아이콘을 붙인다. */

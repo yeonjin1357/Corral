@@ -314,7 +314,7 @@ describe('상세 패널: 서버 판단과 에이전트(G2)', () => {
 
 describe('상세 패널: 하는 일(G3b)', () => {
   const NOTE =
-    '에이전트 연동이 알려 준 내용이에요. Corral 은 이것을 메모리에만 두고 파일로 남기지 않아요. 설정 > 에이전트 연동에서 끌 수 있어요.'
+    '에이전트 연동이나 세션 기록에서 안 내용이에요. Corral 은 이것을 메모리에만 두고 파일로 남기지 않아요. 설정 > 에이전트 연동에서 끌 수 있어요.'
   const HOOK_ON: ClaudeHookStatus = {
     state: 'on',
     problem: null,
@@ -413,6 +413,36 @@ describe('상세 패널: 하는 일(G3b)', () => {
       HOOK_ON
     )
     expect(facts()['실행 중인 도구']).toBe('Grep · TODO · 1분')
+  })
+
+  test('쉬는 에이전트는 멈추며 남긴 마지막 말을 보이고, 새로 끝났으면 배지가 새로 끝남 · 기간이다', () => {
+    const idle = {
+      state: 'idle' as const,
+      stateSince: 10_000_000 - 4 * 60_000,
+      activity: {
+        title: '로그인 버그',
+        prompt: '테스트 고쳐 줘',
+        tool: null,
+        waiting: null,
+        reply: '테스트 3개를 고쳤어요.'
+      }
+    }
+    const badge = (): string | undefined =>
+      document.body.querySelector('[data-slot=badge]')?.textContent?.trim()
+    sheet(
+      { kind: 'agent', row: agentRow({ ...idle, doneSince: 10_000_000 - 4 * 60_000 }) },
+      HOOK_ON
+    )
+    expect(facts()).toMatchObject({
+      '마지막 요청': '테스트 고쳐 줘',
+      '마지막 말': '테스트 3개를 고쳤어요.'
+    })
+    expect(badge()).toBe('새로 끝남 · 4분')
+    wrapper?.unmount()
+    // 본 뒤에는 쉬는 중이고 마지막 말은 그대로 보인다.
+    sheet({ kind: 'agent', row: agentRow(idle) }, HOOK_ON)
+    expect(badge()).toBe('쉬는 중 · 4분')
+    expect(facts()['마지막 말']).toBe('테스트 3개를 고쳤어요.')
   })
 
   test('하는 일을 모르면(설정에서 끔 등) 줄도 설명도 없다', () => {

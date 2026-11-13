@@ -40,10 +40,20 @@ export interface ClaudeSession {
    */
   transcriptPath?: string | null
   /**
-   * 하는 일(G3b): 훅이 알려 준 세션 제목·마지막 요청 첫 줄·실행 중인 도구·권한을 기다리는 도구. 메모리에만 둔다.
-   * 아는 것이 하나도 없거나 설정(showAgentActivity)이 꺼져 있으면 없다.
+   * 하는 일(G3b): 훅이 알려 준 세션 제목·마지막 요청 첫 줄·실행 중인 도구·권한을 기다리는 도구·멈추며 남긴 마지막 말
+   * 첫 줄. 메모리에만 둔다. 아는 것이 하나도 없거나 설정(showAgentActivity)이 꺼져 있으면 없다.
    */
   activity?: AgentActivity
+  /**
+   * 백그라운드 작업이나 예약된 깨우기를 남기고 멈췄다(Stop 의 background_tasks·session_crons). 끝낸 것일 수도(개발 서버를
+   * 띄워 둠), 깨어나기를 기다리는 것일 수도 있다. 쉬는 동안은 그대로 두고, 다시 일하면 없어진다.
+   */
+  pausedForBackground?: boolean
+  /**
+   * 백그라운드 작업이 깨워 이어 가는 중: 백그라운드 작업을 남기고 멈췄다가 사용자의 새 요청(UserPromptSubmit) 없이 다시
+   * 일하기 시작했다. "새로 끝남"은 이 작업을 멈추기 전부터 이어서 센다. 멈추거나 새 요청이 오면 없어진다.
+   */
+  wokenByBackground?: boolean
 }
 
 /** 수집 때 본 최상위 에이전트 프로세스(Claude·Codex). */
@@ -287,7 +297,49 @@ function nextActivity(
   let waiting = next === 'waiting' ? (prev?.waiting ?? null) : null
   if (event === 'PermissionRequest')
     waiting = toolName ? { tool: toolName, summary: toolSummary(toolName, ev.tool_input) } : null
-  return title || prompt || tool || waiting ? { title, prompt, tool, waiting } : undefined
+  // 마지막 말: 멈출 때(Stop) 담고, 쉬는 동안은 그대로 두고, 다시 일하기 시작하면(새 요청·도구 사용) 비운다.
+  const reply =
+    event === 'Stop'
+      ? oneLine(ev.last_assistant_message, PROMPT_MAX)
+      : next === 'idle' && event !== 'UserPromptSubmit'
+        ? (prev?.reply ?? null)
+        : null
+  return title || prompt || tool || waiting || reply
+    ? { title, prompt, tool, waiting, ...(reply ? { reply } : {}) }
+    : undefined
+}
+
+const hasItems = (value: unknown): boolean => Array.isArray(value) && value.length > 0
+
+/**
+ * 백그라운드 작업을 남기고 멈췄는지: Stop 에 돌고 있는 백그라운드 작업(background_tasks)이나 예약된 깨우기
+ * (session_crons)가 있으면 그렇다. 쉬는 동안은 그대로 두고, 다시 일하면 지운다.
+ */
+function pausedOf(
+  ev: Record<string, unknown>,
+  existing: ClaudeSession | undefined,
+  next: AgentState
+): boolean {
+  if (ev.hook_event_name === 'Stop')
+    return hasItems(ev.background_tasks) || hasItems(ev.session_crons)
+  return next === 'idle' && existing?.pausedForBackground === true
+}
+
+/**
+ * 백그라운드 작업이 깨워 이어 가는 중인지: 백그라운드 작업을 남기고 쉬던 세션이 새 요청이 아닌 이벤트로 다시 일하기
+ * 시작했으면 그렇다. 일하는(응답을 기다리는) 동안은 그대로 두고, 새 요청이 오거나 멈추면 지운다.
+ */
+function wokenOf(
+  ev: Record<string, unknown>,
+  existing: ClaudeSession | undefined,
+  next: AgentState
+): boolean {
+  if (ev.hook_event_name === 'UserPromptSubmit') return false
+  if (next !== 'working' && next !== 'waiting') return false
+  return (
+    existing?.wokenByBackground === true ||
+    (existing?.state === 'idle' && existing.pausedForBackground === true)
+  )
 }
 
 /**
@@ -352,6 +404,8 @@ export function applyHookEvent(
         : ev.hook_event_name === 'UserPromptSubmit'
           ? null
           : (existing?.stoppedAt ?? null),
+    ...(pausedOf(ev, existing, next) ? { pausedForBackground: true } : {}),
+    ...(wokenOf(ev, existing, next) ? { wokenByBackground: true } : {}),
     ...(activity ? { activity } : {})
   })
   while (sessions.size > MAX_SESSIONS) {
@@ -499,6 +553,11 @@ export interface HookView {
   sessionId: string
   /** 상태를 보인 세션의 하는 일(G3b). 모르면 null. */
   activity: AgentActivity | null
+  /**
+   * 상태를 보인 세션과 백그라운드 작업(새로 끝남): 'paused' 는 백그라운드 작업을 남기고 멈춤, 'woken' 은 그 작업이 깨워
+   * 이어 가는 중. 아니면 없다.
+   */
+  background?: 'paused' | 'woken'
 }
 
 /**
@@ -550,7 +609,12 @@ export function hookViewForAgent(
       lastActivityAt,
       workingSince,
       sessionId: best.id,
-      activity: best.activity ?? null
+      activity: best.activity ?? null,
+      ...(best.wokenByBackground
+        ? { background: 'woken' as const }
+        : best.pausedForBackground
+          ? { background: 'paused' as const }
+          : {})
     }
   )
 }

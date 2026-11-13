@@ -29,6 +29,7 @@ import {
   type Settings
 } from '../shared/settings'
 import { IPC, type NavigateTarget } from '../shared/ipc'
+import { agentKey, selectionKey } from '../shared/keys'
 import { text } from '../shared/text'
 import { fitGroups } from '../shared/memoryGroups'
 import { existsSync, mkdirSync, readdirSync, rmSync } from 'fs'
@@ -123,10 +124,11 @@ const sessions: Sessions = new Map()
 
 /**
  * Codex 세션 기록 읽기(세션 폴더만, 설정은 바꾸지 않는다). 토큰 숫자·사용 한도(G6)는 설정 readUsage 가 켜져 있을
- * 때만 읽는다.
+ * 때만, 끝난 턴의 마지막 말(새로 끝남)은 설정 showAgentActivity 가 켜져 있을 때만 읽는다.
  */
 const codexReader = createCodexReader(codexHome(process.env, homedir()), {
-  usage: () => settings.readUsage
+  usage: () => settings.readUsage,
+  reply: () => settings.showAgentActivity
 })
 
 /** Claude 실행 중 세션 파일 읽기(`<Claude 설정 폴더>/sessions/<pid>.json` 만 읽는다). */
@@ -308,6 +310,25 @@ function navigate(target: NavigateTarget): void {
   else send()
 }
 
+/**
+ * 그 에이전트(선택 키)를 사용자가 확인한 것으로 한다: 새로 끝남 표시를 거두고 화면을 바로 고친다. 지금 스냅샷의
+ * 에이전트만 다룬다. 거뒀으면 true.
+ */
+function markAgentSeen(key: string): boolean {
+  const agent = scheduler.latest()?.agents.find((a) => selectionKey.agent(a) === key)
+  if (!agent || !collector) return false
+  collector.doneSeen(agentKey(agent))
+  scheduleRestate()
+  return true
+}
+
+/** 에이전트의 창으로 간다. 갔으면 그 에이전트를 확인한 것으로 한다(새로 끝남 표시를 거둔다). */
+async function focusAgent(key: string): Promise<boolean> {
+  const focused = await focuser.focusAgent(key)
+  if (focused) markAgentSeen(key)
+  return focused
+}
+
 /** 보낸 알림을 붙잡아 둔다(가비지 컬렉션되면 Windows 에서 눌러도 반응하지 않는다). */
 const notices = new Set<Notification>()
 function showNotice(notice: Notice): void {
@@ -322,7 +343,7 @@ function showNotice(notice: Notice): void {
     forget()
     void openNoticeTarget(notice, {
       clickFocus: settings.notifyClickFocus,
-      focusAgent: (key) => focuser.focusAgent(key),
+      focusAgent,
       navigate: (key) => navigate({ page: 'dashboard', key })
     })
   })
@@ -717,7 +738,10 @@ function prepareWindowsHelper(): void {
 function applySettings(next: Settings): void {
   settings = next
   // 하는 일(G3b) 보기를 끄면 들고 있던 내용도 지운다(화면은 저장 뒤 새로 수집할 때 비워진다).
-  if (!next.showAgentActivity) clearActivity(sessions)
+  if (!next.showAgentActivity) {
+    clearActivity(sessions)
+    codexReader.dropReply()
+  }
   // 토큰·한도(G6) 읽기를 끄면 들고 있던 숫자를 바로 버린다(Claude 는 읽던 위치도, Codex 는 숫자만).
   if (!next.readUsage) {
     claudeUsage.clear()
@@ -935,7 +959,11 @@ function registerIpc(): void {
   // 키는 믿지 않는다: 문자열·길이를 보고, 지금 스냅샷의 에이전트인지는 focuser 가 확인한다.
   ipcMain.handle(IPC.focusAgent, async (event, key: unknown) => {
     if (!fromMainWindow(event.sender) || typeof key !== 'string') return false
-    return focuser.focusAgent(key)
+    return focusAgent(key)
+  })
+  ipcMain.handle(IPC.agentSeen, (event, key: unknown) => {
+    if (!fromMainWindow(event.sender) || typeof key !== 'string' || key.length > 1000) return false
+    return markAgentSeen(key)
   })
   // 확인 창: 메인 창 화면의 알림·답만 받는다(어느 요청에 어떤 답을 받을지는 confirms 가 정한다).
   const confirmIpc = confirmIpcHandlers(confirms, fromMainWindow)

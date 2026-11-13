@@ -1,11 +1,15 @@
 import type { AgentRow } from '../shared/types'
 import {
+  EMPTY_DONE,
   isParked,
   lastActiveOf,
+  markDoneSeen,
   stillQuiet,
+  trackDone,
   trackQuiet,
   trackSeen,
   type CalmMemo,
+  type DoneMemo,
   type SeenMemo
 } from './activity'
 
@@ -237,5 +241,178 @@ describe('조용한 에이전트(G3c)', () => {
     expect(stillQuiet({ ...quiet, state: 'waiting' })).toBeNull()
     expect(stillQuiet({ ...quiet, stateSource: 'file' })).toBeNull()
     expect(stillQuiet(row())).toBeNull()
+  })
+})
+
+describe('새로 끝남: 작업을 끝냈는데 아직 보지 않은 에이전트', () => {
+  /** 정확한 상태(훅)를 아는 에이전트. */
+  const row = (
+    state: AgentRow['state'],
+    stateSince: number,
+    over: Partial<AgentRow> = {}
+  ): AgentRow => ({
+    pid: 1,
+    tool: 'claude',
+    worktree: null,
+    workspace: null,
+    startedAt: 100,
+    memoryBytes: 1,
+    ownMemoryBytes: 1,
+    commitBytes: null,
+    descendantCount: 0,
+    processes: [],
+    state,
+    stateSource: 'hook',
+    stateSince,
+    cpuPercent: 0.5,
+    lastActiveAt: stateSince,
+    parked: false,
+    activity: null,
+    quietSince: null,
+    usage: null,
+    waitReason: null,
+    host: { pids: [], app: null },
+    ...over
+  })
+  /** 수집을 차례로 흉내 낸다: 행마다 trackDone 을 돌려 그때의 doneSince(없으면 null). */
+  function run(
+    steps: AgentRow[],
+    background: (a: AgentRow) => 'paused' | 'woken' | null = () => null
+  ): { seen: (number | null)[]; memo: DoneMemo } {
+    let memo: DoneMemo = EMPTY_DONE
+    const seen = steps.map((a) => {
+      const next = trackDone([a], memo, background)
+      memo = next.memo
+      return next.agents[0].doneSince ?? null
+    })
+    return { seen, memo }
+  }
+
+  test('2분 넘게 일하다 쉬는 중이 되면 끝난 시각을 표시하고, 볼 때까지 남긴다', () => {
+    const { seen } = run([
+      row('working', 0),
+      row('idle', 3 * MIN),
+      row('idle', 3 * MIN),
+      row('idle', 3 * MIN, { parked: true })
+    ])
+    expect(seen).toEqual([null, 3 * MIN, 3 * MIN, 3 * MIN])
+  })
+
+  test('잠깐(2분 미만) 일한 것은 표시하지 않는다(주고받는 대화마다 뜨지 않게)', () => {
+    expect(run([row('working', 0), row('idle', 1 * MIN)]).seen).toEqual([null, null])
+    // 꼭 2분이면 표시한다.
+    expect(run([row('working', 0), row('idle', 2 * MIN)]).seen).toEqual([null, 2 * MIN])
+  })
+
+  test('권한을 기다린 시간도 한 작업으로 센다(작업 중 → 응답 대기 → 작업 중 → 쉬는 중)', () => {
+    const { seen } = run([
+      row('working', 0),
+      row('waiting', 1 * MIN),
+      row('working', 1.5 * MIN),
+      row('idle', 2.5 * MIN)
+    ])
+    expect(seen).toEqual([null, null, null, 2.5 * MIN])
+  })
+
+  test('다시 일하기 시작하면(새 요청을 보냈다 = 봤다) 표시를 거두고, 그 작업은 처음부터 센다', () => {
+    const { seen } = run([
+      row('working', 0),
+      row('idle', 3 * MIN),
+      row('working', 10 * MIN),
+      row('idle', 11 * MIN)
+    ])
+    expect(seen).toEqual([null, 3 * MIN, null, null])
+  })
+
+  test('쉬는 중으로 처음 본 에이전트는 표시하지 않는다(일하는 것을 본 적이 없다)', () => {
+    expect(run([row('idle', 0), row('idle', 0)]).seen).toEqual([null, null])
+  })
+
+  test('CPU 로 짐작한 상태는 표시하지 않는다(잘못 알리기 쉽다)', () => {
+    const cpu = { stateSource: 'cpu' as const }
+    expect(run([row('working', 0, cpu), row('idle', 3 * MIN, cpu)]).seen).toEqual([null, null])
+    // 정확한 상태로 일하다가 CPU 추정으로 넘어간 쉬는 중도 표시하지 않는다.
+    expect(run([row('working', 0), row('idle', 3 * MIN, cpu)]).seen).toEqual([null, null])
+  })
+
+  test('오류로 끝난 것은 표시하지 않는다(오류 상태가 따로 알린다)', () => {
+    expect(run([row('working', 0), row('error', 3 * MIN)]).seen).toEqual([null, null])
+    // 오류 뒤에 쉬는 중이 돼도 그 작업은 끝난 것으로 치지 않는다.
+    expect(run([row('working', 0), row('error', 3 * MIN), row('idle', 4 * MIN)]).seen).toEqual([
+      null,
+      null,
+      null
+    ])
+  })
+
+  describe('백그라운드 작업을 남기고 멈춘 에이전트', () => {
+    const steps = [
+      row('working', 0),
+      row('idle', 3 * MIN),
+      row('idle', 3 * MIN),
+      row('working', 5 * MIN),
+      row('idle', 5.5 * MIN)
+    ]
+    /** 3분에 멈춘 것은 백그라운드 작업을 남겼고, 5분에 다시 일한 것은 wake 가 정한다. */
+    const background =
+      (wake: 'woken' | null) =>
+      (a: AgentRow): 'paused' | 'woken' | null =>
+        a.state === 'idle' && a.stateSince === 3 * MIN
+          ? 'paused'
+          : a.state === 'working'
+            ? wake
+            : null
+
+    test('멈췄으면 끝난 것으로 표시한다(개발 서버를 띄워 둔 채 끝낸 작업도 놓치지 않게)', () => {
+      expect(run(steps.slice(0, 3), background(null)).seen).toEqual([null, 3 * MIN, 3 * MIN])
+    })
+
+    test('백그라운드 작업이 깨워 이어 간 작업은 처음부터 이어서 센다(잠깐 일하고 끝나도 표시한다)', () => {
+      expect(run(steps, background('woken')).seen).toEqual([
+        null,
+        3 * MIN,
+        3 * MIN,
+        null,
+        5.5 * MIN
+      ])
+    })
+
+    test('그 뒤 새 요청으로 시작한 작업은 새로 센다', () => {
+      expect(run(steps, background(null)).seen).toEqual([null, 3 * MIN, 3 * MIN, null, null])
+    })
+
+    test('표시를 본 것으로 해도 이어 가는 작업은 이어서 센다', () => {
+      const first = run(steps.slice(0, 2), background('woken'))
+      let memo = markDoneSeen(first.memo, '1:100')
+      const seen = steps.slice(2).map((a) => {
+        const next = trackDone([a], memo, background('woken'))
+        memo = next.memo
+        return next.agents[0].doneSince ?? null
+      })
+      expect(seen).toEqual([null, null, 5.5 * MIN])
+    })
+  })
+
+  test('본 것으로 표시하면 거두고, 그 뒤에도 다시 뜨지 않는다', () => {
+    const first = run([row('working', 0), row('idle', 3 * MIN)])
+    const key = '1:100'
+    const memo = markDoneSeen(first.memo, key)
+    const next = trackDone([row('idle', 3 * MIN)], memo, () => null)
+    expect(next.agents[0].doneSince ?? null).toBeNull()
+    // 모르는 키는 아무 일도 없다.
+    expect(markDoneSeen(first.memo, 'nope')).toEqual(first.memo)
+  })
+
+  test('꺼진 에이전트는 기억에서 뺀다', () => {
+    const { memo } = run([row('working', 0), row('idle', 3 * MIN)])
+    const next = trackDone([], memo, () => 'paused')
+    expect(next.memo.unseen.size).toBe(0)
+    expect(next.memo.working.size).toBe(0)
+    expect(next.memo.held.size).toBe(0)
+  })
+
+  test('표시가 없는 행에는 doneSince 를 붙이지 않는다(다른 값은 그대로)', () => {
+    const a = row('working', 0)
+    expect(trackDone([a], EMPTY_DONE, () => null).agents[0]).toEqual(a)
   })
 })

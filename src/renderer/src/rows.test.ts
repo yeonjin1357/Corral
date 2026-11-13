@@ -267,6 +267,58 @@ describe('에이전트 표', () => {
     expect(rows[2].cells.status).toEqual({ text: '작업 중 · 49분', dot: 'running' })
   })
 
+  test('새로 끝난 에이전트의 상태 칸은 새로 끝남 · 기간(끝난 때부터), 하는 일 칸은 마지막 말', () => {
+    const now = 5 * 60 * MIN
+    const reply = '테스트 3개를 고쳤어요.'
+    const s = snapshot({
+      takenAt: now,
+      agents: [
+        agentRow({
+          state: 'idle',
+          stateSince: now - 7 * MIN,
+          doneSince: now - 7 * MIN,
+          activity: {
+            title: '로그인 버그',
+            prompt: '테스트 고쳐 줘',
+            tool: null,
+            waiting: null,
+            reply
+          }
+        }),
+        // 오래 쉬어도 아직 보지 않았으면 새로 끝남이 먼저다. 마지막 말을 모르면 하는 일 칸은 전과 같다.
+        agentRow({
+          pid: 2,
+          state: 'idle',
+          stateSince: now - 4 * 60 * MIN,
+          doneSince: now - 4 * 60 * MIN,
+          lastActiveAt: now - 4 * 60 * MIN,
+          parked: true,
+          activity: { title: '결제', prompt: null, tool: null, waiting: null }
+        }),
+        // 본 뒤(표시 없음)에는 쉬는 중이고, 하는 일 칸은 전처럼 제목이다.
+        agentRow({
+          pid: 3,
+          state: 'idle',
+          stateSince: now - 7 * MIN,
+          activity: { title: '로그인 버그', prompt: null, tool: null, waiting: null, reply }
+        })
+      ]
+    })
+    const rows = tableFor('agents', s).rows
+    expect(rows[0].cells.status).toEqual({
+      text: '새로 끝남 · 7분',
+      title: '작업을 끝냈어요. 아직 확인하지 않았어요',
+      dot: 'running'
+    })
+    expect(rows[0].cells.activity).toEqual({ text: reply, title: `마지막 말: ${reply}` })
+    expect(rows[1].cells.status).toMatchObject({ text: '새로 끝남 · 4시간', dot: 'running' })
+    expect(rows[1].cells.activity).toEqual({ text: '결제', title: '결제' })
+    expect(rows[2].cells.status).toEqual({ text: '쉬는 중 · 7분', dot: 'idle' })
+    expect(rows[2].cells.activity).toEqual({ text: '로그인 버그', title: '로그인 버그' })
+    // 검색: 새로 끝남으로 찾는다.
+    expect(filterRows(rows, '새로 끝남').map((r) => r.key)).toEqual([rows[0].key, rows[1].key])
+  })
+
   test('칸: 이름·브랜치·상태·하는 일·CPU·메모리·커밋·실행 시간', () => {
     const t = tableFor('agents', snapshot({ agents: [agentRow({ commitBytes: GB })] }))
     expect(t.columns.map((col) => [col.id, col.label, col.width])).toEqual([
@@ -1132,6 +1184,16 @@ describe('작업 공간 탭(G4)', () => {
     // 권한 대기 > 조용함 > 작업 중 > 서버 요약.
     expect(status([working, quiet, waiting])).toEqual({ text: '응답 대기', dot: 'warn' })
     expect(status([working, quiet])).toEqual({ text: '조용함', dot: 'warn' })
+    // 새로 끝난 에이전트는 작업 중보다 먼저다(봐 달라는 것이 먼저).
+    const done = agentRow({
+      pid: 54,
+      workspace: SHOP,
+      state: 'idle',
+      stateSince: now - MIN,
+      doneSince: now - MIN
+    })
+    expect(status([working, done])).toEqual({ text: '새로 끝남', dot: 'running' })
+    expect(status([quiet, done])).toEqual({ text: '조용함', dot: 'warn' })
     expect(status([idle, working])).toEqual({ text: '작업 중', dot: 'running' })
     expect(status([idle])).toEqual({ text: '사용 중 1', dot: 'running' })
     const candidate = serverRow({ ...front, judgement: 'candidate', clientCount: 0 })

@@ -111,6 +111,7 @@ function fake(over: Partial<PitwallApi> = {}): Fake {
     openPort: vi.fn(async () => true),
     quick: vi.fn(async () => true),
     focusAgent: vi.fn(async () => true),
+    agentSeen: vi.fn(async () => true),
     claudeHook: { status: async () => null, enable: vi.fn(), disable: vi.fn() },
     codexHook: { status: async () => null, enable: vi.fn(), disable: vi.fn() },
     // 창과 함께 막 시작한 앱.
@@ -488,7 +489,7 @@ test('설정 > 에이전트 연동에서 "에이전트가 하는 일 보기"를 
   expect(box.attributes('aria-checked')).toBe('true')
   expect(w.text()).toContain('에이전트가 하는 일 보기')
   expect(w.text()).toContain(
-    '훅이 알려 주는 세션 제목·요청 첫 줄·도구 이름을 화면에 보여요. 메모리에만 두고 파일로 남기지 않아요.'
+    '세션 제목·요청 첫 줄·도구 이름, 멈추며 남긴 마지막 말의 첫 줄을 화면에 보여요. 메모리에만 두고 파일로 남기지 않아요.'
   )
   await box.trigger('click')
   await w.find('form').trigger('submit')
@@ -1560,6 +1561,39 @@ describe('할 일 띠', () => {
     await w.find('[data-attention-item][data-kind="waiting"] [data-action="act"]').trigger('click')
     await flushPromises()
     expect(f.api.focusAgent).toHaveBeenCalledWith(selectionKey.agent(waiting))
+    w.unmount()
+  })
+
+  test('새로 끝남 줄을 닫으면 그 에이전트를 본 것으로 알리고(agentSeen), 창으로 가기는 focusAgent 를 부른다', async () => {
+    const finished = agentRow({
+      pid: 7,
+      state: 'idle',
+      stateSince: 55 * 60_000,
+      doneSince: 55 * 60_000,
+      activity: { title: null, prompt: null, tool: null, waiting: null, reply: '다 했어요' }
+    })
+    const key = selectionKey.agent(finished)
+    const { f, w } = await startWith(
+      snapshot({ servers: [], agents: [finished], takenAt: 60 * 60_000 })
+    )
+    const line = (): ReturnType<typeof w.find> => w.find('[data-attention-item][data-kind="done"]')
+    expect(line().text()).toContain('새로 끝남 · 5분 · 다 했어요')
+    await line().find('[data-action="act"]').trigger('click')
+    await flushPromises()
+    expect(f.api.focusAgent).toHaveBeenCalledWith(key)
+    expect(f.api.agentSeen).not.toHaveBeenCalled()
+    await line().find('[data-action="dismiss"]').trigger('click')
+    await flushPromises()
+    expect(f.api.agentSeen).toHaveBeenCalledWith(key)
+    expect(line().exists()).toBe(false)
+    w.unmount()
+  })
+
+  test('응답 대기 줄을 닫는 것은 본 것으로 알리지 않는다', async () => {
+    const { f, w } = await startWith(attentionSnap([]))
+    await w.find('[data-kind="waiting"] [data-action="dismiss"]').trigger('click')
+    await flushPromises()
+    expect(f.api.agentSeen).not.toHaveBeenCalled()
     w.unmount()
   })
 

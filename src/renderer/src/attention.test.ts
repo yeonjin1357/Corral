@@ -45,6 +45,42 @@ test('스냅샷의 에이전트 순서가 바뀌어도 줄 순서는 같다', ()
   expect(b).toEqual(a)
 })
 
+test('새로 끝난 에이전트마다 한 줄(응답 대기 뒤, 먼저 끝난 순), 마지막 말을 붙인다', () => {
+  const done = (pid: number, doneSince: number, over: Partial<AgentRow> = {}): AgentRow =>
+    agentRow({ pid, state: 'idle', stateSince: doneSince, doneSince, ...over })
+  const s = snapshot({
+    takenAt: NOW,
+    servers: [],
+    agents: [
+      done(1, NOW - 60_000, {
+        activity: {
+          title: '로그인 버그',
+          prompt: '테스트 고쳐 줘',
+          tool: null,
+          waiting: null,
+          reply: '테스트 3개를 고쳤어요.'
+        }
+      }),
+      done(2, NOW - 5 * 60_000, { tool: 'codex' }),
+      waiter(3, NOW - 1000),
+      agentRow({ pid: 4, state: 'idle' })
+    ]
+  })
+  const key = (pid: number): string => selectionKey.agent(s.agents.find((a) => a.pid === pid)!)
+  const items = attentionItems(s, NOW)
+  expect(items.map((i) => i.id)).toEqual([`waiting:${key(3)}`, `done:${key(2)}`, `done:${key(1)}`])
+  expect(items[2]).toMatchObject({
+    kind: 'done',
+    tone: 'running',
+    name: 'Claude Code',
+    message: '새로 끝남 · 1분',
+    detail: '테스트 3개를 고쳤어요.',
+    key: key(1),
+    state: `${NOW - 60_000}`
+  })
+  expect(items[1]).toMatchObject({ name: 'Codex', message: '새로 끝남 · 5분', detail: null })
+})
+
 test('메모리 경고 + 후보가 있으면 정리 추천 한 줄, 그 안의 서버는 정리 후보 줄로 또 나오지 않는다', () => {
   const inRec = candidate(10, 5173, NOW - 60_000)
   // 작업 폴더를 모르면 추천에 넣지 않는다 -> 후보 줄로만.

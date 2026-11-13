@@ -82,6 +82,7 @@ const api: PitwallApi = {
   openPort: (port) => ipcRenderer.invoke(IPC.openPort, port),
   quick: (kind, path) => ipcRenderer.invoke(IPC.quick, kind, path),
   focusAgent: (key) => ipcRenderer.invoke(IPC.focusAgent, key),
+  agentSeen: (key) => ipcRenderer.invoke(IPC.agentSeen, key),
   claudeHook: {
     status: () => ipcRenderer.invoke(IPC.claudeHookStatus),
     enable: () => ipcRenderer.invoke(IPC.claudeHookEnable),

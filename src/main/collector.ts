@@ -25,12 +25,17 @@ import {
   type CpuMemo
 } from './agents'
 import {
+  EMPTY_DONE,
   isParked,
   lastActiveOf,
+  markDoneSeen,
   stillQuiet,
+  trackDone,
   trackQuiet,
   trackSeen,
   type CalmMemo,
+  type DoneBackground,
+  type DoneMemo,
   type SeenMemo
 } from './activity'
 import { fileStateOver, waitReasonOf, type ClaudeSessionFile } from './claudeSessionFiles'
@@ -101,19 +106,24 @@ function withoutNames(files: Map<number, ClaudeSessionFile>): Map<number, Claude
  * 행의 하는 일(G3b): 그 행이 상태를 얻는 훅 세션의 내용에, 훅 제목이 없으면 Claude 세션 파일의 이름(fileTitle, 한 줄
  * 80자)을 제목으로 쓴다(훅 세션이 없어도). 실행 중인 도구는 작업 중·응답 대기일 때만, 권한을 기다리는 도구는 응답 대기일
  * 때만 보인다(세션 파일·Codex 세션 기록이 더 늦은 근거라 상태가 바뀌었으면 옛 도구를 보이지 않게). 권한을 기다리는 그
- * 도구는 실행 중으로 보이지 않는다(늦게 도착한 PreToolUse 등 — 아직 돌지 않았다). 보일 것이 없으면 null.
+ * 도구는 실행 중으로 보이지 않는다(늦게 도착한 PreToolUse 등 — 아직 돌지 않았다). 멈추며 남긴 마지막 말(훅의 것,
+ * 없으면 Codex 세션 기록의 것 — codexReply)은 쉬는 중일 때만 보인다. 보일 것이 없으면 null.
  */
 function rowActivity(
   state: AgentRow['state'],
   hook: AgentActivity | null,
-  fileName: string | null
+  fileName: string | null,
+  codexReply: string | null
 ): AgentActivity | null {
   const title = hook?.title ?? oneLine(fileName, TITLE_MAX)
   const prompt = hook?.prompt ?? null
   const waiting = state === 'waiting' ? (hook?.waiting ?? null) : null
   const running = state === 'working' || state === 'waiting' ? (hook?.tool ?? null) : null
   const tool = running && waiting && running.name === waiting.tool ? null : running
-  return title || prompt || tool || waiting ? { title, prompt, tool, waiting } : null
+  const reply = state === 'idle' ? (hook?.reply ?? codexReply) : null
+  return title || prompt || tool || waiting || reply
+    ? { title, prompt, tool, waiting, ...(reply ? { reply } : {}) }
+    : null
 }
 
 /** 다른 Codex 프로세스 생존 구간을 기억하는 시간과, 마지막으로 본 뒤 꺼졌을 수 있는 여유(수집 주기보다 길게). */
@@ -221,6 +231,11 @@ export function createCollector(deps: CollectorDeps): {
   ): void
   /** 다시 샘플링하지 않고 훅 세션 상태만 새로 반영한다(훅 이벤트가 왔을 때). */
   restate(snapshot: DashboardSnapshot): Promise<DashboardSnapshot>
+  /**
+   * 새로 끝남 표시를 거둔다: 사용자가 그 에이전트(agentKey)를 봤다(Corral 에서 창으로 갔거나 표시를 닫았다).
+   * 다음 수집·restate 부터 그 행에 doneSince 가 없다. 표시가 없던 키는 아무 일도 없다.
+   */
+  doneSeen(key: string): void
 } {
   let previousCpu: CpuMemo = new Map()
   /** 서버 트리 CPU(에이전트와 따로 기억 — 같은 프로세스가 둘에 들어가지 않는다). */
@@ -231,6 +246,8 @@ export function createCollector(deps: CollectorDeps): {
   let agentSeen: SeenMemo = new Map()
   /** 에이전트별 조용한 조건(훅으로 작업 중·CPU 낮음)이 이어진 첫 시각(G3c). 수집마다 새로 하고 저장하지 않는다. */
   let calm: CalmMemo = new Map()
+  /** 새로 끝남(끝냈는데 아직 보지 않은 에이전트)의 기억. 저장하지 않는다. */
+  let done: DoneMemo = EMPTY_DONE
   /** 서버별 메모리 기록(F6, 1분 간격·60분). */
   const serverHistory = createServerHistory()
   let serverMemo: ServerMemo = new Map()
@@ -265,8 +282,15 @@ export function createCollector(deps: CollectorDeps): {
     (roots: Map<string, string | null>) =>
     (a: AgentRow): HookView | null =>
       hookFor(roots)({ key: agentKey(a), worktreeRoot: a.worktree?.root ?? null, tool: a.tool })
+  /** 그 행의 훅 세션과 백그라운드 작업의 관계(새로 끝남 — trackDone). */
+  const backgroundOf =
+    (roots: Map<string, string | null>) =>
+    (a: AgentRow): DoneBackground =>
+      hookOfRow(roots)(a)?.background ?? null
   /** Codex 세션 기록으로 안 상태(pid → 상태). restate 가 덮어쓰지 않도록 기억한다. */
   let rollouts = new Map<number, RolloutState>()
+  /** Codex 세션 기록에서 읽은 마지막 말(pid → 첫 줄, 새로 끝남). 수집마다 새로 하고, 하는 일 보기를 끄면 버린다. */
+  let codexReplies = new Map<number, string>()
   /** 정확한 상태의 시작 시각: 훅은 이벤트 시각, Codex 세션 기록은 기록의 이벤트 시각, 세션 파일은 상태가 바뀐 시각. */
   const exactSinceFor =
     (roots: Map<string, string | null>) =>
@@ -352,6 +376,7 @@ export function createCollector(deps: CollectorDeps): {
   function withAgentActivity(agents: AgentRow[], roots: Map<string, string | null>): AgentRow[] {
     if (!deps.options().showAgentActivity) {
       sessionFiles = withoutNames(sessionFiles)
+      codexReplies = new Map()
       return agents.map((a): AgentRow => ({ ...a, activity: null }))
     }
     return agents.map((a): AgentRow => ({
@@ -359,7 +384,8 @@ export function createCollector(deps: CollectorDeps): {
       activity: rowActivity(
         a.state,
         hookOfRow(roots)(a)?.activity ?? null,
-        a.tool === 'claude' ? fileTitle(sessionFiles.get(a.pid)) : null
+        a.tool === 'claude' ? fileTitle(sessionFiles.get(a.pid)) : null,
+        a.tool === 'codex' ? (codexReplies.get(a.pid) ?? null) : null
       )
     }))
   }
@@ -673,6 +699,9 @@ export function createCollector(deps: CollectorDeps): {
         return state ? [[a.pid, state] as const] : []
       })
     )
+    codexReplies = new Map(
+      [...codexInfos].flatMap(([pid, info]) => (info.reply ? [[pid, info.reply] as const] : []))
+    )
     // 토큰 숫자(G6): 짝지은 Claude 세션의 기록을 뒤에서 읽게 한다(기다리지 않는다). 기억한 값은 마지막에 붙인다.
     // 설정은 want 바로 전에 새로 읽는다(사이에 기다림 없음): 수집 도중 끄면 — 끌 때 기억을 비운 뒤라도 — 다시 읽게 하지 않는다.
     const usageTargets = new Map<number, UsageTarget>()
@@ -702,7 +731,10 @@ export function createCollector(deps: CollectorDeps): {
       sampledAt
     )
     calm = quiet.memo
-    const active = quiet.agents
+    // 새로 끝남도 최종 상태가 정해진 뒤에 판단한다.
+    const tracked = trackDone(quiet.agents, done, backgroundOf(roots))
+    done = tracked.memo
+    const active = tracked.agents
 
     // 작업 공간은 판단 전에 정한다: 같은 작업 공간에서 에이전트가 일하면 그 작업 공간의 서버·남은 프로세스는
     // 정리 후보로 올리지 않는다(스펙 §4 — 다른 저장소에서 일하는 에이전트가 이 서버를 쓰고 있을 수 있다).
@@ -822,9 +854,13 @@ export function createCollector(deps: CollectorDeps): {
     const stated = withStateSince(restated, agentStates, now, exactSinceFor(rootOfCwd))
     agentStates = stated.memo
     // 조용함(G3c)은 새 이벤트가 왔으면 지우기만 한다(새로 붙이는 것은 다음 수집).
-    const active = withActivity(stated.agents, rootOfCwd, now, deps.options().agentParkedMs).map(
+    const calmed = withActivity(stated.agents, rootOfCwd, now, deps.options().agentParkedMs).map(
       (a): AgentRow => ({ ...a, quietSince: stillQuiet(a) })
     )
+    // 새로 끝남은 수집 사이에도 바로 반영한다(멈추면 붙이고, 다시 일하거나 봤으면 거둔다).
+    const tracked = trackDone(calmed, done, backgroundOf(rootOfCwd))
+    done = tracked.memo
+    const active = tracked.agents
     // 토큰 숫자(G6)는 다음 수집까지 그대로 둔다(설정을 껐으면 바로 숨긴다).
     const usageOn = deps.options().readUsage
     const agents = withAgentActivity(active, rootOfCwd).map((a): AgentRow =>
@@ -864,5 +900,9 @@ export function createCollector(deps: CollectorDeps): {
     )
   }
 
-  return { collect, restate, exportState, importState }
+  function doneSeen(key: string): void {
+    done = markDoneSeen(done, key)
+  }
+
+  return { collect, restate, exportState, importState, doneSeen }
 }

@@ -1,18 +1,21 @@
 /**
- * 할 일 띠(G3)의 줄: 지금 사용자가 처리할 것(응답 대기 에이전트·메모리 정리 추천·정리 후보 서버·무거운 작업 겹침)을
- * 스냅샷에서 만든다. 화면 모양과 상관없는 순수 함수.
+ * 할 일 띠(G3)의 줄: 지금 사용자가 처리할 것(응답 대기 에이전트·새로 끝난 에이전트·메모리 정리 추천·정리 후보 서버·
+ * 무거운 작업 겹침)을 스냅샷에서 만든다. 화면 모양과 상관없는 순수 함수.
  */
 import type { DashboardSnapshot } from '../../shared/types'
 import { selectionKey } from '../../shared/keys'
 import { cleanupRecommendation } from '../../shared/recommend'
 import { formatDuration, formatBytes, formatFreed, pressureText } from '../../shared/format'
 import { text } from '../../shared/text'
-import { agentLine, folderOf, serverName, type Tone } from './rows'
+import { agentLine, folderOf, isNewlyDone, serverName, type Tone } from './rows'
 
-export type AttentionKind = 'waiting' | 'recommend' | 'candidate' | 'overlap'
+export type AttentionKind = 'waiting' | 'done' | 'recommend' | 'candidate' | 'overlap'
 
 export interface AttentionItem {
-  /** 같은 대상이면 갱신해도 같다: `waiting:<에이전트 키>` · 'recommend' · `candidate:<서버 키>` · 'overlap'. */
+  /**
+   * 같은 대상이면 갱신해도 같다: `waiting:<에이전트 키>` · `done:<에이전트 키>` · 'recommend' · `candidate:<서버 키>` ·
+   * 'overlap'.
+   */
   id: string
   /** 닫은 뒤 이 값이 바뀌면 다시 보인다. */
   state: string
@@ -24,7 +27,7 @@ export interface AttentionItem {
   where: string | null
   message: string
   detail: string | null
-  /** 단추가 쓰는 선택 키(waiting: 에이전트 키, candidate: 서버 키). */
+  /** 단추가 쓰는 선택 키(waiting·done: 에이전트 키, candidate: 서버 키). */
   key: string | null
   /** recommend 만: 끌 키 전부. */
   keys?: string[]
@@ -67,7 +70,32 @@ export function attentionItems(s: DashboardSnapshot, now: number): AttentionItem
   }
   waiting.sort(bySince)
 
-  const items: AttentionItem[] = waiting.map((w) => w.item)
+  // 새로 끝남: 끝냈는데 아직 확인하지 않은 에이전트(먼저 끝난 순). 마지막 말을 알면 붙인다.
+  const done: { since: number | null; id: string; item: AttentionItem }[] = []
+  for (const a of s.agents) {
+    if (!isNewlyDone(a)) continue
+    const key = selectionKey.agent(a)
+    const line = agentLine(a, s)
+    const activity = line.cells.activity
+    done.push({
+      since: a.doneSince,
+      id: key,
+      item: {
+        id: `done:${key}`,
+        state: `${a.doneSince}`,
+        kind: 'done',
+        tone: 'running',
+        name: text.ui.agent.toolNames[a.tool],
+        where: folderOf(a.worktree),
+        message: line.cells.status.text,
+        detail: activity.muted ? null : activity.text,
+        key
+      }
+    })
+  }
+  done.sort(bySince)
+
+  const items: AttentionItem[] = [...waiting, ...done].map((w) => w.item)
 
   const rec = cleanupRecommendation(s)
   const recKeys = rec.items.map((i) => i.key)

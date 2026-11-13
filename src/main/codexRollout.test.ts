@@ -699,6 +699,121 @@ describe('토큰·사용 한도(G6)', () => {
   })
 })
 
+describe('마지막 말(새로 끝남): 끝난 턴의 last_agent_message 첫 줄', () => {
+  let home: string
+  beforeEach(async () => {
+    home = await mkdtemp(join(tmpdir(), 'pitwall-codex-'))
+  })
+  afterEach(async () => {
+    await rm(home, { recursive: true, force: true })
+  })
+  const start = new Date(2026, 10, 10, 9, 0, 0)
+  const agent = { cwd: CWD, startedAt: start.getTime() }
+  const now = start.getTime() + 10 * MIN
+  async function rollout(body: string[]): Promise<string> {
+    const dir = join(home, 'sessions', '2026', '11', '10')
+    await mkdir(dir, { recursive: true })
+    const path = join(dir, 'rollout-2026-11-10T09-01-00-0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b.jsonl')
+    const meta = line('session_meta', { id: 'x', cwd: CWD }, start.toISOString())
+    await writeFile(path, [meta, ...body].join('\n') + '\n')
+    return path
+  }
+  const done = (t: string, message: unknown, extra: Record<string, unknown> = {}): string =>
+    event('task_complete', t, { last_agent_message: message, ...extra })
+
+  test('켜져 있으면 끝난 턴의 마지막 말 첫 줄을 담고(200자까지), 다시 일하면 비운다', async () => {
+    const path = await rollout([
+      event('task_started', '2026-11-10T00:01:00.000Z'),
+      done(
+        '2026-11-10T00:04:00.000Z',
+        '\n로그인 테스트를   고쳤어요.\n\n- auth.test.ts\n- 남은 일 없음'
+      )
+    ])
+    const reader = createCodexReader(home, { reply: () => true })
+    expect(await reader.infoFor(agent, now)).toMatchObject({
+      state: { state: 'idle' },
+      reply: '로그인 테스트를 고쳤어요.'
+    })
+    await appendFile(path, event('task_started', '2026-11-10T00:05:00.000Z') + '\n')
+    expect((await reader.infoFor(agent, now)).reply).toBeUndefined()
+    await appendFile(path, done('2026-11-10T00:06:00.000Z', 'r'.repeat(300)) + '\n')
+    expect((await reader.infoFor(agent, now)).reply).toBe('r'.repeat(199) + '…')
+  })
+
+  test('오류로 끝났거나 중단됐거나 말이 없으면 담지 않는다', async () => {
+    const reader = createCodexReader(home, { reply: () => true })
+    const path = await rollout([
+      event('task_started', '2026-11-10T00:01:00.000Z'),
+      done('2026-11-10T00:02:00.000Z', '한도를 넘었어요', { error: { message: 'quota' } })
+    ])
+    expect(await reader.infoFor(agent, now)).toMatchObject({ state: { state: 'error' } })
+    expect((await reader.infoFor(agent, now)).reply).toBeUndefined()
+    for (const [i, empty] of ['', '  \n ', 42, null, { text: 'x' }].entries()) {
+      await appendFile(path, done(`2026-11-10T00:03:0${i}.000Z`, empty) + '\n')
+      expect((await reader.infoFor(agent, now)).reply, String(empty)).toBeUndefined()
+    }
+    // 끝난 말을 알던 뒤에 중단된 턴: 지난 말을 남기지 않는다.
+    await appendFile(
+      path,
+      [
+        done('2026-11-10T00:04:00.000Z', '다 했어요'),
+        event('task_started', '2026-11-10T00:05:00.000Z'),
+        event('turn_aborted', '2026-11-10T00:05:30.000Z', { reason: 'interrupted' })
+      ].join('\n') + '\n'
+    )
+    const info = await reader.infoFor(agent, now)
+    expect(info.state?.state).toBe('idle')
+    expect(info.reply).toBeUndefined()
+  })
+
+  test('꺼져 있으면(기본) 마지막 말을 결과에 남기지 않는다', async () => {
+    await rollout([
+      event('task_started', '2026-11-10T00:01:00.000Z'),
+      done('2026-11-10T00:04:00.000Z', '비밀 대화')
+    ])
+    for (const reader of [
+      createCodexReader(home),
+      createCodexReader(home, { reply: () => false })
+    ]) {
+      const info = await reader.infoFor(agent, now)
+      expect(info.state?.state).toBe('idle')
+      expect(JSON.stringify(info)).not.toContain('비밀')
+    }
+  })
+
+  test('끄면 들고 있던 말을 버린다(dropReply 는 바로, 아니면 다음에 읽을 때)', async () => {
+    await rollout([
+      event('task_started', '2026-11-10T00:01:00.000Z'),
+      done('2026-11-10T00:04:00.000Z', '다 했어요')
+    ])
+    let on = true
+    const reader = createCodexReader(home, { reply: () => on })
+    expect((await reader.infoFor(agent, now)).reply).toBe('다 했어요')
+    on = false
+    expect((await reader.infoFor(agent, now)).reply).toBeUndefined()
+    // 다시 켜도 버린 말은 돌아오지 않는다(다음에 끝나는 턴부터 담는다).
+    on = true
+    expect((await reader.infoFor(agent, now)).reply).toBeUndefined()
+
+    const other = createCodexReader(home, { reply: () => on })
+    expect((await other.infoFor(agent, now)).reply).toBe('다 했어요')
+    other.dropReply()
+    expect((await other.infoFor(agent, now)).reply).toBeUndefined()
+  })
+
+  test('읽는 도중에 꺼지면 그 읽기가 얻은 말도 담지 않는다', async () => {
+    await rollout([
+      event('task_started', '2026-11-10T00:01:00.000Z'),
+      done('2026-11-10T00:04:00.000Z', '다 했어요')
+    ])
+    let on = true
+    const reader = createCodexReader(home, { reply: () => on })
+    const pending = reader.infoFor(agent, now)
+    on = false
+    expect((await pending).reply).toBeUndefined()
+  })
+})
+
 /** 파일 안의 글자를 같은 길이의 다른 글자로 바꿔 쓴다(크기는 그대로). */
 async function rewrite(path: string, from: string, to: string): Promise<void> {
   expect(Buffer.byteLength(to)).toBe(Buffer.byteLength(from))

@@ -43,6 +43,29 @@ test('응답 대기 줄의 창으로 가기는 focus(키), 닫기는 dismiss(id,
   expect(w.emitted('dismiss')?.[0]).toEqual(['waiting:a1', '1'])
 })
 
+test('새로 끝남 줄의 창으로 가기는 focus(키), 닫기는 dismiss(id, state)', async () => {
+  const w = mount(AttentionStrip, {
+    props: {
+      items: [
+        item(1, {
+          id: 'done:agent:1',
+          kind: 'done',
+          tone: 'running',
+          message: '새로 끝남 · 3분',
+          detail: '테스트 3개를 고쳤어요.'
+        })
+      ]
+    }
+  })
+  const row = w.find('[data-attention-item][data-kind="done"]')
+  expect(row.text()).toContain('새로 끝남 · 3분 · 테스트 3개를 고쳤어요.')
+  expect(row.find('[data-action="act"]').text()).toBe('창으로 가기')
+  await row.find('[data-action="act"]').trigger('click')
+  expect(w.emitted('focus')?.[0]).toEqual(['agent:1'])
+  await row.find('[data-action="dismiss"]').trigger('click')
+  expect(w.emitted('dismiss')?.[0]).toEqual(['done:agent:1', '1'])
+})
+
 test('정리 추천은 모두 끄기(killMany)와 칩, 후보는 내리기(kill), 겹침은 목록에서 보기(showHeavy)', async () => {
   const w = mount(AttentionStrip, {
     props: {

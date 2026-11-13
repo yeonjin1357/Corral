@@ -2537,3 +2537,182 @@ describe('토큰·한도(G6)', () => {
     expect(codexInfo.mock.calls.map(([a]) => a.cwd)).toEqual([W2.root])
   })
 })
+
+describe('새로 끝남(끝났는데 아직 보지 않은 에이전트)', () => {
+  const event = (
+    sessions: Sessions,
+    name: string,
+    at: number,
+    extra: Record<string, unknown> = {}
+  ): void => {
+    applyHookEvent(
+      sessions,
+      { session_id: 's1', cwd: W1.root, hook_event_name: name, ...extra },
+      at
+    )
+  }
+  const claude = (s: DashboardSnapshot): AgentRow => s.agents.find((a) => a.pid === 5000)!
+  const codex = (s: DashboardSnapshot): AgentRow => s.agents.find((a) => a.pid === 6000)!
+
+  test('Claude: 2분 넘게 일하고 멈추면 끝난 시각과 마지막 말을 담고, 본 것으로 하면 표시만 거둔다', async () => {
+    const { deps, sessions, clock } = setup()
+    const collector = createCollector(deps)
+    const t = clock.now
+    event(sessions, 'UserPromptSubmit', t, { prompt: '테스트 고쳐 줘' })
+    const working = await collector.collect()
+    expect(claude(working)).toMatchObject({ state: 'working', stateSource: 'hook' })
+    expect(claude(working).doneSince).toBeUndefined()
+    expect(claude(working).activity?.reply).toBeUndefined()
+
+    // 수집 사이에 온 Stop 도 바로 반영한다(restate).
+    clock.now = t + 3 * MIN
+    event(sessions, 'Stop', clock.now, {
+      last_assistant_message: '테스트 3개를 고쳤어요.\n\n- auth.test.ts\n- cart.test.ts'
+    })
+    const stopped = await collector.restate(working)
+    expect(claude(stopped)).toMatchObject({
+      state: 'idle',
+      doneSince: t + 3 * MIN,
+      activity: { prompt: '테스트 고쳐 줘', reply: '테스트 3개를 고쳤어요.' }
+    })
+    clock.now += 5000
+    const done = await collector.collect()
+    expect(claude(done)).toMatchObject({
+      state: 'idle',
+      doneSince: t + 3 * MIN,
+      activity: { reply: '테스트 3개를 고쳤어요.' }
+    })
+
+    // 본 것으로 하면 표시는 거두고 마지막 말은 남는다. 다음 수집에도 다시 뜨지 않는다.
+    collector.doneSeen('5000:100')
+    const seen = await collector.restate(done)
+    expect(claude(seen).doneSince).toBeUndefined()
+    expect(claude(seen).activity?.reply).toBe('테스트 3개를 고쳤어요.')
+    clock.now += 5000
+    expect(claude(await collector.collect()).doneSince).toBeUndefined()
+    // 모르는 키는 아무 일도 없다.
+    collector.doneSeen('nope')
+  })
+
+  test('새 요청을 보내면 표시와 지난 말을 거두고, 잠깐(2분 미만) 일하고 끝난 것은 표시하지 않는다', async () => {
+    const { deps, sessions, clock } = setup()
+    const collector = createCollector(deps)
+    const t = clock.now
+    event(sessions, 'UserPromptSubmit', t, { prompt: '테스트 고쳐 줘' })
+    const working = await collector.collect()
+    clock.now = t + 3 * MIN
+    event(sessions, 'Stop', clock.now, { last_assistant_message: '다 했어요' })
+    const done = await collector.restate(working)
+    expect(claude(done).doneSince).toBe(t + 3 * MIN)
+
+    clock.now += MIN
+    event(sessions, 'UserPromptSubmit', clock.now, { prompt: '커밋해 줘' })
+    const again = await collector.restate(done)
+    expect(claude(again)).toMatchObject({ state: 'working', activity: { prompt: '커밋해 줘' } })
+    expect(claude(again).doneSince).toBeUndefined()
+    expect(claude(again).activity?.reply).toBeUndefined()
+
+    clock.now += 30_000
+    event(sessions, 'Stop', clock.now, { last_assistant_message: '커밋했어요' })
+    const short = await collector.restate(again)
+    expect(claude(short)).toMatchObject({ state: 'idle', activity: { reply: '커밋했어요' } })
+    expect(claude(short).doneSince).toBeUndefined()
+  })
+
+  test('하는 일 보기를 꺼도 표시는 하고, 마지막 말은 담지 않는다', async () => {
+    const options: CollectOptions = {
+      thresholds: { ramWarnPercent: 80, ramDangerPercent: 90 },
+      idlePortMs: 20 * MIN,
+      agentParkedMs: 180 * MIN,
+      heavyPatterns: [],
+      showAgentActivity: true,
+      readUsage: true
+    }
+    const { deps, sessions, clock } = setup({ options: () => options })
+    const collector = createCollector(deps)
+    const t = clock.now
+    event(sessions, 'UserPromptSubmit', t, { prompt: '테스트 고쳐 줘' })
+    const working = await collector.collect()
+    clock.now = t + 3 * MIN
+    event(sessions, 'Stop', clock.now, { last_assistant_message: '다 했어요' })
+    options.showAgentActivity = false
+    const done = await collector.restate(working)
+    expect(claude(done)).toMatchObject({ state: 'idle', doneSince: t + 3 * MIN, activity: null })
+  })
+
+  test('백그라운드 작업을 남기고 멈춰도 표시하고, 그 작업이 깨워 이어 간 것은 잠깐 일하고 끝나도 표시한다', async () => {
+    const { deps, sessions, clock } = setup()
+    const collector = createCollector(deps)
+    const t = clock.now
+    event(sessions, 'UserPromptSubmit', t, { prompt: '빌드 돌려 줘' })
+    let s = await collector.collect()
+    clock.now = t + 3 * MIN
+    event(sessions, 'Stop', clock.now, {
+      last_assistant_message: '빌드를 백그라운드로 돌려 뒀어요.',
+      background_tasks: [{ id: 'task-001', type: 'shell' }]
+    })
+    s = await collector.restate(s)
+    expect(claude(s).doneSince).toBe(t + 3 * MIN)
+    // 빌드가 끝나 에이전트가 깨어났다(새 요청 없이 도구를 쓴다).
+    clock.now = t + 10 * MIN
+    event(sessions, 'PreToolUse', clock.now, {
+      tool_name: 'Bash',
+      tool_input: { command: 'cat build.log' }
+    })
+    s = await collector.restate(s)
+    expect(claude(s).state).toBe('working')
+    expect(claude(s).doneSince).toBeUndefined()
+    clock.now += 30_000
+    event(sessions, 'Stop', clock.now, { last_assistant_message: '빌드가 끝났어요. 경고 2개.' })
+    s = await collector.restate(s)
+    expect(claude(s)).toMatchObject({
+      state: 'idle',
+      doneSince: t + 10 * MIN + 30_000,
+      activity: { reply: '빌드가 끝났어요. 경고 2개.' }
+    })
+  })
+
+  test('Codex: 세션 기록의 마지막 말을 쉬는 동안 보이고, 2분 넘게 일했으면 표시한다', async () => {
+    const at = (state: RolloutState['state'], since: number): RolloutState => ({
+      state,
+      since,
+      lastEventAt: since
+    })
+    let info: CodexInfo = { state: at('working', 10 * MIN), usage: null, limits: null }
+    const { deps, clock } = setup({
+      codexInfo: async (a) =>
+        a.cwd === W2.root ? info : { state: null, usage: null, limits: null }
+    })
+    const collector = createCollector(deps)
+    const first = await collector.collect()
+    expect(codex(first)).toMatchObject({ state: 'working', stateSource: 'rollout' })
+    expect(codex(first).doneSince).toBeUndefined()
+
+    clock.now = 13 * MIN + 5000
+    info = {
+      state: at('idle', 13 * MIN),
+      usage: null,
+      limits: null,
+      reply: '빌드를 고쳤어요.'
+    }
+    const done = await collector.collect()
+    expect(codex(done)).toMatchObject({
+      state: 'idle',
+      doneSince: 13 * MIN,
+      activity: { title: null, prompt: null, tool: null, waiting: null, reply: '빌드를 고쳤어요.' }
+    })
+    // 훅 소식만 반영하는 restate 는 그대로 둔다.
+    expect(codex(await collector.restate(done))).toMatchObject({
+      doneSince: 13 * MIN,
+      activity: { reply: '빌드를 고쳤어요.' }
+    })
+
+    // 다시 일하면 표시와 지난 말을 거둔다.
+    clock.now = 14 * MIN + 5000
+    info = { state: at('working', 14 * MIN), usage: null, limits: null }
+    const again = await collector.collect()
+    expect(codex(again).state).toBe('working')
+    expect(codex(again).doneSince).toBeUndefined()
+    expect(codex(again).activity).toBeNull()
+  })
+})

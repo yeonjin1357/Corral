@@ -208,11 +208,17 @@ function cpuCell(cpuPercent: number | null, s: DashboardSnapshot): Cell {
     : { text: `${cpu.toFixed(1)}%`, sort: cpu, mono: true }
 }
 
+/** 새로 끝남: 작업을 끝내고 쉬는 중인데 사용자가 아직 확인하지 않았다(메인이 doneSince 를 붙인다). */
+export function isNewlyDone(a: AgentRow): a is AgentRow & { doneSince: number } {
+  return a.doneSince != null && a.state === 'idle'
+}
+
 /**
  * 에이전트 상태 칸: "작업 중 · 12분"(F3). 아직 모르는 상태는 시간 없이.
  * 오래 쉬는 세션(G2)은 130px 칸에 배지까지 넣으면 기간이 잘려, 쉬는 중·확인 중이면 글자 자체를
  * "오래 쉼 · 3시간"(마지막 활동부터)으로 하고(오류는 "오류 · 기간" 그대로), title 에 마지막 활동 시각.
  * 조용한 에이전트(G3c)도 같은 까닭으로 "조용함 · 18분"(조용해진 때부터, 주황 점)이고, title 에 실행 중인 도구와 까닭.
+ * 새로 끝난 에이전트(끝냈는데 아직 확인하지 않음)는 "새로 끝남 · 7분"(끝난 때부터, 민트 점) — 오래 쉬어도 이쪽이 먼저다.
  * 트레이 요약 창의 에이전트 줄도 같은 글자를 쓴다.
  */
 export function agentStatus(a: AgentRow, now: number): Cell {
@@ -226,6 +232,8 @@ export function agentStatus(a: AgentRow, now: number): Cell {
       dot: 'warn'
     }
   }
+  if (isNewlyDone(a))
+    return { text: st.withTime(st.done, ago(a.doneSince)), title: st.doneTitle, dot: 'running' }
   const parkedAt = a.parked ? a.lastActiveAt : null
   return {
     text:
@@ -243,10 +251,12 @@ export function agentStatus(a: AgentRow, now: number): Cell {
  * 하는 일 칸(G3b): 권한 대기면 "권한: Bash · npm run build", 기다리는 도구를 모르고 세션 파일로 안 대기 이유가 있으면
  * 그 이유("질문에 답 대기" — 내용이 아니라 상태라 하는 일 보기를 꺼도 보인다), 도구 실행 중이면 "Bash · npm run build",
  * 아니면 세션 제목, 없으면 마지막 요청, 없으면 —. 칸이 좁아 잘리므로 전체 글은 title 에.
+ * 새로 끝난 에이전트는 멈추며 남긴 마지막 말을 먼저 보인다(무엇을 끝냈는지·무엇을 묻는지 창을 열지 않고 알게).
  */
 function activityCell(a: AgentRow): Cell {
   const act = a.activity
   const ag = text.ui.agent
+  if (isNewlyDone(a) && act?.reply) return { text: act.reply, title: ag.activityReply(act.reply) }
   const waiting = act?.waiting ? ag.activityTool(act.waiting.tool, act.waiting.summary) : ''
   const label = waiting
     ? ag.activityWaiting(waiting)
@@ -438,6 +448,7 @@ export function agentLine(a: AgentRow, s: DashboardSnapshot): Row {
       a.worktree?.branch,
       text.ui.agent.toolNames[a.tool],
       text.ui.agent.states[a.state],
+      isNewlyDone(a) ? st.done : null,
       a.activity?.title
     )
   }
@@ -1043,13 +1054,14 @@ function workspaceHead(
 }
 
 /**
- * 작업 공간 머리 상태: 에이전트가 응답 대기 > 조용함 > 작업 중, 아니면 서버 요약.
+ * 작업 공간 머리 상태: 에이전트가 응답 대기 > 조용함 > 새로 끝남 > 작업 중, 아니면 서버 요약.
  * 서버가 없으면 비운다(서버 요약의 "연결 없음"은 서버가 있을 때의 말이라).
  */
 function workspaceStatus(agents: AgentRow[], servers: ServerRow[]): Cell {
   const states = text.ui.agent.states
   if (agents.some((a) => a.state === 'waiting')) return { text: states.waiting, dot: 'warn' }
   if (agents.some((a) => a.quietSince != null)) return { text: st.quiet, dot: 'warn' }
+  if (agents.some(isNewlyDone)) return { text: st.done, dot: 'running' }
   if (agents.some((a) => a.state === 'working')) return { text: states.working, dot: 'running' }
   return servers.length ? groupStatus(servers) : { text: '' }
 }

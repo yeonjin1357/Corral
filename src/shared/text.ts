@@ -602,6 +602,9 @@ export const text = {
       lastActive: (duration: string): string => `마지막 활동 ${duration} 전`,
       /** 에이전트 상태 칸·상세 패널 배지의 조용한 에이전트(G3c, "조용함 · 18분"). */
       quiet: '조용함',
+      /** 새로 끝남: 작업을 끝냈는데 사용자가 아직 확인하지 않은 에이전트(끝난 때부터의 시간을 붙인다). */
+      done: '새로 끝남',
+      doneTitle: '작업을 끝냈어요. 아직 확인하지 않았어요',
       /** 조용한 에이전트 상태 칸의 title. tool: 실행 중인 도구 이름(모르면 null). */
       quietFor: (minutes: number, tool: string | null): string =>
         `${tool ? `${tool} 실행 중 · ` : ''}${minutes}분째 이벤트가 없고 CPU 를 거의 쓰지 않아요`,
@@ -853,7 +856,7 @@ export const text = {
       unhide: '빼기',
       showAgentActivity: '에이전트가 하는 일 보기',
       showAgentActivityHelp:
-        '훅이 알려 주는 세션 제목·요청 첫 줄·도구 이름을 화면에 보여요. 메모리에만 두고 파일로 남기지 않아요.',
+        '세션 제목·요청 첫 줄·도구 이름, 멈추며 남긴 마지막 말의 첫 줄을 화면에 보여요. 메모리에만 두고 파일로 남기지 않아요.',
       readUsage: '토큰 사용량 보기',
       readUsageHelp:
         '세션 기록 파일에서 토큰 숫자만 읽어요. 대화 내용은 남기지 않아요. Claude 의 사용 한도는 보여 주지 않아요(상태 줄 설정을 건드려야 해서요).',
@@ -989,15 +992,18 @@ export const text = {
         [name, summary].filter(Boolean).join(' · '),
       /** 하는 일 칸의 권한 대기: "권한: Bash · npm run build". */
       activityWaiting: (tool: string): string => `권한: ${tool}`,
+      /** 하는 일 칸의 풍선말: 새로 끝난 에이전트가 멈추며 남긴 마지막 말. */
+      activityReply: (reply: string): string => `마지막 말: ${reply}`,
       /** 상세 패널 정보의 하는 일 줄 이름. */
       activityFacts: {
         title: '제목',
         prompt: '마지막 요청',
         tool: '실행 중인 도구',
-        waiting: '권한을 기다리는 도구'
+        waiting: '권한을 기다리는 도구',
+        reply: '마지막 말'
       },
       activityNote:
-        '에이전트 연동이 알려 준 내용이에요. Corral 은 이것을 메모리에만 두고 파일로 남기지 않아요. 설정 > 에이전트 연동에서 끌 수 있어요.'
+        '에이전트 연동이나 세션 기록에서 안 내용이에요. Corral 은 이것을 메모리에만 두고 파일로 남기지 않아요. 설정 > 에이전트 연동에서 끌 수 있어요.'
     },
     disk: {
       empty: '정리할 끝난 워크트리가 없어요.',

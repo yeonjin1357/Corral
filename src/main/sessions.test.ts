@@ -1270,6 +1270,121 @@ describe('하는 일(G3b)', () => {
     }
   })
 
+  test('멈출 때(Stop) 에이전트의 마지막 말 첫 줄을 담고, 다시 일하기 시작하면 비운다', () => {
+    const sessions: Sessions = new Map()
+    applyHookEvent(sessions, ev('UserPromptSubmit', { prompt: '테스트 돌려 줘' }), 1000)
+    expect(activityOf(sessions)?.reply ?? null).toBeNull()
+    applyHookEvent(
+      sessions,
+      ev('Stop', {
+        last_assistant_message:
+          '\n테스트 3개가   실패해서 멈췄어요. 계속할까요?\n\n- auth.test.ts\n- cart.test.ts'
+      }),
+      2000
+    )
+    expect(activityOf(sessions)).toMatchObject({
+      prompt: '테스트 돌려 줘',
+      reply: '테스트 3개가 실패해서 멈췄어요. 계속할까요?'
+    })
+    // 60초 뒤의 쉬는 중 알림은 마지막 말을 지우지 않는다.
+    applyHookEvent(sessions, ev('Notification', { notification_type: 'idle_prompt' }), 3000)
+    expect(activityOf(sessions)?.reply).toBe('테스트 3개가 실패해서 멈췄어요. 계속할까요?')
+    // 새 요청이 오면 지난 말은 비운다.
+    applyHookEvent(sessions, ev('UserPromptSubmit', { prompt: '응 계속해' }), 4000)
+    expect(activityOf(sessions)?.reply ?? null).toBeNull()
+  })
+
+  test('마지막 말은 200자까지, 글이 아니거나 비어 있으면 담지 않는다', () => {
+    const sessions: Sessions = new Map()
+    applyHookEvent(sessions, ev('UserPromptSubmit', { prompt: 'p' }), 1000)
+    applyHookEvent(sessions, ev('Stop', { last_assistant_message: 'r'.repeat(300) }), 2000)
+    expect(activityOf(sessions)?.reply).toBe('r'.repeat(199) + '…')
+    for (const empty of ['', '   \n  ', 42, null, undefined, { text: 'x' }]) {
+      applyHookEvent(sessions, ev('UserPromptSubmit', { prompt: 'p' }), 3000)
+      applyHookEvent(sessions, ev('Stop', { last_assistant_message: empty }), 4000)
+      expect(activityOf(sessions)?.reply ?? null, String(empty)).toBeNull()
+    }
+  })
+
+  test('하는 일 보기를 끄면 마지막 말도 담지 않는다', () => {
+    const sessions: Sessions = new Map()
+    const off = { activity: false }
+    applyHookEvent(sessions, ev('UserPromptSubmit', { prompt: 'p' }), 1000, 'claude', off)
+    applyHookEvent(
+      sessions,
+      ev('Stop', { last_assistant_message: '다 했어요' }),
+      2000,
+      'claude',
+      off
+    )
+    expect(activityOf(sessions)).toBeUndefined()
+    expect(sessions.get('s1')?.state).toBe('idle')
+  })
+
+  test('백그라운드 작업을 남기고 멈췄다가 새 요청 없이 다시 일하면 이어 가는 작업으로 적는다', () => {
+    const sessions: Sessions = new Map()
+    const woken = (): boolean => sessions.get('s1')?.wokenByBackground ?? false
+    applyHookEvent(sessions, ev('UserPromptSubmit', { prompt: 'p' }), 100_000)
+    applyHookEvent(
+      sessions,
+      ev('Stop', { background_tasks: [{ id: 'task-001', type: 'shell' }] }),
+      200_000
+    )
+    expect(sessions.get('s1')?.pausedForBackground).toBe(true)
+    expect(woken()).toBe(false)
+    // 백그라운드 작업이 끝나 에이전트가 깨어났다(새 요청 없이 도구를 쓴다): 이어 가는 작업이다.
+    applyHookEvent(sessions, ev('PreToolUse', bash('npm test')), 300_000)
+    expect(sessions.get('s1')).toMatchObject({ state: 'working', wokenByBackground: true })
+    expect(sessions.get('s1')?.pausedForBackground ?? false).toBe(false)
+    // 권한을 기다려도, 도구가 끝나도 그대로다.
+    applyHookEvent(sessions, ev('PermissionRequest', bash('npm test')), 301_000)
+    applyHookEvent(sessions, ev('PostToolUse', bash('npm test')), 302_000)
+    expect(woken()).toBe(true)
+    // 멈추면 지운다.
+    applyHookEvent(sessions, ev('Stop', {}), 303_000)
+    expect(woken()).toBe(false)
+
+    // 사용자가 새 요청을 보내 다시 일한 것은 이어 가는 작업이 아니다.
+    applyHookEvent(sessions, ev('UserPromptSubmit', { prompt: 'p' }), 350_000)
+    applyHookEvent(sessions, ev('Stop', { session_crons: [{ id: 'c1' }] }), 400_000)
+    applyHookEvent(sessions, ev('UserPromptSubmit', { prompt: 'p' }), 500_000)
+    applyHookEvent(sessions, ev('PreToolUse', bash('npm test')), 501_000)
+    expect(woken()).toBe(false)
+    // 남긴 것 없이 멈췄다가 새 요청 없이 다시 일한 것도 아니다(늦게 온 이벤트 등).
+    applyHookEvent(sessions, ev('Stop', {}), 600_000)
+    applyHookEvent(sessions, ev('PreToolUse', bash('npm test')), 700_000)
+    expect(sessions.get('s1')?.state).toBe('working')
+    expect(woken()).toBe(false)
+  })
+
+  test('멈출 때 백그라운드 작업이 남아 있으면 적어 두고, 다시 일하면 지운다', () => {
+    const sessions: Sessions = new Map()
+    applyHookEvent(sessions, ev('UserPromptSubmit', { prompt: 'p' }), 1000)
+    applyHookEvent(
+      sessions,
+      ev('Stop', { background_tasks: [{ id: 'task-001', type: 'shell' }], session_crons: [] }),
+      2000
+    )
+    expect(sessions.get('s1')?.pausedForBackground).toBe(true)
+    // 60초 뒤의 쉬는 중 알림에도 그대로다.
+    applyHookEvent(sessions, ev('Notification', { notification_type: 'idle_prompt' }), 62_000)
+    expect(sessions.get('s1')?.pausedForBackground).toBe(true)
+    // 백그라운드 작업이 끝나 깨어나 다시 일한다(멈춘 직후의 늦은 도구 이벤트가 아닌 때).
+    applyHookEvent(sessions, ev('PreToolUse', bash('npm test')), 300_000)
+    expect(sessions.get('s1')?.state).toBe('working')
+    expect(sessions.get('s1')?.pausedForBackground ?? false).toBe(false)
+    // 남은 것이 없이 멈추면 적지 않는다. 예약된 깨우기(session_crons)만 있어도 적는다.
+    applyHookEvent(sessions, ev('Stop', { background_tasks: [], session_crons: [] }), 301_000)
+    expect(sessions.get('s1')?.pausedForBackground ?? false).toBe(false)
+    applyHookEvent(sessions, ev('UserPromptSubmit', { prompt: 'p' }), 302_000)
+    applyHookEvent(sessions, ev('Stop', { session_crons: [{ id: 'c1' }] }), 303_000)
+    expect(sessions.get('s1')?.pausedForBackground).toBe(true)
+    // 모양이 다르면(배열이 아님) 없는 것으로 본다.
+    applyHookEvent(sessions, ev('UserPromptSubmit', { prompt: 'p' }), 304_000)
+    applyHookEvent(sessions, ev('Stop', { background_tasks: 'many' }), 305_000)
+    expect(sessions.get('s1')?.pausedForBackground ?? false).toBe(false)
+  })
+
   test('clearActivity 는 들고 있던 내용을 지운다', () => {
     const sessions: Sessions = new Map()
     applyHookEvent(sessions, ev('UserPromptSubmit', { prompt: '배포해 줘' }), 1000)

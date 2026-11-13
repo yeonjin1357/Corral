@@ -877,7 +877,9 @@ await check(
     sh('open', [APP])
     await sleep(1000)
 
-    sendHook({ hook_event_name: 'Stop' })
+    // 멈추며 남긴 마지막 말은 첫 줄만 담는다(새로 끝남 — 한글이 훅 명령을 거쳐 그대로 오는지도 본다).
+    const reply = '로그인 화면을 고쳤어요. 확인해 주세요.'
+    sendHook({ hook_event_name: 'Stop', last_assistant_message: `${reply}\n\n- 둘째 줄` })
     const idle = await waitFor(
       async () => {
         const row = await agentRow()
@@ -887,7 +889,11 @@ await check(
       1000
     )
     assert(idle, `쉬는 중이 되지 않았다: ${JSON.stringify(await agentRow())}`)
-    return `요청 "${working.activity.prompt}", 대기 도구 ${waiting.activity?.waiting?.tool ?? '?'}`
+    assert(
+      idle.activity?.reply === reply,
+      `마지막 말(한글 첫 줄)이 다르다: ${JSON.stringify(idle.activity)}`
+    )
+    return `요청 "${working.activity.prompt}", 대기 도구 ${waiting.activity?.waiting?.tool ?? '?'}, 마지막 말 "${idle.activity.reply}"`
   }
 )
 

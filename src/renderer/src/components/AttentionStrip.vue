@@ -44,7 +44,7 @@ const shown = computed(() => (expanded.value ? props.items : props.items.slice(0
 const hidden = computed(() => props.items.length - SHOWN)
 
 function act(item: AttentionItem): void {
-  if (item.kind === 'waiting' && item.key) emit('focus', item.key)
+  if ((item.kind === 'waiting' || item.kind === 'done') && item.key) emit('focus', item.key)
   else if (item.kind === 'candidate' && item.key) emit('kill', item.key)
   else if (item.kind === 'recommend') emit('killMany', item.keys ?? [])
   else if (item.kind === 'overlap') emit('showHeavy')
@@ -52,6 +52,7 @@ function act(item: AttentionItem): void {
 const label = (item: AttentionItem): string =>
   ({
     waiting: text.ui.quick.focus,
+    done: text.ui.quick.focus,
     recommend: text.ui.home.killAll,
     candidate: text.ui.actions.kill,
     overlap: text.ui.cards.showList
