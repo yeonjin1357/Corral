@@ -2,6 +2,9 @@
  * macOS 의 앱 안 업데이트를 실제 앱으로 확인한다(macOS 러너용, check-update.sh 가 부른다).
  * 깔려 있는 지금 버전을 띄워 설정 > 정보의 업데이트 버튼을 누르고, 앱이 새 버전으로 바뀌어 다시 켜지는지 본다.
  * 그다음 확인 값이 틀린 릴리스 정보를 주고, 앱이 그대로 남아 설치 한 줄을 안내하는지 본다.
+ *
+ * SMOKE_REAL_FEED=1 이면(check-real-update.sh) 릴리스 주소를 바꾸지 않고 GitHub 의 진짜 릴리스에서 받는다.
+ * 이때는 앞의 것(새 버전이 되는지)만 본다. 틀린 릴리스 정보는 진짜 릴리스로는 만들 수 없다.
  */
 import { spawnSync } from 'node:child_process'
 import { existsSync, readdirSync, writeFileSync } from 'node:fs'
@@ -15,7 +18,9 @@ const NEW = process.env.SMOKE_NEW_VERSION
 const APP = '/Applications/Corral.app'
 const PORT = 9333
 const USER_DATA = join(homedir(), 'Library', 'Application Support', 'pitwall')
-const GOOD_FEED = 'http://127.0.0.1:8765'
+const REAL = process.env.SMOKE_REAL_FEED === '1'
+// 진짜 릴리스로 볼 때는 주소를 주지 않는다(앱이 아는 GitHub 주소를 그대로 쓴다).
+const GOOD_FEED = REAL ? null : 'http://127.0.0.1:8765'
 const BAD_FEED = 'http://127.0.0.1:8766'
 const COMMAND =
   'curl -fsSL https://raw.githubusercontent.com/yeonjin1357/Corral/main/scripts/install-mac.sh | bash'
@@ -132,12 +137,12 @@ async function attach() {
   return page
 }
 
-/** 앱을 띄운다(릴리스 정보를 받을 이 러너 안의 주소를 준다). */
+/** 앱을 띄운다(릴리스 정보를 받을 이 러너 안의 주소를 준다. 주소가 없으면 앱이 아는 진짜 주소를 쓴다). */
 function launch(feed) {
   const r = sh('open', [
     APP,
     '--args',
-    `--update-feed=${feed}`,
+    ...(feed ? [`--update-feed=${feed}`] : []),
     `--remote-debugging-port=${PORT}`,
     '--remote-allow-origins=*'
   ])
@@ -250,71 +255,79 @@ await check('다시 켜진 새 버전이 정상으로 일하고, 설정은 그�
 })
 
 // ───────────────────────── 2. 확인 값이 틀리면 앱은 그대로 ─────────────────────────
-await check(
-  '내려받은 파일의 확인 값이 다르면 바꿔 넣지 않고, 까닭과 설치 한 줄을 알린다',
-  async () => {
-    // 새 버전(99.0.0)이 깔린 채로는 "새 버전 있음"이 되지 않는다. 지금 버전으로 되돌려 놓고 틀린 릴리스 정보를 준다.
-    await quit()
-    const old = readdirSync('dist').find((name) => name.endsWith('.dmg'))
-    const volume = join(process.env.RUNNER_TEMP, 'update-volume-2')
-    assert(
-      sh('hdiutil', ['attach', join('dist', old), '-nobrowse', '-readonly', '-mountpoint', volume])
-        .status === 0,
-      '예전 버전 설치 파일을 열지 못했다'
-    )
-    sh('rm', ['-rf', APP])
-    sh('ditto', [join(volume, 'Corral.app'), APP])
-    sh('hdiutil', ['detach', volume, '-quiet'])
-    assert(installedVersion() === OLD, `되돌린 버전 ${installedVersion()}`)
+if (!REAL) {
+  await check(
+    '내려받은 파일의 확인 값이 다르면 바꿔 넣지 않고, 까닭과 설치 한 줄을 알린다',
+    async () => {
+      // 새 버전(99.0.0)이 깔린 채로는 "새 버전 있음"이 되지 않는다. 지금 버전으로 되돌려 놓고 틀린 릴리스 정보를 준다.
+      await quit()
+      const old = readdirSync('dist').find((name) => name.endsWith('.dmg'))
+      const volume = join(process.env.RUNNER_TEMP, 'update-volume-2')
+      assert(
+        sh('hdiutil', [
+          'attach',
+          join('dist', old),
+          '-nobrowse',
+          '-readonly',
+          '-mountpoint',
+          volume
+        ]).status === 0,
+        '예전 버전 설치 파일을 열지 못했다'
+      )
+      sh('rm', ['-rf', APP])
+      sh('ditto', [join(volume, 'Corral.app'), APP])
+      sh('hdiutil', ['detach', volume, '-quiet'])
+      assert(installedVersion() === OLD, `되돌린 버전 ${installedVersion()}`)
 
-    launch(BAD_FEED)
-    page = await attach()
-    const pid = pidOf()
-    const before = await page.eval('window.pitwall.update.check()')
-    assert(before?.state === 'available' && before.selfInstall === true, JSON.stringify(before))
-    await openAbout(page)
-    await waitFor(
-      () => page.eval(`!!document.querySelector('[data-action="update-self-install"]')`),
-      10_000
-    )
-    assert(await page.click('[data-action="update-self-install"]'), '버튼을 누르지 못했다')
-    const after = await waitFor(
-      async () => {
-        const s = await page.eval('window.pitwall.update.get()')
-        return s?.state === 'available' && s.selfInstall === false ? s : null
-      },
-      120_000,
-      500
-    )
-    assert(
-      after,
-      `실패로 돌아오지 않았다: ${JSON.stringify(await page.eval('window.pitwall.update.get()'))}`
-    )
-    assert(after.error === '내려받은 파일이 릴리스의 확인 값과 달라요.', `까닭: ${after.error}`)
-    assert(after.installCommand === COMMAND, `설치 한 줄: ${after.installCommand}`)
-    assert(pidOf() === pid, '앱이 끝났다')
-    assert(installedVersion() === OLD, `깔린 버전이 ${installedVersion()} 로 바뀌었다`)
-    assert(leftovers().length === 0, `풀다 만 것이 남았다: ${leftovers().join(', ')}`)
-    await sleep(500)
-    await page.shot('failed')
-    return `까닭 "${after.error}", 앱은 pid ${pid} 그대로 버전 ${installedVersion()}`
-  }
-)
-
-await check('실패했을 때 한 줄 복사를 누르면 설치 한 줄이 클립보드에 들어간다', async () => {
-  sh('bash', ['-c', 'printf "" | pbcopy'])
-  assert(await page.click('[data-action="update-copy-command"]'), '복사 버튼이 없다')
-  const pasted = await waitFor(
-    () => {
-      const value = sh('pbpaste', []).stdout
-      return value === COMMAND ? value : null
-    },
-    5000,
-    200
+      launch(BAD_FEED)
+      page = await attach()
+      const pid = pidOf()
+      const before = await page.eval('window.pitwall.update.check()')
+      assert(before?.state === 'available' && before.selfInstall === true, JSON.stringify(before))
+      await openAbout(page)
+      await waitFor(
+        () => page.eval(`!!document.querySelector('[data-action="update-self-install"]')`),
+        10_000
+      )
+      assert(await page.click('[data-action="update-self-install"]'), '버튼을 누르지 못했다')
+      const after = await waitFor(
+        async () => {
+          const s = await page.eval('window.pitwall.update.get()')
+          return s?.state === 'available' && s.selfInstall === false ? s : null
+        },
+        120_000,
+        500
+      )
+      assert(
+        after,
+        `실패로 돌아오지 않았다: ${JSON.stringify(await page.eval('window.pitwall.update.get()'))}`
+      )
+      assert(after.error === '내려받은 파일이 릴리스의 확인 값과 달라요.', `까닭: ${after.error}`)
+      assert(after.installCommand === COMMAND, `설치 한 줄: ${after.installCommand}`)
+      assert(pidOf() === pid, '앱이 끝났다')
+      assert(installedVersion() === OLD, `깔린 버전이 ${installedVersion()} 로 바뀌었다`)
+      assert(leftovers().length === 0, `풀다 만 것이 남았다: ${leftovers().join(', ')}`)
+      await sleep(500)
+      await page.shot('failed')
+      return `까닭 "${after.error}", 앱은 pid ${pid} 그대로 버전 ${installedVersion()}`
+    }
   )
-  assert(pasted, `클립보드: ${sh('pbpaste', []).stdout}`)
-  return pasted
-})
+
+  await check('실패했을 때 한 줄 복사를 누르면 설치 한 줄이 클립보드에 들어간다', async () => {
+    sh('bash', ['-c', 'printf "" | pbcopy'])
+    assert(await page.click('[data-action="update-copy-command"]'), '복사 버튼이 없다')
+    const pasted = await waitFor(
+      () => {
+        const value = sh('pbpaste', []).stdout
+        return value === COMMAND ? value : null
+      },
+      5000,
+      200
+    )
+    assert(pasted, `클립보드: ${sh('pbpaste', []).stdout}`)
+    return pasted
+  })
+}
 
 await quit()
 
@@ -324,7 +337,7 @@ writeFileSync(join(OUT, 'update-results.json'), JSON.stringify(results, null, 2)
 writeFileSync(
   join(OUT, 'update-summary.md'),
   [
-    `## Corral macOS 앱 안 업데이트 확인 (${OLD} → ${NEW})`,
+    `## Corral macOS 앱 안 업데이트 확인 (${OLD} → ${NEW}${REAL ? ', GitHub 의 진짜 릴리스' : ''})`,
     '',
     `통과 ${results.length - failed} · 실패 ${failed}`,
     '',

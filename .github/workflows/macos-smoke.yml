@@ -6,6 +6,8 @@ name: macOS smoke
 # - install: README 의 설치 한 줄(scripts/install-mac.sh)로 최신 릴리스를 깔아, 경고 창 없이 열리고 다시 실행하면 바꿔 넣는지
 # - update: 지금 버전을 깔고 앱 안의 업데이트 버튼으로 새 버전이 되는지, 확인 값이 틀리면 앱이 그대로인지
 # - app: dmg 를 팀원이 받는 것처럼 설치하고, 앱을 띄워 수집·끄기·연동·디스크 정리를 해 본다(scripts/macos-smoke)
+# - real-update(update_from 을 줄 때만): 예전 릴리스의 앱을 깔고 업데이트 버튼으로 GitHub 의 최신 릴리스가 되는지.
+#   새 버전을 게시한 뒤에 돌린다(예: `-f dmg_from=release -f update_from=v0.3.0`)
 # 결과 표는 실행 요약에, 스크린샷·스냅샷은 아티팩트에 남는다.
 # 직접 돌린다(Actions > macOS smoke > Run workflow, 또는 `gh workflow run macos-smoke.yml`). 릴리스 전에 한 번 돌려 본다.
 on:
@@ -19,6 +21,9 @@ on:
       release_tag:
         description: 'release 일 때 받을 태그(예: v0.2.0). 비우면 최신 릴리스'
         default: ''
+      update_from:
+        description: '진짜 릴리스로 앱 안 업데이트를 볼 때만: 이 태그(예: v0.3.0)의 앱을 깔고 최신 릴리스로 바뀌는지 본다. 비우면 건너뛴다'
+        default: ''
 
 permissions:
   contents: read
@@ -26,6 +31,7 @@ permissions:
 env:
   DMG_FROM: ${{ inputs.dmg_from }}
   RELEASE_TAG: ${{ inputs.release_tag }}
+  UPDATE_FROM: ${{ inputs.update_from }}
   TZ: Asia/Seoul
 
 jobs:
@@ -124,6 +130,41 @@ jobs:
         with:
           name: macos-update-${{ matrix.os }}
           path: ${{ runner.temp }}/update-out
+          if-no-files-found: warn
+
+  # 진짜 릴리스로 앱 안 업데이트: 예전 릴리스(update_from)의 앱을 깔고, 릴리스 주소를 바꾸지 않은 채 업데이트 버튼으로
+  # GitHub 의 최신 릴리스가 되는지 본다(scripts/macos-smoke/check-real-update.sh). update_from 을 줄 때만 돈다.
+  real-update:
+    name: real update (${{ matrix.os }})
+    if: inputs.update_from != ''
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-26, macos-15, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: 진짜 릴리스로 앱 안 업데이트 확인
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          export SMOKE_OUT="$RUNNER_TEMP/real-update-out"
+          bash scripts/macos-smoke/check-real-update.sh
+      - name: 요약
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/real-update-out/update-summary.md" ]; then
+            cat "$RUNNER_TEMP/real-update-out/update-summary.md" >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: macos-real-update-${{ matrix.os }}
+          path: ${{ runner.temp }}/real-update-out
           if-no-files-found: warn
 
   app:
